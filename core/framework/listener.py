@@ -123,7 +123,7 @@ class Listener(BaseModule):
                 protocol = 'http'
             
             # Get handler and session_type from __info__ if available, otherwise use instance attributes
-            handler = self.handler
+            handler = None
             if hasattr(self, '__info__') and 'handler' in self.__info__:
                 handler_info = self.__info__['handler']
                 # Extract value from enum or use directly if string
@@ -133,12 +133,16 @@ class Listener(BaseModule):
                     handler = handler_info.name.lower()
                 else:
                     handler = str(handler_info).lower()
-            elif hasattr(self.handler, 'value'):
-                handler = self.handler.value
+            elif hasattr(self, 'handler'):
+                if hasattr(self.handler, 'value'):
+                    handler = self.handler.value
+                else:
+                    handler = str(self.handler)
             else:
-                handler = str(self.handler)
+                # Default to bind if not specified
+                handler = 'bind'
             
-            session_type = self.session_type
+            session_type = None
             if hasattr(self, '__info__') and 'session_type' in self.__info__:
                 session_type_info = self.__info__['session_type']
                 # Extract value from enum or use directly if string
@@ -148,10 +152,14 @@ class Listener(BaseModule):
                     session_type = session_type_info.name.lower()
                 else:
                     session_type = str(session_type_info).lower()
-            elif hasattr(self.session_type, 'value'):
-                session_type = self.session_type.value
+            elif hasattr(self, 'session_type'):
+                if hasattr(self.session_type, 'value'):
+                    session_type = self.session_type.value
+                else:
+                    session_type = str(self.session_type)
             else:
-                session_type = str(self.session_type)
+                # Default to shell if not specified
+                session_type = 'shell'
             
             # Prepare session data (without non-serializable objects for database)
             # Store connection metadata only, not the connection object itself

@@ -25,7 +25,7 @@ class Module(Listener):
     def run(self):
         """Run the SSH client listener - ultra-simple implementation"""
         try:
-            print_status(f"Connecting to SSH server {self.rhost}:{self.rport} as {self.username}")
+            print_status(f"Trying connect to {self.rhost}:{self.rport}")
             
             ssh_channel = paramiko.SSHClient()
             ssh_channel.set_missing_host_key_policy(paramiko.AutoAddPolicy())

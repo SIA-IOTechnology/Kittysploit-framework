@@ -20,6 +20,7 @@ class Post(BaseModule):
     def _exploit(self):
         try:
             self.run()
+            return True
         except ProcedureError as e:
             raise e
         except Exception as e:

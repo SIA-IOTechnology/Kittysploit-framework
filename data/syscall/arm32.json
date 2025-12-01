@@ -1,0 +1,4279 @@
+{
+  "architecture": "arm32",
+  "count": 404,
+  "syscalls": [
+    {
+      "number": 0,
+      "name": "restart_syscall",
+      "hex": "0x00",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 1,
+      "name": "exit",
+      "hex": "0x01",
+      "parameters": [
+        "int error_code"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 2,
+      "name": "fork",
+      "hex": "0x02",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 3,
+      "name": "read",
+      "hex": "0x03",
+      "parameters": [
+        "unsigned int fd",
+        "char *buf",
+        "size_t count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 4,
+      "name": "write",
+      "hex": "0x04",
+      "parameters": [
+        "unsigned int fd",
+        "const char *buf",
+        "size_t count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 5,
+      "name": "open",
+      "hex": "0x05",
+      "parameters": [
+        "const char *filename",
+        "int flags",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 6,
+      "name": "close",
+      "hex": "0x06",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 7,
+      "name": "not implemented",
+      "hex": "0x07",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 8,
+      "name": "creat",
+      "hex": "0x08",
+      "parameters": [
+        "const char *pathname",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 9,
+      "name": "link",
+      "hex": "0x09",
+      "parameters": [
+        "const char *oldname",
+        "const char *newname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 10,
+      "name": "unlink",
+      "hex": "0x0a",
+      "parameters": [
+        "const char *pathname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 11,
+      "name": "execve",
+      "hex": "0x0b",
+      "parameters": [
+        "const char *filename",
+        "const char *const *argv",
+        "const char *const *envp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 12,
+      "name": "chdir",
+      "hex": "0x0c",
+      "parameters": [
+        "const char *filename"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 13,
+      "name": "not implemented",
+      "hex": "0x0d",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 14,
+      "name": "mknod",
+      "hex": "0x0e",
+      "parameters": [
+        "const char *filename",
+        "umode_t mode",
+        "unsigned dev"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 15,
+      "name": "chmod",
+      "hex": "0x0f",
+      "parameters": [
+        "const char *filename",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 16,
+      "name": "lchown",
+      "hex": "0x10",
+      "parameters": [
+        "const char *filename",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 17,
+      "name": "not implemented",
+      "hex": "0x11",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 18,
+      "name": "not implemented",
+      "hex": "0x12",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 19,
+      "name": "lseek",
+      "hex": "0x13",
+      "parameters": [
+        "unsigned int fd",
+        "off_t offset",
+        "unsigned int whence"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 20,
+      "name": "getpid",
+      "hex": "0x14",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 21,
+      "name": "mount",
+      "hex": "0x15",
+      "parameters": [
+        "char *dev_name",
+        "char *dir_name",
+        "char *type",
+        "unsigned long flags",
+        "void *data"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 22,
+      "name": "not implemented",
+      "hex": "0x16",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 23,
+      "name": "setuid",
+      "hex": "0x17",
+      "parameters": [
+        "uid_t uid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 24,
+      "name": "getuid",
+      "hex": "0x18",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 25,
+      "name": "not implemented",
+      "hex": "0x19",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 26,
+      "name": "ptrace",
+      "hex": "0x1a",
+      "parameters": [
+        "long request",
+        "long pid",
+        "unsigned long addr",
+        "unsigned long data"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 27,
+      "name": "not implemented",
+      "hex": "0x1b",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 28,
+      "name": "not implemented",
+      "hex": "0x1c",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 29,
+      "name": "pause",
+      "hex": "0x1d",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 30,
+      "name": "not implemented",
+      "hex": "0x1e",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 31,
+      "name": "not implemented",
+      "hex": "0x1f",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 32,
+      "name": "not implemented",
+      "hex": "0x20",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 33,
+      "name": "access",
+      "hex": "0x21",
+      "parameters": [
+        "const char *filename",
+        "int mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 34,
+      "name": "nice",
+      "hex": "0x22",
+      "parameters": [
+        "int increment"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 35,
+      "name": "not implemented",
+      "hex": "0x23",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 36,
+      "name": "sync",
+      "hex": "0x24",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 37,
+      "name": "kill",
+      "hex": "0x25",
+      "parameters": [
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 38,
+      "name": "rename",
+      "hex": "0x26",
+      "parameters": [
+        "const char *oldname",
+        "const char *newname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 39,
+      "name": "mkdir",
+      "hex": "0x27",
+      "parameters": [
+        "const char *pathname",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 40,
+      "name": "rmdir",
+      "hex": "0x28",
+      "parameters": [
+        "const char *pathname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 41,
+      "name": "dup",
+      "hex": "0x29",
+      "parameters": [
+        "unsigned int fildes"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 42,
+      "name": "pipe",
+      "hex": "0x2a",
+      "parameters": [
+        "int *fildes"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 43,
+      "name": "times",
+      "hex": "0x2b",
+      "parameters": [
+        "struct tms *tbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 44,
+      "name": "not implemented",
+      "hex": "0x2c",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 45,
+      "name": "brk",
+      "hex": "0x2d",
+      "parameters": [
+        "unsigned long brk"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 46,
+      "name": "setgid",
+      "hex": "0x2e",
+      "parameters": [
+        "gid_t gid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 47,
+      "name": "getgid",
+      "hex": "0x2f",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 48,
+      "name": "not implemented",
+      "hex": "0x30",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 49,
+      "name": "geteuid",
+      "hex": "0x31",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 50,
+      "name": "getegid",
+      "hex": "0x32",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 51,
+      "name": "acct",
+      "hex": "0x33",
+      "parameters": [
+        "const char *name"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 52,
+      "name": "umount2",
+      "hex": "0x34",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 53,
+      "name": "not implemented",
+      "hex": "0x35",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 54,
+      "name": "ioctl",
+      "hex": "0x36",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd",
+        "unsigned long arg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 55,
+      "name": "fcntl",
+      "hex": "0x37",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd",
+        "unsigned long arg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 56,
+      "name": "not implemented",
+      "hex": "0x38",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 57,
+      "name": "setpgid",
+      "hex": "0x39",
+      "parameters": [
+        "pid_t pid",
+        "pid_t pgid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 58,
+      "name": "not implemented",
+      "hex": "0x3a",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 59,
+      "name": "not implemented",
+      "hex": "0x3b",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 60,
+      "name": "umask",
+      "hex": "0x3c",
+      "parameters": [
+        "int mask"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 61,
+      "name": "chroot",
+      "hex": "0x3d",
+      "parameters": [
+        "const char *filename"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 62,
+      "name": "ustat",
+      "hex": "0x3e",
+      "parameters": [
+        "unsigned dev",
+        "struct ustat *ubuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 63,
+      "name": "dup2",
+      "hex": "0x3f",
+      "parameters": [
+        "unsigned int oldfd",
+        "unsigned int newfd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 64,
+      "name": "getppid",
+      "hex": "0x40",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 65,
+      "name": "getpgrp",
+      "hex": "0x41",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 66,
+      "name": "setsid",
+      "hex": "0x42",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 67,
+      "name": "sigaction",
+      "hex": "0x43",
+      "parameters": [
+        "int",
+        "const struct old_sigaction *",
+        "struct old_sigaction *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 68,
+      "name": "not implemented",
+      "hex": "0x44",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 69,
+      "name": "not implemented",
+      "hex": "0x45",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 70,
+      "name": "setreuid",
+      "hex": "0x46",
+      "parameters": [
+        "uid_t ruid",
+        "uid_t euid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 71,
+      "name": "setregid",
+      "hex": "0x47",
+      "parameters": [
+        "gid_t rgid",
+        "gid_t egid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 72,
+      "name": "sigsuspend",
+      "hex": "0x48",
+      "parameters": [
+        "int unused1",
+        "int unused2",
+        "old_sigset_t mask"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 73,
+      "name": "sigpending",
+      "hex": "0x49",
+      "parameters": [
+        "old_sigset_t *uset"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 74,
+      "name": "sethostname",
+      "hex": "0x4a",
+      "parameters": [
+        "char *name",
+        "int len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 75,
+      "name": "setrlimit",
+      "hex": "0x4b",
+      "parameters": [
+        "unsigned int resource",
+        "struct rlimit *rlim"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 76,
+      "name": "not implemented",
+      "hex": "0x4c",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 77,
+      "name": "getrusage",
+      "hex": "0x4d",
+      "parameters": [
+        "int who",
+        "struct rusage *ru"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 78,
+      "name": "gettimeofday",
+      "hex": "0x4e",
+      "parameters": [
+        "struct timeval *tv",
+        "struct timezone *tz"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 79,
+      "name": "settimeofday",
+      "hex": "0x4f",
+      "parameters": [
+        "struct timeval *tv",
+        "struct timezone *tz"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 80,
+      "name": "getgroups",
+      "hex": "0x50",
+      "parameters": [
+        "int gidsetsize",
+        "gid_t *grouplist"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 81,
+      "name": "setgroups",
+      "hex": "0x51",
+      "parameters": [
+        "int gidsetsize",
+        "gid_t *grouplist"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 82,
+      "name": "not implemented",
+      "hex": "0x52",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 83,
+      "name": "symlink",
+      "hex": "0x53",
+      "parameters": [
+        "const char *old",
+        "const char *new"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 84,
+      "name": "not implemented",
+      "hex": "0x54",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 85,
+      "name": "readlink",
+      "hex": "0x55",
+      "parameters": [
+        "const char *path",
+        "char *buf",
+        "int bufsiz"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 86,
+      "name": "uselib",
+      "hex": "0x56",
+      "parameters": [
+        "const char *library"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 87,
+      "name": "swapon",
+      "hex": "0x57",
+      "parameters": [
+        "const char *specialfile",
+        "int swap_flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 88,
+      "name": "reboot",
+      "hex": "0x58",
+      "parameters": [
+        "int magic1",
+        "int magic2",
+        "unsigned int cmd",
+        "void *arg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 89,
+      "name": "not implemented",
+      "hex": "0x59",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 90,
+      "name": "not implemented",
+      "hex": "0x5a",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 91,
+      "name": "munmap",
+      "hex": "0x5b",
+      "parameters": [
+        "unsigned long addr",
+        "size_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 92,
+      "name": "truncate",
+      "hex": "0x5c",
+      "parameters": [
+        "const char *path",
+        "long length"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 93,
+      "name": "ftruncate",
+      "hex": "0x5d",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned long length"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 94,
+      "name": "fchmod",
+      "hex": "0x5e",
+      "parameters": [
+        "unsigned int fd",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 95,
+      "name": "fchown",
+      "hex": "0x5f",
+      "parameters": [
+        "unsigned int fd",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 96,
+      "name": "getpriority",
+      "hex": "0x60",
+      "parameters": [
+        "int which",
+        "int who"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 97,
+      "name": "setpriority",
+      "hex": "0x61",
+      "parameters": [
+        "int which",
+        "int who",
+        "int niceval"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 98,
+      "name": "not implemented",
+      "hex": "0x62",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 99,
+      "name": "statfs",
+      "hex": "0x63",
+      "parameters": [
+        "const char * path",
+        "struct statfs *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 100,
+      "name": "fstatfs",
+      "hex": "0x64",
+      "parameters": [
+        "unsigned int fd",
+        "struct statfs *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 101,
+      "name": "not implemented",
+      "hex": "0x65",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 102,
+      "name": "not implemented",
+      "hex": "0x66",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 103,
+      "name": "syslog",
+      "hex": "0x67",
+      "parameters": [
+        "int type",
+        "char *buf",
+        "int len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 104,
+      "name": "setitimer",
+      "hex": "0x68",
+      "parameters": [
+        "int which",
+        "struct itimerval *value",
+        "struct itimerval *ovalue"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 105,
+      "name": "getitimer",
+      "hex": "0x69",
+      "parameters": [
+        "int which",
+        "struct itimerval *value"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 106,
+      "name": "stat",
+      "hex": "0x6a",
+      "parameters": [
+        "const char *filename",
+        "struct __old_kernel_stat *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 107,
+      "name": "lstat",
+      "hex": "0x6b",
+      "parameters": [
+        "const char *filename",
+        "struct __old_kernel_stat *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 108,
+      "name": "fstat",
+      "hex": "0x6c",
+      "parameters": [
+        "unsigned int fd",
+        "struct __old_kernel_stat *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 109,
+      "name": "not implemented",
+      "hex": "0x6d",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 110,
+      "name": "not implemented",
+      "hex": "0x6e",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 111,
+      "name": "vhangup",
+      "hex": "0x6f",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 112,
+      "name": "not implemented",
+      "hex": "0x70",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 113,
+      "name": "not implemented",
+      "hex": "0x71",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 114,
+      "name": "wait4",
+      "hex": "0x72",
+      "parameters": [
+        "pid_t pid",
+        "int *stat_addr",
+        "int options",
+        "struct rusage *ru"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 115,
+      "name": "swapoff",
+      "hex": "0x73",
+      "parameters": [
+        "const char *specialfile"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 116,
+      "name": "sysinfo",
+      "hex": "0x74",
+      "parameters": [
+        "struct sysinfo *info"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 117,
+      "name": "not implemented",
+      "hex": "0x75",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 118,
+      "name": "fsync",
+      "hex": "0x76",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 119,
+      "name": "sigreturn",
+      "hex": "0x77",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 120,
+      "name": "clone",
+      "hex": "0x78",
+      "parameters": [
+        "unsigned long",
+        "unsigned long",
+        "int *",
+        "int *",
+        "unsigned long"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 121,
+      "name": "setdomainname",
+      "hex": "0x79",
+      "parameters": [
+        "char *name",
+        "int len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 122,
+      "name": "uname",
+      "hex": "0x7a",
+      "parameters": [
+        "struct old_utsname *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 123,
+      "name": "not implemented",
+      "hex": "0x7b",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 124,
+      "name": "adjtimex",
+      "hex": "0x7c",
+      "parameters": [
+        "struct timex *txc_p"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 125,
+      "name": "mprotect",
+      "hex": "0x7d",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "unsigned long prot"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 126,
+      "name": "sigprocmask",
+      "hex": "0x7e",
+      "parameters": [
+        "int how",
+        "old_sigset_t *set",
+        "old_sigset_t *oset"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 127,
+      "name": "not implemented",
+      "hex": "0x7f",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 128,
+      "name": "init_module",
+      "hex": "0x80",
+      "parameters": [
+        "void *umod",
+        "unsigned long len",
+        "const char *uargs"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 129,
+      "name": "delete_module",
+      "hex": "0x81",
+      "parameters": [
+        "const char *name_user",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 130,
+      "name": "not implemented",
+      "hex": "0x82",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 131,
+      "name": "quotactl",
+      "hex": "0x83",
+      "parameters": [
+        "unsigned int cmd",
+        "const char *special",
+        "qid_t id",
+        "void *addr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 132,
+      "name": "getpgid",
+      "hex": "0x84",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 133,
+      "name": "fchdir",
+      "hex": "0x85",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 134,
+      "name": "bdflush",
+      "hex": "0x86",
+      "parameters": [
+        "int func",
+        "long data"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 135,
+      "name": "sysfs",
+      "hex": "0x87",
+      "parameters": [
+        "int option",
+        "unsigned long arg1",
+        "unsigned long arg2"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 136,
+      "name": "personality",
+      "hex": "0x88",
+      "parameters": [
+        "unsigned int personality"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 137,
+      "name": "not implemented",
+      "hex": "0x89",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 138,
+      "name": "setfsuid",
+      "hex": "0x8a",
+      "parameters": [
+        "uid_t uid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 139,
+      "name": "setfsgid",
+      "hex": "0x8b",
+      "parameters": [
+        "gid_t gid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 140,
+      "name": "_llseek",
+      "hex": "0x8c",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 141,
+      "name": "getdents",
+      "hex": "0x8d",
+      "parameters": [
+        "unsigned int fd",
+        "struct linux_dirent *dirent",
+        "unsigned int count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 142,
+      "name": "_newselect",
+      "hex": "0x8e",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 143,
+      "name": "flock",
+      "hex": "0x8f",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 144,
+      "name": "msync",
+      "hex": "0x90",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 145,
+      "name": "readv",
+      "hex": "0x91",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 146,
+      "name": "writev",
+      "hex": "0x92",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 147,
+      "name": "getsid",
+      "hex": "0x93",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 148,
+      "name": "fdatasync",
+      "hex": "0x94",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 149,
+      "name": "_sysctl",
+      "hex": "0x95",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 150,
+      "name": "mlock",
+      "hex": "0x96",
+      "parameters": [
+        "unsigned long start",
+        "size_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 151,
+      "name": "munlock",
+      "hex": "0x97",
+      "parameters": [
+        "unsigned long start",
+        "size_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 152,
+      "name": "mlockall",
+      "hex": "0x98",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 153,
+      "name": "munlockall",
+      "hex": "0x99",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 154,
+      "name": "sched_setparam",
+      "hex": "0x9a",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_param *param"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 155,
+      "name": "sched_getparam",
+      "hex": "0x9b",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_param *param"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 156,
+      "name": "sched_setscheduler",
+      "hex": "0x9c",
+      "parameters": [
+        "pid_t pid",
+        "int policy",
+        "struct sched_param *param"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 157,
+      "name": "sched_getscheduler",
+      "hex": "0x9d",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 158,
+      "name": "sched_yield",
+      "hex": "0x9e",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 159,
+      "name": "sched_get_priority_max",
+      "hex": "0x9f",
+      "parameters": [
+        "int policy"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 160,
+      "name": "sched_get_priority_min",
+      "hex": "0xa0",
+      "parameters": [
+        "int policy"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 161,
+      "name": "sched_rr_get_interval",
+      "hex": "0xa1",
+      "parameters": [
+        "pid_t pid",
+        "struct timespec *interval"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 162,
+      "name": "nanosleep",
+      "hex": "0xa2",
+      "parameters": [
+        "struct __kernel_timespec *rqtp",
+        "struct __kernel_timespec *rmtp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 163,
+      "name": "mremap",
+      "hex": "0xa3",
+      "parameters": [
+        "unsigned long addr",
+        "unsigned long old_len",
+        "unsigned long new_len",
+        "unsigned long flags",
+        "unsigned long new_addr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 164,
+      "name": "setresuid",
+      "hex": "0xa4",
+      "parameters": [
+        "uid_t ruid",
+        "uid_t euid",
+        "uid_t suid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 165,
+      "name": "getresuid",
+      "hex": "0xa5",
+      "parameters": [
+        "uid_t *ruid",
+        "uid_t *euid",
+        "uid_t *suid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 166,
+      "name": "not implemented",
+      "hex": "0xa6",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 167,
+      "name": "not implemented",
+      "hex": "0xa7",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 168,
+      "name": "poll",
+      "hex": "0xa8",
+      "parameters": [
+        "struct pollfd *ufds",
+        "unsigned int nfds",
+        "int timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 169,
+      "name": "nfsservctl",
+      "hex": "0xa9",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 170,
+      "name": "setresgid",
+      "hex": "0xaa",
+      "parameters": [
+        "gid_t rgid",
+        "gid_t egid",
+        "gid_t sgid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 171,
+      "name": "getresgid",
+      "hex": "0xab",
+      "parameters": [
+        "gid_t *rgid",
+        "gid_t *egid",
+        "gid_t *sgid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 172,
+      "name": "prctl",
+      "hex": "0xac",
+      "parameters": [
+        "int option",
+        "unsigned long arg2",
+        "unsigned long arg3",
+        "unsigned long arg4",
+        "unsigned long arg5"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 173,
+      "name": "rt_sigreturn",
+      "hex": "0xad",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 174,
+      "name": "rt_sigaction",
+      "hex": "0xae",
+      "parameters": [
+        "int",
+        "const struct sigaction *",
+        "struct sigaction *",
+        "size_t"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 175,
+      "name": "rt_sigprocmask",
+      "hex": "0xaf",
+      "parameters": [
+        "int how",
+        "sigset_t *set",
+        "sigset_t *oset",
+        "size_t sigsetsize"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 176,
+      "name": "rt_sigpending",
+      "hex": "0xb0",
+      "parameters": [
+        "sigset_t *set",
+        "size_t sigsetsize"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 177,
+      "name": "rt_sigtimedwait",
+      "hex": "0xb1",
+      "parameters": [
+        "const sigset_t *uthese",
+        "siginfo_t *uinfo",
+        "const struct timespec *uts",
+        "size_t sigsetsize"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 178,
+      "name": "rt_sigqueueinfo",
+      "hex": "0xb2",
+      "parameters": [
+        "pid_t pid",
+        "int sig",
+        "siginfo_t *uinfo"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 179,
+      "name": "rt_sigsuspend",
+      "hex": "0xb3",
+      "parameters": [
+        "sigset_t *unewset",
+        "size_t sigsetsize"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 180,
+      "name": "pread64",
+      "hex": "0xb4",
+      "parameters": [
+        "unsigned int fd",
+        "char *buf",
+        "size_t count",
+        "loff_t pos"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 181,
+      "name": "pwrite64",
+      "hex": "0xb5",
+      "parameters": [
+        "unsigned int fd",
+        "const char *buf",
+        "size_t count",
+        "loff_t pos"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 182,
+      "name": "chown",
+      "hex": "0xb6",
+      "parameters": [
+        "const char *filename",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 183,
+      "name": "getcwd",
+      "hex": "0xb7",
+      "parameters": [
+        "char *buf",
+        "unsigned long size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 184,
+      "name": "capget",
+      "hex": "0xb8",
+      "parameters": [
+        "cap_user_header_t header",
+        "cap_user_data_t dataptr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 185,
+      "name": "capset",
+      "hex": "0xb9",
+      "parameters": [
+        "cap_user_header_t header",
+        "const cap_user_data_t data"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 186,
+      "name": "sigaltstack",
+      "hex": "0xba",
+      "parameters": [
+        "const struct sigaltstack *uss",
+        "struct sigaltstack *uoss"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 187,
+      "name": "sendfile",
+      "hex": "0xbb",
+      "parameters": [
+        "int out_fd",
+        "int in_fd",
+        "off_t *offset",
+        "size_t count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 188,
+      "name": "not implemented",
+      "hex": "0xbc",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 189,
+      "name": "not implemented",
+      "hex": "0xbd",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 190,
+      "name": "vfork",
+      "hex": "0xbe",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 191,
+      "name": "ugetrlimit",
+      "hex": "0xbf",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 192,
+      "name": "mmap2",
+      "hex": "0xc0",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 193,
+      "name": "truncate64",
+      "hex": "0xc1",
+      "parameters": [
+        "const char *path",
+        "loff_t length"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 194,
+      "name": "ftruncate64",
+      "hex": "0xc2",
+      "parameters": [
+        "unsigned int fd",
+        "loff_t length"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 195,
+      "name": "stat64",
+      "hex": "0xc3",
+      "parameters": [
+        "const char *filename",
+        "struct stat64 *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 196,
+      "name": "lstat64",
+      "hex": "0xc4",
+      "parameters": [
+        "const char *filename",
+        "struct stat64 *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 197,
+      "name": "fstat64",
+      "hex": "0xc5",
+      "parameters": [
+        "unsigned long fd",
+        "struct stat64 *statbuf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 198,
+      "name": "lchown32",
+      "hex": "0xc6",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 199,
+      "name": "getuid32",
+      "hex": "0xc7",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 200,
+      "name": "getgid32",
+      "hex": "0xc8",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 201,
+      "name": "geteuid32",
+      "hex": "0xc9",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 202,
+      "name": "getegid32",
+      "hex": "0xca",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 203,
+      "name": "setreuid32",
+      "hex": "0xcb",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 204,
+      "name": "setregid32",
+      "hex": "0xcc",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 205,
+      "name": "getgroups32",
+      "hex": "0xcd",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 206,
+      "name": "setgroups32",
+      "hex": "0xce",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 207,
+      "name": "fchown32",
+      "hex": "0xcf",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 208,
+      "name": "setresuid32",
+      "hex": "0xd0",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 209,
+      "name": "getresuid32",
+      "hex": "0xd1",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 210,
+      "name": "setresgid32",
+      "hex": "0xd2",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 211,
+      "name": "getresgid32",
+      "hex": "0xd3",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 212,
+      "name": "chown32",
+      "hex": "0xd4",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 213,
+      "name": "setuid32",
+      "hex": "0xd5",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 214,
+      "name": "setgid32",
+      "hex": "0xd6",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 215,
+      "name": "setfsuid32",
+      "hex": "0xd7",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 216,
+      "name": "setfsgid32",
+      "hex": "0xd8",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 217,
+      "name": "getdents64",
+      "hex": "0xd9",
+      "parameters": [
+        "unsigned int fd",
+        "struct linux_dirent64 *dirent",
+        "unsigned int count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 218,
+      "name": "pivot_root",
+      "hex": "0xda",
+      "parameters": [
+        "const char *new_root",
+        "const char *put_old"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 219,
+      "name": "mincore",
+      "hex": "0xdb",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "unsigned char * vec"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 220,
+      "name": "madvise",
+      "hex": "0xdc",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "int behavior"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 221,
+      "name": "fcntl64",
+      "hex": "0xdd",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd",
+        "unsigned long arg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 222,
+      "name": "not implemented",
+      "hex": "0xde",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 223,
+      "name": "not implemented",
+      "hex": "0xdf",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 224,
+      "name": "gettid",
+      "hex": "0xe0",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 225,
+      "name": "readahead",
+      "hex": "0xe1",
+      "parameters": [
+        "int fd",
+        "loff_t offset",
+        "size_t count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 226,
+      "name": "setxattr",
+      "hex": "0xe2",
+      "parameters": [
+        "const char *path",
+        "const char *name",
+        "const void *value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 227,
+      "name": "lsetxattr",
+      "hex": "0xe3",
+      "parameters": [
+        "const char *path",
+        "const char *name",
+        "const void *value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 228,
+      "name": "fsetxattr",
+      "hex": "0xe4",
+      "parameters": [
+        "int fd",
+        "const char *name",
+        "const void *value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 229,
+      "name": "getxattr",
+      "hex": "0xe5",
+      "parameters": [
+        "const char *path",
+        "const char *name",
+        "void *value",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 230,
+      "name": "lgetxattr",
+      "hex": "0xe6",
+      "parameters": [
+        "const char *path",
+        "const char *name",
+        "void *value",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 231,
+      "name": "fgetxattr",
+      "hex": "0xe7",
+      "parameters": [
+        "int fd",
+        "const char *name",
+        "void *value",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 232,
+      "name": "listxattr",
+      "hex": "0xe8",
+      "parameters": [
+        "const char *path",
+        "char *list",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 233,
+      "name": "llistxattr",
+      "hex": "0xe9",
+      "parameters": [
+        "const char *path",
+        "char *list",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 234,
+      "name": "flistxattr",
+      "hex": "0xea",
+      "parameters": [
+        "int fd",
+        "char *list",
+        "size_t size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 235,
+      "name": "removexattr",
+      "hex": "0xeb",
+      "parameters": [
+        "const char *path",
+        "const char *name"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 236,
+      "name": "lremovexattr",
+      "hex": "0xec",
+      "parameters": [
+        "const char *path",
+        "const char *name"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 237,
+      "name": "fremovexattr",
+      "hex": "0xed",
+      "parameters": [
+        "int fd",
+        "const char *name"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 238,
+      "name": "tkill",
+      "hex": "0xee",
+      "parameters": [
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 239,
+      "name": "sendfile64",
+      "hex": "0xef",
+      "parameters": [
+        "int out_fd",
+        "int in_fd",
+        "loff_t *offset",
+        "size_t count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 240,
+      "name": "futex",
+      "hex": "0xf0",
+      "parameters": [
+        "u32 *uaddr",
+        "int op",
+        "u32 val",
+        "struct timespec *utime",
+        "u32 *uaddr2",
+        "u32 val3"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 241,
+      "name": "sched_setaffinity",
+      "hex": "0xf1",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int len",
+        "unsigned long *user_mask_ptr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 242,
+      "name": "sched_getaffinity",
+      "hex": "0xf2",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int len",
+        "unsigned long *user_mask_ptr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 243,
+      "name": "io_setup",
+      "hex": "0xf3",
+      "parameters": [
+        "unsigned nr_reqs",
+        "aio_context_t *ctx"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 244,
+      "name": "io_destroy",
+      "hex": "0xf4",
+      "parameters": [
+        "aio_context_t ctx"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 245,
+      "name": "io_getevents",
+      "hex": "0xf5",
+      "parameters": [
+        "aio_context_t ctx_id",
+        "long min_nr",
+        "long nr",
+        "struct io_event *events",
+        "struct timespec *timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 246,
+      "name": "io_submit",
+      "hex": "0xf6",
+      "parameters": [
+        "aio_context_t",
+        "long",
+        "struct iocb * *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 247,
+      "name": "io_cancel",
+      "hex": "0xf7",
+      "parameters": [
+        "aio_context_t ctx_id",
+        "struct iocb *iocb",
+        "struct io_event *result"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 248,
+      "name": "exit_group",
+      "hex": "0xf8",
+      "parameters": [
+        "int error_code"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 249,
+      "name": "lookup_dcookie",
+      "hex": "0xf9",
+      "parameters": [
+        "u64 cookie64",
+        "char *buf",
+        "size_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 250,
+      "name": "epoll_create",
+      "hex": "0xfa",
+      "parameters": [
+        "int size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 251,
+      "name": "epoll_ctl",
+      "hex": "0xfb",
+      "parameters": [
+        "int epfd",
+        "int op",
+        "int fd",
+        "struct epoll_event *event"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 252,
+      "name": "epoll_wait",
+      "hex": "0xfc",
+      "parameters": [
+        "int epfd",
+        "struct epoll_event *events",
+        "int maxevents",
+        "int timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 253,
+      "name": "remap_file_pages",
+      "hex": "0xfd",
+      "parameters": [
+        "unsigned long start",
+        "unsigned long size",
+        "unsigned long prot",
+        "unsigned long pgoff",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 254,
+      "name": "not implemented",
+      "hex": "0xfe",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 255,
+      "name": "not implemented",
+      "hex": "0xff",
+      "parameters": [],
+      "source": "-"
+    },
+    {
+      "number": 256,
+      "name": "set_tid_address",
+      "hex": "0x100",
+      "parameters": [
+        "int *tidptr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 257,
+      "name": "timer_create",
+      "hex": "0x101",
+      "parameters": [
+        "clockid_t which_clock",
+        "struct sigevent *timer_event_spec",
+        "timer_t * created_timer_id"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 258,
+      "name": "timer_settime",
+      "hex": "0x102",
+      "parameters": [
+        "timer_t timer_id",
+        "int flags",
+        "const struct __kernel_itimerspec *new_setting",
+        "struct itimerspec *old_setting"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 259,
+      "name": "timer_gettime",
+      "hex": "0x103",
+      "parameters": [
+        "timer_t timer_id",
+        "struct __kernel_itimerspec *setting"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 260,
+      "name": "timer_getoverrun",
+      "hex": "0x104",
+      "parameters": [
+        "timer_t timer_id"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 261,
+      "name": "timer_delete",
+      "hex": "0x105",
+      "parameters": [
+        "timer_t timer_id"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 262,
+      "name": "clock_settime",
+      "hex": "0x106",
+      "parameters": [
+        "clockid_t which_clock",
+        "const struct __kernel_timespec *tp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 263,
+      "name": "clock_gettime",
+      "hex": "0x107",
+      "parameters": [
+        "clockid_t which_clock",
+        "struct __kernel_timespec *tp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 264,
+      "name": "clock_getres",
+      "hex": "0x108",
+      "parameters": [
+        "clockid_t which_clock",
+        "struct __kernel_timespec *tp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 265,
+      "name": "clock_nanosleep",
+      "hex": "0x109",
+      "parameters": [
+        "clockid_t which_clock",
+        "int flags",
+        "const struct __kernel_timespec *rqtp",
+        "struct __kernel_timespec *rmtp"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 266,
+      "name": "statfs64",
+      "hex": "0x10a",
+      "parameters": [
+        "const char *path",
+        "size_t sz",
+        "struct statfs64 *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 267,
+      "name": "fstatfs64",
+      "hex": "0x10b",
+      "parameters": [
+        "unsigned int fd",
+        "size_t sz",
+        "struct statfs64 *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 268,
+      "name": "tgkill",
+      "hex": "0x10c",
+      "parameters": [
+        "pid_t tgid",
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 269,
+      "name": "utimes",
+      "hex": "0x10d",
+      "parameters": [
+        "char *filename",
+        "struct timeval *utimes"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 270,
+      "name": "arm_fadvise64_64",
+      "hex": "0x10e",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 271,
+      "name": "pciconfig_iobase",
+      "hex": "0x10f",
+      "parameters": [
+        "long which",
+        "unsigned long bus",
+        "unsigned long devfn"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 272,
+      "name": "pciconfig_read",
+      "hex": "0x110",
+      "parameters": [
+        "unsigned long bus",
+        "unsigned long dfn",
+        "unsigned long off",
+        "unsigned long len",
+        "void *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 273,
+      "name": "pciconfig_write",
+      "hex": "0x111",
+      "parameters": [
+        "unsigned long bus",
+        "unsigned long dfn",
+        "unsigned long off",
+        "unsigned long len",
+        "void *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 274,
+      "name": "mq_open",
+      "hex": "0x112",
+      "parameters": [
+        "const char *name",
+        "int oflag",
+        "umode_t mode",
+        "struct mq_attr *attr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 275,
+      "name": "mq_unlink",
+      "hex": "0x113",
+      "parameters": [
+        "const char *name"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 276,
+      "name": "mq_timedsend",
+      "hex": "0x114",
+      "parameters": [
+        "mqd_t mqdes",
+        "const char *msg_ptr",
+        "size_t msg_len",
+        "unsigned int msg_prio",
+        "const struct __kernel_timespec *abs_timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 277,
+      "name": "mq_timedreceive",
+      "hex": "0x115",
+      "parameters": [
+        "mqd_t mqdes",
+        "char *msg_ptr",
+        "size_t msg_len",
+        "unsigned int *msg_prio",
+        "const struct __kernel_timespec *abs_timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 278,
+      "name": "mq_notify",
+      "hex": "0x116",
+      "parameters": [
+        "mqd_t mqdes",
+        "const struct sigevent *notification"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 279,
+      "name": "mq_getsetattr",
+      "hex": "0x117",
+      "parameters": [
+        "mqd_t mqdes",
+        "const struct mq_attr *mqstat",
+        "struct mq_attr *omqstat"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 280,
+      "name": "waitid",
+      "hex": "0x118",
+      "parameters": [
+        "int which",
+        "pid_t pid",
+        "struct siginfo *infop",
+        "int options",
+        "struct rusage *ru"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 281,
+      "name": "socket",
+      "hex": "0x119",
+      "parameters": [
+        "int",
+        "int",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 282,
+      "name": "bind",
+      "hex": "0x11a",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 283,
+      "name": "connect",
+      "hex": "0x11b",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 284,
+      "name": "listen",
+      "hex": "0x11c",
+      "parameters": [
+        "int",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 285,
+      "name": "accept",
+      "hex": "0x11d",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 286,
+      "name": "getsockname",
+      "hex": "0x11e",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 287,
+      "name": "getpeername",
+      "hex": "0x11f",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 288,
+      "name": "socketpair",
+      "hex": "0x120",
+      "parameters": [
+        "int",
+        "int",
+        "int",
+        "int *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 289,
+      "name": "send",
+      "hex": "0x121",
+      "parameters": [
+        "int",
+        "void *",
+        "size_t",
+        "unsigned"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 290,
+      "name": "sendto",
+      "hex": "0x122",
+      "parameters": [
+        "int",
+        "void *",
+        "size_t",
+        "unsigned",
+        "struct sockaddr *",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 291,
+      "name": "recv",
+      "hex": "0x123",
+      "parameters": [
+        "int",
+        "void *",
+        "size_t",
+        "unsigned"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 292,
+      "name": "recvfrom",
+      "hex": "0x124",
+      "parameters": [
+        "int",
+        "void *",
+        "size_t",
+        "unsigned",
+        "struct sockaddr *",
+        "int *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 293,
+      "name": "shutdown",
+      "hex": "0x125",
+      "parameters": [
+        "int",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 294,
+      "name": "setsockopt",
+      "hex": "0x126",
+      "parameters": [
+        "int fd",
+        "int level",
+        "int optname",
+        "char *optval",
+        "int optlen"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 295,
+      "name": "getsockopt",
+      "hex": "0x127",
+      "parameters": [
+        "int fd",
+        "int level",
+        "int optname",
+        "char *optval",
+        "int *optlen"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 296,
+      "name": "sendmsg",
+      "hex": "0x128",
+      "parameters": [
+        "int fd",
+        "struct user_msghdr *msg",
+        "unsigned flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 297,
+      "name": "recvmsg",
+      "hex": "0x129",
+      "parameters": [
+        "int fd",
+        "struct user_msghdr *msg",
+        "unsigned flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 298,
+      "name": "semop",
+      "hex": "0x12a",
+      "parameters": [
+        "int semid",
+        "struct sembuf *sops",
+        "unsigned nsops"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 299,
+      "name": "semget",
+      "hex": "0x12b",
+      "parameters": [
+        "key_t key",
+        "int nsems",
+        "int semflg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 300,
+      "name": "semctl",
+      "hex": "0x12c",
+      "parameters": [
+        "int semid",
+        "int semnum",
+        "int cmd",
+        "unsigned long arg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 301,
+      "name": "msgsnd",
+      "hex": "0x12d",
+      "parameters": [
+        "int msqid",
+        "struct msgbuf *msgp",
+        "size_t msgsz",
+        "int msgflg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 302,
+      "name": "msgrcv",
+      "hex": "0x12e",
+      "parameters": [
+        "int msqid",
+        "struct msgbuf *msgp",
+        "size_t msgsz",
+        "long msgtyp",
+        "int msgflg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 303,
+      "name": "msgget",
+      "hex": "0x12f",
+      "parameters": [
+        "key_t key",
+        "int msgflg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 304,
+      "name": "msgctl",
+      "hex": "0x130",
+      "parameters": [
+        "int msqid",
+        "int cmd",
+        "struct msqid_ds *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 305,
+      "name": "shmat",
+      "hex": "0x131",
+      "parameters": [
+        "int shmid",
+        "char *shmaddr",
+        "int shmflg"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 306,
+      "name": "shmdt",
+      "hex": "0x132",
+      "parameters": [
+        "char *shmaddr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 307,
+      "name": "shmget",
+      "hex": "0x133",
+      "parameters": [
+        "key_t key",
+        "size_t size",
+        "int flag"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 308,
+      "name": "shmctl",
+      "hex": "0x134",
+      "parameters": [
+        "int shmid",
+        "int cmd",
+        "struct shmid_ds *buf"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 309,
+      "name": "add_key",
+      "hex": "0x135",
+      "parameters": [
+        "const char *_type",
+        "const char *_description",
+        "const void *_payload",
+        "size_t plen",
+        "key_serial_t destringid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 310,
+      "name": "request_key",
+      "hex": "0x136",
+      "parameters": [
+        "const char *_type",
+        "const char *_description",
+        "const char *_callout_info",
+        "key_serial_t destringid"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 311,
+      "name": "keyctl",
+      "hex": "0x137",
+      "parameters": [
+        "int cmd",
+        "unsigned long arg2",
+        "unsigned long arg3",
+        "unsigned long arg4",
+        "unsigned long arg5"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 312,
+      "name": "semtimedop",
+      "hex": "0x138",
+      "parameters": [
+        "int semid",
+        "struct sembuf *sops",
+        "unsigned nsops",
+        "const struct __kernel_timespec *timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 313,
+      "name": "vserver",
+      "hex": "0x139",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 314,
+      "name": "ioprio_set",
+      "hex": "0x13a",
+      "parameters": [
+        "int which",
+        "int who",
+        "int ioprio"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 315,
+      "name": "ioprio_get",
+      "hex": "0x13b",
+      "parameters": [
+        "int which",
+        "int who"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 316,
+      "name": "inotify_init",
+      "hex": "0x13c",
+      "parameters": [],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 317,
+      "name": "inotify_add_watch",
+      "hex": "0x13d",
+      "parameters": [
+        "int fd",
+        "const char *path",
+        "u32 mask"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 318,
+      "name": "inotify_rm_watch",
+      "hex": "0x13e",
+      "parameters": [
+        "int fd",
+        "__s32 wd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 319,
+      "name": "mbind",
+      "hex": "0x13f",
+      "parameters": [
+        "unsigned long start",
+        "unsigned long len",
+        "unsigned long mode",
+        "const unsigned long *nmask",
+        "unsigned long maxnode",
+        "unsigned flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 320,
+      "name": "get_mempolicy",
+      "hex": "0x140",
+      "parameters": [
+        "int *policy",
+        "unsigned long *nmask",
+        "unsigned long maxnode",
+        "unsigned long addr",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 321,
+      "name": "set_mempolicy",
+      "hex": "0x141",
+      "parameters": [
+        "int mode",
+        "const unsigned long *nmask",
+        "unsigned long maxnode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 322,
+      "name": "openat",
+      "hex": "0x142",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "int flags",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 323,
+      "name": "mkdirat",
+      "hex": "0x143",
+      "parameters": [
+        "int dfd",
+        "const char * pathname",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 324,
+      "name": "mknodat",
+      "hex": "0x144",
+      "parameters": [
+        "int dfd",
+        "const char * filename",
+        "umode_t mode",
+        "unsigned dev"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 325,
+      "name": "fchownat",
+      "hex": "0x145",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "uid_t user",
+        "gid_t group",
+        "int flag"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 326,
+      "name": "futimesat",
+      "hex": "0x146",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "struct timeval *utimes"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 327,
+      "name": "fstatat64",
+      "hex": "0x147",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "struct stat64 *statbuf",
+        "int flag"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 328,
+      "name": "unlinkat",
+      "hex": "0x148",
+      "parameters": [
+        "int dfd",
+        "const char * pathname",
+        "int flag"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 329,
+      "name": "renameat",
+      "hex": "0x149",
+      "parameters": [
+        "int olddfd",
+        "const char * oldname",
+        "int newdfd",
+        "const char * newname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 330,
+      "name": "linkat",
+      "hex": "0x14a",
+      "parameters": [
+        "int olddfd",
+        "const char *oldname",
+        "int newdfd",
+        "const char *newname",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 331,
+      "name": "symlinkat",
+      "hex": "0x14b",
+      "parameters": [
+        "const char * oldname",
+        "int newdfd",
+        "const char * newname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 332,
+      "name": "readlinkat",
+      "hex": "0x14c",
+      "parameters": [
+        "int dfd",
+        "const char *path",
+        "char *buf",
+        "int bufsiz"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 333,
+      "name": "fchmodat",
+      "hex": "0x14d",
+      "parameters": [
+        "int dfd",
+        "const char * filename",
+        "umode_t mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 334,
+      "name": "faccessat",
+      "hex": "0x14e",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "int mode"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 335,
+      "name": "pselect6",
+      "hex": "0x14f",
+      "parameters": [
+        "int",
+        "fd_set *",
+        "fd_set *",
+        "fd_set *",
+        "struct timespec *",
+        "void *"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 336,
+      "name": "ppoll",
+      "hex": "0x150",
+      "parameters": [
+        "struct pollfd *",
+        "unsigned int",
+        "struct timespec *",
+        "const sigset_t *",
+        "size_t"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 337,
+      "name": "unshare",
+      "hex": "0x151",
+      "parameters": [
+        "unsigned long unshare_flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 338,
+      "name": "set_robust_list",
+      "hex": "0x152",
+      "parameters": [
+        "struct robust_list_head *head",
+        "size_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 339,
+      "name": "get_robust_list",
+      "hex": "0x153",
+      "parameters": [
+        "int pid",
+        "struct robust_list_head * *head_ptr",
+        "size_t *len_ptr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 340,
+      "name": "splice",
+      "hex": "0x154",
+      "parameters": [
+        "int fd_in",
+        "loff_t *off_in",
+        "int fd_out",
+        "loff_t *off_out",
+        "size_t len",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 341,
+      "name": "arm_sync_file_range",
+      "hex": "0x155",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 341,
+      "name": "sync_file_range2",
+      "hex": "0x155",
+      "parameters": [
+        "int fd",
+        "unsigned int flags",
+        "loff_t offset",
+        "loff_t nbytes"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 342,
+      "name": "tee",
+      "hex": "0x156",
+      "parameters": [
+        "int fdin",
+        "int fdout",
+        "size_t len",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 343,
+      "name": "vmsplice",
+      "hex": "0x157",
+      "parameters": [
+        "int fd",
+        "const struct iovec *iov",
+        "unsigned long nr_segs",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 344,
+      "name": "move_pages",
+      "hex": "0x158",
+      "parameters": [
+        "pid_t pid",
+        "unsigned long nr_pages",
+        "const void * *pages",
+        "const int *nodes",
+        "int *status",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 345,
+      "name": "getcpu",
+      "hex": "0x159",
+      "parameters": [
+        "unsigned *cpu",
+        "unsigned *node",
+        "struct getcpu_cache *cache"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 346,
+      "name": "epoll_pwait",
+      "hex": "0x15a",
+      "parameters": [
+        "int epfd",
+        "struct epoll_event *events",
+        "int maxevents",
+        "int timeout",
+        "const sigset_t *sigmask",
+        "size_t sigsetsize"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 347,
+      "name": "kexec_load",
+      "hex": "0x15b",
+      "parameters": [
+        "unsigned long entry",
+        "unsigned long nr_segments",
+        "struct kexec_segment *segments",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 348,
+      "name": "utimensat",
+      "hex": "0x15c",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "struct timespec *utimes",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 349,
+      "name": "signalfd",
+      "hex": "0x15d",
+      "parameters": [
+        "int ufd",
+        "sigset_t *user_mask",
+        "size_t sizemask"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 350,
+      "name": "timerfd_create",
+      "hex": "0x15e",
+      "parameters": [
+        "int clockid",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 351,
+      "name": "eventfd",
+      "hex": "0x15f",
+      "parameters": [
+        "unsigned int count"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 352,
+      "name": "fallocate",
+      "hex": "0x160",
+      "parameters": [
+        "int fd",
+        "int mode",
+        "loff_t offset",
+        "loff_t len"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 353,
+      "name": "timerfd_settime",
+      "hex": "0x161",
+      "parameters": [
+        "int ufd",
+        "int flags",
+        "const struct __kernel_itimerspec *utmr",
+        "struct __kernel_itimerspec *otmr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 354,
+      "name": "timerfd_gettime",
+      "hex": "0x162",
+      "parameters": [
+        "int ufd",
+        "struct __kernel_itimerspec *otmr"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 355,
+      "name": "signalfd4",
+      "hex": "0x163",
+      "parameters": [
+        "int ufd",
+        "sigset_t *user_mask",
+        "size_t sizemask",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 356,
+      "name": "eventfd2",
+      "hex": "0x164",
+      "parameters": [
+        "unsigned int count",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 357,
+      "name": "epoll_create1",
+      "hex": "0x165",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 358,
+      "name": "dup3",
+      "hex": "0x166",
+      "parameters": [
+        "unsigned int oldfd",
+        "unsigned int newfd",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 359,
+      "name": "pipe2",
+      "hex": "0x167",
+      "parameters": [
+        "int *fildes",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 360,
+      "name": "inotify_init1",
+      "hex": "0x168",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 361,
+      "name": "preadv",
+      "hex": "0x169",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 362,
+      "name": "pwritev",
+      "hex": "0x16a",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 363,
+      "name": "rt_tgsigqueueinfo",
+      "hex": "0x16b",
+      "parameters": [
+        "pid_t tgid",
+        "pid_t pid",
+        "int sig",
+        "siginfo_t *uinfo"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 364,
+      "name": "perf_event_open",
+      "hex": "0x16c",
+      "parameters": [
+        "struct perf_event_attr *attr_uptr",
+        "pid_t pid",
+        "int cpu",
+        "int group_fd",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 365,
+      "name": "recvmmsg",
+      "hex": "0x16d",
+      "parameters": [
+        "int fd",
+        "struct mmsghdr *msg",
+        "unsigned int vlen",
+        "unsigned flags",
+        "struct timespec *timeout"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 366,
+      "name": "accept4",
+      "hex": "0x16e",
+      "parameters": [
+        "int",
+        "struct sockaddr *",
+        "int *",
+        "int"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 367,
+      "name": "fanotify_init",
+      "hex": "0x16f",
+      "parameters": [
+        "unsigned int flags",
+        "unsigned int event_f_flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 368,
+      "name": "fanotify_mark",
+      "hex": "0x170",
+      "parameters": [
+        "int fanotify_fd",
+        "unsigned int flags",
+        "u64 mask",
+        "int fd",
+        "const char *pathname"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 369,
+      "name": "prlimit64",
+      "hex": "0x171",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int resource",
+        "const struct rlimit64 *new_rlim",
+        "struct rlimit64 *old_rlim"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 370,
+      "name": "name_to_handle_at",
+      "hex": "0x172",
+      "parameters": [
+        "int dfd",
+        "const char *name",
+        "struct file_handle *handle",
+        "int *mnt_id",
+        "int flag"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 371,
+      "name": "open_by_handle_at",
+      "hex": "0x173",
+      "parameters": [
+        "int mountdirfd",
+        "struct file_handle *handle",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 372,
+      "name": "clock_adjtime",
+      "hex": "0x174",
+      "parameters": [
+        "clockid_t which_clock",
+        "struct timex *tx"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 373,
+      "name": "syncfs",
+      "hex": "0x175",
+      "parameters": [
+        "int fd"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 374,
+      "name": "sendmmsg",
+      "hex": "0x176",
+      "parameters": [
+        "int fd",
+        "struct mmsghdr *msg",
+        "unsigned int vlen",
+        "unsigned flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 375,
+      "name": "setns",
+      "hex": "0x177",
+      "parameters": [
+        "int fd",
+        "int nstype"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 376,
+      "name": "process_vm_readv",
+      "hex": "0x178",
+      "parameters": [
+        "pid_t pid",
+        "const struct iovec *lvec",
+        "unsigned long liovcnt",
+        "const struct iovec *rvec",
+        "unsigned long riovcnt",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 377,
+      "name": "process_vm_writev",
+      "hex": "0x179",
+      "parameters": [
+        "pid_t pid",
+        "const struct iovec *lvec",
+        "unsigned long liovcnt",
+        "const struct iovec *rvec",
+        "unsigned long riovcnt",
+        "unsigned long flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 378,
+      "name": "kcmp",
+      "hex": "0x17a",
+      "parameters": [
+        "pid_t pid1",
+        "pid_t pid2",
+        "int type",
+        "unsigned long idx1",
+        "unsigned long idx2"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 379,
+      "name": "finit_module",
+      "hex": "0x17b",
+      "parameters": [
+        "int fd",
+        "const char *uargs",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 380,
+      "name": "sched_setattr",
+      "hex": "0x17c",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_attr *attr",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 381,
+      "name": "sched_getattr",
+      "hex": "0x17d",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_attr *attr",
+        "unsigned int size",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 382,
+      "name": "renameat2",
+      "hex": "0x17e",
+      "parameters": [
+        "int olddfd",
+        "const char *oldname",
+        "int newdfd",
+        "const char *newname",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 383,
+      "name": "seccomp",
+      "hex": "0x17f",
+      "parameters": [
+        "unsigned int op",
+        "unsigned int flags",
+        "const char *uargs"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 384,
+      "name": "getrandom",
+      "hex": "0x180",
+      "parameters": [
+        "char *buf",
+        "size_t count",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 385,
+      "name": "memfd_create",
+      "hex": "0x181",
+      "parameters": [
+        "const char *uname_ptr",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 386,
+      "name": "bpf",
+      "hex": "0x182",
+      "parameters": [
+        "int cmd",
+        "union bpf_attr *attr",
+        "unsigned int size"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 387,
+      "name": "execveat",
+      "hex": "0x183",
+      "parameters": [
+        "int dfd",
+        "const char *filename",
+        "const char *const *argv",
+        "const char *const *envp",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 388,
+      "name": "userfaultfd",
+      "hex": "0x184",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 389,
+      "name": "membarrier",
+      "hex": "0x185",
+      "parameters": [
+        "int cmd",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 390,
+      "name": "mlock2",
+      "hex": "0x186",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 391,
+      "name": "copy_file_range",
+      "hex": "0x187",
+      "parameters": [
+        "int fd_in",
+        "loff_t *off_in",
+        "int fd_out",
+        "loff_t *off_out",
+        "size_t len",
+        "unsigned int flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 392,
+      "name": "preadv2",
+      "hex": "0x188",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h",
+        "rwf_t flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 393,
+      "name": "pwritev2",
+      "hex": "0x189",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec *vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h",
+        "rwf_t flags"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 394,
+      "name": "pkey_mprotect",
+      "hex": "0x18a",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "unsigned long prot",
+        "int pkey"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 395,
+      "name": "pkey_alloc",
+      "hex": "0x18b",
+      "parameters": [
+        "unsigned long flags",
+        "unsigned long init_val"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 396,
+      "name": "pkey_free",
+      "hex": "0x18c",
+      "parameters": [
+        "int pkey"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 397,
+      "name": "statx",
+      "hex": "0x18d",
+      "parameters": [
+        "int dfd",
+        "const char *path",
+        "unsigned flags",
+        "unsigned mask",
+        "struct statx *buffer"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 983041,
+      "name": "ARM_breakpoint",
+      "hex": "0xf0001",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 983042,
+      "name": "ARM_cacheflush",
+      "hex": "0xf0002",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 983043,
+      "name": "ARM_usr26",
+      "hex": "0xf0003",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 983044,
+      "name": "ARM_usr32",
+      "hex": "0xf0004",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    },
+    {
+      "number": 983045,
+      "name": "ARM_set_tls",
+      "hex": "0xf0005",
+      "parameters": [
+        "?",
+        "?",
+        "?",
+        "?",
+        "?",
+        "?"
+      ],
+      "source": "man/ cs/"
+    }
+  ]
+}

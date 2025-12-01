@@ -1,0 +1,3314 @@
+{
+  "architecture": "x86_64",
+  "count": 314,
+  "syscalls": [
+    {
+      "number": 0,
+      "name": "sys_read",
+      "hex": "0x0",
+      "parameters": [
+        "unsigned int fd",
+        "char __user * buf",
+        "size_t count"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 1,
+      "name": "sys_write",
+      "hex": "0x1",
+      "parameters": [
+        "unsigned int fd",
+        "const char __user * buf",
+        "size_t count"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 2,
+      "name": "sys_open",
+      "hex": "0x2",
+      "parameters": [
+        "const char __user * filename",
+        "int flags",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 3,
+      "name": "sys_close",
+      "hex": "0x3",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 4,
+      "name": "sys_newstat",
+      "hex": "0x4",
+      "parameters": [
+        "const char __user * filename",
+        "struct stat __user * statbuf"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 5,
+      "name": "sys_newfstat",
+      "hex": "0x5",
+      "parameters": [
+        "unsigned int fd",
+        "struct stat __user * statbuf"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 6,
+      "name": "sys_newlstat",
+      "hex": "0x6",
+      "parameters": [
+        "const char __user * filename",
+        "struct stat __user * statbuf"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 7,
+      "name": "sys_poll",
+      "hex": "0x7",
+      "parameters": [
+        "struct pollfd __user * ufds",
+        "unsigned int nfds",
+        "int timeout_msecs"
+      ],
+      "source": "fs/select.c"
+    },
+    {
+      "number": 8,
+      "name": "sys_lseek",
+      "hex": "0x8",
+      "parameters": [
+        "unsigned int fd",
+        "off_t offset",
+        "unsigned int whence"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 9,
+      "name": "sys_mmap",
+      "hex": "0x9",
+      "parameters": [
+        "unsigned long addr",
+        "unsigned long len",
+        "unsigned long prot",
+        "unsigned long flags",
+        "unsigned long fd",
+        "unsigned long off"
+      ],
+      "source": "arch/x86/kernel/sys_x86_64.c"
+    },
+    {
+      "number": 10,
+      "name": "sys_mprotect",
+      "hex": "0xa",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "unsigned long prot"
+      ],
+      "source": "mm/mprotect.c"
+    },
+    {
+      "number": 11,
+      "name": "sys_munmap",
+      "hex": "0xb",
+      "parameters": [
+        "unsigned long addr",
+        "size_t len"
+      ],
+      "source": "mm/mmap.c"
+    },
+    {
+      "number": 12,
+      "name": "sys_brk",
+      "hex": "0xc",
+      "parameters": [
+        "unsigned long brk"
+      ],
+      "source": "mm/mmap.c"
+    },
+    {
+      "number": 13,
+      "name": "sys_rt_sigaction",
+      "hex": "0xd",
+      "parameters": [
+        "int sig",
+        "const struct sigaction __user * act",
+        "struct sigaction __user * oact",
+        "size_t sigsetsize"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 14,
+      "name": "sys_rt_sigprocmask",
+      "hex": "0xe",
+      "parameters": [
+        "int how",
+        "sigset_t __user * nset",
+        "sigset_t __user * oset",
+        "size_t sigsetsize"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 15,
+      "name": "stub_rt_sigreturn",
+      "hex": "0xf",
+      "parameters": [],
+      "source": "arch/x86/kernel/signal.c"
+    },
+    {
+      "number": 16,
+      "name": "sys_ioctl",
+      "hex": "0x10",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd",
+        "unsigned long arg"
+      ],
+      "source": "fs/ioctl.c"
+    },
+    {
+      "number": 17,
+      "name": "sys_pread64",
+      "hex": "0x11",
+      "parameters": [
+        "unsigned int fd",
+        "char __user * buf",
+        "size_t count",
+        "loff_t pos"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 18,
+      "name": "sys_pwrite64",
+      "hex": "0x12",
+      "parameters": [
+        "unsigned int fd",
+        "const char __user * buf",
+        "size_t count",
+        "loff_t pos"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 19,
+      "name": "sys_readv",
+      "hex": "0x13",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec __user * vec",
+        "unsigned long vlen"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 20,
+      "name": "sys_writev",
+      "hex": "0x14",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec __user * vec",
+        "unsigned long vlen"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 21,
+      "name": "sys_access",
+      "hex": "0x15",
+      "parameters": [
+        "const char __user * filename",
+        "int mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 22,
+      "name": "sys_pipe",
+      "hex": "0x16",
+      "parameters": [
+        "int __user * fildes"
+      ],
+      "source": "fs/pipe.c"
+    },
+    {
+      "number": 23,
+      "name": "sys_select",
+      "hex": "0x17",
+      "parameters": [
+        "int n",
+        "fd_set __user * inp",
+        "fd_set __user * outp",
+        "fd_set __user * exp",
+        "struct timeval __user * tvp"
+      ],
+      "source": "fs/select.c"
+    },
+    {
+      "number": 24,
+      "name": "sys_sched_yield",
+      "hex": "0x18",
+      "parameters": [],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 25,
+      "name": "sys_mremap",
+      "hex": "0x19",
+      "parameters": [
+        "unsigned long brk"
+      ],
+      "source": "mm/mmap.c"
+    },
+    {
+      "number": 26,
+      "name": "sys_msync",
+      "hex": "0x1a",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "int flags"
+      ],
+      "source": "mm/msync.c"
+    },
+    {
+      "number": 27,
+      "name": "sys_mincore",
+      "hex": "0x1b",
+      "parameters": [
+        "unsigned long start",
+        "size_t len",
+        "unsigned char __user * vec"
+      ],
+      "source": "mm/mincore.c"
+    },
+    {
+      "number": 28,
+      "name": "sys_madvise",
+      "hex": "0x1c",
+      "parameters": [
+        "unsigned long start",
+        "size_t len_in",
+        "int behavior"
+      ],
+      "source": "mm/madvise.c"
+    },
+    {
+      "number": 29,
+      "name": "sys_shmget",
+      "hex": "0x1d",
+      "parameters": [
+        "key_t key",
+        "size_t size",
+        "int shmflg"
+      ],
+      "source": "ipc/shm.c"
+    },
+    {
+      "number": 30,
+      "name": "sys_shmat",
+      "hex": "0x1e",
+      "parameters": [
+        "int shmid",
+        "char __user * shmaddr",
+        "int shmflg"
+      ],
+      "source": "ipc/shm.c"
+    },
+    {
+      "number": 31,
+      "name": "sys_shmctl",
+      "hex": "0x1f",
+      "parameters": [
+        "int shmid",
+        "int cmd",
+        "struct shmid_ds __user * buf"
+      ],
+      "source": "ipc/shm.c"
+    },
+    {
+      "number": 32,
+      "name": "sys_dup",
+      "hex": "0x20",
+      "parameters": [
+        "unsigned int fildes"
+      ],
+      "source": "fs/file.c"
+    },
+    {
+      "number": 33,
+      "name": "sys_dup2",
+      "hex": "0x21",
+      "parameters": [
+        "unsigned int oldfd",
+        "unsigned int newfd"
+      ],
+      "source": "fs/file.c"
+    },
+    {
+      "number": 34,
+      "name": "sys_pause",
+      "hex": "0x22",
+      "parameters": [],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 35,
+      "name": "sys_nanosleep",
+      "hex": "0x23",
+      "parameters": [
+        "struct timespec __user * rqtp",
+        "struct timespec __user * rmtp"
+      ],
+      "source": "kernel/hrtimer.c"
+    },
+    {
+      "number": 36,
+      "name": "sys_getitimer",
+      "hex": "0x24",
+      "parameters": [
+        "int which",
+        "struct itimerval __user * value"
+      ],
+      "source": "kernel/itimer.c"
+    },
+    {
+      "number": 37,
+      "name": "sys_alarm",
+      "hex": "0x25",
+      "parameters": [
+        "unsigned int seconds"
+      ],
+      "source": "kernel/timer.c"
+    },
+    {
+      "number": 38,
+      "name": "sys_setitimer",
+      "hex": "0x26",
+      "parameters": [
+        "int which",
+        "struct itimerval __user * value",
+        "struct itimerval __user * ovalue"
+      ],
+      "source": "kernel/itimer.c"
+    },
+    {
+      "number": 39,
+      "name": "sys_getpid",
+      "hex": "0x27",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 40,
+      "name": "sys_sendfile64",
+      "hex": "0x28",
+      "parameters": [
+        "int out_fd",
+        "int in_fd",
+        "loff_t __user * offset",
+        "size_t count"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 41,
+      "name": "sys_socket",
+      "hex": "0x29",
+      "parameters": [
+        "int family",
+        "int type",
+        "int protocol"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 42,
+      "name": "sys_connect",
+      "hex": "0x2a",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * uservaddr",
+        "int addrlen"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 43,
+      "name": "sys_accept",
+      "hex": "0x2b",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * upeer_sockaddr",
+        "int __user * upeer_addrlen"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 44,
+      "name": "sys_sendto",
+      "hex": "0x2c",
+      "parameters": [
+        "int fd",
+        "void __user * buff",
+        "size_t len",
+        "unsigned int flags",
+        "struct sockaddr __user * addr",
+        "int addr_len"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 45,
+      "name": "sys_recvfrom",
+      "hex": "0x2d",
+      "parameters": [
+        "int fd",
+        "void __user * ubuf",
+        "size_t size",
+        "unsigned int flags",
+        "struct sockaddr __user * addr",
+        "int __user * addr_len"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 46,
+      "name": "sys_sendmsg",
+      "hex": "0x2e",
+      "parameters": [
+        "int fd",
+        "struct msghdr __user * msg",
+        "unsigned int flags"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 47,
+      "name": "sys_recvmsg",
+      "hex": "0x2f",
+      "parameters": [
+        "int fd",
+        "struct msghdr __user * msg",
+        "unsigned int flags"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 48,
+      "name": "sys_shutdown",
+      "hex": "0x30",
+      "parameters": [
+        "int fd",
+        "int how"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 49,
+      "name": "sys_bind",
+      "hex": "0x31",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * umyaddr",
+        "int addrlen"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 50,
+      "name": "sys_listen",
+      "hex": "0x32",
+      "parameters": [
+        "int fd",
+        "int backlog"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 51,
+      "name": "sys_getsockname",
+      "hex": "0x33",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * usockaddr",
+        "int __user * usockaddr_len"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 52,
+      "name": "sys_getpeername",
+      "hex": "0x34",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * usockaddr",
+        "int __user * usockaddr_len"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 53,
+      "name": "sys_socketpair",
+      "hex": "0x35",
+      "parameters": [
+        "int family",
+        "int type",
+        "int protocol",
+        "int __user * usockvec"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 54,
+      "name": "sys_setsockopt",
+      "hex": "0x36",
+      "parameters": [
+        "int fd",
+        "int level",
+        "int optname",
+        "char __user * optval",
+        "int optlen"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 55,
+      "name": "sys_getsockopt",
+      "hex": "0x37",
+      "parameters": [
+        "int fd",
+        "int level",
+        "int optname",
+        "char __user * optval",
+        "int __user * optlen"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 56,
+      "name": "stub_clone",
+      "hex": "0x38",
+      "parameters": [
+        "unsigned long clone_flags",
+        "unsigned long newsp",
+        "int __user * parent_tidptr",
+        "int __user * child_tidptr",
+        "int tls_val"
+      ],
+      "source": "kernel/fork.c"
+    },
+    {
+      "number": 57,
+      "name": "stub_fork",
+      "hex": "0x39",
+      "parameters": [],
+      "source": "kernel/fork.c"
+    },
+    {
+      "number": 58,
+      "name": "stub_vfork",
+      "hex": "0x3a",
+      "parameters": [],
+      "source": "kernel/fork.c"
+    },
+    {
+      "number": 59,
+      "name": "stub_execve",
+      "hex": "0x3b",
+      "parameters": [
+        "const char __user * filename",
+        "const char __user *const __user * argv",
+        "const char __user *const __user * envp"
+      ],
+      "source": "fs/exec.c"
+    },
+    {
+      "number": 60,
+      "name": "sys_exit",
+      "hex": "0x3c",
+      "parameters": [
+        "int error_code"
+      ],
+      "source": "kernel/exit.c"
+    },
+    {
+      "number": 61,
+      "name": "sys_wait4",
+      "hex": "0x3d",
+      "parameters": [
+        "pid_t upid",
+        "int __user * stat_addr",
+        "int options",
+        "struct rusage __user * ru"
+      ],
+      "source": "kernel/exit.c"
+    },
+    {
+      "number": 62,
+      "name": "sys_kill",
+      "hex": "0x3e",
+      "parameters": [
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 63,
+      "name": "sys_newuname",
+      "hex": "0x3f",
+      "parameters": [
+        "struct new_utsname __user * name"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 64,
+      "name": "sys_semget",
+      "hex": "0x40",
+      "parameters": [
+        "key_t key",
+        "int nsems",
+        "int semflg"
+      ],
+      "source": "ipc/sem.c"
+    },
+    {
+      "number": 65,
+      "name": "sys_semop",
+      "hex": "0x41",
+      "parameters": [
+        "int semid",
+        "struct sembuf __user * tsops",
+        "unsigned nsops"
+      ],
+      "source": "ipc/sem.c"
+    },
+    {
+      "number": 66,
+      "name": "sys_semctl",
+      "hex": "0x42",
+      "parameters": [
+        "int semid",
+        "int semnum",
+        "int cmd",
+        "unsigned long arg"
+      ],
+      "source": "ipc/sem.c"
+    },
+    {
+      "number": 67,
+      "name": "sys_shmdt",
+      "hex": "0x43",
+      "parameters": [
+        "char __user * shmaddr"
+      ],
+      "source": "ipc/shm.c"
+    },
+    {
+      "number": 68,
+      "name": "sys_msgget",
+      "hex": "0x44",
+      "parameters": [
+        "key_t key",
+        "int msgflg"
+      ],
+      "source": "ipc/msg.c"
+    },
+    {
+      "number": 69,
+      "name": "sys_msgsnd",
+      "hex": "0x45",
+      "parameters": [
+        "int msqid",
+        "struct msgbuf __user * msgp",
+        "size_t msgsz",
+        "int msgflg"
+      ],
+      "source": "ipc/msg.c"
+    },
+    {
+      "number": 70,
+      "name": "sys_msgrcv",
+      "hex": "0x46",
+      "parameters": [
+        "int msqid",
+        "struct msgbuf __user * msgp",
+        "size_t msgsz",
+        "long msgtyp",
+        "int msgflg"
+      ],
+      "source": "ipc/msg.c"
+    },
+    {
+      "number": 71,
+      "name": "sys_msgctl",
+      "hex": "0x47",
+      "parameters": [
+        "int msqid",
+        "int cmd",
+        "struct msqid_ds __user * buf"
+      ],
+      "source": "ipc/msg.c"
+    },
+    {
+      "number": 72,
+      "name": "sys_fcntl",
+      "hex": "0x48",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd",
+        "unsigned long arg"
+      ],
+      "source": "fs/fcntl.c"
+    },
+    {
+      "number": 73,
+      "name": "sys_flock",
+      "hex": "0x49",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned int cmd"
+      ],
+      "source": "fs/locks.c"
+    },
+    {
+      "number": 74,
+      "name": "sys_fsync",
+      "hex": "0x4a",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "fs/sync.c"
+    },
+    {
+      "number": 75,
+      "name": "sys_fdatasync",
+      "hex": "0x4b",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "fs/sync.c"
+    },
+    {
+      "number": 76,
+      "name": "sys_truncate",
+      "hex": "0x4c",
+      "parameters": [
+        "const char __user * path",
+        "long length"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 77,
+      "name": "sys_ftruncate",
+      "hex": "0x4d",
+      "parameters": [
+        "unsigned int fd",
+        "unsigned long length"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 78,
+      "name": "sys_getdents",
+      "hex": "0x4e",
+      "parameters": [
+        "unsigned int fd",
+        "struct linux_dirent __user * dirent",
+        "unsigned int count"
+      ],
+      "source": "fs/readdir.c"
+    },
+    {
+      "number": 79,
+      "name": "sys_getcwd",
+      "hex": "0x4f",
+      "parameters": [
+        "char __user * buf",
+        "unsigned long size"
+      ],
+      "source": "fs/dcache.c"
+    },
+    {
+      "number": 80,
+      "name": "sys_chdir",
+      "hex": "0x50",
+      "parameters": [
+        "const char __user * filename"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 81,
+      "name": "sys_fchdir",
+      "hex": "0x51",
+      "parameters": [
+        "unsigned int fd"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 82,
+      "name": "sys_rename",
+      "hex": "0x52",
+      "parameters": [
+        "const char __user * oldname",
+        "const char __user * newname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 83,
+      "name": "sys_mkdir",
+      "hex": "0x53",
+      "parameters": [
+        "const char __user * pathname",
+        "umode_t mode"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 84,
+      "name": "sys_rmdir",
+      "hex": "0x54",
+      "parameters": [
+        "const char __user * pathname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 85,
+      "name": "sys_creat",
+      "hex": "0x55",
+      "parameters": [
+        "const char __user * pathname",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 86,
+      "name": "sys_link",
+      "hex": "0x56",
+      "parameters": [
+        "const char __user * oldname",
+        "const char __user * newname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 87,
+      "name": "sys_unlink",
+      "hex": "0x57",
+      "parameters": [
+        "const char __user * pathname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 88,
+      "name": "sys_symlink",
+      "hex": "0x58",
+      "parameters": [
+        "const char __user * oldname",
+        "const char __user * newname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 89,
+      "name": "sys_readlink",
+      "hex": "0x59",
+      "parameters": [
+        "const char __user * path",
+        "char __user * buf",
+        "int bufsiz"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 90,
+      "name": "sys_chmod",
+      "hex": "0x5a",
+      "parameters": [
+        "const char __user * filename",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 91,
+      "name": "sys_fchmod",
+      "hex": "0x5b",
+      "parameters": [
+        "unsigned int fd",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 92,
+      "name": "sys_chown",
+      "hex": "0x5c",
+      "parameters": [
+        "const char __user * filename",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 93,
+      "name": "sys_fchown",
+      "hex": "0x5d",
+      "parameters": [
+        "unsigned int fd",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 94,
+      "name": "sys_lchown",
+      "hex": "0x5e",
+      "parameters": [
+        "const char __user * filename",
+        "uid_t user",
+        "gid_t group"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 95,
+      "name": "sys_umask",
+      "hex": "0x5f",
+      "parameters": [
+        "int mask"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 96,
+      "name": "sys_gettimeofday",
+      "hex": "0x60",
+      "parameters": [
+        "struct timeval __user * tv",
+        "struct timezone __user * tz"
+      ],
+      "source": "kernel/time.c"
+    },
+    {
+      "number": 97,
+      "name": "sys_getrlimit",
+      "hex": "0x61",
+      "parameters": [
+        "unsigned int resource",
+        "struct rlimit __user * rlim"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 98,
+      "name": "sys_getrusage",
+      "hex": "0x62",
+      "parameters": [
+        "int who",
+        "struct rusage __user * ru"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 99,
+      "name": "sys_sysinfo",
+      "hex": "0x63",
+      "parameters": [
+        "struct sysinfo __user * info"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 100,
+      "name": "sys_times",
+      "hex": "0x64",
+      "parameters": [
+        "struct tms __user * tbuf"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 101,
+      "name": "sys_ptrace",
+      "hex": "0x65",
+      "parameters": [
+        "long request",
+        "long pid",
+        "unsigned long addr",
+        "unsigned long data"
+      ],
+      "source": "kernel/ptrace.c"
+    },
+    {
+      "number": 102,
+      "name": "sys_getuid",
+      "hex": "0x66",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 103,
+      "name": "sys_syslog",
+      "hex": "0x67",
+      "parameters": [
+        "int type",
+        "char __user * buf",
+        "int len"
+      ],
+      "source": "kernel/printk/printk.c"
+    },
+    {
+      "number": 104,
+      "name": "sys_getgid",
+      "hex": "0x68",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 105,
+      "name": "sys_setuid",
+      "hex": "0x69",
+      "parameters": [
+        "uid_t uid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 106,
+      "name": "sys_setgid",
+      "hex": "0x6a",
+      "parameters": [
+        "gid_t gid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 107,
+      "name": "sys_geteuid",
+      "hex": "0x6b",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 108,
+      "name": "sys_getegid",
+      "hex": "0x6c",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 109,
+      "name": "sys_setpgid",
+      "hex": "0x6d",
+      "parameters": [
+        "pid_t pid",
+        "pid_t pgid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 110,
+      "name": "sys_getppid",
+      "hex": "0x6e",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 111,
+      "name": "sys_getpgrp",
+      "hex": "0x6f",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 112,
+      "name": "sys_setsid",
+      "hex": "0x70",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 113,
+      "name": "sys_setreuid",
+      "hex": "0x71",
+      "parameters": [
+        "uid_t ruid",
+        "uid_t euid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 114,
+      "name": "sys_setregid",
+      "hex": "0x72",
+      "parameters": [
+        "gid_t rgid",
+        "gid_t egid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 115,
+      "name": "sys_getgroups",
+      "hex": "0x73",
+      "parameters": [
+        "int gidsetsize",
+        "gid_t __user * grouplist"
+      ],
+      "source": "kernel/groups.c"
+    },
+    {
+      "number": 116,
+      "name": "sys_setgroups",
+      "hex": "0x74",
+      "parameters": [
+        "int gidsetsize",
+        "gid_t __user * grouplist"
+      ],
+      "source": "kernel/groups.c"
+    },
+    {
+      "number": 117,
+      "name": "sys_setresuid",
+      "hex": "0x75",
+      "parameters": [
+        "uid_t ruid",
+        "uid_t euid",
+        "uid_t suid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 118,
+      "name": "sys_getresuid",
+      "hex": "0x76",
+      "parameters": [
+        "uid_t __user * ruidp",
+        "uid_t __user * euidp",
+        "uid_t __user * suidp"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 119,
+      "name": "sys_setresgid",
+      "hex": "0x77",
+      "parameters": [
+        "gid_t rgid",
+        "gid_t egid",
+        "gid_t sgid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 120,
+      "name": "sys_getresgid",
+      "hex": "0x78",
+      "parameters": [
+        "gid_t __user * rgidp",
+        "gid_t __user * egidp",
+        "gid_t __user * sgidp"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 121,
+      "name": "sys_getpgid",
+      "hex": "0x79",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 122,
+      "name": "sys_setfsuid",
+      "hex": "0x7a",
+      "parameters": [
+        "uid_t uid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 123,
+      "name": "sys_setfsgid",
+      "hex": "0x7b",
+      "parameters": [
+        "gid_t gid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 124,
+      "name": "sys_getsid",
+      "hex": "0x7c",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 125,
+      "name": "sys_capget",
+      "hex": "0x7d",
+      "parameters": [
+        "cap_user_header_t header",
+        "cap_user_data_t dataptr"
+      ],
+      "source": "kernel/capability.c"
+    },
+    {
+      "number": 126,
+      "name": "sys_capset",
+      "hex": "0x7e",
+      "parameters": [
+        "cap_user_header_t header",
+        "const cap_user_data_t data"
+      ],
+      "source": "kernel/capability.c"
+    },
+    {
+      "number": 127,
+      "name": "sys_rt_sigpending",
+      "hex": "0x7f",
+      "parameters": [
+        "sigset_t __user * uset",
+        "size_t sigsetsize"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 128,
+      "name": "sys_rt_sigtimedwait",
+      "hex": "0x80",
+      "parameters": [
+        "const sigset_t __user * uthese",
+        "siginfo_t __user * uinfo",
+        "const struct timespec __user * uts",
+        "size_t sigsetsize"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 129,
+      "name": "sys_rt_sigqueueinfo",
+      "hex": "0x81",
+      "parameters": [
+        "pid_t pid",
+        "int sig",
+        "siginfo_t __user * uinfo"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 130,
+      "name": "sys_rt_sigsuspend",
+      "hex": "0x82",
+      "parameters": [
+        "sigset_t __user * unewset",
+        "size_t sigsetsize"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 131,
+      "name": "sys_sigaltstack",
+      "hex": "0x83",
+      "parameters": [
+        "const stack_t __user * uss",
+        "stack_t __user * uoss"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 132,
+      "name": "sys_utime",
+      "hex": "0x84",
+      "parameters": [
+        "char __user * filename",
+        "struct utimbuf __user * times"
+      ],
+      "source": "fs/utimes.c"
+    },
+    {
+      "number": 133,
+      "name": "sys_mknod",
+      "hex": "0x85",
+      "parameters": [
+        "const char __user * filename",
+        "umode_t mode",
+        "unsigned dev"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 134,
+      "name": "None",
+      "hex": "0x86",
+      "parameters": [
+        "const char __user * library"
+      ],
+      "source": "fs/exec.c"
+    },
+    {
+      "number": 135,
+      "name": "sys_personality",
+      "hex": "0x87",
+      "parameters": [
+        "unsigned int personality"
+      ],
+      "source": "kernel/exec_domain.c"
+    },
+    {
+      "number": 136,
+      "name": "sys_ustat",
+      "hex": "0x88",
+      "parameters": [
+        "unsigned dev",
+        "struct ustat __user * ubuf"
+      ],
+      "source": "fs/statfs.c"
+    },
+    {
+      "number": 137,
+      "name": "sys_statfs",
+      "hex": "0x89",
+      "parameters": [
+        "const char __user * pathname",
+        "struct statfs __user * buf"
+      ],
+      "source": "fs/statfs.c"
+    },
+    {
+      "number": 138,
+      "name": "sys_fstatfs",
+      "hex": "0x8a",
+      "parameters": [
+        "unsigned int fd",
+        "struct statfs __user * buf"
+      ],
+      "source": "fs/statfs.c"
+    },
+    {
+      "number": 139,
+      "name": "sys_sysfs",
+      "hex": "0x8b",
+      "parameters": [
+        "int option",
+        "unsigned long arg1",
+        "unsigned long arg2"
+      ],
+      "source": "fs/filesystems.c"
+    },
+    {
+      "number": 140,
+      "name": "sys_getpriority",
+      "hex": "0x8c",
+      "parameters": [
+        "int which",
+        "int who"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 141,
+      "name": "sys_setpriority",
+      "hex": "0x8d",
+      "parameters": [
+        "int which",
+        "int who",
+        "int niceval"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 142,
+      "name": "sys_sched_setparam",
+      "hex": "0x8e",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_param __user * param"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 143,
+      "name": "sys_sched_getparam",
+      "hex": "0x8f",
+      "parameters": [
+        "pid_t pid",
+        "struct sched_param __user * param"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 144,
+      "name": "sys_sched_setscheduler",
+      "hex": "0x90",
+      "parameters": [
+        "pid_t pid",
+        "int policy",
+        "struct sched_param __user * param"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 145,
+      "name": "sys_sched_getscheduler",
+      "hex": "0x91",
+      "parameters": [
+        "pid_t pid"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 146,
+      "name": "sys_sched_get_priority_max",
+      "hex": "0x92",
+      "parameters": [
+        "int policy"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 147,
+      "name": "sys_sched_get_priority_min",
+      "hex": "0x93",
+      "parameters": [
+        "int policy"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 148,
+      "name": "sys_sched_rr_get_interval",
+      "hex": "0x94",
+      "parameters": [
+        "pid_t pid",
+        "struct timespec __user * interval"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 149,
+      "name": "sys_mlock",
+      "hex": "0x95",
+      "parameters": [
+        "unsigned long start",
+        "size_t len"
+      ],
+      "source": "mm/mlock.c"
+    },
+    {
+      "number": 150,
+      "name": "sys_munlock",
+      "hex": "0x96",
+      "parameters": [
+        "unsigned long start",
+        "size_t len"
+      ],
+      "source": "mm/mlock.c"
+    },
+    {
+      "number": 151,
+      "name": "sys_mlockall",
+      "hex": "0x97",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "mm/mlock.c"
+    },
+    {
+      "number": 152,
+      "name": "sys_munlockall",
+      "hex": "0x98",
+      "parameters": [],
+      "source": "mm/mlock.c"
+    },
+    {
+      "number": 153,
+      "name": "sys_vhangup",
+      "hex": "0x99",
+      "parameters": [],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 154,
+      "name": "sys_modify_ldt",
+      "hex": "0x9a",
+      "parameters": [
+        "int func",
+        "void * ptr",
+        "unsigned long bytecount"
+      ],
+      "source": "arch/x86/um/ldt.c"
+    },
+    {
+      "number": 155,
+      "name": "sys_pivot_root",
+      "hex": "0x9b",
+      "parameters": [
+        "const char __user * new_root",
+        "const char __user * put_old"
+      ],
+      "source": "fs/namespace.c"
+    },
+    {
+      "number": 156,
+      "name": "sys_sysctl",
+      "hex": "0x9c",
+      "parameters": [
+        "struct __sysctl_args __user * args"
+      ],
+      "source": "kernel/sysctl_binary.c"
+    },
+    {
+      "number": 157,
+      "name": "sys_prctl",
+      "hex": "0x9d",
+      "parameters": [
+        "int option",
+        "unsigned long arg2",
+        "unsigned long arg3",
+        "unsigned long arg4",
+        "unsigned long arg5"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 158,
+      "name": "sys_arch_prctl",
+      "hex": "0x9e",
+      "parameters": [
+        "struct task_struct * task",
+        "int code",
+        "unsigned long __user * addr"
+      ],
+      "source": "arch/x86/um/syscalls_64.c"
+    },
+    {
+      "number": 159,
+      "name": "sys_adjtimex",
+      "hex": "0x9f",
+      "parameters": [
+        "struct timex __user * txc_p"
+      ],
+      "source": "kernel/time.c"
+    },
+    {
+      "number": 160,
+      "name": "sys_setrlimit",
+      "hex": "0xa0",
+      "parameters": [
+        "unsigned int resource",
+        "struct rlimit __user * rlim"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 161,
+      "name": "sys_chroot",
+      "hex": "0xa1",
+      "parameters": [
+        "const char __user * filename"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 162,
+      "name": "sys_sync",
+      "hex": "0xa2",
+      "parameters": [],
+      "source": "fs/sync.c"
+    },
+    {
+      "number": 163,
+      "name": "sys_acct",
+      "hex": "0xa3",
+      "parameters": [
+        "const char __user * name"
+      ],
+      "source": "kernel/acct.c"
+    },
+    {
+      "number": 164,
+      "name": "sys_settimeofday",
+      "hex": "0xa4",
+      "parameters": [
+        "struct timeval __user * tv",
+        "struct timezone __user * tz"
+      ],
+      "source": "kernel/time.c"
+    },
+    {
+      "number": 165,
+      "name": "sys_mount",
+      "hex": "0xa5",
+      "parameters": [
+        "char __user * dev_name",
+        "char __user * dir_name",
+        "char __user * type",
+        "unsigned long flags",
+        "void __user * data"
+      ],
+      "source": "fs/namespace.c"
+    },
+    {
+      "number": 166,
+      "name": "sys_umount",
+      "hex": "0xa6",
+      "parameters": [
+        "char __user * name",
+        "int flags"
+      ],
+      "source": "fs/namespace.c"
+    },
+    {
+      "number": 167,
+      "name": "sys_swapon",
+      "hex": "0xa7",
+      "parameters": [
+        "const char __user * specialfile",
+        "int swap_flags"
+      ],
+      "source": "mm/swapfile.c"
+    },
+    {
+      "number": 168,
+      "name": "sys_swapoff",
+      "hex": "0xa8",
+      "parameters": [
+        "const char __user * specialfile"
+      ],
+      "source": "mm/swapfile.c"
+    },
+    {
+      "number": 169,
+      "name": "sys_reboot",
+      "hex": "0xa9",
+      "parameters": [
+        "int magic1",
+        "int magic2",
+        "unsigned int cmd",
+        "void __user * arg"
+      ],
+      "source": "kernel/reboot.c"
+    },
+    {
+      "number": 170,
+      "name": "sys_sethostname",
+      "hex": "0xaa",
+      "parameters": [
+        "char __user * name",
+        "int len"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 171,
+      "name": "sys_setdomainname",
+      "hex": "0xab",
+      "parameters": [
+        "char __user * name",
+        "int len"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 172,
+      "name": "stub_iopl",
+      "hex": "0xac",
+      "parameters": [
+        "unsigned int level"
+      ],
+      "source": "arch/x86/kernel/ioport.c"
+    },
+    {
+      "number": 173,
+      "name": "sys_ioperm",
+      "hex": "0xad",
+      "parameters": [
+        "unsigned long from",
+        "unsigned long num",
+        "int turn_on"
+      ],
+      "source": "arch/x86/kernel/ioport.c"
+    },
+    {
+      "number": 174,
+      "name": "None",
+      "hex": "0xae",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 175,
+      "name": "sys_init_module",
+      "hex": "0xaf",
+      "parameters": [
+        "void __user * umod",
+        "unsigned long len",
+        "const char __user * uargs"
+      ],
+      "source": "kernel/module.c"
+    },
+    {
+      "number": 176,
+      "name": "sys_delete_module",
+      "hex": "0xb0",
+      "parameters": [
+        "const char __user * name_user",
+        "unsigned int flags"
+      ],
+      "source": "kernel/module.c"
+    },
+    {
+      "number": 177,
+      "name": "None",
+      "hex": "0xb1",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 178,
+      "name": "None",
+      "hex": "0xb2",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 179,
+      "name": "sys_quotactl",
+      "hex": "0xb3",
+      "parameters": [
+        "unsigned int cmd",
+        "const char __user * special",
+        "qid_t id",
+        "void __user * addr"
+      ],
+      "source": "fs/quota/quota.c"
+    },
+    {
+      "number": 180,
+      "name": "None",
+      "hex": "0xb4",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 181,
+      "name": "None",
+      "hex": "0xb5",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 182,
+      "name": "None",
+      "hex": "0xb6",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 183,
+      "name": "None",
+      "hex": "0xb7",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 184,
+      "name": "None",
+      "hex": "0xb8",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 185,
+      "name": "None",
+      "hex": "0xb9",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 186,
+      "name": "sys_gettid",
+      "hex": "0xba",
+      "parameters": [],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 187,
+      "name": "sys_readahead",
+      "hex": "0xbb",
+      "parameters": [
+        "int fd",
+        "loff_t offset",
+        "size_t count"
+      ],
+      "source": "mm/readahead.c"
+    },
+    {
+      "number": 188,
+      "name": "sys_setxattr",
+      "hex": "0xbc",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name",
+        "const void __user * value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 189,
+      "name": "sys_lsetxattr",
+      "hex": "0xbd",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name",
+        "const void __user * value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 190,
+      "name": "sys_fsetxattr",
+      "hex": "0xbe",
+      "parameters": [
+        "int fd",
+        "const char __user * name",
+        "const void __user * value",
+        "size_t size",
+        "int flags"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 191,
+      "name": "sys_getxattr",
+      "hex": "0xbf",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name",
+        "void __user * value",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 192,
+      "name": "sys_lgetxattr",
+      "hex": "0xc0",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name",
+        "void __user * value",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 193,
+      "name": "sys_fgetxattr",
+      "hex": "0xc1",
+      "parameters": [
+        "int fd",
+        "const char __user * name",
+        "void __user * value",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 194,
+      "name": "sys_listxattr",
+      "hex": "0xc2",
+      "parameters": [
+        "const char __user * pathname",
+        "char __user * list",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 195,
+      "name": "sys_llistxattr",
+      "hex": "0xc3",
+      "parameters": [
+        "const char __user * pathname",
+        "char __user * list",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 196,
+      "name": "sys_flistxattr",
+      "hex": "0xc4",
+      "parameters": [
+        "int fd",
+        "char __user * list",
+        "size_t size"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 197,
+      "name": "sys_removexattr",
+      "hex": "0xc5",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 198,
+      "name": "sys_lremovexattr",
+      "hex": "0xc6",
+      "parameters": [
+        "const char __user * pathname",
+        "const char __user * name"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 199,
+      "name": "sys_fremovexattr",
+      "hex": "0xc7",
+      "parameters": [
+        "int fd",
+        "const char __user * name"
+      ],
+      "source": "fs/xattr.c"
+    },
+    {
+      "number": 200,
+      "name": "sys_tkill",
+      "hex": "0xc8",
+      "parameters": [
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 201,
+      "name": "sys_time",
+      "hex": "0xc9",
+      "parameters": [
+        "time_t __user * tloc"
+      ],
+      "source": "kernel/time.c"
+    },
+    {
+      "number": 202,
+      "name": "sys_futex",
+      "hex": "0xca",
+      "parameters": [
+        "u32 __user * uaddr",
+        "int op",
+        "u32 val",
+        "struct timespec __user * utime",
+        "u32 __user * uaddr2",
+        "u32 val3"
+      ],
+      "source": "kernel/futex.c"
+    },
+    {
+      "number": 203,
+      "name": "sys_sched_setaffinity",
+      "hex": "0xcb",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int len",
+        "unsigned long __user * user_mask_ptr"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 204,
+      "name": "sys_sched_getaffinity",
+      "hex": "0xcc",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int len",
+        "unsigned long __user * user_mask_ptr"
+      ],
+      "source": "kernel/sched/core.c"
+    },
+    {
+      "number": 205,
+      "name": "None",
+      "hex": "0xcd",
+      "parameters": [
+        "struct user_desc __user * u_info"
+      ],
+      "source": "arch/x86/kernel/tls.c"
+    },
+    {
+      "number": 206,
+      "name": "sys_io_setup",
+      "hex": "0xce",
+      "parameters": [
+        "unsigned nr_events",
+        "aio_context_t __user * ctxp"
+      ],
+      "source": "fs/aio.c"
+    },
+    {
+      "number": 207,
+      "name": "sys_io_destroy",
+      "hex": "0xcf",
+      "parameters": [
+        "aio_context_t ctx"
+      ],
+      "source": "fs/aio.c"
+    },
+    {
+      "number": 208,
+      "name": "sys_io_getevents",
+      "hex": "0xd0",
+      "parameters": [
+        "aio_context_t ctx_id",
+        "long min_nr",
+        "long nr",
+        "struct io_event __user * events",
+        "struct timespec __user * timeout"
+      ],
+      "source": "fs/aio.c"
+    },
+    {
+      "number": 209,
+      "name": "sys_io_submit",
+      "hex": "0xd1",
+      "parameters": [
+        "aio_context_t ctx_id",
+        "long nr",
+        "struct iocb __user * __user * iocbpp"
+      ],
+      "source": "fs/aio.c"
+    },
+    {
+      "number": 210,
+      "name": "sys_io_cancel",
+      "hex": "0xd2",
+      "parameters": [
+        "aio_context_t ctx_id",
+        "struct iocb __user * iocb",
+        "struct io_event __user * result"
+      ],
+      "source": "fs/aio.c"
+    },
+    {
+      "number": 211,
+      "name": "None",
+      "hex": "0xd3",
+      "parameters": [
+        "struct user_desc __user * u_info"
+      ],
+      "source": "arch/x86/kernel/tls.c"
+    },
+    {
+      "number": 212,
+      "name": "sys_lookup_dcookie",
+      "hex": "0xd4",
+      "parameters": [
+        "u64 cookie64",
+        "char __user * buf",
+        "size_t len"
+      ],
+      "source": "fs/dcookies.c"
+    },
+    {
+      "number": 213,
+      "name": "sys_epoll_create",
+      "hex": "0xd5",
+      "parameters": [
+        "int size"
+      ],
+      "source": "fs/eventpoll.c"
+    },
+    {
+      "number": 214,
+      "name": "None",
+      "hex": "0xd6",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 215,
+      "name": "None",
+      "hex": "0xd7",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 216,
+      "name": "sys_remap_file_pages",
+      "hex": "0xd8",
+      "parameters": [
+        "unsigned long start",
+        "unsigned long size",
+        "unsigned long prot",
+        "unsigned long pgoff",
+        "unsigned long flags"
+      ],
+      "source": "mm/fremap.c"
+    },
+    {
+      "number": 217,
+      "name": "sys_getdents64",
+      "hex": "0xd9",
+      "parameters": [
+        "unsigned int fd",
+        "struct linux_dirent64 __user * dirent",
+        "unsigned int count"
+      ],
+      "source": "fs/readdir.c"
+    },
+    {
+      "number": 218,
+      "name": "sys_set_tid_address",
+      "hex": "0xda",
+      "parameters": [
+        "int __user * tidptr"
+      ],
+      "source": "kernel/fork.c"
+    },
+    {
+      "number": 219,
+      "name": "sys_restart_syscall",
+      "hex": "0xdb",
+      "parameters": [],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 220,
+      "name": "sys_semtimedop",
+      "hex": "0xdc",
+      "parameters": [
+        "int semid",
+        "struct sembuf __user * tsops",
+        "unsigned nsops",
+        "const struct timespec __user * timeout"
+      ],
+      "source": "ipc/sem.c"
+    },
+    {
+      "number": 221,
+      "name": "sys_fadvise64",
+      "hex": "0xdd",
+      "parameters": [
+        "int fd",
+        "loff_t offset",
+        "size_t len",
+        "int advice"
+      ],
+      "source": "mm/fadvise.c"
+    },
+    {
+      "number": 222,
+      "name": "sys_timer_create",
+      "hex": "0xde",
+      "parameters": [
+        "const clockid_t which_clock",
+        "struct sigevent __user * timer_event_spec",
+        "timer_t __user * created_timer_id"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 223,
+      "name": "sys_timer_settime",
+      "hex": "0xdf",
+      "parameters": [
+        "timer_t timer_id",
+        "int flags",
+        "const struct itimerspec __user * new_setting",
+        "struct itimerspec __user * old_setting"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 224,
+      "name": "sys_timer_gettime",
+      "hex": "0xe0",
+      "parameters": [
+        "timer_t timer_id",
+        "struct itimerspec __user * setting"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 225,
+      "name": "sys_timer_getoverrun",
+      "hex": "0xe1",
+      "parameters": [
+        "timer_t timer_id"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 226,
+      "name": "sys_timer_delete",
+      "hex": "0xe2",
+      "parameters": [
+        "timer_t timer_id"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 227,
+      "name": "sys_clock_settime",
+      "hex": "0xe3",
+      "parameters": [
+        "const clockid_t which_clock",
+        "const struct timespec __user * tp"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 228,
+      "name": "sys_clock_gettime",
+      "hex": "0xe4",
+      "parameters": [
+        "const clockid_t which_clock",
+        "struct timespec __user * tp"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 229,
+      "name": "sys_clock_getres",
+      "hex": "0xe5",
+      "parameters": [
+        "const clockid_t which_clock",
+        "struct timespec __user * tp"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 230,
+      "name": "sys_clock_nanosleep",
+      "hex": "0xe6",
+      "parameters": [
+        "const clockid_t which_clock",
+        "int flags",
+        "const struct timespec __user * rqtp",
+        "struct timespec __user * rmtp"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 231,
+      "name": "sys_exit_group",
+      "hex": "0xe7",
+      "parameters": [
+        "int error_code"
+      ],
+      "source": "kernel/exit.c"
+    },
+    {
+      "number": 232,
+      "name": "sys_epoll_wait",
+      "hex": "0xe8",
+      "parameters": [
+        "int epfd",
+        "struct epoll_event __user * events",
+        "int maxevents",
+        "int timeout"
+      ],
+      "source": "fs/eventpoll.c"
+    },
+    {
+      "number": 233,
+      "name": "sys_epoll_ctl",
+      "hex": "0xe9",
+      "parameters": [
+        "int epfd",
+        "int op",
+        "int fd",
+        "struct epoll_event __user * event"
+      ],
+      "source": "fs/eventpoll.c"
+    },
+    {
+      "number": 234,
+      "name": "sys_tgkill",
+      "hex": "0xea",
+      "parameters": [
+        "pid_t tgid",
+        "pid_t pid",
+        "int sig"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 235,
+      "name": "sys_utimes",
+      "hex": "0xeb",
+      "parameters": [
+        "char __user * filename",
+        "struct timeval __user * utimes"
+      ],
+      "source": "fs/utimes.c"
+    },
+    {
+      "number": 236,
+      "name": "None",
+      "hex": "0xec",
+      "parameters": [
+        "None"
+      ],
+      "source": "None"
+    },
+    {
+      "number": 237,
+      "name": "sys_mbind",
+      "hex": "0xed",
+      "parameters": [
+        "unsigned long start",
+        "unsigned long len",
+        "unsigned long mode",
+        "unsigned long __user * nmask",
+        "unsigned long maxnode",
+        "unsigned flags"
+      ],
+      "source": "mm/mempolicy.c"
+    },
+    {
+      "number": 238,
+      "name": "sys_set_mempolicy",
+      "hex": "0xee",
+      "parameters": [
+        "int mode",
+        "unsigned long __user * nmask",
+        "unsigned long maxnode"
+      ],
+      "source": "mm/mempolicy.c"
+    },
+    {
+      "number": 239,
+      "name": "sys_get_mempolicy",
+      "hex": "0xef",
+      "parameters": [
+        "int __user * policy",
+        "unsigned long __user * nmask",
+        "unsigned long maxnode",
+        "unsigned long addr",
+        "unsigned long flags"
+      ],
+      "source": "mm/mempolicy.c"
+    },
+    {
+      "number": 240,
+      "name": "sys_mq_open",
+      "hex": "0xf0",
+      "parameters": [
+        "const char __user * u_name",
+        "int oflag",
+        "umode_t mode",
+        "struct mq_attr __user * u_attr"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 241,
+      "name": "sys_mq_unlink",
+      "hex": "0xf1",
+      "parameters": [
+        "const char __user * u_name"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 242,
+      "name": "sys_mq_timedsend",
+      "hex": "0xf2",
+      "parameters": [
+        "mqd_t mqdes",
+        "const char __user * u_msg_ptr",
+        "size_t msg_len",
+        "unsigned int msg_prio",
+        "const struct timespec __user * u_abs_timeout"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 243,
+      "name": "sys_mq_timedreceive",
+      "hex": "0xf3",
+      "parameters": [
+        "mqd_t mqdes",
+        "char __user * u_msg_ptr",
+        "size_t msg_len",
+        "unsigned int __user * u_msg_prio",
+        "const struct timespec __user * u_abs_timeout"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 244,
+      "name": "sys_mq_notify",
+      "hex": "0xf4",
+      "parameters": [
+        "mqd_t mqdes",
+        "const struct sigevent __user * u_notification"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 245,
+      "name": "sys_mq_getsetattr",
+      "hex": "0xf5",
+      "parameters": [
+        "mqd_t mqdes",
+        "const struct mq_attr __user * u_mqstat",
+        "struct mq_attr __user * u_omqstat"
+      ],
+      "source": "ipc/mqueue.c"
+    },
+    {
+      "number": 246,
+      "name": "sys_kexec_load",
+      "hex": "0xf6",
+      "parameters": [
+        "unsigned long entry",
+        "unsigned long nr_segments",
+        "struct kexec_segment __user * segments",
+        "unsigned long flags"
+      ],
+      "source": "kernel/kexec.c"
+    },
+    {
+      "number": 247,
+      "name": "sys_waitid",
+      "hex": "0xf7",
+      "parameters": [
+        "int which",
+        "pid_t upid",
+        "struct siginfo __user * infop",
+        "int options",
+        "struct rusage __user * ru"
+      ],
+      "source": "kernel/exit.c"
+    },
+    {
+      "number": 248,
+      "name": "sys_add_key",
+      "hex": "0xf8",
+      "parameters": [
+        "const char __user * _type",
+        "const char __user * _description",
+        "const void __user * _payload",
+        "size_t plen",
+        "key_serial_t ringid"
+      ],
+      "source": "security/keys/keyctl.c"
+    },
+    {
+      "number": 249,
+      "name": "sys_request_key",
+      "hex": "0xf9",
+      "parameters": [
+        "const char __user * _type",
+        "const char __user * _description",
+        "const char __user * _callout_info",
+        "key_serial_t destringid"
+      ],
+      "source": "security/keys/keyctl.c"
+    },
+    {
+      "number": 250,
+      "name": "sys_keyctl",
+      "hex": "0xfa",
+      "parameters": [
+        "int option",
+        "unsigned long arg2",
+        "unsigned long arg3",
+        "unsigned long arg4",
+        "unsigned long arg5"
+      ],
+      "source": "security/keys/keyctl.c"
+    },
+    {
+      "number": 251,
+      "name": "sys_ioprio_set",
+      "hex": "0xfb",
+      "parameters": [
+        "int which",
+        "int who",
+        "int ioprio"
+      ],
+      "source": "fs/ioprio.c"
+    },
+    {
+      "number": 252,
+      "name": "sys_ioprio_get",
+      "hex": "0xfc",
+      "parameters": [
+        "int which",
+        "int who"
+      ],
+      "source": "fs/ioprio.c"
+    },
+    {
+      "number": 253,
+      "name": "sys_inotify_init",
+      "hex": "0xfd",
+      "parameters": [],
+      "source": "fs/notify/inotify/inotify_user.c"
+    },
+    {
+      "number": 254,
+      "name": "sys_inotify_add_watch",
+      "hex": "0xfe",
+      "parameters": [
+        "int fd",
+        "const char __user * pathname",
+        "u32 mask"
+      ],
+      "source": "fs/notify/inotify/inotify_user.c"
+    },
+    {
+      "number": 255,
+      "name": "sys_inotify_rm_watch",
+      "hex": "0xff",
+      "parameters": [
+        "int fd",
+        "__s32 wd"
+      ],
+      "source": "fs/notify/inotify/inotify_user.c"
+    },
+    {
+      "number": 256,
+      "name": "sys_migrate_pages",
+      "hex": "0x100",
+      "parameters": [
+        "pid_t pid",
+        "unsigned long maxnode",
+        "const unsigned long __user * old_nodes",
+        "const unsigned long __user * new_nodes"
+      ],
+      "source": "mm/mempolicy.c"
+    },
+    {
+      "number": 257,
+      "name": "sys_openat",
+      "hex": "0x101",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "int flags",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 258,
+      "name": "sys_mkdirat",
+      "hex": "0x102",
+      "parameters": [
+        "int dfd",
+        "const char __user * pathname",
+        "umode_t mode"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 259,
+      "name": "sys_mknodat",
+      "hex": "0x103",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "umode_t mode",
+        "unsigned dev"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 260,
+      "name": "sys_fchownat",
+      "hex": "0x104",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "uid_t user",
+        "gid_t group",
+        "int flag"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 261,
+      "name": "sys_futimesat",
+      "hex": "0x105",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "struct timeval __user * utimes"
+      ],
+      "source": "fs/utimes.c"
+    },
+    {
+      "number": 262,
+      "name": "sys_newfstatat",
+      "hex": "0x106",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "struct stat __user * statbuf",
+        "int flag"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 263,
+      "name": "sys_unlinkat",
+      "hex": "0x107",
+      "parameters": [
+        "int dfd",
+        "const char __user * pathname",
+        "int flag"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 264,
+      "name": "sys_renameat",
+      "hex": "0x108",
+      "parameters": [
+        "int olddfd",
+        "const char __user * oldname",
+        "int newdfd",
+        "const char __user * newname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 265,
+      "name": "sys_linkat",
+      "hex": "0x109",
+      "parameters": [
+        "int olddfd",
+        "const char __user * oldname",
+        "int newdfd",
+        "const char __user * newname",
+        "int flags"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 266,
+      "name": "sys_symlinkat",
+      "hex": "0x10a",
+      "parameters": [
+        "const char __user * oldname",
+        "int newdfd",
+        "const char __user * newname"
+      ],
+      "source": "fs/namei.c"
+    },
+    {
+      "number": 267,
+      "name": "sys_readlinkat",
+      "hex": "0x10b",
+      "parameters": [
+        "int dfd",
+        "const char __user * pathname",
+        "char __user * buf",
+        "int bufsiz"
+      ],
+      "source": "fs/stat.c"
+    },
+    {
+      "number": 268,
+      "name": "sys_fchmodat",
+      "hex": "0x10c",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "umode_t mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 269,
+      "name": "sys_faccessat",
+      "hex": "0x10d",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "int mode"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 270,
+      "name": "sys_pselect6",
+      "hex": "0x10e",
+      "parameters": [
+        "int n",
+        "fd_set __user * inp",
+        "fd_set __user * outp",
+        "fd_set __user * exp",
+        "struct timespec __user * tsp",
+        "void __user * sig"
+      ],
+      "source": "fs/select.c"
+    },
+    {
+      "number": 271,
+      "name": "sys_ppoll",
+      "hex": "0x10f",
+      "parameters": [
+        "struct pollfd __user * ufds",
+        "unsigned int nfds",
+        "struct timespec __user * tsp",
+        "const sigset_t __user * sigmask",
+        "size_t sigsetsize"
+      ],
+      "source": "fs/select.c"
+    },
+    {
+      "number": 272,
+      "name": "sys_unshare",
+      "hex": "0x110",
+      "parameters": [
+        "unsigned long unshare_flags"
+      ],
+      "source": "kernel/fork.c"
+    },
+    {
+      "number": 273,
+      "name": "sys_set_robust_list",
+      "hex": "0x111",
+      "parameters": [
+        "struct robust_list_head __user * head",
+        "size_t len"
+      ],
+      "source": "kernel/futex.c"
+    },
+    {
+      "number": 274,
+      "name": "sys_get_robust_list",
+      "hex": "0x112",
+      "parameters": [
+        "int pid",
+        "struct robust_list_head __user * __user * head_ptr",
+        "size_t __user * len_ptr"
+      ],
+      "source": "kernel/futex.c"
+    },
+    {
+      "number": 275,
+      "name": "sys_splice",
+      "hex": "0x113",
+      "parameters": [
+        "int fd_in",
+        "loff_t __user * off_in",
+        "int fd_out",
+        "loff_t __user * off_out",
+        "size_t len",
+        "unsigned int flags"
+      ],
+      "source": "fs/splice.c"
+    },
+    {
+      "number": 276,
+      "name": "sys_tee",
+      "hex": "0x114",
+      "parameters": [
+        "int fdin",
+        "int fdout",
+        "size_t len",
+        "unsigned int flags"
+      ],
+      "source": "fs/splice.c"
+    },
+    {
+      "number": 277,
+      "name": "sys_sync_file_range",
+      "hex": "0x115",
+      "parameters": [
+        "int fd",
+        "loff_t offset",
+        "loff_t nbytes",
+        "unsigned int flags"
+      ],
+      "source": "fs/sync.c"
+    },
+    {
+      "number": 278,
+      "name": "sys_vmsplice",
+      "hex": "0x116",
+      "parameters": [
+        "int fd",
+        "const struct iovec __user * iov",
+        "unsigned long nr_segs",
+        "unsigned int flags"
+      ],
+      "source": "fs/splice.c"
+    },
+    {
+      "number": 279,
+      "name": "sys_move_pages",
+      "hex": "0x117",
+      "parameters": [
+        "pid_t pid",
+        "unsigned long nr_pages",
+        "const void __user * __user * pages",
+        "const int __user * nodes",
+        "int __user * status",
+        "int flags"
+      ],
+      "source": "mm/migrate.c"
+    },
+    {
+      "number": 280,
+      "name": "sys_utimensat",
+      "hex": "0x118",
+      "parameters": [
+        "int dfd",
+        "const char __user * filename",
+        "struct timespec __user * utimes",
+        "int flags"
+      ],
+      "source": "fs/utimes.c"
+    },
+    {
+      "number": 281,
+      "name": "sys_epoll_pwait",
+      "hex": "0x119",
+      "parameters": [
+        "int epfd",
+        "struct epoll_event __user * events",
+        "int maxevents",
+        "int timeout",
+        "const sigset_t __user * sigmask",
+        "size_t sigsetsize"
+      ],
+      "source": "fs/eventpoll.c"
+    },
+    {
+      "number": 282,
+      "name": "sys_signalfd",
+      "hex": "0x11a",
+      "parameters": [
+        "int ufd",
+        "sigset_t __user * user_mask",
+        "size_t sizemask"
+      ],
+      "source": "fs/signalfd.c"
+    },
+    {
+      "number": 283,
+      "name": "sys_timerfd_create",
+      "hex": "0x11b",
+      "parameters": [
+        "int clockid",
+        "int flags"
+      ],
+      "source": "fs/timerfd.c"
+    },
+    {
+      "number": 284,
+      "name": "sys_eventfd",
+      "hex": "0x11c",
+      "parameters": [
+        "unsigned int count"
+      ],
+      "source": "fs/eventfd.c"
+    },
+    {
+      "number": 285,
+      "name": "sys_fallocate",
+      "hex": "0x11d",
+      "parameters": [
+        "int fd",
+        "int mode",
+        "loff_t offset",
+        "loff_t len"
+      ],
+      "source": "fs/open.c"
+    },
+    {
+      "number": 286,
+      "name": "sys_timerfd_settime",
+      "hex": "0x11e",
+      "parameters": [
+        "int ufd",
+        "int flags",
+        "const struct itimerspec __user * utmr",
+        "struct itimerspec __user * otmr"
+      ],
+      "source": "fs/timerfd.c"
+    },
+    {
+      "number": 287,
+      "name": "sys_timerfd_gettime",
+      "hex": "0x11f",
+      "parameters": [
+        "int ufd",
+        "struct itimerspec __user * otmr"
+      ],
+      "source": "fs/timerfd.c"
+    },
+    {
+      "number": 288,
+      "name": "sys_accept4",
+      "hex": "0x120",
+      "parameters": [
+        "int fd",
+        "struct sockaddr __user * upeer_sockaddr",
+        "int __user * upeer_addrlen",
+        "int flags"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 289,
+      "name": "sys_signalfd4",
+      "hex": "0x121",
+      "parameters": [
+        "int ufd",
+        "sigset_t __user * user_mask",
+        "size_t sizemask",
+        "int flags"
+      ],
+      "source": "fs/signalfd.c"
+    },
+    {
+      "number": 290,
+      "name": "sys_eventfd2",
+      "hex": "0x122",
+      "parameters": [
+        "unsigned int count",
+        "int flags"
+      ],
+      "source": "fs/eventfd.c"
+    },
+    {
+      "number": 291,
+      "name": "sys_epoll_create1",
+      "hex": "0x123",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "fs/eventpoll.c"
+    },
+    {
+      "number": 292,
+      "name": "sys_dup3",
+      "hex": "0x124",
+      "parameters": [
+        "unsigned int oldfd",
+        "unsigned int newfd",
+        "int flags"
+      ],
+      "source": "fs/file.c"
+    },
+    {
+      "number": 293,
+      "name": "sys_pipe2",
+      "hex": "0x125",
+      "parameters": [
+        "int __user * fildes",
+        "int flags"
+      ],
+      "source": "fs/pipe.c"
+    },
+    {
+      "number": 294,
+      "name": "sys_inotify_init1",
+      "hex": "0x126",
+      "parameters": [
+        "int flags"
+      ],
+      "source": "fs/notify/inotify/inotify_user.c"
+    },
+    {
+      "number": 295,
+      "name": "sys_preadv",
+      "hex": "0x127",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec __user * vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 296,
+      "name": "sys_pwritev",
+      "hex": "0x128",
+      "parameters": [
+        "unsigned long fd",
+        "const struct iovec __user * vec",
+        "unsigned long vlen",
+        "unsigned long pos_l",
+        "unsigned long pos_h"
+      ],
+      "source": "fs/read_write.c"
+    },
+    {
+      "number": 297,
+      "name": "sys_rt_tgsigqueueinfo",
+      "hex": "0x129",
+      "parameters": [
+        "pid_t tgid",
+        "pid_t pid",
+        "int sig",
+        "siginfo_t __user * uinfo"
+      ],
+      "source": "kernel/signal.c"
+    },
+    {
+      "number": 298,
+      "name": "sys_perf_event_open",
+      "hex": "0x12a",
+      "parameters": [
+        "struct perf_event_attr __user * attr_uptr",
+        "pid_t pid",
+        "int cpu",
+        "int group_fd",
+        "unsigned long flags"
+      ],
+      "source": "kernel/events/core.c"
+    },
+    {
+      "number": 299,
+      "name": "sys_recvmmsg",
+      "hex": "0x12b",
+      "parameters": [
+        "int fd",
+        "struct mmsghdr __user * mmsg",
+        "unsigned int vlen",
+        "unsigned int flags",
+        "struct timespec __user * timeout"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 300,
+      "name": "sys_fanotify_init",
+      "hex": "0x12c",
+      "parameters": [
+        "unsigned int flags",
+        "unsigned int event_f_flags"
+      ],
+      "source": "fs/notify/fanotify/fanotify_user.c"
+    },
+    {
+      "number": 301,
+      "name": "sys_fanotify_mark",
+      "hex": "0x12d",
+      "parameters": [
+        "int fanotify_fd",
+        "unsigned int flags",
+        "__u64 mask",
+        "int dfd",
+        "const char  __user * pathname"
+      ],
+      "source": "fs/notify/fanotify/fanotify_user.c"
+    },
+    {
+      "number": 302,
+      "name": "sys_prlimit64",
+      "hex": "0x12e",
+      "parameters": [
+        "pid_t pid",
+        "unsigned int resource",
+        "const struct rlimit64 __user * new_rlim",
+        "struct rlimit64 __user * old_rlim"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 303,
+      "name": "sys_name_to_handle_at",
+      "hex": "0x12f",
+      "parameters": [
+        "int dfd",
+        "const char __user * name",
+        "struct file_handle __user * handle",
+        "int __user * mnt_id",
+        "int flag"
+      ],
+      "source": "fs/fhandle.c"
+    },
+    {
+      "number": 304,
+      "name": "sys_open_by_handle_at",
+      "hex": "0x130",
+      "parameters": [
+        "int mountdirfd",
+        "struct file_handle __user * handle",
+        "int flags"
+      ],
+      "source": "fs/fhandle.c"
+    },
+    {
+      "number": 305,
+      "name": "sys_clock_adjtime",
+      "hex": "0x131",
+      "parameters": [
+        "const clockid_t which_clock",
+        "struct timex __user * utx"
+      ],
+      "source": "kernel/posix-timers.c"
+    },
+    {
+      "number": 306,
+      "name": "sys_syncfs",
+      "hex": "0x132",
+      "parameters": [
+        "int fd"
+      ],
+      "source": "fs/sync.c"
+    },
+    {
+      "number": 307,
+      "name": "sys_sendmmsg",
+      "hex": "0x133",
+      "parameters": [
+        "int fd",
+        "struct mmsghdr __user * mmsg",
+        "unsigned int vlen",
+        "unsigned int flags"
+      ],
+      "source": "net/socket.c"
+    },
+    {
+      "number": 308,
+      "name": "sys_setns",
+      "hex": "0x134",
+      "parameters": [
+        "int fd",
+        "int nstype"
+      ],
+      "source": "kernel/nsproxy.c"
+    },
+    {
+      "number": 309,
+      "name": "sys_getcpu",
+      "hex": "0x135",
+      "parameters": [
+        "unsigned __user * cpup",
+        "unsigned __user * nodep",
+        "struct getcpu_cache __user * unused"
+      ],
+      "source": "kernel/sys.c"
+    },
+    {
+      "number": 310,
+      "name": "sys_process_vm_readv",
+      "hex": "0x136",
+      "parameters": [
+        "pid_t pid",
+        "const struct iovec __user * lvec",
+        "unsigned long liovcnt",
+        "const struct iovec __user * rvec",
+        "unsigned long riovcnt",
+        "unsigned long flags"
+      ],
+      "source": "mm/process_vm_access.c"
+    },
+    {
+      "number": 311,
+      "name": "sys_process_vm_writev",
+      "hex": "0x137",
+      "parameters": [
+        "pid_t pid",
+        "const struct iovec __user * lvec",
+        "unsigned long liovcnt",
+        "const struct iovec __user * rvec",
+        "unsigned long riovcnt",
+        "unsigned long flags"
+      ],
+      "source": "mm/process_vm_access.c"
+    },
+    {
+      "number": 312,
+      "name": "sys_kcmp",
+      "hex": "0x138",
+      "parameters": [
+        "pid_t pid1",
+        "pid_t pid2",
+        "int type",
+        "unsigned long idx1",
+        "unsigned long idx2"
+      ],
+      "source": "kernel/kcmp.c"
+    },
+    {
+      "number": 313,
+      "name": "sys_finit_module",
+      "hex": "0x139",
+      "parameters": [
+        "int fd",
+        "const char __user * uargs",
+        "int flags"
+      ],
+      "source": "kernel/module.c"
+    }
+  ]
+}

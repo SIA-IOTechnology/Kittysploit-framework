@@ -1,0 +1,218 @@
+$recycle.bin/s-1-5-18/desktop.ini
+apache2/log/access.log
+apache2/log/access_log
+apache2/log/error.log
+apache2/log/error_log
+apache2/logs/access.log
+apache2/logs/access_log
+apache2/logs/error.log
+apache2/logs/error_log
+apache/log/access.log
+apache/log/access_log
+apache/log/error.log
+apache/log/error_log
+apache/logs/access.log
+apache/logs/access_log
+apache/logs/error.log
+apache/logs/error_log
+apache/php/php.ini
+boot.ini
+documents and settings/administrator/desktop/desktop.ini
+documents and settings/administrator/ntuser.dat
+documents and settings/administrator/ntuser.ini
+home2/bin/stable/apache/php.ini
+home/bin/stable/apache/php.ini
+inetpub/logs/logfiles
+inetpub/wwwroot/global.asa
+inetpub/wwwroot/index.asp
+inetpub/wwwroot/web.config
+log/access.log
+log/access_log
+log/error.log
+log/error_log
+log/httpd/access_log
+log/httpd/error_log
+logs/access.log
+logs/access_log
+logs/error.log
+logs/error_log
+logs/httpd/access_log
+logs/httpd/error_log
+MININT/SMSOSD/OSDLOGS/VARIABLES.DAT
+mysql/bin/my.ini
+mysql/data/hostname.err
+mysql/data/mysql.err
+mysql/data/mysql.log
+mysql/my.cnf
+mysql/my.ini
+opt/xampp/logs/access.log
+opt/xampp/logs/access_log
+opt/xampp/logs/error.log
+opt/xampp/logs/error_log
+php4/php.ini
+php4/sessions/
+php5/php.ini
+php5/sessions/
+php/php.ini
+php/sessions/
+programdata/mcafee/common framework/sitelist.xml
+program files/apache group/apache2/conf/httpd.conf
+program files/apache group/apache/conf/access.log
+program files/apache group/apache/conf/error.log
+program files/apache group/apache/conf/httpd.conf
+program files/apache group/apache/logs/access.log
+program files/apache group/apache/logs/error.log
+program files/filezilla server/filezilla server.xml
+program files/mysql/data/hostname.err
+program files/mysql/data/mysql-bin.log
+program files/mysql/data/mysql.err
+program files/mysql/data/mysql.log
+program files/mysql/my.cnf
+program files/mysql/my.ini
+program files/mysql/mysql server 5.0/data/hostname.err
+program files/mysql/mysql server 5.0/data/mysql-bin.log
+program files/mysql/mysql server 5.0/data/mysql.err
+program files/mysql/mysql server 5.0/data/mysql.log
+program files/mysql/mysql server 5.0/my.cnf
+program files/mysql/mysql server 5.0/my.ini
+program files/mysql/mysql server 5.1/my.ini
+program files (x86)/apache group/apache2/conf/httpd.conf
+program files (x86)/apache group/apache/conf/access.log
+program files (x86)/apache group/apache/conf/error.log
+program files (x86)/apache group/apache/conf/httpd.conf
+program files (x86)/apache group/apache/logs/access.log
+program files (x86)/apache group/apache/logs/error.log
+program files (x86)/filezilla server/filezilla server.xml
+program files (x86)/mysql/data/hostname.err
+program files (x86)/mysql/data/mysql-bin.log
+program files (x86)/mysql/data/mysql.err
+program files (x86)/mysql/data/mysql.log
+program files (x86)/mysql/my.cnf
+program files (x86)/mysql/my.ini
+program files (x86)/mysql/mysql server 5.0/data/hostname.err
+program files (x86)/mysql/mysql server 5.0/data/mysql-bin.log
+program files (x86)/mysql/mysql server 5.0/data/mysql.err
+program files (x86)/mysql/mysql server 5.0/data/mysql.log
+program files (x86)/mysql/mysql server 5.0/my.cnf
+program files (x86)/mysql/mysql server 5.0/my.ini
+program files (x86)/mysql/mysql server 5.1/my.ini
+program files (x86)/xampp/apache/conf/httpd.conf
+program files/xampp/apache/conf/httpd.conf
+sysprep.inf
+sysprep/sysprep.inf
+sysprep/sysprep.xml
+sysprep.xml
+system32/inetsrv/metabase.xml
+system volume information/wpsettings.dat
+unattended.txt
+unattended.xml
+unattend.txt
+unattend.xml
+users/administrator/appdata/local/google/chrome/user data/default/bookmarks
+users/administrator/appdata/local/google/chrome/user data/default/bookmarks.bak
+users/administrator/appdata/local/google/chrome/user data/default/cookies
+users/administrator/appdata/local/google/chrome/user data/default/history
+users/administrator/appdata/local/google/chrome/user data/default/last session
+users/administrator/appdata/local/google/chrome/user data/default/login data
+users/administrator/appdata/local/google/chrome/user data/default/preferences
+users/administrator/appdata/local/google/chrome/user data/default/secure preferences
+users/administrator/appdata/local/google/chrome/user data/default/top sites
+users/administrator/appdata/Roaming/Microsoft/Windows/PowerShell/PSReadline/ConsoleHost_history.txt
+users/administrator/.aws/config
+users/administrator/.aws/credentials
+users/administrator/desktop/desktop.ini
+users/administrator/desktop/proof.txt
+users/administrator/.elasticbeanstalk/config
+users/administrator/ntuser.dat
+users/administrator/ntuser.ini
+windows/csc/v2.0.6/pq
+windows/csc/v2.0.6/sm
+windows/debug/netsetup.log
+windows/explorer.exe
+windows/iis5.log
+windows/iis6.log
+windows/iis7.log
+windows/iis8.log
+windows/notepad.exe
+windows/panther/setupinfo
+windows/panther/setupinfo.bak
+windows/panther/sysprep.inf
+windows/panther/sysprep.xml
+windows/panther/unattended.txt
+windows/panther/unattended.xml
+windows/panther/unattend/setupinfo
+windows/panther/unattend/setupinfo.bak
+windows/panther/unattend/sysprep.inf
+windows/panther/unattend/sysprep.xml
+windows/panther/unattend.txt
+windows/panther/unattend/unattended.txt
+windows/panther/unattend/unattended.xml
+windows/panther/unattend/unattend.txt
+windows/panther/unattend/unattend.xml
+windows/panther/unattend.xml
+windows/php.ini
+windows/repair/sam
+windows/repair/security
+windows/repair/software
+windows/repair/system
+windows/system32/config/appevent.evt
+windows/system32/config/default.sav
+windows/system32/config/regback/default
+windows/system32/config/regback/sam
+windows/system32/config/regback/security
+windows/system32/config/regback/software
+windows/system32/config/regback/system
+windows/system32/config/sam
+windows/system32/config/secevent.evt
+windows/system32/config/security.sav
+windows/system32/config/software.sav
+windows/system32/config/system
+windows/system32/config/system.sa
+windows/system32/config/system.sav
+windows/system32/drivers/etc/hosts
+windows/system32/eula.txt
+windows/system32/inetsrv/config/applicationhost.config
+windows/system32/inetsrv/config/schema/aspnet_schema.xml
+windows/system32/license.rtf
+windows/system32/logfiles/httperr/httperr1.log
+windows/system32/sysprep.inf
+windows/system32/sysprepsysprep.inf
+windows/system32/sysprep/sysprep.xml
+windows/system32/sysprepsysprep.xml
+windows/system32/sysprepunattended.txt
+windows/system32/sysprepunattended.xml
+windows/system32/sysprepunattend.txt
+windows/system32/sysprepunattend.xml
+windows/system32/sysprep.xml
+windows/system32/unattended.txt
+windows/system32/unattended.xml
+windows/system32/unattend.txt
+windows/system32/unattend.xml
+windows/system.ini
+windows/temp/
+windows/windowsupdate.log
+windows/win.ini
+winnt/php.ini
+winnt/win.ini
+xampp/apache/bin/php.ini
+xampp/apache/conf/httpd.conf
+xampp/apache/logs/access.log
+xampp/apache/logs/error.log
+xampp/filezillaftp/filezilla server.xml
+xampp/filezillaftp/logs
+xampp/filezillaftp/logs/access.log
+xampp/filezillaftp/logs/error.log
+xampp/mercurymail/logs/access.log
+xampp/mercurymail/logs/error.log
+xampp/mercurymail/mercury.ini
+xampp/mysql/data/mysql.err
+xampp/phpmyadmin/config.inc
+xampp/phpmyadmin/config.inc.php
+xampp/phpmyadmin/phpinfo.php
+xampp/php/php.ini
+xampp/sendmail/sendmail.ini
+xampp/sendmail/sendmail.log
+xampp/tomcat/conf/tomcat-users.xml
+xampp/tomcat/conf/web.xml
+xampp/webalizer/webalizer.conf
+xampp/webdav/webdav.txt

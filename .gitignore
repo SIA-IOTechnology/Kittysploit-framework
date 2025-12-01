@@ -1,0 +1,60 @@
+# KittySploit Framework - Git Ignore
+# ===================================
+
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python package files
+*.egg-info/
+dist/
+build/
+
+# Database files
+database/
+*.db
+*.sqlite
+
+# Output files
+output/
+
+# Cache files
+cache/
+.cache/
+
+# Test files
+test_*.py
+*_test.py
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Backup files
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Zig executable
+core/lib/compiler/zig_executable/
+
+# Installer files
+start_kittysploit.bat
+uninstall.bat
+start_kittysploit.sh
+uninstall.sh
+KittySploit.lnk
+
+# Zig cache
+.zig_cache/
+config/trust_store.json

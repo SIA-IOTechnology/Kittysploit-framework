@@ -55,15 +55,15 @@ After installation, you can start KittySploit using:
 **Windows:**
 - Double-click `start_kittysploit.bat`
 - Or double-click `KittySploit.lnk` (shortcut with icon)
-- Or run: `python kittysploit.py`
+- Or run: `python kittyconsole.py`
 
 **Linux / macOS:**
 - Run: `./start_kittysploit.sh`
-- Or run: `python3 kittysploit.py`
+- Or run: `python3 kittyconsole.py`
 
 ### CLI Mode
 ```bash
-python kittysploit.py
+python kittyconsole.py
 ```
 
 ### API Mode

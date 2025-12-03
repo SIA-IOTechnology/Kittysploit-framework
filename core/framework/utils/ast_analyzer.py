@@ -86,6 +86,9 @@ class ASTAnalyzer:
             self.visitor.reset()
             self.visitor.visit(tree)
             
+            # Détecter si c'est un payload
+            is_payload = "payloads" in module_path.lower() or self.visitor.is_payload
+            
             # Collecter les résultats
             result["dangerous_patterns"] = self.visitor.dangerous_patterns
             result["dependencies"] = list(self.visitor.imports)
@@ -107,9 +110,15 @@ class ASTAnalyzer:
                 result["errors"].append("Module doit définir une classe 'Module'")
                 result["valid"] = False
             
-            if not self.visitor.has_run_method:
-                result["errors"].append("Module doit définir une méthode 'run()'")
-                result["valid"] = False
+            # Pour les payloads, vérifier generate() au lieu de run()
+            if is_payload:
+                if not self.visitor.has_generate_method:
+                    result["errors"].append("Payload modules must define a 'generate()' method")
+                    result["valid"] = False
+            else:
+                if not self.visitor.has_run_method:
+                    result["errors"].append("Module doit définir une méthode 'run()'")
+                    result["valid"] = False
             
             if not self.visitor.has_info:
                 result["warnings"].append("Module devrait définir '__info__'")
@@ -153,7 +162,9 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.risk_factors: List[str] = []
         self.has_module_class = False
         self.has_run_method = False
+        self.has_generate_method = False
         self.has_info = False
+        self.is_payload = False
     
     def visit_Import(self, node: ast.Import):
         """Visite les imports"""
@@ -175,12 +186,24 @@ class SecurityASTVisitor(ast.NodeVisitor):
         """Visite les définitions de classe"""
         if node.name == "Module":
             self.has_module_class = True
+            # Vérifier si la classe hérite de Payload
+            for base in node.bases:
+                if isinstance(base, ast.Name):
+                    if base.id == "Payload":
+                        self.is_payload = True
+                        break
+                elif isinstance(base, ast.Attribute):
+                    if base.attr == "Payload":
+                        self.is_payload = True
+                        break
         self.generic_visit(node)
     
     def visit_FunctionDef(self, node: ast.FunctionDef):
         """Visite les définitions de fonction"""
         if node.name == "run":
             self.has_run_method = True
+        elif node.name == "generate":
+            self.has_generate_method = True
         
         # Détecter les appels dangereux dans les fonctions
         self._check_dangerous_calls(node)

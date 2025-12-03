@@ -306,6 +306,11 @@ Session Types:
             
             while True:
                 try:
+                    # Check if shell connection is still active (for SSH shells)
+                    if hasattr(shell, 'is_connected') and not shell.is_connected:
+                        print_error("SSH connection lost. Exiting interactive session...")
+                        break
+                    
                     # Get shell prompt
                     prompt = shell.get_prompt()
                     command = input(prompt)
@@ -354,7 +359,42 @@ Session Types:
                         print_info(output)
                     
                     if result and result.get('error'):
-                        print_error(result['error'])
+                        error_msg = result['error']
+                        print_error(error_msg)
+                        
+                        # Check if error indicates connection lost (SSH, socket, etc.)
+                        connection_lost_indicators = [
+                            '10054',  # Windows: connection reset by peer
+                            '10053',  # Windows: connection aborted
+                            'Socket exception',
+                            'connexion existante a dû être fermée',
+                            'connection closed',
+                            'Connection closed',
+                            'Connection reset',
+                            'connection reset',
+                            'SSH execution error',
+                            'Socket connection is closed',
+                            'Connection closed by remote',
+                            'Connection closed by remote host',
+                            'Not connected to SSH server'
+                        ]
+                        
+                        # Check if error contains any connection lost indicator
+                        error_lower = error_msg.lower()
+                        if any(indicator.lower() in error_lower for indicator in connection_lost_indicators):
+                            print_error("Connection lost. Exiting interactive session...")
+                            # Mark shell as inactive if possible
+                            if hasattr(shell, 'disconnect'):
+                                try:
+                                    shell.disconnect()
+                                except:
+                                    pass
+                            if hasattr(shell, 'deactivate'):
+                                try:
+                                    shell.deactivate()
+                                except:
+                                    pass
+                            break
                     
                     # Check if shell is still active
                     if not shell.is_active:

@@ -278,10 +278,20 @@ class SSHShell(BaseShell):
     def _execute_remote_command(self, command: str) -> Dict[str, Any]:
         """Execute command on remote SSH server using paramiko"""
         if not self.connection:
+            self.is_connected = False
             return {'output': '', 'status': 1, 'error': 'SSH connection not available'}
         
         try:
             import paramiko
+            import socket
+            
+            # Check if connection is still active
+            if hasattr(self.connection, 'get_transport'):
+                transport = self.connection.get_transport()
+                if transport is None or not transport.is_active():
+                    self.is_connected = False
+                    self.connection = None
+                    return {'output': '', 'status': 1, 'error': 'SSH connection is closed'}
             
             # Execute command via SSH
             stdin, stdout, stderr = self.connection.exec_command(command)
@@ -307,8 +317,32 @@ class SSHShell(BaseShell):
                 'status': exit_status,
                 'error': error
             }
-        except Exception as e:
+        except (socket.error, OSError) as e:
+            # Socket/connection errors - connection is lost
+            error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
+            error_msg = str(e)
+            
+            # Mark connection as lost
+            self.is_connected = False
+            self.connection = None
+            
+            # Check for specific connection closed errors
+            if error_code in [10053, 10054, 104, 32, 107] or '10054' in error_msg or '10053' in error_msg:
+                return {'output': '', 'status': 1, 'error': f'SSH execution error: {error_msg}'}
+            else:
+                return {'output': '', 'status': 1, 'error': f'SSH execution error: {error_msg}'}
+        except paramiko.SSHException as e:
+            # SSH-specific errors - connection might be lost
+            self.is_connected = False
+            self.connection = None
             return {'output': '', 'status': 1, 'error': f'SSH execution error: {str(e)}'}
+        except Exception as e:
+            # Other errors - check if it's a connection issue
+            error_msg = str(e)
+            if 'connection' in error_msg.lower() or 'socket' in error_msg.lower() or 'closed' in error_msg.lower():
+                self.is_connected = False
+                self.connection = None
+            return {'output': '', 'status': 1, 'error': f'SSH execution error: {error_msg}'}
     
     # Built-in command implementations
     def _cmd_help(self, args: str) -> Dict[str, Any]:

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Système de Hot Reload - Couche N+1
-Permet de recharger dynamiquement les modules et extensions sans redémarrer le framework.
-"""
-
 import os
 import sys
 import time
@@ -15,7 +10,6 @@ import threading
 from typing import Dict, Set, Optional, Callable, List, Any
 from pathlib import Path
 
-# Optionnel: watchdog pour le monitoring de fichiers
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler, FileModifiedEvent

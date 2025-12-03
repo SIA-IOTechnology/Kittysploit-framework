@@ -62,9 +62,43 @@ class RemoteConnection:
             return False
     
     def _connect_tcp(self) -> bool:
-        """Connect via raw TCP"""
+        """Connect via raw TCP (with proxy support if configured)"""
         try:
+            # Check if proxy is configured
+            proxy_host = None
+            proxy_port = None
+            proxy_type = None
+            
+            # Check framework proxy config
+            if hasattr(self, 'framework') and self.framework:
+                if hasattr(self.framework, 'is_proxy_enabled') and self.framework.is_proxy_enabled():
+                    proxy_url = self.framework.get_proxy_url()
+                    if proxy_url and proxy_url.startswith('socks'):
+                        import re
+                        match = re.match(r'socks(\d)://([^:]+):(\d+)', proxy_url)
+                        if match:
+                            proxy_type_num = int(match.group(1))
+                            proxy_host = match.group(2)
+                            proxy_port = int(match.group(3))
+                            
+                            # Import socks
+                            try:
+                                import socks
+                                proxy_type = socks.SOCKS5 if proxy_type_num == 5 else socks.SOCKS4
+                            except ImportError:
+                                print_warning("PySocks not installed - proxy not available for TCP")
+                                proxy_host = None
+            
+            # Create socket
             self.connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            
+            # Configure proxy if available
+            if proxy_host and proxy_port and proxy_type:
+                try:
+                    self.connection.set_proxy(proxy_type, proxy_host, proxy_port)
+                except AttributeError:
+                    print_warning("SOCKS proxy not available for this socket")
+            
             self.connection.settimeout(self.timeout)
             self.connection.connect((self.host, self.port))
             self.connected = True

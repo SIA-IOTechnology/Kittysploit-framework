@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Système de Pipelines - Couche N+1
-Permet de composer des pipelines de modules, workflows et automation.
-"""
-
 from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass, field
 from enum import Enum

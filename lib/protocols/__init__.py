@@ -5,9 +5,17 @@
 Protocol libraries for KittySploit
 """
 
-# Import only existing modules
+# Import protocol clients
+__all__ = []
+
 try:
-    from .http_client import HTTPClient
-    __all__ = ['HTTPClient']
+    from .http.http_client import Http_client
+    __all__.append('Http_client')
 except ImportError:
-    __all__ = []
+    pass
+
+try:
+    from .http.websocket_client import WebSocket_client
+    __all__.append('WebSocket_client')
+except ImportError:
+    pass

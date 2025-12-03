@@ -73,14 +73,29 @@ class Http_client(BaseModule):
             'Upgrade-Insecure-Requests': '1'
         })
         
-        # Set proxy if provided
+        # Set proxy if provided, otherwise check framework proxy config
         if proxy:
             self.session.proxies = {
                 'http': proxy,
                 'https': proxy
             }
         else:
-            self.session.proxies = {}
+            # Check if framework has proxy configured
+            if self.framework and hasattr(self.framework, 'is_proxy_enabled'):
+                if self.framework.is_proxy_enabled():
+                    proxy_url = self.framework.get_proxy_url()
+                    if proxy_url:
+                        self.session.proxies = {
+                            'http': proxy_url,
+                            'https': proxy_url,
+                            'all': proxy_url
+                        }
+                    else:
+                        self.session.proxies = {}
+                else:
+                    self.session.proxies = {}
+            else:
+                self.session.proxies = {}
         
         # Disable SSL warnings if verify_ssl is False
         if not verify_ssl:

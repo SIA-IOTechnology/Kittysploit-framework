@@ -26,6 +26,15 @@ class OptChoice(Option):
         
         super().__init__(default, description, required)
     
+    def __get__(self, instance, owner):
+        """Get the value directly (returns the value, not the option object)"""
+        # If accessed via class (instance is None), return the descriptor
+        if instance is None:
+            return self
+        
+        # Get the value using parent's __get__ which already returns the value directly
+        return super().__get__(instance, owner)
+    
     def __set__(self, instance, value):
         """Set the value with validation"""
         # Validate the value before storing it (only if choices are defined)

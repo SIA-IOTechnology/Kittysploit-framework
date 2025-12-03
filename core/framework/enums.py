@@ -85,6 +85,7 @@ class PayloadCategory(Enum):
     STAGE = "stage"
     SINGLE = "single"
     ENCODER = "encoder"
+    CMD = "cmd"
     NOP = "nop"
 
 class Arch(Enum):

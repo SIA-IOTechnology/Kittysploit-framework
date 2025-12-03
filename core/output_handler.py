@@ -9,6 +9,15 @@ import logging
 import uuid
 from colorama import init, Fore, Style
 
+try:
+    _terminal_size = os.get_terminal_size
+except AttributeError:
+    def _terminal_size():
+        class TerminalSize:
+            columns = 80
+            lines = 24
+        return TerminalSize()
+
 init(autoreset=True)
 
 USE_COLORS = True
@@ -79,6 +88,17 @@ def print_table(headers, rows, max_width=80, **kwargs):
     if not headers or not rows:
         return
     
+    # Detect terminal width if available and max_width is default or reasonable
+    try:
+        if max_width == 80 or (max_width <= 120 and sys.stdout.isatty()):
+            terminal_cols = _terminal_size().columns
+            # Use terminal width if it's larger than max_width, but cap at reasonable maximum
+            if terminal_cols > max_width:
+                max_width = min(terminal_cols, 200)  # Cap at 200 to avoid overly wide tables
+    except (OSError, AttributeError):
+        # Terminal size not available, use provided max_width
+        pass
+    
     # Calculate optimal column widths
     # Reserve space for separators (3 chars per separator: " | ")
     num_separators = len(headers) - 1
@@ -98,17 +118,24 @@ def print_table(headers, rows, max_width=80, **kwargs):
         
         col_widths.append(max_width_col)
     
-    # Special handling: "Name" column should never be truncated (needed for 'set' command)
+    # Special handling: "Name" and "Path" columns should never be truncated (needed for 'set' and 'use' commands)
     name_column_index = None
     for i, header in enumerate(headers):
-        if str(header).lower() == "name":
+        if str(header).lower() in ("name", "path"):
             name_column_index = i
+            break
+    
+    # Special handling: "Description" column should get priority for extra space
+    desc_column_index = None
+    for i, header in enumerate(headers):
+        if str(header).lower() == "description":
+            desc_column_index = i
             break
     
     # Distribute available width proportionally
     total_min_width = sum(col_widths)
     if total_min_width > available_width:
-        # Scale down proportionally, but protect the Name column
+        # Scale down proportionally, but protect the Name column and prioritize Description
         if name_column_index is not None:
             # Reserve full width for Name column
             name_width = col_widths[name_column_index]
@@ -118,21 +145,89 @@ def print_table(headers, rows, max_width=80, **kwargs):
             if remaining_cols and remaining_width > 0:
                 total_remaining = sum(remaining_cols)
                 if total_remaining > 0:
-                    scale_factor = remaining_width / total_remaining
-                    for i in range(len(col_widths)):
-                        if i != name_column_index:
-                            col_widths[i] = max(int(col_widths[i] * scale_factor), len(str(headers[i])))
-                col_widths[name_column_index] = name_width
+                    # If Description column exists, give it more space
+                    if desc_column_index is not None and desc_column_index != name_column_index:
+                        # Calculate base scale factor
+                        scale_factor = remaining_width / total_remaining
+                        # Give Description column up to 50% more space if available
+                        desc_base_width = col_widths[desc_column_index]
+                        desc_target_width = int(desc_base_width * scale_factor * 1.5)
+                        
+                        # Calculate minimum width needed for other columns (excluding Name and Description)
+                        min_other_width = sum(len(str(headers[i])) for i in range(len(headers)) if i != name_column_index and i != desc_column_index)
+                        # Ensure Description doesn't take too much space
+                        desc_target_width = min(desc_target_width, remaining_width - min_other_width)
+                        desc_target_width = max(desc_target_width, int(desc_base_width * scale_factor))
+                        
+                        # Adjust remaining width after Description
+                        remaining_width_after_desc = remaining_width - desc_target_width
+                        # Get widths of columns other than Name and Description
+                        remaining_cols_no_desc = [col_widths[i] for i in range(len(col_widths)) if i != name_column_index and i != desc_column_index]
+                        total_remaining_no_desc = sum(remaining_cols_no_desc) if remaining_cols_no_desc else 1
+                        
+                        if total_remaining_no_desc > 0 and remaining_width_after_desc > 0:
+                            scale_factor_others = remaining_width_after_desc / total_remaining_no_desc
+                        else:
+                            scale_factor_others = scale_factor
+                        
+                        # Apply widths
+                        for i in range(len(col_widths)):
+                            if i == name_column_index:
+                                col_widths[i] = name_width
+                            elif i == desc_column_index:
+                                col_widths[i] = desc_target_width
+                            else:
+                                col_widths[i] = max(int(col_widths[i] * scale_factor_others), len(str(headers[i])))
+                    else:
+                        # No Description column, use standard scaling
+                        scale_factor = remaining_width / total_remaining
+                        for i in range(len(col_widths)):
+                            if i != name_column_index:
+                                col_widths[i] = max(int(col_widths[i] * scale_factor), len(str(headers[i])))
+                        col_widths[name_column_index] = name_width
+                else:
+                    col_widths[name_column_index] = name_width
             else:
                 # Fallback: scale all columns
                 scale_factor = available_width / total_min_width
                 col_widths = [max(int(w * scale_factor), len(str(headers[i]))) for i, w in enumerate(col_widths)]
         else:
-            # No Name column, scale proportionally
-            scale_factor = available_width / total_min_width
-            col_widths = [max(int(w * scale_factor), len(str(headers[i]))) for i, w in enumerate(col_widths)]
+            # No Name column, but still prioritize Description if it exists
+            if desc_column_index is not None:
+                # Give Description column more space
+                desc_base_width = col_widths[desc_column_index]
+                # Try to give Description up to 40% of available width
+                desc_target_width = min(int(available_width * 0.4), desc_base_width * 2)
+                desc_target_width = max(desc_target_width, int(desc_base_width))
+                
+                remaining_width_after_desc = available_width - desc_target_width
+                remaining_cols_no_desc = [w for i, w in enumerate(col_widths) if i != desc_column_index]
+                total_remaining_no_desc = sum(remaining_cols_no_desc) if remaining_cols_no_desc else 1
+                
+                if total_remaining_no_desc > 0 and remaining_width_after_desc > 0:
+                    scale_factor_others = remaining_width_after_desc / total_remaining_no_desc
+                else:
+                    scale_factor_others = available_width / total_min_width
+                
+                for i in range(len(col_widths)):
+                    if i == desc_column_index:
+                        col_widths[i] = desc_target_width
+                    else:
+                        col_widths[i] = max(int(col_widths[i] * scale_factor_others), len(str(headers[i])))
+            else:
+                # No Name or Description column, scale proportionally
+                scale_factor = available_width / total_min_width
+                col_widths = [max(int(w * scale_factor), len(str(headers[i]))) for i, w in enumerate(col_widths)]
     else:
-        # Use natural widths, but cap at reasonable maximum
+        # Use natural widths, but give extra space to Description if available
+        if desc_column_index is not None:
+            # Calculate how much extra space is available
+            extra_space = available_width - total_min_width
+            if extra_space > 0:
+                # Give extra space to Description column to help it fit on one line
+                col_widths[desc_column_index] += min(extra_space, int(available_width * 0.3))
+        
+        # Cap columns at reasonable maximum
         max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
         col_widths = [min(w, max_col_width) for w in col_widths]
     

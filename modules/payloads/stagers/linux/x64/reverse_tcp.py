@@ -3,8 +3,9 @@ from kittysploit import *
 class Module(Payload):
 	
 	__info__ = {
-			'name': 'payload reverse tcp',
-			'description': 'payload reverse tcp',
+			'name': 'Linux x64 Reverse TCP Stager',
+			'description': 'Linux x64 Reverse TCP Stager',
+			'author': 'KittySploit Team',
 			'category': PayloadCategory.STAGER,
 			'arch': Arch.X64,
 			'platform': Platform.LINUX,

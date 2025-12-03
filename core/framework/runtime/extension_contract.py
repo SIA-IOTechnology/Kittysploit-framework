@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Contrat d'Extensions - Couche N+1
-Définit les interfaces pour les extensions du framework (hooks, events, middlewares, policies).
-"""
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List, Callable

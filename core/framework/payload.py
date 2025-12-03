@@ -23,8 +23,11 @@ class Payload(BaseModule):
         raise NotImplementedError("Payload modules must implement the generate() method")
     
     def run(self):
-        """Run the payload - must be implemented by derived classes"""
-        raise NotImplementedError("Payload modules must implement the run() method")
+        """
+        Run the payload - default implementation calls generate()
+        Derived classes can override this if they need different behavior
+        """
+        return self.generate()
     
     def compile_zig(self,
                     source_code: str,

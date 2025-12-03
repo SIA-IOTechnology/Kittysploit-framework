@@ -107,15 +107,73 @@ class ModuleValidator:
         if not has_info:
             warnings.append("Module should define __info__ dictionary")
         
-        # Check for run() method
-        has_run = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == "run":
-                has_run = True
-                break
+        # Detect if this is a payload module
+        is_payload = False
         
-        if not has_run:
-            errors.append("Module must define a 'run()' method")
+        # Method 1: Check path (most reliable)
+        if "payloads" in module_path.lower():
+            is_payload = True
+        
+        # Method 2: Check if Module class inherits from Payload
+        if not is_payload:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == "Module":
+                    for base in node.bases:
+                        # Check for direct Payload reference
+                        if isinstance(base, ast.Name):
+                            if base.id == "Payload":
+                                is_payload = True
+                                break
+                        # Check for Payload via attribute (e.g., from kittysploit import *)
+                        elif isinstance(base, ast.Attribute):
+                            if base.attr == "Payload":
+                                is_payload = True
+                                break
+                    if is_payload:
+                        break
+        
+        # Method 3: Check imports for Payload
+        if not is_payload:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    # Check for "from kittysploit import *" or "from core.framework.payload import Payload"
+                    if node.module and ("kittysploit" in node.module or "payload" in node.module.lower()):
+                        if node.names:
+                            for alias in node.names:
+                                if isinstance(alias, ast.alias):
+                                    if alias.name == "Payload" or alias.asname == "Payload":
+                                        is_payload = True
+                                        break
+                                    # Check for wildcard import
+                                    if alias.name == "*":
+                                        is_payload = True  # Assume Payload might be imported
+                                        break
+                        else:
+                            # Wildcard import from kittysploit
+                            is_payload = True
+                        if is_payload:
+                            break
+        
+        # For payloads, check for generate() method instead of run()
+        if is_payload:
+            has_generate = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == "generate":
+                    has_generate = True
+                    break
+            
+            if not has_generate:
+                errors.append("Payload modules must define a 'generate()' method")
+        else:
+            # For other modules, check for run() method
+            has_run = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == "run":
+                    has_run = True
+                    break
+            
+            if not has_run:
+                errors.append("Module doit définir une méthode 'run()'")
         
         return {
             "valid": len(errors) == 0,

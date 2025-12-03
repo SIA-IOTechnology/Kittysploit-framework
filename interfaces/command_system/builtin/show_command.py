@@ -395,18 +395,39 @@ Examples:
         rows = []
         
         for name, option_data in advanced_options.items():
-            default, required, description, advanced = option_data[:4]
-            current_value = getattr(module, name, default)
-            
-            # Format current value (truncate if too long)
-            value_str = str(current_value) if current_value else ""
-            if len(value_str) > 30:
-                value_str = value_str[:27] + "..."
-            
-            # Format required
-            req_text = "yes" if required else "no"
-            
-            rows.append([name, value_str, req_text, description])
+            if len(option_data) >= 4:
+                default, required, description, advanced = option_data[:4]
+                # Get option object from class to avoid triggering __get__ for OptFile and OptPayload
+                option_descriptor = getattr(type(module), name, None)
+                if option_descriptor and isinstance(option_descriptor, BaseOption):
+                    # Use to_dict to get display_value without triggering __get__
+                    option_dict = option_descriptor.to_dict(module)
+                    current_value = option_dict.get('display_value', '')
+                else:
+                    # Fallback to old method for non-Option attributes
+                    option_obj = getattr(module, name, default)
+                    if hasattr(option_obj, 'value'):
+                        current_value = option_obj.value
+                    elif hasattr(option_obj, 'display_value'):
+                        current_value = option_obj.display_value
+                    else:
+                        current_value = option_obj
+                
+                # Format current value - handle booleans and None correctly
+                if current_value is None:
+                    value_str = ""
+                elif isinstance(current_value, bool):
+                    # Always display boolean values as True/False
+                    value_str = str(current_value)
+                elif current_value == "":
+                    value_str = ""
+                else:
+                    value_str = str(current_value)
+                
+                # Format required
+                req_text = "yes" if required else "no"
+                
+                rows.append([name, value_str, req_text, description])
         
         # Display table
         print_info("")
@@ -584,25 +605,10 @@ Examples:
             else:
                 rows.append([path, description])
         
-        # Compute column widths without truncation
-        col_widths = [len(str(header)) for header in headers]
-        for row in rows:
-            for idx, cell in enumerate(row):
-                if idx < len(col_widths):
-                    col_widths[idx] = max(col_widths[idx], len(cell))
-        
-        def format_row(values):
-            return " | ".join(value.ljust(col_widths[idx]) for idx, value in enumerate(values))
-        
+        # Use print_table which handles terminal width and description truncation
         print_info("")
         print_info(heading)
-        header_line = format_row(headers)
-        print_info("-" * len(header_line))
-        print_info(header_line)
-        print_info("-" * len(header_line))
-        for row in rows:
-            print_info(format_row(row))
-        print_info("-" * len(header_line))
+        print_table(headers, rows, max_width=120)
     
     def _normalize_module_type(self, module_type: str):
         if not module_type:

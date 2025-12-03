@@ -214,14 +214,38 @@ Examples:
                                 print_warning(f"Error during shutdown: {e}")
                         return True
             else:
+                # Check if it's a payload module
+                is_payload = (hasattr(module, 'type') and module.type == 'payload') or \
+                            (hasattr(module, 'TYPE_MODULE') and module.TYPE_MODULE == 'payload')
+                
+                if is_payload:
+                    # For payloads, use generate() instead of run()
+                    print_info("Payload module detected. Generating payload...")
+                    try:
+                        payload_result = module.generate()
+                        if payload_result:
+                            print_success("Payload generated successfully!")
+                            print_info(f"Payload: {payload_result}")
+                            return True
+                        else:
+                            print_error("Failed to generate payload")
+                            return False
+                    except Exception as e:
+                        print_error(f"Error generating payload: {e}")
+                        return False
+                
                 # Regular module execution
                 if parsed_args.background:
                     print_info("Running module in background mode.")
                     try:
                         # Check if run() method accepts background parameter
                         import inspect
-                        run_signature = inspect.signature(module.run)
-                        accepts_background = 'background' in run_signature.parameters
+                        try:
+                            run_signature = inspect.signature(module.run)
+                            accepts_background = 'background' in run_signature.parameters
+                        except (ValueError, TypeError):
+                            # If signature inspection fails, assume no background parameter
+                            accepts_background = False
                         
                         if accepts_background:
                             result = module._exploit(background=True)

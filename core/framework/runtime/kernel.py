@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Runtime Kernel - Couche N+1
-Couche plate et fondamentale qui fournit les services de base pour l'exécution de modules,
-la gestion des sandboxes, la supervision des ressources et le contrat d'extensions.
-"""
-
 import os
 import sys
 import time

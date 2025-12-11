@@ -67,16 +67,12 @@ class Config:
     def _find_config_file(self, start_dir: Path) -> str:
         """Find config file in current or parent directories"""
         for directory in [start_dir] + list(start_dir.parents):
-            # Try config/kittysploit.toml first
-            config_path = directory / "config" / "kittysploit.toml"
-            if config_path.exists():
-                return str(config_path)
-            # Try kittysploit.toml in root
-            config_path = directory / "kittysploit.toml"
-            if config_path.exists():
-                return str(config_path)
+            for candidate in ["config.toml", "config/kittysploit.toml", "kittysploit.toml"]:
+                config_path = directory / candidate
+                if config_path.exists():
+                    return str(config_path)
         # Return default path
-        return str(start_dir / "config" / "kittysploit.toml")
+        return str(start_dir / "config.toml")
     
     def load_config(self):
         """Load configuration from file"""
@@ -86,18 +82,28 @@ class Config:
             return
         
         try:
-            if os.path.exists(self.config_file):
-                with open(self.config_file, 'rb') as f:
-                    self.config = tomllib.load(f)
-            else:
-                # Use defaults if file doesn't exist
-                self.config = self._get_default_config()
+            config_path = Path(self.config_file)
+            if not config_path.exists():
+                self._create_default_config_file(config_path)
+            with open(config_path, 'rb') as f:
+                self.config = tomllib.load(f)
         except Exception as e:
             print(f"Warning: Failed to load configuration from {self.config_file}: {e}")
             self.config = self._get_default_config()
         
         # Update class attributes from loaded config
         self._update_class_attributes()
+
+    def _create_default_config_file(self, config_path: Path) -> None:
+        """Create default config.toml if it does not exist"""
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.write("[FRAMEWORK]\n")
+                f.write('prompt = "kittysploit"\n')
+                f.write('api_key = ""\n')
+        except Exception as e:
+            print(f"Warning: Could not create default configuration at {config_path}: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
@@ -124,7 +130,7 @@ class Config:
             Config.PROXY_CONFIG.update(proxy_config)
         
         # Update framework settings
-        framework = self.config.get('framework', {})
+        framework = self.config.get('framework') or self.config.get('FRAMEWORK', {})
         if 'workspaces_dir' in framework:
             Config.DEFAULT_WORKSPACES_DIR = framework['workspaces_dir']
         if 'default_workspace' in framework:

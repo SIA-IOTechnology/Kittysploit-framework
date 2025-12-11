@@ -49,8 +49,20 @@ def is_debug_mode() -> bool:
         return getattr(_DEBUG_MANAGER, 'is_active', False)
     return False
 
+def color_green(text):
+    return f"{Fore.GREEN}{text}{Style.RESET_ALL}"
+
+def color_red(text):
+    return f"{Fore.RED}{text}{Style.RESET_ALL}"
+
+def color_yellow(text):
+    return f"{Fore.YELLOW}{text}{Style.RESET_ALL}"
+
+def color_blue(text):
+    return f"{Fore.BLUE}{text}{Style.RESET_ALL}"
+    
 def print_empty():
-    print("\n")
+    print_info("")
 
 def print_info(message="", **kwargs):
     print(message, **kwargs)

@@ -59,7 +59,11 @@ from core.output_handler import (
     print_warning,
     print_debug,
     print_status,
-    print_table
+    print_table,
+    color_green,
+    color_red,
+    color_yellow,
+    color_blue
 )
 
 # Import enums
@@ -118,7 +122,10 @@ __all__ = [
     'print_debug',
     'print_status',
     'print_table',
-    
+    'color_green',
+    'color_red',
+    'color_yellow',
+    'color_blue',
     # Enums
     'Handler',
     'SessionType',

@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittyProxy</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="api_tester.css">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code:wght@400;500&display=swap">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="browser_mirror.js?v=1"></script>
+    <style>
+        .page-btn {
+            padding: 5px 12px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+
+        .page-btn:hover:not(:disabled) {
+            background: #f5f5f5;
+        }
+
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Make left menu scrollable when viewport is small */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .main-nav {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+            -ms-overflow-style: none; /* IE/Edge */
+            scrollbar-width: none; /* Firefox */
+        }
+
+        /* Hide scrollbar by default, show on hover */
+        .main-nav::-webkit-scrollbar {
+            width: 0px;
+            height: 0px;
+        }
+
+        .main-nav:hover {
+            scrollbar-width: thin; /* Firefox */
+        }
+
+        .main-nav:hover::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .main-nav::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.25);
+            border-radius: 4px;
+        }
+
+        .main-nav::-webkit-scrollbar-track {
+            background: transparent;
+        }
+    </style>
+</head>
+
+<body>
+    <aside class="sidebar">
+        <div class="logo-icon" id="logo-icon" title="Home">
+            <img src="/logo.png" alt="KittyProxy Logo"
+                onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+            <span class="material-symbols-outlined" style="display: none;">home</span>
+        </div>
+        <nav class="main-nav">
+            <div class="nav-item active" data-view="browser" title="Browser">
+                <span class="material-symbols-outlined">public</span>
+            </div>
+            <div class="nav-item" data-view="analyze" title="Analyze">
+                <span class="material-symbols-outlined">analytics</span>
+            </div>
+            <div class="nav-item" data-view="intercept" title="Intercept">
+                <span class="material-symbols-outlined">gavel</span>
+            </div>
+            <div class="nav-item" data-view="replay" title="Replay">
+                <span class="material-symbols-outlined">repeat</span>
+            </div>
+            <div class="nav-item" data-view="intruder" title="Intruder">
+                <span class="material-symbols-outlined">target</span>
+            </div>
+            <div class="nav-item" data-view="api" title="API Tester">
+                <span style="font-family: 'Fira Code', monospace; font-size: 20px; font-weight: 600;">{}</span>
+            </div>
+            <div class="nav-item" data-view="modules" title="Modules">
+                <span class="material-symbols-outlined">extension</span>
+            </div>
+            <div class="nav-item" data-view="plugins" title="Interception Plugins">
+                <span class="material-symbols-outlined">power</span>
+            </div>
+            <div class="nav-item" data-view="visualize" title="Visualization">
+                <span class="material-symbols-outlined">insights</span>
+            </div>
+            <div class="nav-item" data-view="monitor" title="Performance Monitor">
+                <span class="material-symbols-outlined">speed</span>
+            </div>
+            <div class="nav-item" data-view="collaborate" title="Collaboration">
+                <span class="material-symbols-outlined">group</span>
+                <span id="collab-live-indicator" class="nav-live-indicator material-symbols-outlined" title="Live Mirror actif" aria-hidden="true" style="display: none;">play_arrow</span>
+            </div>
+            <div class="nav-item" data-view="encoder" title="Encoder / Decoder">
+                <span class="material-symbols-outlined">code</span>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="nav-item" id="clear-btn" title="Clear Flows">
+                <span class="material-symbols-outlined">delete_sweep</span>
+            </div>
+        </div>
+    </aside>
+
+    <main class="content-wrapper">
+        <!-- Browser View -->
+        <div id="browser-view" class="view-section active">
+            <div class="top-bar">
+                <h2>Browser</h2>
+            </div>
+
+            <div class="browser-launch-container">
+                <div class="launch-card">
+                    <div class="launch-icon" style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+                        <div style="position: absolute; width: 80px; height: 80px; background-color: #1e1e1e; border-radius: 12px; z-index: 0;"></div>
+                        <img src="/logo.png" alt="KittyProxy Logo" style="height: 64px; width: 64px; object-fit: contain; position: relative; z-index: 1;" onerror="this.onerror=null;this.src='';this.outerHTML='<span class=\'material-symbols-outlined\' style=\'font-size: 64px; position: relative; z-index: 1;\'>rocket_launch</span>';">
+                    </div>
+                    <h3>Launch Protected Browser</h3>
+                    <p>Start a secure browser instance configured to capture all traffic through KittyProxy.</p>
+                    <div style="margin: 20px 0;">
+                        <label style="display: block; font-weight: 600; margin-bottom: 8px; color: var(--text-color);">Select Browser</label>
+                        <select id="browser-select" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.95rem; background: white; cursor: pointer;">
+                            <option value="auto" selected>Loading browsers...</option>
+                        </select>
+                    </div>
+                    <button id="launch-browser-btn" class="btn btn-primary">
+                        <span class="material-symbols-outlined">open_in_browser</span>
+                        Launch Browser
+                    </button>
+                    <div id="launch-status" class="launch-status"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analyze View -->
+        <div id="analyze-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Analyze</h2>
+<!--
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="compare-responses-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">compare</span>
+                        Compare
+                    </button>
+                    <button id="export-har-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">download</span>
+                        Export HAR
+                    </button>
+                    <button id="export-json-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">code</span>
+                        Export JSON
+                    </button>
+                </div>
+            -->
+            </div>
+            <!-- Statistics Dashboard -->
+            <div id="stats-dashboard"
+                style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px; background: #f9f9f9; border-bottom: 1px solid var(--border-color);">
+                <div
+                    style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">Total Requests</div>
+                    <div id="stat-total" style="font-size: 2em; font-weight: 600; color: #6200ea;">0</div>
+                </div>
+                <div
+                    style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">Avg Response Time</div>
+                    <div id="stat-avg-time" style="font-size: 2em; font-weight: 600; color: #4caf50;">0ms</div>
+                </div>
+                <div
+                    style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">Success Rate</div>
+                    <div id="stat-success-rate" style="font-size: 2em; font-weight: 600; color: #00bcd4;">0%</div>
+                </div>
+                <div
+                    style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">Errors</div>
+                    <div id="stat-errors" style="font-size: 2em; font-weight: 600; color: #f44336;">0</div>
+                </div>
+            </div>
+
+            <div class="split-pane">
+                <div class="flow-list-panel" id="flow-list-panel">
+                    <div class="flow-search-container">
+                        <input type="text" id="flow-search" placeholder="Filter flows..." class="flow-search-input">
+                    </div>
+                    <div class="flow-table-header">
+                        <div class="sortable-header" data-sort="method">
+                            Method
+                            <span class="sort-indicator"></span>
+                        </div>
+                        <div class="sortable-header" data-sort="status">
+                            Status
+                            <span class="sort-indicator"></span>
+                        </div>
+                        <div>URL</div>
+                        <div class="sortable-header" data-sort="size">
+                            Size
+                            <span class="sort-indicator"></span>
+                        </div>
+                        <div class="sortable-header" data-sort="time">
+                            Time
+                            <span class="sort-indicator"></span>
+                        </div>
+                        <div class="flow-share-header">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">group</span>
+                        </div>
+                    </div>
+                    <div id="flow-list" class="flow-list"></div>
+                    <!-- Pagination -->
+                    <div id="pagination" class="pagination-container">
+                        <div id="pagination-info" class="pagination-info">Showing 0-0 of 0</div>
+                        <div class="pagination-controls">
+                            <button id="page-first" class="page-btn" disabled>First</button>
+                            <button id="page-prev" class="page-btn" disabled>Prev</button>
+                            <span id="page-current" class="page-current">1</span>
+                            <button id="page-next" class="page-btn" disabled>Next</button>
+                            <button id="page-last" class="page-btn" disabled>Last</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="resize-handle" id="resize-handle"></div>
+                <div class="detail-panel" id="detail-panel">
+                    <div class="detail-header">
+                        <div class="detail-tabs">
+                            <div class="tab active" data-tab="request">Request</div>
+                            <div class="tab" data-tab="response">Response</div>
+                            <div class="tab" data-tab="tech">Tech</div>
+                            <div class="tab" data-tab="endpoints">Endpoints</div>
+                            <div class="tab" data-tab="hexdump">Hexdump</div>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button id="replay-btn" class="replay-btn" title="Replay Request">
+                                <span class="material-symbols-outlined">replay</span>
+                            </button>
+                            <button id="send-to-repeater-btn" class="replay-btn" title="Send to Repeater">
+                                <span class="material-symbols-outlined">repeat</span>
+                            </button>
+                            <button id="send-to-intruder-btn" class="replay-btn" title="Send to Intruder">
+                                <span class="material-symbols-outlined">target</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="detail-content" class="detail-content">
+                        <div style="padding: 20px; color: #666; text-align: center;">Select a flow to view details</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Intercept View -->
+        <div id="intercept-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Intercept</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="intercept-toggle-btn" class="btn btn-primary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">power_settings_new</span>
+                        <span id="intercept-status-text">Enable Interception</span>
+                    </button>
+                    <button id="resume-all-btn" class="btn btn-success">Resume All</button>
+                    <button id="drop-all-btn" class="btn btn-danger">Drop
+                        All</button>
+                </div>
+            </div>
+            <div class="split-pane">
+                <div class="flow-list-panel">
+                    <div
+                        style="padding: 10px; border-bottom: 1px solid var(--border-color); background: #fff3cd; color: #856404;">
+                        <strong id="pending-count-text">0 requests pending</strong>
+                    </div>
+                    <div id="pending-list" class="flow-list"></div>
+                </div>
+                <div class="detail-panel">
+                    <div class="detail-header">
+                        <h3 style="margin: 0; padding: 12px 20px;">Request Editor</h3>
+                    </div>
+                    <div id="intercept-editor" class="detail-content"
+                        style="display: flex; flex-direction: column; gap: 15px;">
+                        <p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modules View -->
+        <div id="modules-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Kittysploit Modules</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <input type="text" id="module-search" placeholder="Search modules..."
+                        style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; width: 300px;">
+                    <button id="refresh-modules-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="split-pane">
+                <div class="flow-list-panel">
+                    <div
+                        style="padding: 10px; border-bottom: 1px solid var(--border-color); background: #e3f2fd; color: #1976d2;">
+                        <strong id="module-count-text">0 modules available</strong>
+                    </div>
+                    <div id="module-list" class="flow-list"></div>
+                </div>
+                <div class="detail-panel">
+                    <div class="detail-header">
+                        <h3 style="margin: 0; padding: 12px 20px;">Module Configuration</h3>
+                        <button id="run-module-btn" class="btn btn-success" disabled>
+                            <span class="material-symbols-outlined" style="font-size: 18px;">play_arrow</span>
+                            Run Module
+                        </button>
+                    </div>
+                    <div id="module-config" class="detail-content"
+                        style="display: flex; flex-direction: column; gap: 15px; overflow-y: auto; padding: 20px; box-sizing: border-box;">
+                        <p style="color: #888; text-align: center; margin-top: 50px;">Select a module to configure and
+                            run</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plugins View -->
+        <div id="plugins-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Interception Plugins</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="refresh-plugins-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="split-pane">
+                <div class="flow-list-panel">
+                    <div
+                        style="padding: 10px; border-bottom: 1px solid var(--border-color); background: #e3f2fd; color: #1976d2;">
+                        <strong id="plugin-count-text">0 plugins available</strong>
+                    </div>
+                    <div id="plugin-list" class="flow-list"></div>
+                </div>
+                <div class="detail-panel">
+                    <div class="detail-header">
+                        <h3 style="margin: 0; padding: 12px 20px;">Plugin Configuration</h3>
+                    </div>
+                    <div id="plugin-config" class="detail-content"
+                        style="display: flex; flex-direction: column; gap: 15px; overflow-y: auto; padding: 20px;">
+                        <p style="color: #888; text-align: center; margin-top: 50px;">Select a plugin to configure</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualization View -->
+        <div id="visualize-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Visualization</h2>
+            </div>
+            <div style="display: flex; height: 100%; overflow: hidden;">
+                <!-- Sidebar: Domaines -->
+                <div id="viz-domains-sidebar"
+                    style="width: 450px; min-width: 300px; max-width: 50%; background: white; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;">
+                    <div style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
+                        <h3
+                            style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600; color: #333; display: flex; align-items: center; gap: 8px;">
+                            <span class="material-symbols-outlined" style="font-size: 20px;">language</span>
+                            Domains
+                        </h3>
+                        <input type="text" id="viz-domain-filter" placeholder="Filter domains..."
+                            style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;">
+                    </div>
+                    <div id="viz-domains-list" style="flex: 1; overflow-y: auto; padding: 10px;">
+                        <div style="text-align: center; padding: 50px; color: #888; font-size: 0.9rem;">
+                            Loading domains...
+                        </div>
+                    </div>
+                </div>
+                <div class="resize-handle" id="viz-resize-handle"></div>
+                <!-- Main Content: Tabs -->
+                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 400px;">
+                    <div class="detail-header" style="margin: 0;">
+                        <div class="detail-tabs">
+                            <div class="tab active" data-viz-tab="dependencies" id="viz-tab-dependencies">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 18px; vertical-align: middle;">link</span>
+                                Dependencies
+                            </div>
+                            <div class="tab" data-viz-tab="timeline" id="viz-tab-timeline">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 18px; vertical-align: middle;">timeline</span>
+                                Timeline
+                            </div>
+                            <div class="tab" data-viz-tab="heatmap" id="viz-tab-heatmap">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 18px; vertical-align: middle;">whatshot</span>
+                                Heatmap
+                            </div>
+                            <div class="tab" data-viz-tab="navigation" id="viz-tab-navigation">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 18px; vertical-align: middle;">account_tree</span>
+                                Navigation Tree
+                            </div>
+                        </div>
+                    </div>
+                    <div id="visualization-content"
+                        style="flex: 1; overflow: auto; padding: 20px; background: #fafafa;">
+                        <!-- Dependencies Panel -->
+                        <div id="viz-panel-dependencies" class="viz-panel active" style="display: block;">
+                            <div style="text-align: center; padding: 50px; color: #888;">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 64px; color: #ddd; margin-bottom: 20px;">link</span>
+                                <p>Select a domain to see the dependencies</p>
+                            </div>
+                        </div>
+                        <!-- Timeline Panel -->
+                        <div id="viz-panel-timeline" class="viz-panel" style="display: none;">
+                            <div style="text-align: center; padding: 50px; color: #888;">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 64px; color: #ddd; margin-bottom: 20px;">timeline</span>
+                                <p>Select a domain to see the timeline</p>
+                            </div>
+                        </div>
+                        <!-- Heatmap Panel -->
+                        <div id="viz-panel-heatmap" class="viz-panel" style="display: none;">
+                            <div style="text-align: center; padding: 50px; color: #888;">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 64px; color: #ddd; margin-bottom: 20px;">whatshot</span>
+                                <p>Select a domain to see the heatmap</p>
+                            </div>
+                        </div>
+                        <!-- Navigation Tree Panel -->
+                        <div id="viz-panel-navigation" class="viz-panel" style="display: none;">
+                            <div style="text-align: center; padding: 50px; color: #888;">
+                                <span class="material-symbols-outlined"
+                                    style="font-size: 64px; color: #ddd; margin-bottom: 20px;">account_tree</span>
+                                <p>Select a domain to see the navigation tree</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Collaboration View -->
+        <div id="collaborate-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2 id="collab-session-name">Collaboration</h2>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="collab-leave-session-btn" class="btn btn-secondary" style="display: none; padding: 8px 12px; gap: 6px; align-items: center;">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">logout</span>
+                        Quit Session
+                    </button>
+                </div>
+            </div>
+            
+            <!-- No Session State -->
+            <div id="collab-no-session" style="flex: 1; display: flex; align-items: center; justify-content: center; background: #fafafa;">
+                <div id="collaboration-content" style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 50px 30px; max-width: 520px; width: 100%; text-align: center;">
+                    <span class="material-symbols-outlined"
+                        style="font-size: 88px; color: var(--primary-color); opacity: 0.45;">groups</span>
+                    <h2 style="color: #444; font-size: 2rem; margin: 0;">Real-Time Collaboration</h2>
+                    <p style="color: #666; font-size: 1rem; margin: 0 0 12px 0; line-height: 1.5;">
+                        Work in team on your pentest sessions. Share the flows, discuss and collaborate in real-time.
+                    </p>
+                    <div id="collaboration-actions" style="display: flex; gap: 10px; margin-top: 6px; justify-content: center; flex-wrap: wrap;">
+                        <button id="collab-create-session-btn-2" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                            Create a Session
+                        </button>
+                        <button id="collab-join-session-btn-2" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">login</span>
+                            Join a Session
+                        </button>
+                        <button id="collab-ai-history-btn" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">history</span>
+                            AI History
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Session State -->
+            <div id="collab-active-session" style="flex: 1; display: none; flex-direction: column; background: #fafafa; overflow: hidden;">
+                <div id="collab-main-grid" style="display: grid; grid-template-columns: 250px 1fr 320px; height: 100%; gap: 0; position: relative;">
+                    <!-- Sidebar Participants -->
+                    <div id="collab-participants-sidebar" style="background: white; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; transition: width 0.3s ease; position: relative;">
+                        <div style="padding: 16px; border-bottom: 1px solid var(--border-color); position: relative;">
+                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #333; display: flex; align-items: center; gap: 8px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">people</span>
+                                Participants List
+                                <span id="collab-participant-count" style="background: #f5f5f5; color: #666; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-left: auto;">0</span>
+                            </h3>
+                        </div>
+                        <div id="collab-participants-list" style="flex: 1; overflow-y: auto; padding: 8px;">
+                            <!-- Participants will be added here -->
+                        </div>
+                    </div>
+
+                    <!-- Main Content (Flow List / Mirror) -->
+                    <div style="display: flex; flex-direction: column; overflow: hidden; background: white; min-width: 0;">
+                        <div style="padding: 16px; border-bottom: 1px solid var(--border-color);">
+                            <div style="display: flex; align-items: center; justify-content: space-between;">
+                                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                                    <button id="collab-toggle-participants-top" class="collab-sidebar-toggle" style="padding: 6px 8px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px;">chevron_left</span>
+                                    </button>
+                                    <button id="collab-tab-flows" class="collab-tab-btn active" style="padding: 6px 12px; border: none; background: #f5f5f5; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">list</span>
+                                        Flows
+                                    </button>
+                                    <button id="collab-tab-mirror" class="collab-tab-btn" style="padding: 6px 12px; border: none; background: #f5f5f5; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">desktop_windows</span>
+                                        Live Mirror
+                                    </button>
+                                    <button id="collab-tab-ai" class="collab-tab-btn" style="padding: 6px 12px; border: none; background: #f5f5f5; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; display: none;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">auto_awesome</span>
+                                        AI Assistant
+                                        <span id="collab-ai-badge" style="display: none; background: #ff4444; color: white; border-radius: 10px; padding: 2px 6px; font-size: 10px; margin-left: 4px;">PRO</span>
+                                    </button>
+                                    <div id="collab-mirror-users-tabs" style="display: flex; gap: 8px; align-items: center;">
+                                        <!-- Boutons dynamiques pour chaque utilisateur qui partage -->
+                                    </div>
+                                </div>
+                                <div id="collab-session-info" style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666;">
+                                    <span id="collab-invite-code" style="font-family: monospace; background: #f5f5f5; padding: 4px 8px; border-radius: 4px;"></span>
+                                    <button id="collab-toggle-chat-top" class="collab-sidebar-toggle" style="padding: 6px 8px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px;">chevron_right</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="collab-flows-list-container" class="collab-tab-content active" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                            <div class="flow-table-header collab-flow-table-header">
+                                <div>User</div>
+                                <div>Method</div>
+                                <div>Status</div>
+                                <div>URL</div>
+                                <div>Size</div>
+                                <div>Time</div>
+                                <div class="flow-share-header">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">group</span>
+                                </div>
+                            </div>
+                            <div id="collab-flows-list" class="flow-list">
+                                <!-- Flows will be added here -->
+                            </div>
+                        </div>
+                        <div id="collab-mirror-container" class="collab-tab-content" style="flex: 1; overflow: hidden; display: none; position: relative; background: #000;">
+                            <div id="collab-mirror-controls" style="position: absolute; top: 12px; right: 12px; z-index: 10; display: flex; gap: 8px;">
+                                <button id="collab-mirror-start-btn" class="btn btn-success" style="padding: 8px 16px; font-size: 12px;">
+                                    <span class="material-symbols-outlined" style="font-size: 16px;">play_arrow</span>
+                                    Start Mirroring
+                                </button>
+                                <button id="collab-mirror-stop-btn" class="btn btn-danger" style="padding: 8px 16px; font-size: 12px; display: none;">
+                                    <span class="material-symbols-outlined" style="font-size: 16px;">stop</span>
+                                    Stop
+                                </button>
+                            </div>
+                            <div id="collab-mirror-viewer" style="width: 100%; height: 100%; display: block; background: #1a1a1a; position: relative;">
+                                <div id="collab-mirror-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #666;">
+                                    <span class="material-symbols-outlined" style="font-size: 64px; color: #444; display: block; margin-bottom: 16px;">desktop_windows</span>
+                                    <p style="margin: 0; font-size: 14px;">Aucun mirroring actif</p>
+                                    <p style="margin: 8px 0 0 0; font-size: 12px; color: #888;">Cliquez sur "Start Mirroring" pour partager votre écran</p>
+                                </div>
+                                <div id="collab-mirror-content" style="display: none; width: 100%; height: 100%; overflow: hidden; position: relative;">
+                                    <img id="collab-mirror-image" style="width: 100%; height: 100%; object-fit: contain; display: none;" alt="Mirror view">
+                                    <div id="collab-mirror-loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #666; display: flex; flex-direction: column; align-items: center;">
+                                        <span class="material-symbols-outlined" style="font-size: 48px; color: #666; margin-bottom: 16px; animation: pulse 2s infinite;">screen_share</span>
+                                        <p style="margin: 0; font-size: 14px; color: #888;">Sharing in progress...</p>
+                                    </div>
+                                    <div id="collab-mirror-info" style="position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px;">
+                                        <div id="collab-mirror-user" style="font-weight: 600;"></div>
+                                        <div id="collab-mirror-url" style="font-size: 11px; color: #ccc; margin-top: 4px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- AI Assistant Container -->
+                        <div id="collab-ai-container" class="collab-tab-content" style="flex: 1; display: none; flex-direction: column; overflow: hidden; background: #fff;">
+                            <!-- Message si pas d'accès -->
+                            <div id="collab-ai-no-access" style="display: none; padding: 40px; text-align: center; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                                <span class="material-symbols-outlined" style="font-size: 64px; color: #ccc; margin-bottom: 16px;">lock</span>
+                                <h3 style="margin: 0 0 8px 0; color: #333;">AI Assistant - Configuration Required</h3>
+                                <p style="margin: 0 0 24px 0; color: #666; max-width: 500px;">To use the AI Assistant, you need to configure an API key with AI access enabled.</p>
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;">
+                                    <button id="collab-ai-create-key-btn" class="btn btn-primary" style="padding: 10px 20px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px; vertical-align: middle; margin-right: 6px;">add</span>
+                                        Create API Key
+                                    </button>
+                                    <button id="collab-ai-configure-key-btn" class="btn btn-secondary" style="padding: 10px 20px;">
+                                        <span class="material-symbols-outlined" style="font-size: 18px; vertical-align: middle; margin-right: 6px;">settings</span>
+                                        Configure API Key
+                                    </button>
+                                </div>
+                                <div id="collab-ai-config-status" style="margin-top: 20px; padding: 12px; background: #f5f5f5; border-radius: 6px; max-width: 500px; font-size: 12px; color: #666; display: none;">
+                                    <div id="collab-ai-config-info"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Interface principale -->
+                            <div id="collab-ai-main" style="display: flex; height: 100%;">
+                                <!-- Liste des flows analysables (plus large) -->
+                                <div style="width: 400px; border-right: 1px solid var(--border-color); overflow-y: auto; display: flex; flex-direction: column;">
+                                    <div style="padding: 16px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;">
+                                        <h3 style="margin: 0; font-size: 14px; font-weight: 600;">Select Flow to Analyze</h3>
+                                        <div style="font-size: 11px; color: #666; margin-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                            <span><strong id="collab-ai-requests-used">-</strong> used</span>
+                                            <span aria-hidden="true" style="color:#999;">•</span>
+                                            <span><strong id="collab-ai-requests-remaining">-</strong> remaining</span>
+                                        </div>
+                                    </div>
+                                    <div id="collab-ai-flows-list" style="flex: 1; overflow-y: auto; padding: 8px;">
+                                        <!-- Flows list will be populated here -->
+                                    </div>
+                                </div>
+                                
+                                <!-- Panneau de suggestions -->
+                                <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                                    <div id="collab-ai-analysis" style="flex: 1; overflow-y: auto; padding: 20px;">
+                                        <div style="text-align: center; color: #888; padding: 60px 20px;">
+                                            <span class="material-symbols-outlined" style="font-size: 40px; margin-bottom: 16px; display: block; color: #ccc;">auto_awesome</span>
+                                            <p style="margin: 0; font-size: 14px; color: #666;">Click on a flow to view results, or click the analyze button to run a new analysis</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Panel -->
+                    <div id="collab-chat-sidebar" style="background: white; border-left: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; transition: width 0.3s ease; position: relative;">
+                        <div style="padding: 16px; border-bottom: 1px solid var(--border-color); position: relative;">
+                            <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #333; display: flex; align-items: center; gap: 8px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">chat</span>
+                                Chat
+                            </h3>
+                        </div>
+                        <div id="collab-chat-messages" style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                            <!-- Messages will be added here -->
+                        </div>
+                        <div style="padding: 12px; border-top: 1px solid var(--border-color);">
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="collab-chat-input" placeholder="Tapez un message..." 
+                                    style="flex: 1; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px;"
+                                    onkeypress="if(event.key === 'Enter') sendCollabMessage()">
+                                <button id="collab-chat-send-btn" class="btn btn-primary" onclick="sendCollabMessage()" style="padding: 8px 16px;">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">send</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Monitor View -->
+        <div id="monitor-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Performance Monitor</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="refresh-monitor-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <div id="monitor-content" style="flex: 1; overflow: auto; padding: 0; background: var(--bg-color);">
+                <div style="text-align: center; padding: 80px 20px; color: var(--text-secondary);">
+                    <span class="material-symbols-outlined"
+                        style="font-size: 64px; color: #ddd; margin-bottom: 20px; display: block;">speed</span>
+                    <p style="font-size: 1rem; margin: 0;">Loading performance data...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Replay View -->
+        <div id="replay-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Repeater</h2>
+                <button id="repeater-new-tab-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Request
+                </button>
+            </div>
+            <div class="repeater-container">
+                <div id="repeater-tabs-container" class="repeater-tabs-container">
+                    <!-- Les onglets seront générés dynamiquement -->
+                </div>
+                <div id="repeater-content-container" class="repeater-content-container">
+                    <!-- Le contenu des onglets sera généré dynamiquement -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Intruder View -->
+        <div id="intruder-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Intruder</h2>
+                <button id="intruder-new-tab-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Attack
+                </button>
+            </div>
+            <div class="intruder-container">
+                <div id="intruder-tabs-container" class="intruder-tabs-container">
+                    <!-- Les onglets seront générés dynamiquement -->
+                </div>
+                <div id="intruder-content-container" class="intruder-content-container">
+                    <!-- Le contenu des onglets sera généré dynamiquement -->
+                </div>
+            </div>
+        </div>
+
+        <!-- API Tester View -->
+        <div id="api-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>API Tester</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="api-new-request-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                        New Request
+                    </button>
+                </div>
+            </div>
+            <div class="api-tester-layout">
+                <!-- Sidebar: Collections & History -->
+                <div class="api-tester-sidebar" id="api-tester-sidebar">
+                    <div class="api-sidebar-header">
+                        <div class="api-sidebar-title">
+                            <span class="material-symbols-outlined" style="font-size: 20px;">folder</span>
+                            <span>API Tester</span>
+                        </div>
+                    </div>
+                    <div class="api-sidebar-tabs">
+                        <div class="api-sidebar-tab active" id="tab-history" onclick="switchApiSidebarTab('history')">
+                            History</div>
+                        <div class="api-sidebar-tab" id="tab-collections" onclick="switchApiSidebarTab('collections')">
+                            Collections</div>
+                        <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
+                            React APIs</div>
+                    </div>
+                    <div id="api-history-list" class="api-history-list"></div>
+                    <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
+                    <div id="api-react-apis-list" class="api-react-apis-list" style="display: none;"></div>
+                </div>
+                <div class="resize-handle" id="api-resize-handle"></div>
+
+                <!-- Main Content: Request Builder -->
+                <div class="api-tester-main">
+                    <!-- Request Bar -->
+                    <div class="api-request-bar">
+                        <select id="api-method" class="api-method-select">
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                            <option value="PATCH">PATCH</option>
+                            <option value="DELETE">DELETE</option>
+                            <option value="HEAD">HEAD</option>
+                            <option value="OPTIONS">OPTIONS</option>
+                        </select>
+                        <input type="text" id="api-url" class="api-url-input"
+                            placeholder="https://example.com/api/endpoint">
+                        <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">send</span>
+                            Send
+                        </button>
+                    </div>
+
+                    <!-- Request Tabs (Params, Headers, Body) -->
+                    <div class="api-request-tabs">
+                        <div class="api-req-tab active" id="req-tab-params" onclick="switchApiReqTab('params')">Params
+                        </div>
+                        <div class="api-req-tab" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
+                        <div class="api-req-tab" id="req-tab-body" onclick="switchApiReqTab('body')">Body</div>
+                    </div>
+
+                    <!-- Request Body -->
+                    <div class="api-request-body">
+                        <!-- Params Panel -->
+                        <div class="api-req-panel active" id="api-panel-params">
+                            <div id="api-params-container"></div>
+                            <button class="btn btn-secondary" onclick="addKvRow('api-params-container')"
+                                style="margin-top: 10px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                                Add Param
+                            </button>
+                        </div>
+
+                        <!-- Headers Panel -->
+                        <div class="api-req-panel" id="api-panel-headers">
+                            <div id="api-headers-container"></div>
+                            <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')"
+                                style="margin-top: 10px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                                Add Header
+                            </button>
+                        </div>
+
+                        <!-- Body Panel -->
+                        <div class="api-req-panel" id="api-panel-body">
+                            <div
+                                style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
+                                <label style="display: flex; gap: 15px; align-items: center;">
+                                    <input type="radio" name="body-type" value="none" checked
+                                        onchange="toggleBodyType()">
+                                    <span>None</span>
+                                </label>
+                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
+                                    <input type="radio" name="body-type" value="raw" onchange="toggleBodyType()">
+                                    <span>Raw</span>
+                                </label>
+                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
+                                    <input type="radio" name="body-type" value="json" onchange="toggleBodyType()">
+                                    <span>JSON</span>
+                                </label>
+                            </div>
+                            <div id="api-body-none-msg"
+                                style="padding: 50px; text-align: center; color: #999; display: none;">
+                                This request does not have a body
+                            </div>
+                            <div id="api-body-editor-container" style="display: none; flex: 1; padding: 15px; flex-direction: column; position: relative;">
+                                <div id="api-body-json-view" style="display: none; flex: 1; overflow-y: auto; overflow-x: hidden; background: #282c34; border-radius: 4px; padding: 15px; position: relative; min-height: 300px;">
+                                    <pre id="api-body-json-formatted" style="margin: 0; font-family: 'Fira Code', monospace; font-size: 13px; color: #abb2bf; line-height: 1.5; white-space: pre; word-wrap: normal; overflow-wrap: normal;"></pre>
+                                    <button id="api-body-edit-btn" onclick="switchToJsonEditor()" style="position: absolute; top: 10px; right: 10px; background: #61afef; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; z-index: 10;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">edit</span> Edit
+                                    </button>
+                                </div>
+                                <textarea id="api-body-editor"
+                                    oninput="updateApiBody()"
+                                    style="width: 100%; height: 100%; min-height: 300px; font-family: 'Fira Code', monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; display: none;"></textarea>
+                                <button id="api-body-format-btn" onclick="formatJsonBody()" style="display: none; margin-top: 10px; background: #333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-start;">
+                                    <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span> Format JSON
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Response Section -->
+                    <div id="api-response-section" class="api-response-section" style="display: none;">
+                        <div class="api-response-header">
+                            <div>
+                                <span id="api-resp-status" class="api-status-badge">-</span>
+                            </div>
+                            <div class="api-response-meta">
+                                <span>Time: <strong id="api-resp-time-val">-</strong></span>
+                                <span>Size: <strong id="api-resp-size-val">-</strong></span>
+                            </div>
+                        </div>
+                        <div class="api-response-body">
+                            <pre id="api-resp-content"
+                                style="margin: 0; padding: 15px; font-family: 'Fira Code', monospace; font-size: 12px; overflow: auto; height: 100%;"></pre>
+                            <span class="material-symbols-outlined"
+                                style="font-size: 64px; color: #ddd; margin-bottom: 20px;">whatshot</span>
+                            <p>Select a domain to see the heatmap</p>
+                        </div>
+                    </div>
+                    <!-- Navigation Tree Panel -->
+                    <div id="viz-panel-navigation" class="viz-panel" style="display: none;">
+                        <div style="text-align: center; padding: 50px; color: #888;">
+                            <span class="material-symbols-outlined"
+                                style="font-size: 64px; color: #ddd; margin-bottom: 20px;">account_tree</span>
+                            <p>Select a domain to see the navigation tree</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Collaboration View -->
+        <div id="collaborate-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Collaboration</h2>
+            </div>
+            <div id="collaboration-content" style="flex: 1; overflow: auto; padding: 20px; background: #fafafa;">
+                <div style="text-align: center; padding: 50px; color: #888;">
+                    <span class="material-symbols-outlined"
+                        style="font-size: 64px; color: #ddd; margin-bottom: 20px;">group</span>
+                    <p>Create or join a collaborative session to work in team</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Monitor View -->
+        <div id="monitor-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Performance Monitor</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="refresh-monitor-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">refresh</span>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+            <div id="monitor-content" style="flex: 1; overflow: auto; padding: 0; background: var(--bg-color);">
+                <div style="text-align: center; padding: 80px 20px; color: var(--text-secondary);">
+                    <span class="material-symbols-outlined"
+                        style="font-size: 64px; color: #ddd; margin-bottom: 20px; display: block;">speed</span>
+                    <p style="font-size: 1rem; margin: 0;">Loading performance data...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Replay View -->
+        <div id="replay-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Repeater</h2>
+                <button id="repeater-new-tab-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Request
+                </button>
+            </div>
+            <div class="repeater-container">
+                <div id="repeater-tabs-container" class="repeater-tabs-container">
+                    <!-- Les onglets seront générés dynamiquement -->
+                </div>
+                <div id="repeater-content-container" class="repeater-content-container">
+                    <!-- Le contenu des onglets sera généré dynamiquement -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Intruder View -->
+        <div id="intruder-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Intruder</h2>
+                <button id="intruder-new-tab-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Attack
+                </button>
+            </div>
+            <div class="intruder-container">
+                <div id="intruder-tabs-container" class="intruder-tabs-container">
+                    <!-- Les onglets seront générés dynamiquement -->
+                </div>
+                <div id="intruder-content-container" class="intruder-content-container">
+                    <!-- Le contenu des onglets sera généré dynamiquement -->
+                </div>
+            </div>
+        </div>
+
+        <!-- API Tester View -->
+        <div id="api-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>API Tester</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="api-new-request-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                        New Request
+                    </button>
+                </div>
+            </div>
+            <div class="api-tester-layout">
+                <!-- Sidebar: Collections & History -->
+                <div class="api-tester-sidebar" id="api-tester-sidebar">
+                    <div class="api-sidebar-header">
+                        <div class="api-sidebar-title">
+                            <span class="material-symbols-outlined" style="font-size: 20px;">folder</span>
+                            <span>API Tester</span>
+                        </div>
+                    </div>
+                    <div class="api-sidebar-tabs">
+                        <div class="api-sidebar-tab active" id="tab-history" onclick="switchApiSidebarTab('history')">
+                            History</div>
+                        <div class="api-sidebar-tab" id="tab-collections" onclick="switchApiSidebarTab('collections')">
+                            Collections</div>
+                        <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
+                            React APIs</div>
+                    </div>
+                    <div id="api-history-list" class="api-history-list"></div>
+                    <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
+                    <div id="api-react-apis-list" class="api-react-apis-list" style="display: none;"></div>
+                </div>
+                <div class="resize-handle" id="api-resize-handle"></div>
+
+                <!-- Main Content: Request Builder -->
+                <div class="api-tester-main">
+                    <!-- Request Bar -->
+                    <div class="api-request-bar">
+                        <select id="api-method" class="api-method-select">
+                            <option value="GET">GET</option>
+                            <option value="POST">POST</option>
+                            <option value="PUT">PUT</option>
+                            <option value="PATCH">PATCH</option>
+                            <option value="DELETE">DELETE</option>
+                            <option value="HEAD">HEAD</option>
+                            <option value="OPTIONS">OPTIONS</option>
+                        </select>
+                        <input type="text" id="api-url" class="api-url-input"
+                            placeholder="https://example.com/api/endpoint">
+                        <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">send</span>
+                            Send
+                        </button>
+                    </div>
+
+                    <!-- Request Tabs (Params, Headers, Body) -->
+                    <div class="api-request-tabs">
+                        <div class="api-req-tab active" id="req-tab-params" onclick="switchApiReqTab('params')">Params
+                        </div>
+                        <div class="api-req-tab" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
+                        <div class="api-req-tab" id="req-tab-body" onclick="switchApiReqTab('body')">Body</div>
+                    </div>
+
+                    <!-- Request Body -->
+                    <div class="api-request-body">
+                        <!-- Params Panel -->
+                        <div class="api-req-panel active" id="api-panel-params">
+                            <div id="api-params-container"></div>
+                            <button class="btn btn-secondary" onclick="addKvRow('api-params-container')"
+                                style="margin-top: 10px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                                Add Param
+                            </button>
+                        </div>
+
+                        <!-- Headers Panel -->
+                        <div class="api-req-panel" id="api-panel-headers">
+                            <div id="api-headers-container"></div>
+                            <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')"
+                                style="margin-top: 10px;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                                Add Header
+                            </button>
+                        </div>
+
+                        <!-- Body Panel -->
+                        <div class="api-req-panel" id="api-panel-body">
+                            <div
+                                style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
+                                <label style="display: flex; gap: 15px; align-items: center;">
+                                    <input type="radio" name="body-type" value="none" checked
+                                        onchange="toggleBodyType()">
+                                    <span>None</span>
+                                </label>
+                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
+                                    <input type="radio" name="body-type" value="raw" onchange="toggleBodyType()">
+                                    <span>Raw</span>
+                                </label>
+                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
+                                    <input type="radio" name="body-type" value="json" onchange="toggleBodyType()">
+                                    <span>JSON</span>
+                                </label>
+                            </div>
+                            <div id="api-body-none-msg"
+                                style="padding: 50px; text-align: center; color: #999; display: none;">
+                                This request does not have a body
+                            </div>
+                            <div id="api-body-editor-container" style="display: none; flex: 1; padding: 15px; flex-direction: column; position: relative;">
+                                <div id="api-body-json-view" style="display: none; flex: 1; overflow-y: auto; overflow-x: hidden; background: #282c34; border-radius: 4px; padding: 15px; position: relative; min-height: 300px;">
+                                    <pre id="api-body-json-formatted" style="margin: 0; font-family: 'Fira Code', monospace; font-size: 13px; color: #abb2bf; line-height: 1.5; white-space: pre; word-wrap: normal; overflow-wrap: normal;"></pre>
+                                    <button id="api-body-edit-btn" onclick="switchToJsonEditor()" style="position: absolute; top: 10px; right: 10px; background: #61afef; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; z-index: 10;">
+                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">edit</span> Edit
+                                    </button>
+                                </div>
+                                <textarea id="api-body-editor"
+                                    oninput="updateApiBody()"
+                                    style="width: 100%; height: 100%; min-height: 300px; font-family: 'Fira Code', monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; display: none;"></textarea>
+                                <button id="api-body-format-btn" onclick="formatJsonBody()" style="display: none; margin-top: 10px; background: #333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-start;">
+                                    <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span> Format JSON
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Response Section -->
+                    <div id="api-response-section" class="api-response-section" style="display: none;">
+                        <div class="api-response-header">
+                            <div>
+                                <span id="api-resp-status" class="api-status-badge">-</span>
+                            </div>
+                            <div class="api-response-meta">
+                                <span>Time: <strong id="api-resp-time-val">-</strong></span>
+                                <span>Size: <strong id="api-resp-size-val">-</strong></span>
+                            </div>
+                        </div>
+                        <div class="api-response-body">
+                            <pre id="api-resp-content"
+                                style="margin: 0; padding: 15px; font-family: 'Fira Code', monospace; font-size: 12px; overflow: auto; height: 100%;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Encoder / Decoder View -->
+        <div id="encoder-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Encoder / Decoder</h2>
+            </div>
+            <div style="padding: 20px; display: flex; flex-direction: column; gap: 15px; height: calc(100% - 70px); box-sizing: border-box;">
+                <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #fafafa; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+                    <div style="display: flex; flex-direction: column; gap: 6px; min-width: 240px;">
+                        <label for="encoder-mode" style="font-weight: 600; color: var(--text-color);">Codec</label>
+                        <select id="encoder-mode" style="padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; min-width: 220px;">
+                            <option value="base64">Base64</option>
+                            <option value="url">URL encode</option>
+                            <option value="html">HTML entities</option>
+                            <option value="hex">Hex</option>
+                        </select>
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto;">
+                        <button id="encoder-encode-btn" class="btn btn-primary">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">lock</span>
+                            Encoder
+                        </button>
+                        <button id="encoder-decode-btn" class="btn btn-secondary">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">lock_open</span>
+                            Decoder
+                        </button>
+                        <button id="encoder-swap-btn" class="btn btn-secondary">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">swap_horiz</span>
+                            Swap
+                        </button>
+                        <button id="encoder-clear-btn" class="btn btn-danger" style="background: #f5f5f5; color: #555;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">backspace</span>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; flex: 1; min-height: 0;">
+                    <div style="display: flex; flex-direction: column; gap: 8px; background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; min-height: 260px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span style="font-weight: 600; color: var(--text-color); display: inline-flex; gap: 6px; align-items: center;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">input</span>
+                                Input
+                            </span>
+                            <button id="encoder-copy-input-btn" class="btn btn-secondary" style="padding: 6px 10px; display: inline-flex; gap: 6px; align-items: center;">
+                                <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span>
+                                Copy
+                            </button>
+                        </div>
+                        <textarea id="encoder-input" style="flex: 1; width: 100%; resize: vertical; min-height: 220px; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-family: 'Fira Code', monospace; font-size: 13px; box-sizing: border-box;"></textarea>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px; background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; min-height: 260px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <span style="font-weight: 600; color: var(--text-color); display: inline-flex; gap: 6px; align-items: center;">
+                                <span class="material-symbols-outlined" style="font-size: 18px;">output</span>
+                                Output
+                            </span>
+                            <button id="encoder-copy-output-btn" class="btn btn-secondary" style="padding: 6px 10px; display: inline-flex; gap: 6px; align-items: center;">
+                                <span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span>
+                                Copy
+                            </button>
+                        </div>
+                        <textarea id="encoder-output" readonly style="flex: 1; width: 100%; resize: vertical; min-height: 220px; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; font-family: 'Fira Code', monospace; font-size: 13px; background: #fafafa; box-sizing: border-box;"></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Node Details Panel -->
+    <div id="node-details-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9998;"
+        onclick="closeNodeDetails()"></div>
+    <div id="node-details-panel"
+        style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 900px; max-height: 85vh; background: white; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); z-index: 9999; overflow: hidden; border: 1px solid var(--border-color);">
+        <div
+            style="background: #fff; border-bottom: 1px solid var(--border-color); padding: 20px 24px; position: relative;">
+            <button onclick="closeNodeDetails()"
+                style="position: absolute; top: 16px; right: 16px; background: #f5f5f5; border: none; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: #666;"
+                onmouseover="this.style.background='#e0e0e0'; this.style.color='#333'"
+                onmouseout="this.style.background='#f5f5f5'; this.style.color='#666'">
+                <span class="material-symbols-outlined" style="font-size: 18px;">close</span>
+            </button>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div
+                    style="width: 40px; height: 40px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--primary-color);">
+                    <span class="material-symbols-outlined" id="node-details-icon"
+                        style="font-size: 22px;">public</span>
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <h2 id="node-details-title"
+                        style="margin: 0; font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333;">
+                        Node Title</h2>
+                    <p id="node-details-subtitle" style="margin: 4px 0 0 0; color: #666; font-size: 13px;">Node
+                        Subtitle</p>
+                </div>
+            </div>
+        </div>
+        <div id="node-details-content" style="padding: 30px; overflow-y: auto; max-height: calc(85vh - 120px);">
+            <!-- Content will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- File Content Modal -->
+    <div id="file-content-overlay"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9998;"
+        onclick="closeFileContentModal()"></div>
+    <div id="file-content-modal"
+        style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 1200px; max-height: 90vh; background: white; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); z-index: 9999; overflow: hidden; border: 1px solid var(--border-color); flex-direction: column;">
+        <div
+            style="background: #fff; border-bottom: 1px solid var(--border-color); padding: 20px 24px; position: relative; flex-shrink: 0;">
+            <button onclick="closeFileContentModal()"
+                style="position: absolute; top: 16px; right: 16px; background: #f5f5f5; border: none; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: #666;"
+                onmouseover="this.style.background='#e0e0e0'; this.style.color='#333'"
+                onmouseout="this.style.background='#f5f5f5'; this.style.color='#666'">
+                <span class="material-symbols-outlined" style="font-size: 18px;">close</span>
+            </button>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div
+                    style="width: 40px; height: 40px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--primary-color);">
+                    <span class="material-symbols-outlined" id="file-content-icon"
+                        style="font-size: 22px;">description</span>
+                </div>
+                <div style="flex: 1; min-width: 0;">
+                    <h2 id="file-content-title"
+                        style="margin: 0; font-size: 18px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333;">
+                        File Content</h2>
+                    <p id="file-content-subtitle" style="margin: 4px 0 0 0; color: #666; font-size: 13px;">
+                        Loading...</p>
+                </div>
+            </div>
+        </div>
+        <div id="file-content-body" style="padding: 30px; overflow-y: auto; flex: 1; min-height: 0; background: #fafafa;">
+            <!-- Content will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Modales de collaboration -->
+    <!-- Modale pour créer une session -->
+    <div id="modal-create-session" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Create Session</h3>
+                <button class="modal-close" onclick="closeModal('modal-create-session')">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-group">
+                    <label for="modal-session-name">Session Name</label>
+                    <input type="text" id="modal-session-name" class="modal-input" placeholder="Pentest Session" value="Pentest Session" autofocus>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-create-session')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmCreateSession()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale pour rejoindre une session -->
+    <div id="modal-join-session" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Join Session</h3>
+                <button class="modal-close" onclick="closeModal('modal-join-session')">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-form-group">
+                    <label for="modal-invite-code">Session ID or Invitation Code</label>
+                    <input type="text" id="modal-invite-code" class="modal-input" placeholder="Session ID (UUID) or short code" autofocus>
+                    <small class="modal-hint">Paste the full session ID or the short invite code</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modal-join-session')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmJoinSession()">Join</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale pour afficher les erreurs -->
+    <div id="modal-error" class="modal-overlay" style="display: none;">
+        <div class="modal-container modal-error-container">
+            <div class="modal-header">
+                <h3 style="color: var(--btn-danger-bg);">
+                    <span class="material-symbols-outlined" style="vertical-align: middle; margin-right: 8px;">error</span>
+                    Error
+                </h3>
+                <button class="modal-close" onclick="closeModal('modal-error')">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p id="modal-error-message" style="color: var(--text-color); margin: 0;"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal('modal-error')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale historique IA -->
+    <div id="modal-ai-history" class="modal-overlay" style="display: none;">
+        <div class="modal-container" style="max-width: 1100px; width: 95%; max-height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3>AI History (local)</h3>
+                <button class="modal-close" onclick="closeModal('modal-ai-history')">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body" style="overflow-y: hidden; flex: 1; padding: 0; display: flex; flex-direction: column;">
+                <div id="ai-history-empty" style="display: none; padding: 24px; text-align: center; color: #666;">No AI history recorded yet.</div>
+                <div id="ai-history-wrapper" style="display: flex; flex: 1; min-height: 0;">
+                    <div id="ai-history-list" style="width: 340px; border-right: 1px solid var(--border-color); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px;"></div>
+                    <div id="ai-history-detail" style="flex: 1; padding: 16px; overflow-y: auto; background: #fafafa;">
+                        <div style="color: #666; font-size: 14px;">Select an entry to view details.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button class="btn btn-secondary" onclick="clearAIHistory()">Clear</button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-secondary" onclick="closeModal('modal-ai-history')">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Styles pour les modales -->
+    <style>
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        .modal-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            animation: slideUp 0.3s ease;
+            overflow: hidden;
+        }
+
+        /* Highlight selection in AI history list */
+        .ai-history-item.active {
+            border-color: var(--primary-color, #2196f3) !important;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.15);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--header-bg);
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .modal-close:hover {
+            background: var(--btn-secondary-hover);
+            color: var(--text-color);
+        }
+
+        .modal-close .material-symbols-outlined {
+            font-size: 20px;
+        }
+
+        .modal-body {
+            padding: 24px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .modal-form-group {
+            margin-bottom: 20px;
+        }
+
+        .modal-form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: var(--text-color);
+            font-size: 14px;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+
+        .modal-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.1);
+        }
+
+        .modal-hint {
+            display: block;
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            background: var(--header-bg);
+        }
+
+        .modal-error-container .modal-body {
+            padding: 24px;
+        }
+
+        .modal-error-container .modal-body p {
+            line-height: 1.6;
+        }
+    </style>
+
+    <script src="app.js?v=14"></script>
+</body>
+
+</html>

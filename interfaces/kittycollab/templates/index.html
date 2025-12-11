@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittySploit | Editor</title>
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+    <script>
+        // Configuration de l'URL du serveur (peut être définie depuis le serveur)
+        window.KITTYCOLLAB_SERVER_URL = "{{ server_url|default('') }}";
+        const SERVER_TOKEN = "{{ api_token|default('') }}";
+        const TOKEN_VALUE = SERVER_TOKEN.trim();
+        if (TOKEN_VALUE) {
+            sessionStorage.setItem('token', TOKEN_VALUE);
+        }
+    </script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <img src="/static/img/logo.png" alt="Logo" class="header-logo-icon" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+                <i class="fas fa-cat" style="display: none;"></i>
+                <div class="room-info" id="roomInfo">#Loading...</div>
+                <button class="icon-btn" id="editDescriptionBtn" onclick="editRoomDescription()" title="Edit description" style="margin-left: 10px; padding: 4px 8px;">
+                    <i class="fas fa-edit" style="font-size: 12px;"></i>
+                </button>
+                <button class="icon-btn" id="deleteRoomBtn" onclick="deleteCurrentRoom()" title="Delete/Close session" style="margin-left: 5px; padding: 4px 8px; display: none; color: var(--error);">
+                    <i class="fas fa-trash" style="font-size: 12px;"></i>
+                </button>
+            </div>
+            
+            <!-- Room Description -->
+            <div class="room-description-container" id="roomDescriptionContainer" style="display: none;">
+                <div class="room-description-text" id="roomDescriptionText"></div>
+            </div>
+
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" onclick="switchTab('modules', {currentTarget: this})" title="Modules">
+                    <i class="fas fa-cubes"></i>
+                </button>
+                <button class="sidebar-tab" onclick="switchTab('files', {currentTarget: this})" title="Project">
+                    <i class="fas fa-project-diagram"></i>
+                </button>
+                <button class="sidebar-tab" onclick="switchTab('chat', {currentTarget: this})" title="Comms">
+                    <i class="fas fa-comments"></i>
+                </button>
+                <button class="sidebar-tab" onclick="switchTab('notes', {currentTarget: this})" title="Notes">
+                    <i class="fas fa-sticky-note"></i>
+                </button>
+            </div>
+
+            <div class="sidebar-content-area">
+                <!-- Modules Tab -->
+                <div class="sidebar-view active" id="tab-modules">
+                    <div class="section-title">localhost</div>
+                    <ul class="list-container" id="moduleList">
+                        <li class="loading-item"><i class="fas fa-circle-notch fa-spin"></i> Loading modules...</li>
+                    </ul>
+                </div>
+
+                <!-- Files Tab -->
+                <div class="sidebar-view" id="tab-files">
+                    <div class="section-title">Project Assets</div>
+                    <div class="upload-zone">
+                        <button class="action-btn small" onclick="createNewPythonFile()" style="margin-bottom: 10px;">
+                            <i class="fas fa-plus"></i> New Python File
+                        </button>
+                        <label for="fileUpload" class="upload-btn">
+                            <i class="fas fa-cloud-upload-alt"></i> Upload File
+                        </label>
+                        <input type="file" id="fileUpload" multiple>
+                    </div>
+                    <ul class="list-container" id="filesList"></ul>
+                </div>
+
+                <!-- Chat Tab -->
+                <div class="sidebar-view" id="tab-chat">
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chatMessages"></div>
+                        <div class="chat-input-area">
+                            <input type="text" id="chatInput" placeholder="Transmit message..."
+                                onkeypress="if(event.key==='Enter') sendChatMessage()">
+                            <button onclick="sendChatMessage()"><i class="fas fa-paper-plane"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notes Tab -->
+                <div class="sidebar-view" id="tab-notes">
+                    <div class="section-title">Mission Notes</div>
+                    <button class="action-btn small" onclick="createNote()">
+                        <i class="fas fa-plus"></i> New Note
+                    </button>
+                    <ul class="list-container" id="notesList"></ul>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="status-dot online"></div>
+                    <span id="currentUser">User</span>
+                </div>
+                <button class="icon-btn" onclick="window.location.href='/rooms'" title="Exit Session">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Resizer -->
+        <div class="resizer" id="sidebarResizer"></div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="editor-toolbar">
+                <div class="file-info">
+                    <i class="fas fa-file-code"></i>
+                    <span id="editorTitle">No file selected</span>
+                </div>
+                <div class="toolbar-actions">
+                    <span id="saveStatus" class="save-status"></span>
+                    <button class="action-btn" id="copyBtn" disabled>
+                        <i class="fas fa-copy"></i>Copy
+                    </button>
+                    <button class="action-btn" id="shareBtn" disabled>
+                        <i class="fas fa-share-alt"></i>Share
+                    </button>
+                    <button class="action-btn" id="saveBtn" disabled>
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                </div>
+            </div>
+
+            <div class="editor-area">
+                <div id="editor"></div>
+                <div id="imagePreview" style="display: none; width: 100%; height: 100%; overflow: auto; background: #1e1e1e; padding: 20px; box-sizing: border-box;">
+                    <img id="previewImage" src="" alt="Image preview" style="max-width: 100%; max-height: 100%; display: block; margin: 0 auto;">
+                </div>
+                <div class="empty-editor-state" id="editorLoading">
+                    <i class="fas fa-code"></i>
+                    <p>Select a module to begin editing</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Note Modal -->
+    <div class="modal-overlay" id="noteModal" onclick="if(event.target === this) closeNoteModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Note</h3>
+                <button class="icon-btn" onclick="closeNoteModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="noteTitle" placeholder="Enter note title...">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="noteContent" rows="10" placeholder="Enter note description..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn" onclick="closeNoteModal()">Cancel</button>
+                <button class="action-btn" id="saveNoteBtn" onclick="saveNote()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Description Modal -->
+    <div class="modal-overlay" id="descriptionModal" onclick="if(event.target === this) closeDescriptionModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Edit Session Description</h3>
+                <button class="icon-btn" onclick="closeDescriptionModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="roomDescription" rows="4" placeholder="Enter session description..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn" onclick="closeDescriptionModal()">Cancel</button>
+                <button class="action-btn" onclick="saveRoomDescription()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>

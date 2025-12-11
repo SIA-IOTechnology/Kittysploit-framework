@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittySploit | Access Control</title>
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #050508;
+            position: relative;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        /* Animated background elements */
+        body::before {
+            content: '';
+            position: absolute;
+            width: 120vw;
+            height: 120vh;
+            background:
+                radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.25), transparent 40%),
+                radial-gradient(circle at 85% 30%, rgba(0, 255, 255, 0.08), transparent 40%);
+            z-index: -2;
+            animation: bgPulse 15s ease-in-out infinite alternate;
+        }
+
+        @keyframes bgPulse {
+            0% {
+                transform: scale(1);
+            }
+
+            100% {
+                transform: scale(1.1);
+            }
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+            padding: 40px;
+            background: rgba(20, 20, 30, 0.6);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00ffff, transparent);
+            animation: scan 2s linear infinite;
+        }
+
+        @keyframes scan {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .brand {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .brand i {
+            font-size: 48px;
+            color: #00ffff;
+            margin-bottom: 15px;
+            filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5));
+        }
+
+        .brand-logo {
+            width: 64px;
+            height: 64px;
+            object-fit: contain;
+            margin-bottom: 15px;
+            filter: drop-shadow(0 0 10px rgba(0, 255, 255, 0.5));
+        }
+
+        .brand h1 {
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 24px;
+            color: #fff;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+            position: relative;
+        }
+
+        .form-group label {
+            display: block;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: block;
+        }
+
+        .input-wrapper i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(255, 255, 255, 0.4);
+            transition: color 0.3s;
+            z-index: 1;
+            pointer-events: none;
+            width: 16px;
+            text-align: center;
+        }
+
+        #username {
+            width: 100%;
+            padding: 12px 15px 12px 50px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #fff;
+            font-family: 'Consolas', monospace;
+            font-size: 14px;
+            transition: all 0.3s;
+            position: relative;
+            z-index: 2;
+            box-sizing: border-box;
+            margin: 0;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            line-height: 1.5;
+        }
+
+        #username:focus {
+            outline: none;
+            border-color: #00ffff;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+        }
+
+        .input-wrapper:focus-within i {
+            color: #00ffff;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(45deg, #00ffff, #00ccff);
+            border: none;
+            border-radius: 8px;
+            color: #000;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+        }
+
+        .btn-login::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(rgba(255, 255, 255, 0.2), transparent);
+            transform: rotate(45deg);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0% {
+                transform: translateX(-100%) rotate(45deg);
+            }
+
+            100% {
+                transform: translateX(100%) rotate(45deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-card">
+        <div class="brand">
+            <img src="/static/img/logo.png" alt="KittySploit" class="brand-logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <i class="fas fa-shield-cat" style="display: none;"></i>
+            <h1>KittySploit</h1>
+        </div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Identity</label>
+                <div class="input-wrapper">
+                    <i class="fas fa-user"></i>
+                    <input type="text" id="username" placeholder="Enter username" required autocomplete="off">
+                </div>
+            </div>
+            <button type="submit" class="btn-login">Initialize Session</button>
+        </form>
+    </div>
+
+    <script>
+        // Configuration de l'URL du serveur (peut être définie depuis le serveur)
+        window.KITTYCOLLAB_SERVER_URL = "{{ server_url|default('') }}";
+        
+        // Utiliser l'URL du serveur distant si configurée, sinon utiliser l'origine locale
+        const SERVER_URL = window.KITTYCOLLAB_SERVER_URL || window.location.origin;
+        
+        const SERVER_TOKEN = {% if api_token %}'{{ api_token }}'{% else %}null{% endif %};
+        if (SERVER_TOKEN) {
+            sessionStorage.setItem('token', SERVER_TOKEN);
+        } else {
+            sessionStorage.removeItem('token');
+        }
+
+        document.getElementById('loginForm').onsubmit = async function (e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+
+            if (!username) return;
+
+            // Add loading effect
+            const btn = document.querySelector('.btn-login');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Authenticating...';
+            btn.style.opacity = '0.8';
+            btn.disabled = true;
+
+            try {
+                sessionStorage.setItem('username', username);
+                // Sauvegarder l'URL du serveur si configurée
+                if (window.KITTYCOLLAB_SERVER_URL) {
+                    sessionStorage.setItem('server_url', window.KITTYCOLLAB_SERVER_URL);
+                }
+                window.location.href = '/rooms';
+            } catch (error) {
+                console.error('Erreur lors de la validation:', error);
+                btn.innerHTML = originalText;
+                btn.style.opacity = '1';
+                btn.disabled = false;
+                alert('Erreur de connexion au serveur. Vérifiez votre connexion et réessayez.');
+            }
+        };
+    </script>
+</body>
+
+</html>

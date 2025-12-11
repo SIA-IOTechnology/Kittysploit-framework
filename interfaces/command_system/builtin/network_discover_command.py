@@ -11,12 +11,85 @@ import time
 import ipaddress
 import subprocess
 import platform
+import re
+import os
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class NetworkDiscoverCommand(BaseCommand):
     """Command to discover hosts on the network"""
+    
+    def __init__(self, framework=None, session=None, output_handler=None):
+        """Initialize the command and load OUI database"""
+        super().__init__(framework, session, output_handler)
+        self.oui_db = None
+        self._load_oui_database()
+    
+    def _load_oui_database(self):
+        """Load OUI (MAC vendor) database"""
+        try:
+            # Get the path to oui.json relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            oui_path = os.path.join(current_dir, '..', '..', '..', 'data', 'vendors', 'oui.json')
+            oui_path = os.path.normpath(oui_path)
+            
+            if os.path.exists(oui_path):
+                with open(oui_path, 'r', encoding='utf-8') as f:
+                    self.oui_db = json.load(f)
+            else:
+                print_warning(f"OUI database not found at {oui_path}")
+        except Exception as e:
+            print_warning(f"Failed to load OUI database: {e}")
+    
+    def _get_mac_vendor(self, mac_address):
+        """Get vendor name from MAC address using OUI database"""
+        if not self.oui_db or not mac_address or mac_address == 'Unknown':
+            return 'Unknown'
+        
+        try:
+            # Extract first 3 octets (6 hex characters) from MAC address
+            # Handle both formats: xx-xx-xx-xx-xx-xx and xx:xx:xx:xx:xx:xx
+            mac_clean = mac_address.replace('-', '').replace(':', '').upper()
+            if len(mac_clean) >= 6:
+                oui_prefix = mac_clean[:6]
+                return self.oui_db.get(oui_prefix, 'Unknown')
+        except Exception as e:
+            pass
+        
+        return 'Unknown'
+    
+    def _merge_host_data(self, existing_host, new_host):
+        """Merge new host data into existing host data, preserving MAC addresses"""
+        merged = existing_host.copy()
+        
+        # Preserve MAC address if it exists and is not Unknown
+        if existing_host.get('mac') and existing_host.get('mac') != 'Unknown':
+            merged['mac'] = existing_host['mac']
+        elif new_host.get('mac') and new_host.get('mac') != 'Unknown':
+            merged['mac'] = new_host['mac']
+        
+        # Merge hostname (prefer non-Unknown)
+        if new_host.get('hostname') and new_host.get('hostname') != 'Unknown':
+            merged['hostname'] = new_host['hostname']
+        elif not merged.get('hostname') or merged.get('hostname') == 'Unknown':
+            merged['hostname'] = existing_host.get('hostname', 'Unknown')
+        
+        # Merge services (combine lists)
+        existing_services = set(existing_host.get('services', []))
+        new_services = set(new_host.get('services', []))
+        merged['services'] = sorted(list(existing_services | new_services))
+        
+        # Merge methods (combine)
+        existing_method = existing_host.get('method', '')
+        new_method = new_host.get('method', '')
+        if existing_method and new_method and existing_method != new_method:
+            merged['method'] = f"{existing_method}, {new_method}"
+        else:
+            merged['method'] = new_method or existing_method
+        
+        return merged
     
     @property
     def name(self) -> str:
@@ -210,32 +283,68 @@ Note: Some methods require elevated privileges (sudo/Administrator).
         if method == 'all' or method == 'arp':
             print_info("Performing ARP scan...")
             arp_hosts = self._arp_scan(network, options)
-            hosts.update(arp_hosts)
+            # Merge ARP hosts intelligently
+            for ip, host_data in arp_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
         
         if method == 'all' or method == 'ping':
             print_info("Performing ICMP ping sweep...")
             ping_hosts = self._ping_sweep(network, options)
-            hosts.update(ping_hosts)
+            # Merge ping hosts intelligently (preserve MAC from ARP)
+            for ip, host_data in ping_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
         
         if method == 'all' or method == 'tcp':
             print_info("Performing TCP port scan...")
             tcp_hosts = self._tcp_scan(network, options)
-            hosts.update(tcp_hosts)
+            # Merge TCP hosts intelligently (preserve MAC from ARP)
+            for ip, host_data in tcp_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
         
         if method == 'all' or method == 'udp':
             print_info("Performing UDP scan...")
             udp_hosts = self._udp_scan(network, options)
-            hosts.update(udp_hosts)
+            # Merge UDP hosts intelligently (preserve MAC from ARP)
+            for ip, host_data in udp_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
         
         if method == 'all' or method == 'netbios':
             print_info("Performing NetBIOS discovery...")
             netbios_hosts = self._netbios_scan(network, options)
-            hosts.update(netbios_hosts)
+            # Merge NetBIOS hosts intelligently (preserve MAC from ARP)
+            for ip, host_data in netbios_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
         
         if method == 'all' or method == 'mdns':
             print_info("Performing mDNS/Bonjour discovery...")
             mdns_hosts = self._mdns_scan(network, options)
-            hosts.update(mdns_hosts)
+            # Merge mDNS hosts intelligently (preserve MAC from ARP)
+            for ip, host_data in mdns_hosts.items():
+                if ip in hosts:
+                    hosts[ip] = self._merge_host_data(hosts[ip], host_data)
+                else:
+                    hosts[ip] = host_data
+        
+        # Add vendor information for all hosts with MAC addresses
+        for ip in hosts:
+            if hosts[ip].get('mac') and hosts[ip].get('mac') != 'Unknown':
+                vendor = self._get_mac_vendor(hosts[ip]['mac'])
+                hosts[ip]['vendor'] = vendor
         
         return hosts
     
@@ -246,13 +355,26 @@ Note: Some methods require elevated privileges (sudo/Administrator).
         try:
             if platform.system() == "Windows":
                 # Windows ARP scan
-                result = subprocess.run(['arp', '-a'], capture_output=True, text=True)
+                result = subprocess.run(['arp', '-a'], capture_output=True, text=True, encoding='utf-8', errors='ignore')
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
-                        if '(' in line and ')' in line:
+                        line = line.strip()
+                        # Skip empty lines, headers, and interface lines
+                        if not line or 'Interface' in line or 'Adresse Internet' in line or 'Internet Address' in line or 'Type' in line:
+                            continue
+                        
+                        # Try to match IP address pattern
+                        # Format can be: "10.81.7.4             b4-00-16-0b-0f-c7     dynamique"
+                        # or: "10.81.7.4 (192.168.1.1)     b4-00-16-0b-0f-c7     dynamique"
+                        ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
+                        if ip_match:
                             try:
-                                ip = line.split('(')[1].split(')')[0]
-                                mac = line.split()[-2] if len(line.split()) >= 2 else 'Unknown'
+                                ip = ip_match.group(1)
+                                # Extract MAC address (format: xx-xx-xx-xx-xx-xx or xx:xx:xx:xx:xx:xx)
+                                mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', line)
+                                mac = mac_match.group(0) if mac_match else 'Unknown'
+                                
+                                # Check if IP is in the target network
                                 if ipaddress.ip_address(ip) in network:
                                     hosts[ip] = {
                                         'ip': ip,
@@ -261,7 +383,7 @@ Note: Some methods require elevated privileges (sudo/Administrator).
                                         'services': [],
                                         'method': 'ARP'
                                     }
-                            except:
+                            except Exception as e:
                                 continue
             else:
                 # Linux/Mac ARP scan
@@ -489,18 +611,23 @@ Note: Some methods require elevated privileges (sudo/Administrator).
             return
         
         print_success(f"Discovered {len(hosts)} hosts on {network}")
-        print_info("=" * 80)
-        print_info(f"{'IP Address':<15} {'MAC Address':<17} {'Hostname':<20} {'Services':<30} {'Method'}")
-        print_info("-" * 80)
+        print_info("=" * 100)
+        print_info(f"{'IP Address':<15} {'MAC Address':<17} {'Vendor':<25} {'Hostname':<20} {'Services':<25} {'Method'}")
+        print_info("-" * 100)
         
         for ip, info in sorted(hosts.items(), key=lambda x: ipaddress.ip_address(x[0])):
-            services = ', '.join(info['services'][:3])  # Show first 3 services
-            if len(info['services']) > 3:
-                services += f" (+{len(info['services'])-3} more)"
+            services = ', '.join(info['services'][:2])  # Show first 2 services
+            if len(info['services']) > 2:
+                services += f" (+{len(info['services'])-2} more)"
             
-            print_info(f"{info['ip']:<15} {info['mac']:<17} {info['hostname']:<20} {services:<30} {info['method']}")
+            vendor = info.get('vendor', 'Unknown')
+            # Truncate vendor name if too long
+            if len(vendor) > 24:
+                vendor = vendor[:21] + "..."
+            
+            print_info(f"{info['ip']:<15} {info['mac']:<17} {vendor:<25} {info['hostname']:<20} {services:<25} {info['method']}")
         
-        print_info("=" * 80)
+        print_info("=" * 100)
         print_info(f"Total: {len(hosts)} hosts discovered")
         
         # Summary by method

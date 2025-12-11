@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittySploit | Session Hub</title>
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.js"></script>
+    <style>
+        body {
+            background: #0a0a0f;
+            background-image:
+                linear-gradient(rgba(0, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 60px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+        }
+
+        .header-title h1 {
+            font-size: 28px;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 5px;
+        }
+
+        .header-title h1 i {
+            color: #00ffff;
+            margin-right: 10px;
+        }
+
+        .user-badge {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px 20px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            background: linear-gradient(45deg, #00ffff, #00ccff);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .actions-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .btn-create {
+            background: rgba(0, 255, 255, 0.1);
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-create:hover {
+            background: #00ffff;
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        }
+
+        .btn-join {
+            background: rgba(0, 255, 157, 0.1);
+            color: #00ff9d;
+            border: 1px solid #00ff9d;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-join:hover {
+            background: #00ff9d;
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
+        }
+
+        .rooms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+        }
+
+        .room-card {
+            background: rgba(20, 20, 30, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 25px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .room-card:hover {
+            transform: translateY(-5px);
+            border-color: #00ffff;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .room-card.public::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: #00ff9d;
+        }
+
+        .room-card.private::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: #ff0055;
+        }
+
+        .room-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+        }
+
+        .room-id {
+            font-family: 'Consolas', monospace;
+            font-size: 18px;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .room-type {
+            font-size: 10px;
+            text-transform: uppercase;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .room-type.public {
+            background: rgba(0, 255, 157, 0.1);
+            color: #00ff9d;
+        }
+
+        .room-type.private {
+            background: rgba(255, 0, 85, 0.1);
+            color: #ff0055;
+        }
+
+        .room-details {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .detail-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 13px;
+        }
+
+        .detail-item i {
+            width: 16px;
+            text-align: center;
+        }
+
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 60px;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-container {
+            background: rgba(20, 20, 30, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0, 255, 255, 0.3);
+        }
+
+        .modal-header {
+            padding: 20px 25px;
+            border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #00ffff;
+            font-size: 20px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 18px;
+        }
+
+        .icon-btn:hover {
+            color: #ff0055;
+            background: rgba(255, 0, 85, 0.1);
+        }
+
+        .modal-body {
+            padding: 25px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .modal-footer {
+            padding: 20px 25px;
+            border-top: 1px solid rgba(0, 255, 255, 0.1);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: bold;
+        }
+
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 255, 255, 0.2);
+            border-radius: 6px;
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #00ffff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .radio-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .radio-option {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .radio-option input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .option-card {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(0, 255, 255, 0.2);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            min-height: 80px;
+        }
+
+        .radio-option:hover .option-card {
+            background: rgba(0, 255, 255, 0.1);
+            border-color: rgba(0, 255, 255, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 255, 255, 0.2);
+        }
+
+        .radio-option input[type="radio"]:checked + .option-card {
+            background: rgba(0, 255, 255, 0.15);
+            border-color: #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        }
+
+        .public-option input[type="radio"]:checked + .option-card {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(0, 255, 255, 0.05));
+            border-color: #00ffff;
+        }
+
+        .private-option input[type="radio"]:checked + .option-card {
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.15), rgba(255, 0, 85, 0.05));
+            border-color: #ff0055;
+        }
+
+        .option-icon {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 255, 255, 0.1);
+            border-radius: 10px;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+
+        .option-icon i {
+            font-size: 24px;
+            color: #00ffff;
+        }
+
+        .private-option .option-icon {
+            background: rgba(255, 0, 85, 0.1);
+        }
+
+        .private-option .option-icon i {
+            color: #ff0055;
+        }
+
+        .option-content {
+            flex: 1;
+        }
+
+        .option-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .option-description {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .option-check {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .radio-option input[type="radio"]:checked + .option-card .option-check {
+            opacity: 1;
+        }
+
+        .option-check i {
+            color: #00ffff;
+            font-size: 20px;
+        }
+
+        .private-option input[type="radio"]:checked + .option-card .option-check i {
+            color: #ff0055;
+        }
+
+        .action-btn {
+            padding: 10px 20px;
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 0.5px;
+        }
+
+        .action-btn:hover {
+            background: #00ffff;
+            color: #000;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+        }
+
+        .saved-session-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(0, 255, 255, 0.1);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .saved-session-item:hover {
+            background: rgba(0, 255, 255, 0.05);
+            border-color: rgba(0, 255, 255, 0.3);
+        }
+
+        .saved-session-info {
+            flex: 1;
+        }
+
+        .saved-session-id {
+            font-family: 'Consolas', monospace;
+            color: #00ffff;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .saved-session-description {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 4px;
+        }
+
+        .saved-session-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .saved-session-btn {
+            padding: 6px 12px;
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            color: #00ffff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .saved-session-btn:hover {
+            background: rgba(0, 255, 255, 0.2);
+        }
+
+        .saved-session-btn.delete {
+            color: #ff0055;
+            border-color: rgba(255, 0, 85, 0.3);
+        }
+
+        .saved-session-btn.delete:hover {
+            background: rgba(255, 0, 85, 0.1);
+        }
+
+        .form-group input[type="checkbox"] {
+            width: auto;
+            margin-right: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-title">
+                <h1><i class="fas fa-network-wired"></i> Session Hub</h1>
+            </div>
+            <div class="user-badge">
+                <div class="user-avatar" id="userAvatar"></div>
+                <div class="user-name" id="userName">Loading...</div>
+                <i class="fas fa-sign-out-alt" style="cursor: pointer; color: #ff0055;" onclick="logout()"></i>
+            </div>
+        </div>
+
+        <div class="actions-bar">
+            <h2 style="font-size: 18px; color: rgba(255,255,255,0.7);">Active Sessions</h2>
+            <div style="display: flex; gap: 15px;">
+                <button class="btn-create" onclick="createRoom()">
+                    <i class="fas fa-plus"></i> Initialize New Session
+                </button>
+                <button class="btn-join" onclick="showJoinRoomModal()">
+                    <i class="fas fa-sign-in-alt"></i> Join Session
+                </button>
+            </div>
+        </div>
+
+        <div id="roomsContainer" class="rooms-grid">
+            <div class="empty-state">
+                <i class="fas fa-circle-notch fa-spin"></i>
+                <p>Scanning network for active sessions...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Room Modal -->
+    <div class="modal-overlay" id="createRoomModal" onclick="if(event.target === this) closeCreateRoomModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Initialize New Session</h3>
+                <button class="icon-btn" onclick="closeCreateRoomModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="roomDescriptionInput" rows="3" placeholder="Enter session description..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Session Type</label>
+                    <div class="radio-group">
+                        <label class="radio-option public-option">
+                            <input type="radio" name="roomType" value="public" checked>
+                            <div class="option-card">
+                                <div class="option-icon">
+                                    <i class="fas fa-globe"></i>
+                                </div>
+                                <div class="option-content">
+                                    <div class="option-title">Public</div>
+                                    <div class="option-description">Visible to all</div>
+                                </div>
+                                <div class="option-check">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                            </div>
+                        </label>
+                        <label class="radio-option private-option">
+                            <input type="radio" name="roomType" value="private">
+                            <div class="option-card">
+                                <div class="option-icon">
+                                    <i class="fas fa-lock"></i>
+                                </div>
+                                <div class="option-content">
+                                    <div class="option-title">Private</div>
+                                    <div class="option-description">Access restricted</div>
+                                </div>
+                                <div class="option-check">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn" onclick="closeCreateRoomModal()">Cancel</button>
+                <button class="action-btn" onclick="submitCreateRoom()">Create Session</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join Room Modal -->
+    <div class="modal-overlay" id="joinRoomModal" onclick="if(event.target === this) closeJoinRoomModal()">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3>Join Session</h3>
+                <button class="icon-btn" onclick="closeJoinRoomModal()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Session ID</label>
+                    <input type="text" id="joinRoomIdInput" placeholder="Enter session ID (e.g., abc12345)" style="font-family: 'Consolas', monospace;">
+                </div>
+                <div class="form-group" id="joinTokenGroup" style="display: none;">
+                    <label>Access Token</label>
+                    <input type="text" id="joinTokenInput" placeholder="Enter access token">
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="saveSessionCheckbox" checked>
+                        <span style="margin-left: 8px;">Save session for quick access</span>
+                    </label>
+                </div>
+                <div class="form-group" id="savedSessionsGroup" style="margin-top: 20px;">
+                    <label>Saved Sessions</label>
+                    <div id="savedSessionsList" style="max-height: 200px; overflow-y: auto;">
+                        <!-- Saved sessions will be loaded here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="action-btn" onclick="closeJoinRoomModal()">Cancel</button>
+                <button class="action-btn" onclick="submitJoinRoom()">Join Session</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration de l'URL du serveur (peut être définie depuis le serveur ou sessionStorage)
+        window.KITTYCOLLAB_SERVER_URL = "{{ server_url|default('') }}";
+        // Utiliser l'URL sauvegardée dans sessionStorage si disponible
+        if (!window.KITTYCOLLAB_SERVER_URL) {
+            window.KITTYCOLLAB_SERVER_URL = sessionStorage.getItem('server_url');
+        }
+        // Utiliser l'URL du serveur distant si configurée, sinon utiliser l'origine locale
+        const SERVER_URL = window.KITTYCOLLAB_SERVER_URL || window.location.origin;
+        const SERVER_TOKEN = "{{ api_token|default('') }}";
+        const TOKEN_VALUE = SERVER_TOKEN.trim();
+        if (TOKEN_VALUE) {
+            sessionStorage.setItem('token', TOKEN_VALUE);
+        }
+        let socket = null;
+        let currentUsername = '';
+        let currentToken = '';
+        let cachedRooms = [];
+
+        window.addEventListener('load', function () {
+            currentUsername = sessionStorage.getItem('username');
+            currentToken = sessionStorage.getItem('token') || '';
+
+            if (!currentUsername) {
+                window.location.href = '/';
+                return;
+            }
+
+            document.getElementById('userName').textContent = currentUsername;
+            document.getElementById('userAvatar').textContent = currentUsername.charAt(0).toUpperCase();
+
+            socket = io(SERVER_URL);
+            socket.on('connect', function () {
+                loadRooms();
+                socket.on('room_list_updated', loadRooms);
+            });
+
+            // Précharger les sessions sauvegardées pour l'affichage rapide
+            loadSavedSessions();
+        });
+
+        async function loadRooms() {
+            try {
+                // Construire l'URL avec le token si disponible
+                let url = SERVER_URL + '/api/rooms';
+                if (currentToken) {
+                    url += '?token=' + encodeURIComponent(currentToken);
+                }
+                
+                const res = await fetch(url);
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    cachedRooms = data.rooms || [];
+                    // Afficher toutes les rooms accessibles (publiques + privées accessibles avec le token)
+                    renderRooms(cachedRooms);
+                } else {
+                    console.error('Error loading rooms:', data.message);
+                    cachedRooms = [];
+                    renderRooms([]);
+                }
+            } catch (e) {
+                console.error('Error:', e);
+                cachedRooms = [];
+                renderRooms([]);
+            }
+        }
+        
+        function renderRooms(rooms) {
+            const container = document.getElementById('roomsContainer');
+            
+            try {
+                if (rooms.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-satellite-dish"></i>
+                            <p>No active sessions detected.</p>
+                            <p style="font-size: 12px; margin-top: 10px;">Initialize a new session to begin.</p>
+                        </div>`;
+                } else {
+                    container.innerHTML = rooms.map(room => {
+                        const typeClass = room.is_public ? 'public' : 'private';
+                        const typeLabel = room.is_public ? 'PUBLIC' : 'PRIVATE';
+                        const description = room.description || 'No description';
+                        const descriptionHtml = description && description !== 'No description' 
+                            ? '<div class="room-description" style="padding: 10px; margin: 10px 0; background: rgba(0,255,255,0.05); border-left: 2px solid #00ffff; font-size: 13px; color: rgba(255,255,255,0.8);">' + description + '</div>' 
+                            : '';
+                        const operatives = room.connected_users !== undefined ? room.connected_users : (room.guest_count + 1);
+                        const createdDate = new Date(room.created_at);
+                        const day = String(createdDate.getDate()).padStart(2, '0');
+                        const month = String(createdDate.getMonth() + 1).padStart(2, '0');
+                        const year = createdDate.getFullYear();
+                        const activeSince = day + '/' + month + '/' + year;
+                        
+                        return '<div class="room-card ' + typeClass + '" onclick="joinRoom(\'' + room.id + '\')">' +
+                            '<div class="room-header">' +
+                            '<div class="room-id">#' + room.id + '</div>' +
+                            '<div class="room-type ' + typeClass + '">' + typeLabel + '</div>' +
+                            '</div>' +
+                            descriptionHtml +
+                            '<div class="room-details">' +
+                            '<div class="detail-item">' +
+                            '<i class="fas fa-user-astronaut" style="color: #00ffff;"></i>' +
+                            '<span>Host: ' + room.host_username + '</span>' +
+                            '</div>' +
+                            '<div class="detail-item">' +
+                            '<i class="fas fa-users" style="color: #b0b0b0;"></i>' +
+                            '<span>Operatives: ' + operatives + '</span>' +
+                            '</div>' +
+                            '<div class="detail-item">' +
+                            '<i class="far fa-clock" style="color: #b0b0b0;"></i>' +
+                            '<span>Active since: ' + activeSince + '</span>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                    }).join('');
+                }
+            } catch (e) {
+                console.error('Error rendering rooms:', e);
+            }
+        }
+
+        function createRoom() {
+            // Reset form
+            document.getElementById('roomDescriptionInput').value = '';
+            document.querySelector('input[name="roomType"][value="public"]').checked = true;
+            
+            // Show modal
+            document.getElementById('createRoomModal').style.display = 'flex';
+        }
+
+        function closeCreateRoomModal() {
+            document.getElementById('createRoomModal').style.display = 'none';
+        }
+
+        function submitCreateRoom() {
+            const description = document.getElementById('roomDescriptionInput').value.trim();
+            const roomType = document.querySelector('input[name="roomType"]:checked').value;
+            const isPublic = roomType === 'public';
+            // Get token from sessionStorage (already provided during login)
+            const token = sessionStorage.getItem('token') || '';
+
+            if (socket && socket.connected) {
+                socket.emit('create_room', {
+                    username: currentUsername,
+                    is_public: isPublic,
+                    access_token: token,
+                    description: description
+                });
+
+                socket.once('room_created', function (data) {
+                    sessionStorage.setItem('currentRoomId', data.room_id);
+                    window.location.href = '/editor';
+                });
+
+                socket.once('error', function (data) {
+                    alert('Error creating room: ' + data.message);
+                });
+
+                closeCreateRoomModal();
+            }
+        }
+
+        function getRoomDescription(roomId) {
+            const room = cachedRooms.find(r => r.id === roomId);
+            if (room && room.description) {
+                return room.description;
+            }
+            return 'Saved session';
+        }
+
+        async function joinRoom(roomId, descHint = null) {
+            // Utilise simplement le token courant (sessionStorage) ou celui saisi
+            currentToken = sessionStorage.getItem('token') || currentToken || '';
+            const descriptionHint = descHint || getRoomDescription(roomId);
+            if (socket && socket.connected) {
+                socket.emit('join_room', {
+                    room_id: roomId,
+                    username: currentUsername,
+                    token: currentToken
+                });
+
+                socket.once('room_joined', function (data) {
+                    sessionStorage.setItem('currentRoomId', data.room_id);
+                    window.location.href = '/editor';
+                });
+
+                socket.once('error', function (data) {
+                    alert('Access Denied: ' + data.message);
+                });
+            }
+        }
+
+        // Saved sessions management (persisted on backend, sans token)
+        async function fetchSavedSessions() {
+            try {
+                const res = await fetch('/api/saved-sessions');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    return data.sessions || [];
+                }
+            } catch (e) {
+                console.warn('Failed to fetch saved sessions', e);
+            }
+            return [];
+        }
+
+        async function saveSessionPersisted(roomId, description) {
+            try {
+                await fetch('/api/saved-sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: roomId,
+                        description: description || 'No description'
+                    })
+                });
+            } catch (e) {
+                console.warn('Failed to save session', e);
+            }
+        }
+
+        async function removeSavedSession(roomId) {
+            try {
+                await fetch('/api/saved-sessions/' + encodeURIComponent(roomId), {
+                    method: 'DELETE'
+                });
+                loadSavedSessions();
+            } catch (e) {
+                console.warn('Failed to delete session', e);
+            }
+        }
+
+        async function loadSavedSessions() {
+            const sessions = await fetchSavedSessions();
+            const list = document.getElementById('savedSessionsList');
+            
+            if (!list) {
+                return; // List element doesn't exist
+            }
+            
+            if (sessions.length === 0) {
+                list.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.4); font-size: 13px;">No saved sessions</div>';
+                return;
+            }
+            
+            list.innerHTML = sessions.map(session => {
+                const description = session.description || 'No description';
+                const roomId = session.id || '';
+                
+                return '<div class="saved-session-item">' +
+                    '<div class="saved-session-info" onclick="joinSavedSession(\'' + roomId + '\', \'' + description.replace(/'/g, "\\'") + '\')">' +
+                    '<div class="saved-session-id">#' + roomId + '</div>' +
+                    '<div class="saved-session-description">' + description + '</div>' +
+                    '</div>' +
+                    '<div class="saved-session-actions">' +
+                    '<button class="saved-session-btn" onclick="joinSavedSession(\'' + roomId + '\', \'' + description.replace(/'/g, "\\'") + '\')">Join</button>' +
+                    '<button class="saved-session-btn delete" onclick="removeSavedSession(\'' + roomId + '\')">Delete</button>' +
+                    '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function joinSavedSession(roomId, description) {
+            // Join immediately using current token (from session) and keep description hint
+            joinRoom(roomId, description);
+        }
+
+        function setupJoinRoomHandlers() {
+            const roomIdInput = document.getElementById('joinRoomIdInput');
+            if (roomIdInput) {
+                roomIdInput.addEventListener('blur', function() {
+                    const roomId = this.value.trim();
+                    if (roomId) {
+                        fetch(SERVER_URL + '/api/rooms')
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.status === 'success') {
+                                    const room = data.rooms.find(r => r.id === roomId);
+                                    if (room && !room.is_public) {
+                                        document.getElementById('joinTokenGroup').style.display = 'block';
+                                    }
+                                }
+                            })
+                            .catch(() => {});
+                    }
+                });
+            }
+        }
+
+        function showJoinRoomModal() {
+            // Reset form
+            document.getElementById('joinRoomIdInput').value = '';
+            document.getElementById('joinTokenInput').value = '';
+            document.getElementById('joinTokenGroup').style.display = 'none';
+            document.getElementById('saveSessionCheckbox').checked = true;
+            
+            // Setup handlers
+            setupJoinRoomHandlers();
+            
+            // Load saved sessions
+            loadSavedSessions();
+            
+            // Show modal
+            document.getElementById('joinRoomModal').style.display = 'flex';
+        }
+
+        function closeJoinRoomModal() {
+            document.getElementById('joinRoomModal').style.display = 'none';
+        }
+
+        async function submitJoinRoom() {
+            const roomId = document.getElementById('joinRoomIdInput').value.trim();
+            const token = document.getElementById('joinTokenInput').value.trim();
+            const saveSession = document.getElementById('saveSessionCheckbox').checked;
+
+            if (!roomId) {
+                alert('Please enter a session ID');
+                return;
+            }
+
+            // Join the room
+            if (socket && socket.connected) {
+                socket.emit('join_room', {
+                    room_id: roomId,
+                    username: currentUsername,
+                    token: token
+                });
+
+                socket.once('room_joined', async function (data) {
+                    if (saveSession) {
+                        // Enregistrer avec la vraie description si possible (cache + fallback)
+                        let desc = getRoomDescription(roomId);
+                        try {
+                            await saveSessionPersisted(roomId, desc);
+                        } catch (e) {}
+                    }
+                    sessionStorage.setItem('currentRoomId', data.room_id);
+                    window.location.href = '/editor';
+                });
+
+                socket.once('error', function (data) {
+                    alert('Access Denied: ' + data.message);
+                });
+
+                closeJoinRoomModal();
+            }
+        }
+
+        function logout() {
+            sessionStorage.clear();
+            window.location.href = '/';
+        }
+    </script>
+</body>
+
+</html>
+</html>

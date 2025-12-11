@@ -1,5 +1,6 @@
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from colorama import Fore, Style
         
 class Module(Auxiliary, Http_client):
 
@@ -17,6 +18,14 @@ class Module(Auxiliary, Http_client):
         options['ssl'] = 'true'
         options['uripath'] = '/robots.txt'
         return options
+
+    def color_green(self, text):
+        """Return text with green color"""
+        return f"{Fore.GREEN}{text}{Style.RESET_ALL}"
+    
+    def color_red(self, text):
+        """Return text with red color"""
+        return f"{Fore.RED}{text}{Style.RESET_ALL}"
 
     def get_robots_txt(self):
         response = self.http_request(
@@ -54,9 +63,9 @@ class Module(Auxiliary, Http_client):
             )
             page_weight = len(response.content)
             if response.status_code == 200:
-                results.append((self.target+url, color_green(response.status_code), page_weight))
+                results.append((self.target+url, self.color_green(response.status_code), page_weight))
             else:    
-                results.append((self.target+url, color_red(response.status_code), page_weight))
+                results.append((self.target+url, self.color_red(response.status_code), page_weight))
 
         return results
 

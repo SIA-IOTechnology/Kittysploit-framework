@@ -17,15 +17,15 @@ class Http_client(BaseModule):
     """Advanced HTTP client with security testing capabilities"""
     
     target = OptString("", "Target URL, IP or hostname", True)
-    port = OptPort(80, "Target port", True)
-
-    ssl = OptBool(False, "SSL enabled: true/false", False, advanced=True)
+    port = OptPort(443, "Target port", True)
+    path = OptString("/", "Target path", True)  
+    ssl = OptBool(True, "SSL enabled: true/false", True, advanced=True)
     user_agent = OptString("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "User agent", True, advanced=True)
     follow_redirects = OptBool(True, "Follow redirects: true/false", True, advanced=True)
-    timeout = OptPort(30, "Request timeout in seconds", True, advanced=True)
+    timeout = OptPort(10, "Request timeout in seconds", True, advanced=True)
     verify_ssl = OptBool(False, "Verify SSL certificates: true/false", False, advanced=True)
     proxy = OptString("", "Proxy URL (e.g., 'http://127.0.0.1:8080')", False, advanced=True)
-
+    
     def __init__(self, framework=None):
         """
         Initialize HTTP client using options from the module.

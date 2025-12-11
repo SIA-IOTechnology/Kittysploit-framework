@@ -1,0 +1,263 @@
+/* Modern Gradient Header Styles for KittyProxy - Brand Colors */
+
+/* Global Top Bar - Dark to Violet Gradient */
+.global-top-bar {
+    height: 70px;
+    border-bottom: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    background: linear-gradient(135deg, #1e1e1e 0%, #3d3d3d 30%, #6200ea 100%);
+    position: relative;
+    flex-shrink: 0;
+    z-index: 10;
+    box-shadow:
+        0 4px 20px rgba(0, 0, 0, 0.3),
+        0 8px 40px rgba(98, 0, 234, 0.2);
+}
+
+/* Animated shimmer effect */
+.global-top-bar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    background: linear-gradient(90deg,
+            transparent,
+            rgba(255, 255, 255, 0.1),
+            transparent);
+    animation: shimmer 3s infinite;
+    pointer-events: none;
+}
+
+@keyframes shimmer {
+    0% {
+        left: -100%;
+    }
+
+    100% {
+        left: 100%;
+    }
+}
+
+/* Header Left Section */
+.top-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+}
+
+/* Header Title */
+.global-top-bar h2,
+#current-view-title {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #ffffff;
+    white-space: nowrap;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    letter-spacing: -0.02em;
+}
+
+/* Divider */
+.top-bar-divider {
+    width: 1px;
+    height: 36px;
+    background: rgba(255, 255, 255, 0.25);
+    flex-shrink: 0;
+    box-shadow: 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Header Right Section */
+.top-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+}
+
+/* View Actions Container */
+.view-actions-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Workspace Controls */
+.workspace-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* Workspace Group - Glassmorphism */
+.workspace-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 12px;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+}
+
+.workspace-group:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.4);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+/* Workspace Label */
+.workspace-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.workspace-label .material-symbols-outlined {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.9);
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* Workspace Select */
+.workspace-select {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-family: 'Inter', sans-serif;
+    min-width: 140px;
+    color: #ffffff;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.workspace-select:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.workspace-select:focus {
+    outline: none;
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.workspace-select option {
+    background: #ffffff;
+    color: #333;
+}
+
+/* Icon Buttons */
+.btn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.btn-icon:hover {
+    background: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.btn-icon .material-symbols-outlined {
+    font-size: 20px;
+}
+
+/* Workspace Toggle */
+.workspace-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    position: relative;
+}
+
+.workspace-toggle:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.25);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transform: translateY(-2px);
+}
+
+.workspace-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.workspace-toggle .material-symbols-outlined {
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 0.3s ease;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.workspace-toggle input:checked+.material-symbols-outlined {
+    color: #ffffff;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+.workspace-toggle:hover .material-symbols-outlined {
+    color: #ffffff;
+}
+
+/* View Actions Bar */
+.view-actions-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

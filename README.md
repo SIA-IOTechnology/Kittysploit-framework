@@ -76,6 +76,46 @@ python kittyapi.py -H 0.0.0.0 -p 5000 -m "master_key"
 python kittyrpc.py -H 0.0.0.0 -p 8888 -m "master_key"
 ```
 
+## Components
+
+### KittyProxy
+
+KittyProxy is a web-based HTTP/HTTPS proxy interface that provides real-time traffic interception, analysis, and manipulation capabilities. It features:
+
+- **Live Traffic Monitoring**: View and analyze HTTP/HTTPS requests and responses in real-time
+- **Request/Response Modification**: Intercept and modify requests before they reach the target server
+- **Repeater & Intruder Tools**: Replay and fuzz requests with customizable payloads
+- **Technology Detection**: Automatically detect web technologies and frameworks
+- **Endpoint Discovery**: Extract and visualize API endpoints, GraphQL queries, and more
+- **Performance Monitoring**: Track response times and analyze request patterns
+- **Plugin System**: Extensible architecture for custom interception plugins
+
+Start KittyProxy:
+```bash
+python kittyproxy.py 
+```
+
+Access the web interface at `http://localhost:8000`
+
+### KittyCollab
+
+KittyCollab is a real-time collaborative code editor that enables multiple penetration testers to work together on the same exploit or module. It provides:
+
+- **Room Management**: Create and join collaborative editing rooms
+- **Real-time Code Editing**: Collaborative editing using Monaco Editor (VS Code-like interface)
+- **Module/Exploit Development**: Edit and develop modules and exploits together in real-time
+- **Chat System**: Communicate with team members during development
+- **Socket.IO-based**: Real-time synchronization using Socket.IO connections
+- **Local API Integration**: Connects to local KittySploit API to load and save modules
+
+Start KittyCollab:
+```bash
+python kittycollab.py
+```
+
+Access the web interface at `http://localhost:5001`
+
+
 ## License
 
 MIT License - See [LICENSE](LICENSE) file

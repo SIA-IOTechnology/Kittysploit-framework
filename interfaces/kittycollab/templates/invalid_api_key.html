@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittySploit | API Key requise</title>
+    <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #050508;
+            font-family: 'Segoe UI', sans-serif;
+            color: #fff;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .card {
+            max-width: 540px;
+            width: 100%;
+            padding: 32px;
+            background: rgba(20, 20, 30, 0.6);
+            border: 1px solid rgba(0, 255, 255, 0.15);
+            border-radius: 14px;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+        }
+        .card h1 {
+            font-size: 22px;
+            margin-bottom: 12px;
+            letter-spacing: 1px;
+        }
+        .card p {
+            color: rgba(255, 255, 255, 0.75);
+            line-height: 1.6;
+            margin: 0 0 12px 0;
+        }
+        .card .error {
+            color: #ff6b6b;
+            margin: 12px 0;
+            font-family: 'Consolas', monospace;
+            word-break: break-word;
+        }
+        .hint {
+            margin-top: 20px;
+            padding: 12px;
+            border: 1px dashed rgba(0, 255, 255, 0.3);
+            border-radius: 10px;
+            background: rgba(0, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.85);
+        }
+        .hint code {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-family: 'Consolas', monospace;
+            color: #00ffff;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <i class="fas fa-lock fa-2x" style="color:#00ffff;margin-bottom:14px;"></i>
+        <h1>API Key required</h1>
+        <p>Impossible to start KittyCollab without a valid API key.</p>
+        {% if error_message %}
+        <div class="error">{{ error_message }}</div>
+        {% endif %}
+        <div class="hint">
+            <p>Add your key in <code>config.toml</code> :</p>
+            <p><code>[FRAMEWORK]</code><br><code>api_key = "your_api_key"</code></p>
+            <p>Then restart the KittyCollab server.</p>
+        </div>
+    </div>
+</body>
+</html>
+

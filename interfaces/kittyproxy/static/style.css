@@ -70,6 +70,7 @@ body {
     display: flex;
     flex-direction: row;
     overflow: hidden; /* avoid global scrollbar; views manage their own scroll */
+    overflow-x: hidden; /* prevent horizontal scroll */
 }
 
 /* Main content layout */
@@ -79,6 +80,8 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    overflow-x: hidden;
+    min-width: 0; /* Allow flex item to shrink below content size */
 }
 
 .view-section {
@@ -198,6 +201,97 @@ body {
     padding: 20px 0;
     color: #fff;
     flex-shrink: 0;
+    transition: width 0.3s ease;
+    position: relative;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.sidebar.expanded {
+    width: 240px;
+    align-items: flex-start;
+    padding: 20px 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.sidebar.expanded .main-nav {
+    width: 100%;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.sidebar.expanded .nav-item {
+    width: calc(100% - 24px);
+    justify-content: flex-start;
+    padding: 0 8px;
+    gap: 12px;
+    box-sizing: border-box;
+}
+
+.sidebar.expanded .nav-item .material-symbols-outlined {
+    flex-shrink: 0;
+}
+
+.sidebar.expanded .nav-item {
+    position: relative;
+}
+
+.sidebar.expanded .nav-item::after {
+    content: attr(data-label);
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    animation: fadeIn 0.3s ease 0.1s forwards;
+    margin-left: 4px;
+}
+
+@keyframes fadeIn {
+    to {
+        opacity: 1;
+    }
+}
+
+.sidebar:not(.expanded) .nav-item::after {
+    display: none;
+}
+
+.sidebar.expanded .logo-icon {
+    width: auto;
+    min-width: 40px;
+    height: 40px;
+    justify-content: flex-start;
+    box-sizing: border-box;
+    padding: 0;
+    margin-left: 0;
+    margin-right: 0;
+    overflow: visible;
+}
+
+.sidebar.expanded .logo-text {
+    display: inline-block !important;
+    animation: fadeIn 0.3s ease 0.1s forwards;
+    margin-left: 12px;
+    vertical-align: middle;
+    line-height: 40px;
+}
+
+.sidebar.expanded .sidebar-footer {
+    width: 100%;
+    align-items: flex-start;
+    padding: 0 12px;
+}
+
+.sidebar.expanded .sidebar-footer .nav-item {
+    width: calc(100% - 24px);
+    justify-content: flex-start;
+    padding: 0 8px;
+    box-sizing: border-box;
+}
+
+.sidebar.expanded #sidebar-toggle-icon {
+    transform: rotate(180deg);
 }
 
 .logo-icon {
@@ -212,7 +306,8 @@ body {
     border-radius: 12px;
     transition: all 0.2s;
     color: #888;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
 }
 
 .logo-icon:hover {
@@ -239,10 +334,13 @@ body {
 .main-nav {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 8px;
     width: 100%;
     align-items: center;
     flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0; /* Allow flex item to shrink */
 }
 
 .sidebar-footer {
@@ -253,6 +351,13 @@ body {
     margin-top: auto;
     gap: 20px;
     padding-bottom: 20px;
+    overflow: visible;
+    min-height: fit-content;
+}
+
+.sidebar.expanded .sidebar-footer {
+    padding-bottom: 20px;
+    overflow: visible;
 }
 
 .nav-item {
@@ -275,8 +380,8 @@ body {
 
 .nav-item.active {
     color: #fff;
-    background-color: var(--primary-color);
-    box-shadow: 0 4px 12px rgba(98, 0, 234, 0.3);
+    background-color: #2196F3;
+    box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
 }
 
 #intercept-toggle.active {
@@ -303,6 +408,27 @@ body {
     font-size: 9px;
     box-shadow: 0 0 0 2px #1e1e1e;
     pointer-events: none;
+}
+
+.intercept-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #f44336;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    box-shadow: 0 0 0 2px #1e1e1e;
+    pointer-events: none;
+    z-index: 10;
+    line-height: 1;
 }
 
 /* Content Wrapper */
@@ -854,6 +980,7 @@ body {
     flex-direction: column;
     background: #fff;
     overflow: hidden;
+    overflow-x: hidden; /* Prevent horizontal scrolling */
 }
 
 .detail-header {
@@ -915,10 +1042,12 @@ body {
 .detail-content {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden; /* Prevent horizontal scrolling */
     padding: 0;
     font-family: 'Fira Code', monospace;
     font-size: 0.9rem;
     background: #fafafa;
+    box-sizing: border-box; /* Include padding in width calculation */
 }
 
 .detail-content h4 {
@@ -1722,3 +1851,68 @@ body {
  } 
  
  
+/* SideChannel Flow Items */
+.sidechannel-flow-item {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px 16px;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    background: #fff;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.sidechannel-flow-item:hover {
+    background: #f8f9fa;
+    border-color: #d0d0d0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
+.sidechannel-flow-item.selected {
+    border-color: #2196f3;
+    box-shadow: 0 0 0 2px rgba(33,150,243,0.2), 0 2px 6px rgba(33,150,243,0.15);
+    background: #f0f8ff;
+}
+.sidechannel-flow-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+.sidechannel-flow-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.sidechannel-flow-url-container {
+    flex: 1;
+    min-width: 0;
+}
+.sidechannel-flow-url {
+    font-size: 0.85rem;
+    color: #1f1f1f;
+    font-weight: 500;
+    line-height: 1.5;
+    word-break: break-all;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+    margin-bottom: 4px;
+}
+.sidechannel-flow-host {
+    font-size: 0.75rem;
+    color: #666;
+    font-weight: 500;
+    margin-top: 2px;
+}
+.sidechannel-flow-meta {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #f0f0f0;
+    font-size: 0.75rem;
+    color: #616161;
+}
+

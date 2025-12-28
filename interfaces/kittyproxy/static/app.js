@@ -8,6 +8,7 @@ let sharedFlows = new Set(); // IDs des flows partagés en collaboration
 let interceptEnabled = false;
 let pendingInterceptsData = [];
 let selectedInterceptId = null;
+let autoResumeEnabled = false; // Mode auto-resume : reprend automatiquement toutes les requêtes
 
 // Search
 let searchTerm = '';
@@ -83,6 +84,16 @@ async function copyToClipboard(text) {
         return false;
     }
 }
+
+function debounce(fn, delay = 200) {
+    let timeoutId;
+    return (...args) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn.apply(null, args), delay);
+    };
+}
+
+const debouncedSidechannelSearch = debounce(() => renderSidechannelFlows(), 150);
 
 // Browser Launch
 const launchBtn = document.getElementById('launch-browser-btn');
@@ -166,6 +177,40 @@ const encoderClearBtn = document.getElementById('encoder-clear-btn');
 const encoderCopyInputBtn = document.getElementById('encoder-copy-input-btn');
 const encoderCopyOutputBtn = document.getElementById('encoder-copy-output-btn');
 
+// SideChannel
+let sidechannelTabManual = null;
+let sidechannelTabUrls = null;
+let sidechannelTabResults = null;
+let sidechannelResultsBadge = null;
+let sidechannelManualMode = null;
+let sidechannelUrlsMode = null;
+let sidechannelResultsMode = null;
+let sidechannelUrlsList = null;
+let sidechannelAttackTypeSelect = null;
+let sidechannelManualAttackTypeSelect = null;
+let sidechannelGenerateUrlBtn = null;
+let sidechannelTestBtn = null;
+let sidechannelFlowsList = null;
+let sidechannelFlowSearch = null;
+let sidechannelResultsList = null;
+let sidechannelGeneratedUrlInput = null;
+let sidechannelCopyUrlBtn = null;
+let sidechannelExportResultsBtn = null;
+let sidechannelClearResultsBtn = null;
+let selectedSidechannelFlowId = null;
+let sidechannelApiKeyValid = false;
+let sidechannelTests = []; // Liste des tests en cours
+let sidechannelDetections = []; // Liste des détections (résultats)
+let sidechannelPollInterval = null;
+let currentGeneratedUrl = null; // URL générée pour injection manuelle
+let currentSidechannelMode = 'manual'; // 'manual', 'urls', or 'results'
+let sidechannelGeneratedUrls = []; // Liste des URLs générées
+let sidechannelFlowCache = [];
+let sidechannelFlowsSignature = '';
+let sidechannelLastFlowFetchTs = 0;
+let sidechannelFlowsFetchInFlight = false;
+const SIDECHANNEL_MIN_FLOW_FETCH_INTERVAL = 900;
+
 // === NAVIGATION ===
 function switchView(viewId, navItem = null) {
         currentViewId = viewId;
@@ -203,6 +248,14 @@ function switchView(viewId, navItem = null) {
         }
     } else {
         removeCollabApiOverlay();
+    }
+    
+    // SideChannel tab: validate auth; otherwise remove overlay
+    if (viewId === 'sidechannel') {
+        checkSidechannelApiKey();
+        restoreSidechannelData();
+    } else {
+        removeSidechannelApiOverlay();
     }
 }
 
@@ -278,6 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
         joinCollaborationSession(savedState.sessionId);
     }
     
+    // Restaurer les données SideChannel au chargement
+    restoreSidechannelData();
+    
     // Find the active view
     const activeNavItem = document.querySelector('.nav-item.active');
     if (activeNavItem && activeNavItem.dataset.view) {
@@ -285,6 +341,119 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         // Default to browser view (accessible via logo)
         switchView('browser');
+    }
+    
+    // Sidebar toggle functionality
+    const sidebar = document.querySelector('.sidebar');
+    
+    // Fonction pour créer et ajouter le bouton toggle à une top-bar
+    function addToggleButtonToTopBar(topBar) {
+        // Vérifier si le bouton existe déjà
+        if (topBar.querySelector('#sidebar-toggle-btn')) {
+            return;
+        }
+        
+        const toggleBtn = document.createElement('button');
+        toggleBtn.id = 'sidebar-toggle-btn';
+        toggleBtn.className = 'btn btn-secondary';
+        toggleBtn.title = 'Toggle Sidebar';
+        toggleBtn.style.cssText = 'padding: 8px 12px; min-width: auto;';
+        toggleBtn.innerHTML = '<span class="material-symbols-outlined" id="sidebar-toggle-icon">menu</span>';
+        
+        // Insérer le bouton au début de la top-bar
+        const firstChild = topBar.firstElementChild;
+        
+        // Vérifier si le premier enfant est déjà un conteneur flex
+        const isFlexContainer = firstChild && 
+            firstChild.style && 
+            firstChild.style.display === 'flex' && 
+            firstChild.style.alignItems === 'center';
+        
+        if (isFlexContainer) {
+            // Si le premier élément est déjà un conteneur flex, ajouter le bouton dedans au début
+            firstChild.insertBefore(toggleBtn, firstChild.firstChild);
+        } else {
+            // Sinon, créer un nouveau conteneur flex
+            const container = document.createElement('div');
+            container.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+            container.appendChild(toggleBtn);
+            
+            // Déplacer tous les enfants existants dans le nouveau container
+            const existingChildren = Array.from(topBar.childNodes);
+            existingChildren.forEach(child => {
+                if (child.nodeType === 1) { // Element node only
+                    container.appendChild(child);
+                }
+            });
+            
+            // Ajouter le container à la top-bar
+            topBar.appendChild(container);
+        }
+    }
+    
+    // Ajouter le bouton toggle à toutes les top-bar
+    const allTopBars = document.querySelectorAll('.top-bar');
+    allTopBars.forEach(addToggleButtonToTopBar);
+    
+    // Observer pour ajouter le bouton aux top-bar créées dynamiquement
+    const topBarObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === 1) { // Element node
+                    if (node.classList && node.classList.contains('top-bar')) {
+                        addToggleButtonToTopBar(node);
+                    }
+                    // Vérifier aussi les enfants
+                    const topBars = node.querySelectorAll && node.querySelectorAll('.top-bar');
+                    if (topBars) {
+                        topBars.forEach(addToggleButtonToTopBar);
+                    }
+                }
+            });
+        });
+    });
+    
+    topBarObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    if (sidebar) {
+        // Restaurer l'état du sidebar depuis localStorage
+        const sidebarExpanded = localStorage.getItem('sidebarExpanded') === 'true';
+        if (sidebarExpanded) {
+            sidebar.classList.add('expanded');
+            updateToggleIcon();
+        }
+        
+        // Gérer le clic sur le bouton toggle (délégation d'événements)
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('#sidebar-toggle-btn')) {
+                e.stopPropagation();
+                sidebar.classList.toggle('expanded');
+                const isExpanded = sidebar.classList.contains('expanded');
+                localStorage.setItem('sidebarExpanded', isExpanded);
+                updateToggleIcon();
+            }
+        });
+        
+        // Fonction pour mettre à jour l'icône
+        function updateToggleIcon() {
+            const icons = document.querySelectorAll('#sidebar-toggle-icon');
+            const isExpanded = sidebar.classList.contains('expanded');
+            icons.forEach(icon => {
+                icon.textContent = isExpanded ? 'chevron_left' : 'menu';
+            });
+        }
+        
+        // Observer les changements de classe pour mettre à jour l'icône
+        const sidebarObserver = new MutationObserver(() => {
+            updateToggleIcon();
+        });
+        sidebarObserver.observe(sidebar, {
+            attributes: true,
+            attributeFilter: ['class']
+        });
     }
 });
 
@@ -392,6 +561,1186 @@ if (encoderCopyInputBtn) {
 if (encoderCopyOutputBtn) {
     encoderCopyOutputBtn.addEventListener('click', () => copyEncoderText(encoderOutputEl));
 }
+
+// === SIDECHANNEL ===
+let sidechannelContentDefaultHTML = null;
+
+// Sauvegarder les données SideChannel dans localStorage
+function saveSidechannelData() {
+    try {
+        const dataToSave = {
+            generatedUrls: sidechannelGeneratedUrls.map(url => ({
+                ...url,
+                generated_at: url.generated_at instanceof Date ? url.generated_at.toISOString() : url.generated_at
+            })),
+            tests: sidechannelTests.map(test => ({
+                ...test,
+                timestamp: test.timestamp instanceof Date ? test.timestamp.toISOString() : test.timestamp
+            })),
+            detections: sidechannelDetections.map(detection => ({
+                ...detection,
+                detected_at: detection.detected_at instanceof Date ? detection.detected_at.toISOString() : detection.detected_at
+            }))
+        };
+        localStorage.setItem('sidechannelData', JSON.stringify(dataToSave));
+    } catch (err) {
+        console.error('Error saving SideChannel data:', err);
+    }
+}
+
+// Restaurer les données SideChannel depuis localStorage
+function restoreSidechannelData() {
+    try {
+        const savedData = localStorage.getItem('sidechannelData');
+        if (savedData) {
+            const data = JSON.parse(savedData);
+            
+            // Restaurer les URLs générées
+            if (data.generatedUrls && Array.isArray(data.generatedUrls)) {
+                sidechannelGeneratedUrls = data.generatedUrls.map(url => ({
+                    ...url,
+                    generated_at: url.generated_at ? new Date(url.generated_at) : new Date()
+                }));
+            }
+            
+            // Restaurer les tests
+            if (data.tests && Array.isArray(data.tests)) {
+                sidechannelTests = data.tests.map(test => ({
+                    ...test,
+                    timestamp: test.timestamp ? new Date(test.timestamp) : new Date()
+                }));
+            }
+            
+            // Restaurer les détections
+            if (data.detections && Array.isArray(data.detections)) {
+                sidechannelDetections = data.detections.map(detection => ({
+                    ...detection,
+                    detected_at: detection.detected_at ? new Date(detection.detected_at) : new Date()
+                }));
+            }
+            
+            // Mettre à jour l'affichage
+            if (currentViewId === 'sidechannel') {
+                renderSidechannelUrls();
+                renderSidechannelResults();
+                updateSidechannelResultsBadge();
+                
+                // Redémarrer le polling si nécessaire
+                const hasPendingTests = sidechannelTests.some(t => t.status === 'pending');
+                if (hasPendingTests) {
+                    startSidechannelPolling();
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Error restoring SideChannel data:', err);
+    }
+}
+
+function renderSidechannelApiKeyRequired(message) {
+    if (currentViewId !== 'sidechannel') return;
+    const content = document.getElementById('sidechannel-content');
+    if (content) {
+        if (!sidechannelContentDefaultHTML) {
+            sidechannelContentDefaultHTML = content.innerHTML;
+        }
+        content.innerHTML = `
+            <div style="width: 100%; display: flex; align-items: center; justify-content: center; padding: 20px 0;">
+                <div style="max-width: 420px; width: 90%; padding: 22px; border: 1px solid rgba(0,255,255,0.25); border-radius: 12px; background: #181a23; color: #fff; font-family: 'Segoe UI', sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,0.35); text-align: center;">
+                    <h3 style="margin: 0 0 8px 0; color: #00ffff; font-size: 20px; text-align: center;">Pro feature – API key required</h3>
+                    <p style="margin: 6px 0 12px 0; color: rgba(255,255,255,0.9); text-align: center;">${message || 'SideChannel requires a valid API key.'}</p>
+                    <div style="padding: 12px; border: 1px dashed rgba(0,255,255,0.35); border-radius: 10px; background: rgba(0,255,255,0.06); color: rgba(255,255,255,0.95); font-size: 13px; text-align: center;">
+                        <p style="margin: 0 0 6px 0; text-align: center;">Add your key in <code style="background: rgba(255,255,255,0.12); padding: 2px 6px; border-radius: 6px; color: #00ffff;">config.toml</code> :</p>
+                        <p style="margin: 0; font-family: Consolas, monospace; text-align: center;">
+                            [FRAMEWORK]<br>
+                            api_key = "your_api_key"
+                        </p>
+                    </div>
+                    <p style="margin: 14px 0 0 0; color: rgba(255,255,255,0.75); font-size: 12px; text-align: center;">Restart KittyProxy after updating.</p>
+                </div>
+            </div>
+        `;
+        content.style.display = 'flex';
+        content.style.justifyContent = 'center';
+        content.style.alignItems = 'center';
+    }
+    hydrateSidechannelDom();
+    if (sidechannelTestBtn) sidechannelTestBtn.disabled = true;
+}
+
+function removeSidechannelApiOverlay() {
+    if (currentViewId !== 'sidechannel') return;
+    const content = document.getElementById('sidechannel-content');
+    if (content && sidechannelContentDefaultHTML) {
+        content.innerHTML = sidechannelContentDefaultHTML;
+        // Restore default styles
+        content.style.display = '';
+        content.style.justifyContent = '';
+        content.style.alignItems = '';
+        hydrateSidechannelDom();
+    }
+}
+
+// Load and check API key status from server (utilise le même endpoint que collaboration)
+async function checkSidechannelApiKey() {
+    if (currentViewId !== 'sidechannel') return;
+    
+    try {
+        // Utilise le même endpoint que la collaboration
+        const res = await fetch(`${API_BASE}/collab/auth`);
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            renderSidechannelApiKeyRequired(data.detail || data.message || 'API key invalid or missing.');
+            sidechannelApiKeyValid = false;
+            return false;
+        }
+        const data = await res.json();
+        sidechannelApiKeyValid = !!(data.valid && data.token);
+        
+        if (sidechannelApiKeyValid) {
+            removeSidechannelApiOverlay();
+            updateSidechannelTestButtonState();
+            if (sidechannelGenerateUrlBtn) sidechannelGenerateUrlBtn.disabled = false;
+            // Initialize the correct mode on first load (default to manual)
+            switchSidechannelMode(currentSidechannelMode || 'manual');
+        } else {
+            renderSidechannelApiKeyRequired(data.detail || data.message || 'API key invalid or missing.');
+            if (sidechannelTestBtn) sidechannelTestBtn.disabled = true;
+            if (sidechannelGenerateUrlBtn) sidechannelGenerateUrlBtn.disabled = true;
+        }
+        return sidechannelApiKeyValid;
+    } catch (err) {
+        console.error('Error checking SideChannel API key:', err);
+        renderSidechannelApiKeyRequired('Unable to validate API key.');
+        sidechannelApiKeyValid = false;
+        return false;
+    }
+}
+
+function getMethodColor(method) {
+    const colors = {
+        'GET': '#4caf50',
+        'POST': '#2196f3',
+        'PUT': '#ff9800',
+        'DELETE': '#f44336',
+        'PATCH': '#9c27b0'
+    };
+    return colors[method] || '#666';
+}
+
+function getStatusColor(status) {
+    if (status >= 200 && status < 300) return '#4caf50';
+    if (status >= 300 && status < 400) return '#ff9800';
+    if (status >= 400) return '#f44336';
+    return '#666';
+}
+
+function escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatDuration(ms) {
+    if (ms === null || ms === undefined) return '--';
+    if (ms >= 1000) {
+        return `${(ms / 1000).toFixed(1)}s`;
+    }
+    return `${Math.max(1, Math.round(ms))} ms`;
+}
+
+function formatResponseSize(bytes) {
+    if (bytes === null || bytes === undefined) return '--';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes === 0) return '0 B';
+    return `${bytes} B`;
+}
+
+function updateSidechannelTestButtonState() {
+    if (!sidechannelTestBtn) return;
+    if (sidechannelTestBtn.dataset.loading === '1') {
+        return;
+    }
+    const shouldEnable = sidechannelApiKeyValid && !!selectedSidechannelFlowId;
+    sidechannelTestBtn.disabled = !shouldEnable;
+}
+
+// Load flows for SideChannel
+async function loadSidechannelFlows(options = {}) {
+    if (!sidechannelFlowsList) return;
+    const { forceNetwork = false } = options;
+    const now = Date.now();
+    if (!forceNetwork && sidechannelFlowsFetchInFlight) {
+        return;
+    }
+    if (!forceNetwork && now - sidechannelLastFlowFetchTs < SIDECHANNEL_MIN_FLOW_FETCH_INTERVAL) {
+        renderSidechannelFlows();
+        return;
+    }
+    sidechannelFlowsFetchInFlight = true;
+    if (sidechannelFlowCache.length === 0) {
+        sidechannelFlowsList.innerHTML = '<div style="text-align: center; padding: 40px 20px; color: #888; font-size: 0.9rem;">Loading flows...</div>';
+    }
+    try {
+        const res = await fetch(`${API_BASE}/flows?page=1&size=1000`);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        const data = await res.json();
+        const flows = data.items || data.flows || [];
+        const signature = flows.map(flow => {
+            const flowId = flow.id || flow.flow_id || '';
+            const status = flow.status_code || flow.response?.status_code || '';
+            const method = flow.method || flow.request?.method || '';
+            return `${flowId}:${status}:${method}:${flow.timestamp_start || ''}`;
+        }).join('|');
+        sidechannelLastFlowFetchTs = now;
+        if (!forceNetwork && signature === sidechannelFlowsSignature && sidechannelFlowCache.length) {
+            renderSidechannelFlows();
+            return;
+        }
+        sidechannelFlowsSignature = signature;
+        sidechannelFlowCache = flows;
+        renderSidechannelFlows();
+    } catch (err) {
+        console.error('Error loading SideChannel flows:', err);
+        if (sidechannelFlowsList) {
+            sidechannelFlowsList.innerHTML = '<div style="text-align: center; padding: 50px 20px; color: #f44336; font-size: 0.9rem;">Error loading flows</div>';
+        }
+    } finally {
+        sidechannelFlowsFetchInFlight = false;
+    }
+}
+
+function renderSidechannelFlows() {
+    if (!sidechannelFlowsList) return;
+    const searchTerm = (sidechannelFlowSearch?.value || '').trim().toLowerCase();
+    const hasFlows = sidechannelFlowCache.length > 0;
+    const filteredFlows = hasFlows
+        ? sidechannelFlowCache.filter(flow => {
+            if (!searchTerm) return true;
+            const url = (flow.request?.url || flow.url || flow.path || '').toLowerCase();
+            const method = (flow.request?.method || flow.method || '').toLowerCase();
+            const status = String(flow.status_code ?? flow.response?.status_code ?? '').toLowerCase();
+            return url.includes(searchTerm) || method.includes(searchTerm) || status.includes(searchTerm);
+        })
+        : [];
+
+    const selectionVisible = filteredFlows.some(flow => {
+        const flowId = flow.id || flow.flow_id || flow.uuid;
+        return flowId && flowId === selectedSidechannelFlowId;
+    });
+    if (!selectionVisible) {
+        selectedSidechannelFlowId = null;
+    }
+    updateSidechannelTestButtonState();
+
+    if (!hasFlows) {
+        sidechannelFlowsList.innerHTML = '<div style="text-align: center; padding: 50px 20px; color: #888; font-size: 0.9rem;">No flows available. Make sure the proxy is running and capturing traffic.</div>';
+        return;
+    }
+
+    if (filteredFlows.length === 0) {
+        sidechannelFlowsList.innerHTML = '<div style="text-align: center; padding: 50px 20px; color: #888; font-size: 0.9rem;">No flows match your search</div>';
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    filteredFlows.forEach(flow => {
+        const flowId = flow.id || flow.flow_id || flow.uuid;
+        const method = (flow.request?.method || flow.method || 'GET').toUpperCase();
+        const url = flow.request?.url || flow.url || flow.request?.path || flow.path || 'Unknown URL';
+        const statusValue = flow.status_code ?? flow.response?.status_code ?? '-';
+        const status = statusValue === null || statusValue === undefined || statusValue === '' ? '---' : statusValue;
+        let host = flow.host || flow.request?.host || '';
+        if (!host && url) {
+            try {
+                const parsed = new URL(url);
+                host = parsed.host;
+            } catch {
+                // ignore parsing errors
+            }
+        }
+        const durationLabel = formatDuration(flow.duration_ms);
+        const sizeLabel = formatResponseSize(flow.response_size);
+        const metaParts = [];
+        if (durationLabel !== '--') metaParts.push(durationLabel);
+        if (sizeLabel !== '--') metaParts.push(sizeLabel);
+        const metaText = metaParts.length ? metaParts.join(' | ') : '--';
+        const isSelected = flowId && flowId === selectedSidechannelFlowId;
+
+        const item = document.createElement('div');
+        item.className = 'sidechannel-flow-item' + (isSelected ? ' selected' : '');
+        item.title = url;
+        
+        item.innerHTML = `
+            <div class="sidechannel-flow-header">
+                <div class="sidechannel-flow-badges">
+                    <span style="padding: 4px 10px; background: ${getMethodColor(method)}; color: white; border-radius: 4px; font-size: 12px; font-weight: 600; font-family: 'Fira Code', monospace;">${escapeHtml(method)}</span>
+                    <span style="padding: 4px 10px; background: ${getStatusColor(statusValue)}; color: white; border-radius: 4px; font-size: 12px; font-weight: 600;">${escapeHtml(status)}</span>
+                </div>
+                <div class="sidechannel-flow-url-container">
+                    <div class="sidechannel-flow-url">${escapeHtml(url)}</div>
+                    ${host ? `<div class="sidechannel-flow-host">${escapeHtml(host)}</div>` : ''}
+                </div>
+            </div>
+            <div class="sidechannel-flow-meta">
+                ${metaText !== '--' ? `<span>${escapeHtml(metaText)}</span>` : ''}
+            </div>
+        `;
+
+        item.addEventListener('click', () => {
+            selectedSidechannelFlowId = flowId;
+            document.querySelectorAll('#sidechannel-flows-list .sidechannel-flow-item').forEach(el => {
+                el.classList.remove('selected');
+            });
+            item.classList.add('selected');
+            updateSidechannelTestButtonState();
+        });
+
+        fragment.appendChild(item);
+    });
+
+    sidechannelFlowsList.innerHTML = '';
+    sidechannelFlowsList.appendChild(fragment);
+}
+
+async function handleSidechannelGenerateUrlClick() {
+    if (!sidechannelApiKeyValid) {
+        showToast('API key not configured or invalid. Please configure it in config.toml', 'error');
+        return;
+    }
+    if (!sidechannelGenerateUrlBtn) return;
+    const attackType = sidechannelManualAttackTypeSelect ? sidechannelManualAttackTypeSelect.value : 'xxe';
+    sidechannelGenerateUrlBtn.disabled = true;
+    sidechannelGenerateUrlBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">hourglass_empty</span> Generating...';
+    try {
+        const res = await fetch(`${API_BASE}/sidechannel/generate-url`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ attack_type: attackType })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            currentGeneratedUrl = data.sidechannel_url;
+            const testId = data.test_id;
+            if (sidechannelGeneratedUrlInput) {
+                sidechannelGeneratedUrlInput.value = currentGeneratedUrl || '';
+            }
+            if (sidechannelCopyUrlBtn) {
+                sidechannelCopyUrlBtn.disabled = !currentGeneratedUrl;
+            }
+            const urlEntry = {
+                id: `url-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                test_id: testId,
+                attack_type: attackType,
+                sidechannel_url: currentGeneratedUrl,
+                generated_at: new Date(),
+                status: 'pending'
+            };
+            sidechannelGeneratedUrls.push(urlEntry);
+            saveSidechannelData();
+            if (currentSidechannelMode === 'urls') {
+                renderSidechannelUrls();
+            }
+            const test = {
+                id: testId,
+                flow_id: 'manual',
+                attack_type: attackType,
+                sidechannel_url: currentGeneratedUrl,
+                status: 'pending',
+                detected: false,
+                timestamp: new Date(),
+                details: {},
+                manual: true
+            };
+            sidechannelTests.push(test);
+            saveSidechannelData();
+            renderSidechannelTests();
+            showToast('URL generated! Copy it and inject it manually in your payloads.', 'success');
+            startSidechannelPolling();
+        } else {
+            showToast(data.detail || data.message || 'Failed to generate URL', 'error');
+        }
+    } catch (err) {
+        console.error('SideChannel generate URL error:', err);
+        showToast('Failed to generate URL', 'error');
+    } finally {
+        if (sidechannelGenerateUrlBtn) {
+            sidechannelGenerateUrlBtn.disabled = !sidechannelApiKeyValid;
+            sidechannelGenerateUrlBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">link</span> Generate URL';
+        }
+    }
+}
+
+function handleSidechannelCopyUrlClick() {
+    if (!currentGeneratedUrl) {
+        showToast('No URL to copy yet', 'info');
+        return;
+    }
+    copyToClipboard(currentGeneratedUrl).then(ok => {
+        if (ok) {
+            showToast('URL copied to clipboard', 'success');
+        } else {
+            showToast('Failed to copy URL', 'error');
+        }
+    });
+}
+
+async function handleSidechannelTestClick() {
+    if (!selectedSidechannelFlowId) {
+        showToast('Please select a flow to test', 'error');
+        return;
+    }
+    if (!sidechannelApiKeyValid) {
+        showToast('API key not configured or invalid. Please configure it in config.toml', 'error');
+        return;
+    }
+    if (!sidechannelTestBtn) return;
+    const attackType = sidechannelAttackTypeSelect ? sidechannelAttackTypeSelect.value : 'xxe';
+    sidechannelTestBtn.dataset.loading = '1';
+    sidechannelTestBtn.disabled = true;
+    sidechannelTestBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">hourglass_empty</span> Starting...';
+    try {
+        const res = await fetch(`${API_BASE}/sidechannel/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                flow_id: selectedSidechannelFlowId,
+                attack_type: attackType
+            })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const test = {
+                id: data.test_id || `test-${Date.now()}`,
+                flow_id: data.flow_id,
+                attack_type: data.attack_type,
+                sidechannel_url: data.sidechannel_url,
+                status: 'pending',
+                detected: data.detected || false,
+                timestamp: new Date(),
+                details: data.details || {},
+                request_duration: data.request_duration,
+                target_response_status: data.target_response_status
+            };
+            sidechannelTests.push(test);
+            saveSidechannelData();
+            showToast('Test started! Monitoring for requests...', 'success');
+            startSidechannelPolling();
+            checkSidechannelTest(test.id);
+        } else {
+            showToast(data.detail || data.message || 'Test failed', 'error');
+        }
+    } catch (err) {
+        console.error('SideChannel test error:', err);
+        showToast('Failed to start test', 'error');
+    } finally {
+        if (sidechannelTestBtn) {
+            delete sidechannelTestBtn.dataset.loading;
+            sidechannelTestBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">bug_report</span> Test Attack';
+        }
+        updateSidechannelTestButtonState();
+    }
+}
+
+function handleSidechannelExportResultsClick() {
+    if (sidechannelDetections.length === 0) {
+        showToast('No detections to export', 'info');
+        return;
+    }
+    const exportData = {
+        export_date: new Date().toISOString(),
+        total_detections: sidechannelDetections.length,
+        detections: sidechannelDetections.map(d => ({
+            id: d.id,
+            test_id: d.test_id,
+            attack_type: d.attack_type,
+            sidechannel_url: d.sidechannel_url,
+            detected_at: d.detected_at.toISOString(),
+            evidence: d.evidence,
+            flow_id: d.flow_id,
+            manual: d.manual
+        }))
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sidechannel-detections-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Results exported successfully', 'success');
+}
+
+function handleSidechannelClearResultsClick() {
+    if (sidechannelDetections.length === 0) {
+        showToast('No results to clear', 'info');
+        return;
+    }
+    if (confirm('Clear all detection results? This cannot be undone.')) {
+        sidechannelDetections = [];
+        saveSidechannelData();
+        updateSidechannelResultsBadge();
+        renderSidechannelResults();
+        showToast('All results cleared', 'info');
+    }
+}
+
+function hydrateSidechannelDom() {
+    sidechannelTabManual = document.getElementById('sidechannel-tab-manual');
+    sidechannelTabUrls = document.getElementById('sidechannel-tab-urls');
+    sidechannelTabResults = document.getElementById('sidechannel-tab-results');
+    sidechannelResultsBadge = document.getElementById('sidechannel-results-badge');
+    sidechannelManualMode = document.getElementById('sidechannel-manual-mode');
+    sidechannelUrlsMode = document.getElementById('sidechannel-urls-mode');
+    sidechannelResultsMode = document.getElementById('sidechannel-results-mode');
+    sidechannelUrlsList = document.getElementById('sidechannel-urls-list');
+    sidechannelManualAttackTypeSelect = document.getElementById('sidechannel-manual-attack-type');
+    sidechannelGenerateUrlBtn = document.getElementById('sidechannel-generate-url-btn');
+    sidechannelResultsList = document.getElementById('sidechannel-results-list');
+    sidechannelGeneratedUrlInput = document.getElementById('sidechannel-generated-url');
+    sidechannelCopyUrlBtn = document.getElementById('sidechannel-copy-url-btn');
+    sidechannelExportResultsBtn = document.getElementById('sidechannel-export-results-btn');
+    sidechannelClearResultsBtn = document.getElementById('sidechannel-clear-results-btn');
+
+    if (sidechannelTabManual) sidechannelTabManual.onclick = () => switchSidechannelMode('manual');
+    if (sidechannelTabUrls) sidechannelTabUrls.onclick = () => switchSidechannelMode('urls');
+    if (sidechannelTabResults) sidechannelTabResults.onclick = () => switchSidechannelMode('results');
+    if (sidechannelGenerateUrlBtn) {
+        sidechannelGenerateUrlBtn.onclick = handleSidechannelGenerateUrlClick;
+        sidechannelGenerateUrlBtn.disabled = !sidechannelApiKeyValid;
+    }
+    if (sidechannelCopyUrlBtn) {
+        sidechannelCopyUrlBtn.onclick = handleSidechannelCopyUrlClick;
+        sidechannelCopyUrlBtn.disabled = !currentGeneratedUrl;
+    }
+    if (sidechannelTestBtn) {
+        sidechannelTestBtn.onclick = handleSidechannelTestClick;
+        updateSidechannelTestButtonState();
+    }
+    if (sidechannelExportResultsBtn) {
+        sidechannelExportResultsBtn.onclick = handleSidechannelExportResultsClick;
+    }
+    if (sidechannelClearResultsBtn) {
+        sidechannelClearResultsBtn.onclick = handleSidechannelClearResultsClick;
+    }
+
+    if (currentSidechannelMode === 'urls') {
+        renderSidechannelUrls();
+    } else if (currentSidechannelMode === 'results') {
+        renderSidechannelResults();
+    }
+    updateSidechannelResultsBadge();
+}
+
+hydrateSidechannelDom();
+
+// Mode switching
+function switchSidechannelMode(mode) {
+    currentSidechannelMode = mode;
+    
+    // Update tabs
+    const tabs = [sidechannelTabManual, sidechannelTabUrls, sidechannelTabResults];
+    tabs.forEach(tab => {
+        if (tab) {
+            tab.classList.remove('active');
+            tab.style.borderBottomColor = 'transparent';
+            tab.style.color = '#666';
+            tab.style.fontWeight = '500';
+        }
+    });
+    
+    if (mode === 'manual' && sidechannelTabManual) {
+        sidechannelTabManual.classList.add('active');
+        sidechannelTabManual.style.borderBottomColor = 'var(--primary-color, #6200ea)';
+        sidechannelTabManual.style.color = 'var(--primary-color, #6200ea)';
+        sidechannelTabManual.style.fontWeight = '600';
+    } else if (mode === 'urls' && sidechannelTabUrls) {
+        sidechannelTabUrls.classList.add('active');
+        sidechannelTabUrls.style.borderBottomColor = 'var(--primary-color, #6200ea)';
+        sidechannelTabUrls.style.color = 'var(--primary-color, #6200ea)';
+        sidechannelTabUrls.style.fontWeight = '600';
+    } else if (mode === 'results' && sidechannelTabResults) {
+        sidechannelTabResults.classList.add('active');
+        sidechannelTabResults.style.borderBottomColor = 'var(--primary-color, #6200ea)';
+        sidechannelTabResults.style.color = 'var(--primary-color, #6200ea)';
+        sidechannelTabResults.style.fontWeight = '600';
+    }
+    
+    // Update panels
+    if (sidechannelManualMode && sidechannelUrlsMode && sidechannelResultsMode) {
+        // Hide all panels first
+        sidechannelManualMode.style.display = 'none';
+        sidechannelUrlsMode.style.display = 'none';
+        sidechannelResultsMode.style.display = 'none';
+        
+        if (mode === 'manual') {
+            sidechannelManualMode.style.display = 'block';
+        } else if (mode === 'urls') {
+            sidechannelUrlsMode.style.display = 'block';
+            // Render URLs list
+            renderSidechannelUrls();
+        } else if (mode === 'results') {
+            sidechannelResultsMode.style.display = 'flex';
+            // Render results
+            renderSidechannelResults();
+        }
+    }
+}
+
+// Rendre la liste des tests
+// Function kept for compatibility but does nothing - tests panel has been removed
+// Tests are still tracked in memory for polling and detection purposes
+function renderSidechannelTests() {
+    // No-op: tests panel removed, but tests are still tracked in memory
+    return;
+}
+
+// Copier l'URL SideChannel
+function copySidechannelUrl(url) {
+    copyToClipboard(url).then(ok => {
+        if (ok) {
+            showToast('URL copied to clipboard', 'success');
+        } else {
+            showToast('Failed to copy URL', 'error');
+        }
+    });
+}
+window.copySidechannelUrl = copySidechannelUrl;
+
+// Supprimer un test
+function deleteSidechannelTest(testId) {
+    sidechannelTests = sidechannelTests.filter(t => t.id !== testId);
+    renderSidechannelTests();
+    showToast('Test removed', 'info');
+}
+window.deleteSidechannelTest = deleteSidechannelTest;
+
+// Vérifier le statut d'un test
+async function checkSidechannelTest(testId) {
+    const test = sidechannelTests.find(t => t.id === testId);
+    if (!test) return;
+    
+    // Ne vérifier que les tests en attente
+    if (test.status !== 'pending') return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/sidechannel/check/${testId}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (res.ok) {
+            const data = await res.json();
+            test.status = data.detected ? 'detected' : (data.message && data.message.includes('expired') ? 'error' : 'pending');
+            test.detected = data.detected || false;
+            if (data.details) {
+                // Merger les détails, en préservant l'evidence existante
+                test.details = { 
+                    ...test.details, 
+                    ...data.details,
+                    evidence: data.details.evidence || test.details.evidence || data.details.request_details || test.details.evidence
+                };
+            }
+            // Mettre à jour la liste des URLs si on est en mode URLs
+            if (currentSidechannelMode === 'urls') {
+                renderSidechannelUrls();
+            }
+            
+            // Si une vulnérabilité est détectée, ajouter à la liste des détections
+            if (data.detected) {
+                // Vérifier si cette détection n'existe pas déjà
+                const existingDetection = sidechannelDetections.find(d => d.test_id === test.id);
+                if (!existingDetection) {
+                    const detection = {
+                        id: `detection-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        test_id: test.id,
+                        attack_type: test.attack_type,
+                        sidechannel_url: test.sidechannel_url,
+                        detected_at: new Date(),
+                        evidence: test.details?.evidence || data.details?.evidence || {},
+                        flow_id: test.flow_id,
+                        manual: test.manual || false
+                    };
+                    sidechannelDetections.push(detection);
+                    saveSidechannelData();
+                    updateSidechannelResultsBadge();
+                    // Si on est en mode results, re-render
+                    if (currentSidechannelMode === 'results') {
+                        renderSidechannelResults();
+                    }
+                }
+                showToast(`⚠️ Vulnerability detected for ${test.attack_type.toUpperCase()}! Check Results tab.`, 'error');
+            }
+        } else if (res.status === 404) {
+            // Test expiré ou non trouvé
+            test.status = 'error';
+            test.details = { ...test.details, message: 'Test expired or not found' };
+        }
+    } catch (err) {
+        console.error('Error checking test:', err);
+        // Ne pas changer le statut en cas d'erreur réseau
+    }
+}
+
+// Démarrer le polling automatique
+function startSidechannelPolling() {
+    if (sidechannelPollInterval) return; // Déjà en cours
+    
+    sidechannelPollInterval = setInterval(() => {
+        sidechannelTests.filter(t => t.status === 'pending').forEach(test => {
+            checkSidechannelTest(test.id);
+        });
+    }, 5000); // Vérifier toutes les 5 secondes
+}
+
+// Arrêter le polling
+function stopSidechannelPolling() {
+    if (sidechannelPollInterval) {
+        clearInterval(sidechannelPollInterval);
+        sidechannelPollInterval = null;
+    }
+}
+
+// Toggle auto-poll
+// Auto-polling is now always enabled when there are active tests
+// No manual controls needed since the tests panel has been removed
+
+// Afficher les détails d'un test
+function showSidechannelTestDetails(test) {
+    const overlay = document.getElementById('sidechannel-details-overlay');
+    const panel = document.getElementById('sidechannel-details-panel');
+    const content = document.getElementById('sidechannel-details-content');
+    
+    if (!overlay || !panel || !content) return;
+    
+    // Construire le contenu de la modal
+    let html = `
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+            <!-- Test Information -->
+            <div style="background: #f5f5f5; border-radius: 8px; padding: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #333; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">info</span>
+                    Test Information
+                </h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.9rem;">
+                    <div>
+                        <div style="color: #666; margin-bottom: 4px;">Attack Type:</div>
+                        <div style="font-weight: 600; color: #333;">${test.attack_type.toUpperCase()}</div>
+                    </div>
+                    <div>
+                        <div style="color: #666; margin-bottom: 4px;">Status:</div>
+                        <div style="font-weight: 600; color: ${test.status === 'detected' ? '#f44336' : test.status === 'not_detected' ? '#4caf50' : '#2196f3'};">
+                            ${test.status === 'detected' ? 'Vulnerability Detected' : test.status === 'not_detected' ? 'No Vulnerability' : test.status === 'error' ? 'Error' : 'Monitoring...'}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="color: #666; margin-bottom: 4px;">Timestamp:</div>
+                        <div style="font-weight: 600; color: #333;">${test.timestamp.toLocaleString()}</div>
+                    </div>
+                    <div>
+                        <div style="color: #666; margin-bottom: 4px;">Source:</div>
+                        <div style="font-weight: 600; color: #333;">${test.manual ? 'Manual Injection' : `Flow: ${test.flow_id.substring(0, 12)}...`}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- SideChannel URL -->
+            <div style="background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 8px; padding: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #1976d2; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">link</span>
+                    SideChannel URL
+                </h3>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <code style="flex: 1; padding: 10px; background: white; border-radius: 6px; font-family: 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all; border: 1px solid #90caf9;">
+                        ${test.sidechannel_url || 'N/A'}
+                    </code>
+                    <button onclick="copySidechannelUrl('${test.sidechannel_url}')" 
+                        style="background: #2196f3; color: white; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; transition: background 0.2s;"
+                        onmouseover="this.style.background='#1976d2'"
+                        onmouseout="this.style.background='#2196f3'">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">content_copy</span>
+                        Copy
+                    </button>
+                </div>
+            </div>
+    `;
+    
+    // Si une vulnérabilité a été détectée, afficher les détails de la requête
+    if (test.status === 'detected' && test.details && test.details.evidence) {
+        const evidence = test.details.evidence;
+        html += `
+            <div style="background: #ffebee; border-left: 4px solid #f44336; border-radius: 8px; padding: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #c62828; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">bug_report</span>
+                    Request Details (Evidence)
+                </h3>
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+        `;
+        
+        // IP Source
+        if (evidence.ip || evidence.remote_addr) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">Source IP:</div>
+                    <div style="padding: 8px 12px; background: white; border-radius: 6px; font-family: 'Fira Code', monospace; font-size: 0.9rem;">
+                        ${evidence.ip || evidence.remote_addr || 'N/A'}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Headers
+        if (evidence.headers) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">Request Headers:</div>
+                    <div style="padding: 12px; background: white; border-radius: 6px; max-height: 300px; overflow-y: auto;">
+                        <pre style="margin: 0; font-family: 'Fira Code', monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word;">${JSON.stringify(evidence.headers, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // User-Agent
+        if (evidence.user_agent || (evidence.headers && evidence.headers['User-Agent'])) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">User-Agent:</div>
+                    <div style="padding: 8px 12px; background: white; border-radius: 6px; font-family: 'Fira Code', monospace; font-size: 0.85rem; word-break: break-all;">
+                        ${evidence.user_agent || evidence.headers['User-Agent'] || 'N/A'}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Method
+        if (evidence.method) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">HTTP Method:</div>
+                    <div style="padding: 8px 12px; background: white; border-radius: 6px; font-size: 0.9rem; font-weight: 600; display: inline-block;">
+                        ${evidence.method}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Body
+        if (evidence.body) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">Request Body:</div>
+                    <div style="padding: 12px; background: white; border-radius: 6px; max-height: 200px; overflow-y: auto;">
+                        <pre style="margin: 0; font-family: 'Fira Code', monospace; font-size: 0.8rem; white-space: pre-wrap; word-break: break-word;">${typeof evidence.body === 'string' ? evidence.body : JSON.stringify(evidence.body, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Timestamp de la requête
+        if (evidence.timestamp || evidence.request_time) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">Request Timestamp:</div>
+                    <div style="padding: 8px 12px; background: white; border-radius: 6px; font-size: 0.9rem;">
+                        ${evidence.timestamp || evidence.request_time || 'N/A'}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Raw evidence (si disponible)
+        if (Object.keys(evidence).length > 0) {
+            html += `
+                <div>
+                    <div style="color: #666; margin-bottom: 6px; font-size: 0.85rem; font-weight: 600;">Raw Evidence (JSON):</div>
+                    <div style="padding: 12px; background: white; border-radius: 6px; max-height: 300px; overflow-y: auto;">
+                        <pre style="margin: 0; font-family: 'Fira Code', monospace; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word;">${JSON.stringify(evidence, null, 2)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+    } else if (test.status === 'pending') {
+        html += `
+            <div style="background: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 8px; padding: 16px; text-align: center;">
+                <span class="material-symbols-outlined" style="font-size: 48px; color: #2196f3; margin-bottom: 12px; display: block;">hourglass_empty</span>
+                <div style="font-size: 1rem; color: #1976d2; font-weight: 600;">Monitoring for requests...</div>
+                <div style="font-size: 0.85rem; color: #666; margin-top: 8px;">The system is waiting for a request on the SideChannel URL.</div>
+            </div>
+        `;
+    } else if (test.status === 'not_detected') {
+        html += `
+            <div style="background: #e8f5e9; border-left: 4px solid #4caf50; border-radius: 8px; padding: 16px; text-align: center;">
+                <span class="material-symbols-outlined" style="font-size: 48px; color: #4caf50; margin-bottom: 12px; display: block;">check_circle</span>
+                <div style="font-size: 1rem; color: #2e7d32; font-weight: 600;">No Vulnerability Detected</div>
+                <div style="font-size: 0.85rem; color: #666; margin-top: 8px;">No request was received on the SideChannel URL.</div>
+            </div>
+        `;
+    }
+    
+    // Recommendations
+    if (test.details && test.details.recommendations && test.details.recommendations.length > 0) {
+        html += `
+            <div style="background: #fff3cd; border-left: 4px solid #ff9800; border-radius: 8px; padding: 16px;">
+                <h3 style="margin: 0 0 12px 0; font-size: 16px; font-weight: 600; color: #856404; display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">lightbulb</span>
+                    Recommendations
+                </h3>
+                <ul style="margin: 0; padding-left: 20px; color: #856404; font-size: 0.9rem; line-height: 1.8;">
+                    ${test.details.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    html += `
+        </div>
+    `;
+    
+    content.innerHTML = html;
+    overlay.style.display = 'block';
+    panel.style.display = 'block';
+}
+
+// Fermer la modal de détails
+function closeSidechannelDetails() {
+    const overlay = document.getElementById('sidechannel-details-overlay');
+    const panel = document.getElementById('sidechannel-details-panel');
+    if (overlay) overlay.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+}
+window.closeSidechannelDetails = closeSidechannelDetails;
+
+// Render generated URLs list
+function renderSidechannelUrls() {
+    if (!sidechannelUrlsList) return;
+    
+    if (sidechannelGeneratedUrls.length === 0) {
+        sidechannelUrlsList.innerHTML = `
+            <div style="text-align: center; padding: 40px 20px; color: #888; font-size: 0.9rem;">
+                No URLs generated yet. Go to "Manual Mode" to generate your first URL.
+            </div>
+        `;
+        return;
+    }
+    
+    sidechannelUrlsList.innerHTML = '';
+    
+    // Trier par date (plus récent en premier)
+    const sortedUrls = [...sidechannelGeneratedUrls].sort((a, b) => b.generated_at - a.generated_at);
+    
+    sortedUrls.forEach(urlEntry => {
+        const item = document.createElement('div');
+        item.className = 'sidechannel-url-item';
+        item.style.cssText = 'background: #f5f5f5; border-radius: 6px; padding: 12px; margin-bottom: 8px; border-left: 3px solid #2196f3;';
+        
+        // Trouver le test correspondant pour le statut
+        const test = sidechannelTests.find(t => t.id === urlEntry.test_id);
+        const status = test ? test.status : urlEntry.status;
+        const statusColor = status === 'detected' ? '#f44336' : status === 'not_detected' ? '#4caf50' : '#2196f3';
+        const statusIcon = status === 'detected' ? 'warning' : status === 'not_detected' ? 'check_circle' : 'hourglass_empty';
+        const statusText = status === 'detected' ? 'Vulnerability Detected' : status === 'not_detected' ? 'No Vulnerability' : 'Monitoring...';
+        
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                        <span style="padding: 4px 8px; background: #e3f2fd; border-radius: 4px; font-size: 11px; color: #1976d2; font-weight: 600;">${urlEntry.attack_type.toUpperCase()}</span>
+                        <span style="padding: 4px 8px; background: ${statusColor}20; color: ${statusColor}; border-radius: 4px; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                            <span class="material-symbols-outlined" style="font-size: 14px;">${statusIcon}</span>
+                            ${statusText}
+                        </span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: #666; margin-bottom: 4px;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span class="material-symbols-outlined" style="font-size: 14px;">link</span>
+                            <code style="font-family: 'Fira Code', monospace; word-break: break-all; font-size: 0.8rem; color: #333;">${urlEntry.sidechannel_url}</code>
+                            <button onclick="event.stopPropagation(); copySidechannelUrl('${urlEntry.sidechannel_url}')" 
+                                style="background: #f5f5f5; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; margin-left: 8px;">
+                                <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">content_copy</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #999;">
+                        ${urlEntry.generated_at.toLocaleString()}
+                    </div>
+                </div>
+                <button class="delete-url-btn" onclick="event.stopPropagation(); deleteSidechannelUrl('${urlEntry.id}')" 
+                    style="background: transparent; border: none; padding: 4px; cursor: pointer; color: #999; border-radius: 4px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">close</span>
+                </button>
+            </div>
+        `;
+        
+        sidechannelUrlsList.appendChild(item);
+    });
+}
+
+// Supprimer une URL générée
+function deleteSidechannelUrl(urlId) {
+    sidechannelGeneratedUrls = sidechannelGeneratedUrls.filter(u => u.id !== urlId);
+    saveSidechannelData();
+    renderSidechannelUrls();
+    showToast('URL removed', 'info');
+}
+window.deleteSidechannelUrl = deleteSidechannelUrl;
+
+// Clear all tests
+// Clear button removed - tests panel has been removed
+
+// Render results (détections)
+function renderSidechannelResults() {
+    if (!sidechannelResultsList) return;
+    
+    if (sidechannelDetections.length === 0) {
+        sidechannelResultsList.innerHTML = `
+            <div style="text-align: center; padding: 80px 20px; color: var(--text-secondary);">
+                <span class="material-symbols-outlined" style="font-size: 64px; color: #ddd; margin-bottom: 20px; display: block;">analytics</span>
+                <p style="font-size: 1rem; margin: 0;">No detections yet. Results will appear here when vulnerabilities are detected.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    sidechannelResultsList.innerHTML = '';
+    
+    // Trier par date (plus récent en premier)
+    const sortedDetections = [...sidechannelDetections].sort((a, b) => b.detected_at - a.detected_at);
+    
+    sortedDetections.forEach(detection => {
+        const item = document.createElement('div');
+        item.className = 'sidechannel-detection-item';
+        item.style.cssText = 'background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid #f44336;';
+        
+        const evidence = detection.evidence || {};
+        const ip = evidence.ip || evidence.remote_addr || 'Unknown';
+        const method = evidence.method || 'GET';
+        const userAgent = evidence.user_agent || (evidence.headers && evidence.headers['User-Agent']) || 'Unknown';
+        const body = evidence.body || '';
+        const headers = evidence.headers || {};
+        
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <span class="material-symbols-outlined" style="font-size: 20px; color: #f44336;">warning</span>
+                        <span style="font-weight: 600; color: #333; font-size: 14px;">Vulnerability Detected</span>
+                        <span style="padding: 4px 8px; background: #f5f5f5; border-radius: 4px; font-size: 11px; color: #666; font-weight: 600;">${detection.attack_type.toUpperCase()}</span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: #666; margin-bottom: 8px;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                            <span class="material-symbols-outlined" style="font-size: 14px;">link</span>
+                            <span style="font-family: 'Fira Code', monospace; word-break: break-all; font-size: 0.8rem;">${detection.sidechannel_url || 'N/A'}</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #999; margin-top: 4px;">
+                            ${detection.detected_at.toLocaleString()} • ${detection.manual ? 'Manual injection' : `Flow: ${detection.flow_id ? detection.flow_id.substring(0, 8) : 'N/A'}...`}
+                        </div>
+                    </div>
+                </div>
+                <button class="delete-detection-btn" onclick="event.stopPropagation(); deleteSidechannelDetection('${detection.id}')" 
+                    style="background: transparent; border: none; padding: 4px; cursor: pointer; color: #999; border-radius: 4px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">close</span>
+                </button>
+            </div>
+            
+            <!-- Request Details -->
+            <div style="background: #f5f5f5; border-radius: 6px; padding: 12px; margin-top: 12px;">
+                <div style="font-weight: 600; color: #333; margin-bottom: 8px; font-size: 0.9rem; display: flex; align-items: center; gap: 6px;">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">info</span>
+                    Request Details
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; margin-bottom: 8px;">
+                    <div>
+                        <span style="color: #666; font-weight: 600;">Source IP:</span>
+                        <div style="font-family: 'Fira Code', monospace; color: #333; margin-top: 2px;">${ip}</div>
+                    </div>
+                    <div>
+                        <span style="color: #666; font-weight: 600;">Method:</span>
+                        <div style="color: #333; margin-top: 2px;">${method}</div>
+                    </div>
+                </div>
+                ${userAgent !== 'Unknown' ? `
+                    <div style="margin-bottom: 8px;">
+                        <span style="color: #666; font-weight: 600; font-size: 0.8rem;">User-Agent:</span>
+                        <div style="font-family: 'Fira Code', monospace; color: #333; margin-top: 2px; font-size: 0.75rem; word-break: break-all;">${userAgent}</div>
+                    </div>
+                ` : ''}
+                ${Object.keys(headers).length > 0 ? `
+                    <details style="margin-top: 8px;">
+                        <summary style="cursor: pointer; color: #666; font-weight: 600; font-size: 0.8rem; margin-bottom: 4px;">Headers (${Object.keys(headers).length})</summary>
+                        <pre style="background: white; padding: 8px; border-radius: 4px; margin-top: 4px; font-size: 0.7rem; overflow-x: auto; max-height: 200px; overflow-y: auto;">${JSON.stringify(headers, null, 2)}</pre>
+                    </details>
+                ` : ''}
+                ${body ? `
+                    <details style="margin-top: 8px;">
+                        <summary style="cursor: pointer; color: #666; font-weight: 600; font-size: 0.8rem; margin-bottom: 4px;">Request Body</summary>
+                        <pre style="background: white; padding: 8px; border-radius: 4px; margin-top: 4px; font-size: 0.7rem; overflow-x: auto; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word;">${typeof body === 'string' ? body : JSON.stringify(body, null, 2)}</pre>
+                    </details>
+                ` : ''}
+            </div>
+            
+            <!-- Raw Evidence -->
+            <details style="margin-top: 8px;">
+                <summary style="cursor: pointer; color: #666; font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">Raw Evidence (JSON)</summary>
+                <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 4px; font-size: 0.7rem; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'Fira Code', monospace;">${JSON.stringify(evidence, null, 2)}</pre>
+            </details>
+        `;
+        
+        // Plus besoin d'ouvrir une modal, toutes les infos sont déjà affichées
+        sidechannelResultsList.appendChild(item);
+    });
+}
+
+// Supprimer une détection
+function deleteSidechannelDetection(detectionId) {
+    sidechannelDetections = sidechannelDetections.filter(d => d.id !== detectionId);
+    updateSidechannelResultsBadge();
+    renderSidechannelResults();
+    showToast('Detection removed', 'info');
+}
+window.deleteSidechannelDetection = deleteSidechannelDetection;
+
+// Mettre à jour le badge de résultats
+function updateSidechannelResultsBadge() {
+    if (sidechannelResultsBadge) {
+        const count = sidechannelDetections.length;
+        if (count > 0) {
+            sidechannelResultsBadge.textContent = count;
+            sidechannelResultsBadge.style.display = 'block';
+        } else {
+            sidechannelResultsBadge.style.display = 'none';
+        }
+    }
+}
+
+// Load flows when SideChannel view is opened
+const originalSwitchView = switchView;
+switchView = function(viewId, navItem = null) {
+    originalSwitchView(viewId, navItem);
+    if (viewId === 'sidechannel' && sidechannelApiKeyValid) {
+        // Démarrer le polling si activé et qu'il y a des tests en cours
+        if (sidechannelTests.length > 0) {
+            startSidechannelPolling();
+        }
+    } else if (viewId !== 'sidechannel') {
+        // Arrêter le polling quand on quitte la vue
+        stopSidechannelPolling();
+    }
+};
 
 // === WORKSPACE MANAGEMENT === DISABLED
 // Workspace functionality has been removed from the main browser view
@@ -619,27 +1968,53 @@ if (interceptToggleBtn) {
 
 if (resumeAllBtn) {
     resumeAllBtn.addEventListener('click', async () => {
-        const flowIds = [...pendingInterceptsData.map(f => f.id)];
+        // Toggle auto-resume mode
+        autoResumeEnabled = !autoResumeEnabled;
+        updateResumeAllButton();
 
-        for (const flowId of flowIds) {
-            try {
-                await fetch(`${API_BASE}/intercept/${flowId}/resume`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-            } catch (err) {
-                console.error(`Failed to resume ${flowId}`, err);
+        if (autoResumeEnabled) {
+            // Activer le mode auto-resume : reprendre toutes les requêtes actuelles
+            const flowIds = [...pendingInterceptsData.map(f => f.id)];
+
+            for (const flowId of flowIds) {
+                try {
+                    await fetch(`${API_BASE}/intercept/${flowId}/resume`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({}) // Objet vide = reprendre avec les valeurs originales
+                    });
+                } catch (err) {
+                    console.error(`Failed to resume ${flowId}`, err);
+                }
             }
-        }
 
-        pendingInterceptsData = [];
-        selectedInterceptId = null;
-        renderPendingList();
-        if (interceptEditorEl) {
-            interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
+            // Initialiser previousPendingIds avec les requêtes actuelles pour éviter de les reprendre
+            previousPendingIds = new Set(flowIds);
+            pendingInterceptsData = [];
+            selectedInterceptId = null;
+            renderPendingList();
+            updateInterceptTabBadge();
+            if (interceptEditorEl) {
+                interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
+            }
+        } else {
+            // Désactiver le mode auto-resume : réinitialiser previousPendingIds
+            previousPendingIds = new Set();
+            isFirstPoll = true;
         }
     });
+}
+
+function updateResumeAllButton() {
+    if (resumeAllBtn) {
+        if (autoResumeEnabled) {
+            resumeAllBtn.style.background = '#ff9800'; // Orange pour indiquer que c'est actif
+            resumeAllBtn.textContent = 'Stop Auto-Resume';
+        } else {
+            resumeAllBtn.style.background = ''; // Retour à la couleur par défaut (btn-success)
+            resumeAllBtn.textContent = 'Resume All';
+        }
+    }
 }
 
 if (dropAllBtn) {
@@ -661,6 +2036,7 @@ if (dropAllBtn) {
         pendingInterceptsData = [];
         selectedInterceptId = null;
         renderPendingList();
+        updateInterceptTabBadge();
         if (interceptEditorEl) {
             interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
         }
@@ -679,12 +2055,34 @@ function updateInterceptUI() {
     }
 }
 
+function updateInterceptTabBadge() {
+    const interceptNavItem = document.querySelector('[data-view="intercept"]');
+    if (!interceptNavItem) return;
+
+    // Supprimer le badge existant s'il y en a un
+    const existingBadge = interceptNavItem.querySelector('.intercept-badge');
+    if (existingBadge) {
+        existingBadge.remove();
+    }
+
+    // Ajouter un badge si il y a des requêtes en attente
+    if (pendingInterceptsData.length > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'intercept-badge';
+        badge.textContent = pendingInterceptsData.length > 99 ? '99+' : pendingInterceptsData.length.toString();
+        interceptNavItem.appendChild(badge);
+    }
+}
+
 function renderPendingList() {
     if (!pendingListEl) return;
 
     if (pendingCountText) {
         pendingCountText.textContent = `${pendingInterceptsData.length} request${pendingInterceptsData.length !== 1 ? 's' : ''} pending`;
     }
+
+    // Mettre à jour le badge de l'onglet
+    updateInterceptTabBadge();
 
     if (pendingInterceptsData.length === 0) {
         pendingListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No pending requests</div>';
@@ -712,6 +2110,11 @@ function renderPendingList() {
         item.addEventListener('click', (e) => {
             const flowId = e.currentTarget.dataset.flowId;
             selectedInterceptId = flowId;
+            // Désactiver le mode auto-resume quand l'utilisateur sélectionne une requête pour modification manuelle
+            if (autoResumeEnabled) {
+                autoResumeEnabled = false;
+                updateResumeAllButton();
+            }
             renderPendingList();
             renderInterceptEditor(flowId);
         });
@@ -726,25 +2129,25 @@ function renderInterceptEditor(flowId) {
     const reqBody = flow.request.content_bs64 ? atob(flow.request.content_bs64) : '';
 
     interceptEditorEl.innerHTML = `
-        <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px;">Method</label>
-            <input type="text" id="intercept-method" value="${flow.method}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Method</label>
+            <input type="text" id="intercept-method" value="${escapeHtml(flow.method)}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.9rem;">
         </div>
-        <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px;">URL</label>
-            <input type="text" id="intercept-url" value="${flow.url}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">URL</label>
+            <input type="text" id="intercept-url" value="${escapeHtml(flow.url)}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.9rem; word-wrap: break-word; overflow-wrap: break-word;">
         </div>
-        <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px;">Headers (JSON)</label>
-            <textarea id="intercept-headers" style="width: 100%; height: 150px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.85em;">${reqHeaders}</textarea>
+        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Headers (JSON)</label>
+            <textarea id="intercept-headers" style="width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.85em; resize: vertical; overflow-x: hidden; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(reqHeaders)}</textarea>
         </div>
-        <div>
-            <label style="display: block; font-weight: 600; margin-bottom: 5px;">Body</label>
-            <textarea id="intercept-body" style="width: 100%; height: 150px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.85em;">${reqBody}</textarea>
+        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Body</label>
+            <textarea id="intercept-body" style="width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.85em; resize: vertical; overflow-x: hidden; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(reqBody)}</textarea>
         </div>
-        <div style="display: flex; gap: 10px; margin-top: auto;">
-            <button id="resume-intercept-btn" style="flex: 1; padding: 10px; background: #4caf50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">Resume</button>
-            <button id="drop-intercept-btn" style="flex: 1; padding: 10px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">Drop</button>
+        <div style="display: flex; gap: 10px; margin-top: auto; padding-top: 10px; box-sizing: border-box;">
+            <button id="resume-intercept-btn" style="flex: 1; padding: 12px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Resume</button>
+            <button id="drop-intercept-btn" style="flex: 1; padding: 12px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Drop</button>
         </div>
     `;
 
@@ -767,6 +2170,7 @@ function renderInterceptEditor(flowId) {
             pendingInterceptsData = pendingInterceptsData.filter(f => f.id !== flowId);
             selectedInterceptId = null;
             renderPendingList();
+            updateInterceptTabBadge();
             interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
         } catch (err) {
             alert('Error: Invalid JSON in headers or failed to resume');
@@ -785,6 +2189,7 @@ function renderInterceptEditor(flowId) {
             pendingInterceptsData = pendingInterceptsData.filter(f => f.id !== flowId);
             selectedInterceptId = null;
             renderPendingList();
+            updateInterceptTabBadge();
             interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
         } catch (err) {
             console.error(err);
@@ -793,15 +2198,49 @@ function renderInterceptEditor(flowId) {
 }
 
 // Poll for pending intercepts
+let previousPendingIds = new Set();
+let isFirstPoll = true; // Pour initialiser previousPendingIds au premier poll
 setInterval(async () => {
-    if (!interceptEnabled) return;
+    if (!interceptEnabled) {
+        // Réinitialiser quand l'interception est désactivée
+        previousPendingIds = new Set();
+        isFirstPoll = true;
+        return;
+    }
 
     try {
         const res = await fetch(`${API_BASE}/intercept/pending`);
         const pending = await res.json();
 
+        // Initialiser previousPendingIds au premier poll ou quand le mode auto-resume est activé
+        if (isFirstPoll) {
+            previousPendingIds = new Set(pending.map(f => f.id));
+            isFirstPoll = false;
+        }
+
+        // Si le mode auto-resume est activé, reprendre automatiquement toutes les nouvelles requêtes
+        if (autoResumeEnabled && pending.length > 0) {
+            const currentPendingIds = new Set(pending.map(f => f.id));
+            const newFlowIds = [...currentPendingIds].filter(id => !previousPendingIds.has(id));
+
+            // Reprendre toutes les nouvelles requêtes automatiquement
+            for (const flowId of newFlowIds) {
+                try {
+                    await fetch(`${API_BASE}/intercept/${flowId}/resume`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({}) // Reprendre sans modifications
+                    });
+                } catch (err) {
+                    console.error(`Failed to auto-resume ${flowId}`, err);
+                }
+            }
+        }
+
+        previousPendingIds = new Set(pending.map(f => f.id));
         pendingInterceptsData = pending;
         renderPendingList();
+        updateInterceptTabBadge();
     } catch (err) {
         console.error("Failed to fetch pending intercepts", err);
     }
@@ -2629,7 +4068,7 @@ function renderRepeaterContent() {
                 <button id="repeater-send-${activeTab.id}" class="btn btn-primary">Send</button>
             </div>
             <div class="split-pane" style="flex: 1; border: 1px solid var(--border-color); border-radius: 4px; display: flex;">
-                <div class="repeater-editor">
+                <div class="repeater-editor" id="repeater-editor-${activeTab.id}" style="width: 50%; min-width: 300px; flex-shrink: 0;">
                     <div class="section-title"
                         style="padding: 10px; background: #f5f5f5; margin: 0; border-bottom: 1px solid #eee;">
                         Request Headers (JSON)</div>
@@ -2643,7 +4082,8 @@ function renderRepeaterContent() {
                         spellcheck="false" autocapitalize="off" autocomplete="off"
                         style="flex: 1; border: none; padding: 10px; font-family: 'Fira Code', monospace; resize: none; min-height: 150px;">${escapeHtml(activeTab.body)}</textarea>
                 </div>
-                <div class="repeater-response" id="repeater-response-${activeTab.id}">
+                <div class="resize-handle" id="repeater-resize-handle-${activeTab.id}"></div>
+                <div class="repeater-response" id="repeater-response-${activeTab.id}" style="flex: 1; min-width: 300px;">
                     ${activeTab.response ? displayRepeaterResponseHTML(activeTab.response) :
             activeTab.error ? displayRepeaterErrorHTML(activeTab.error) :
                 '<div style="color: #888; text-align: center; margin-top: 20px;">Response will appear here</div>'}
@@ -2690,6 +4130,9 @@ function renderRepeaterContent() {
             saveRepeaterTabs();
         });
     }
+
+    // Initialiser le resize handle pour cet onglet
+    setupRepeaterResizeHandle(activeTab.id);
 }
 
 // Mettre à jour le titre de l'onglet
@@ -5842,6 +7285,152 @@ if (apiResizeHandle && apiTesterSidebar && apiTesterMain) {
         if (isApiResizing) {
             isApiResizing = false;
             apiResizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+// === VISUALIZATION RESIZE HANDLE ===
+const vizResizeHandle = document.getElementById('viz-resize-handle');
+const vizDomainsSidebar = document.getElementById('viz-domains-sidebar');
+
+let isVizResizing = false;
+let vizStartX = 0;
+let vizStartWidth = 0;
+
+if (vizResizeHandle && vizDomainsSidebar) {
+    vizResizeHandle.addEventListener('mousedown', (e) => {
+        isVizResizing = true;
+        vizStartX = e.clientX;
+        vizStartWidth = vizDomainsSidebar.offsetWidth;
+        vizResizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isVizResizing) return;
+
+        const diff = e.clientX - vizStartX;
+        const newWidth = vizStartWidth + diff;
+        const minWidth = 300;
+        const maxWidth = window.innerWidth * 0.6; // Max 60% of window width
+
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+            vizDomainsSidebar.style.width = `${newWidth}px`;
+            vizDomainsSidebar.style.flexShrink = '0';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isVizResizing) {
+            isVizResizing = false;
+            vizResizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+// === REPEATER RESIZE HANDLE ===
+let repeaterResizeData = null;
+
+function setupRepeaterResizeHandle(tabId) {
+    const resizeHandle = document.getElementById(`repeater-resize-handle-${tabId}`);
+    const editorPanel = document.getElementById(`repeater-editor-${tabId}`);
+    const responsePanel = document.getElementById(`repeater-response-${tabId}`);
+
+    if (!resizeHandle || !editorPanel || !responsePanel) return;
+
+    // Supprimer les anciens event listeners s'ils existent
+    const newResizeHandle = resizeHandle.cloneNode(true);
+    resizeHandle.parentNode.replaceChild(newResizeHandle, resizeHandle);
+
+    newResizeHandle.addEventListener('mousedown', (e) => {
+        repeaterResizeData = {
+            tabId,
+            startX: e.clientX,
+            startWidth: editorPanel.offsetWidth,
+            containerWidth: editorPanel.parentElement.offsetWidth
+        };
+        newResizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+}
+
+document.addEventListener('mousemove', (e) => {
+    if (!repeaterResizeData) return;
+
+    const { tabId, startX, startWidth, containerWidth } = repeaterResizeData;
+    const editorPanel = document.getElementById(`repeater-editor-${tabId}`);
+    const responsePanel = document.getElementById(`repeater-response-${tabId}`);
+
+    if (!editorPanel || !responsePanel) {
+        repeaterResizeData = null;
+        return;
+    }
+
+    const diff = e.clientX - startX;
+    const newWidth = Math.max(300, Math.min(containerWidth - 300, startWidth + diff));
+
+    editorPanel.style.width = `${newWidth}px`;
+    editorPanel.style.flexShrink = '0';
+});
+
+document.addEventListener('mouseup', () => {
+    if (repeaterResizeData) {
+        const resizeHandle = document.getElementById(`repeater-resize-handle-${repeaterResizeData.tabId}`);
+        if (resizeHandle) {
+            resizeHandle.classList.remove('active');
+        }
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        repeaterResizeData = null;
+    }
+});
+
+// === INTERCEPT RESIZE HANDLE ===
+const interceptResizeHandle = document.getElementById('intercept-resize-handle');
+const interceptFlowListPanel = document.getElementById('intercept-flow-list-panel');
+const interceptDetailPanel = document.getElementById('intercept-detail-panel');
+
+let isInterceptResizing = false;
+let interceptStartX = 0;
+let interceptStartWidth = 0;
+
+if (interceptResizeHandle && interceptFlowListPanel && interceptDetailPanel) {
+    interceptResizeHandle.addEventListener('mousedown', (e) => {
+        isInterceptResizing = true;
+        interceptStartX = e.clientX;
+        interceptStartWidth = interceptFlowListPanel.offsetWidth;
+        interceptResizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isInterceptResizing) return;
+
+        const diff = e.clientX - interceptStartX;
+        const newWidth = interceptStartWidth + diff;
+        const minWidth = 250;
+        const maxWidth = window.innerWidth * 0.8;
+
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+            interceptFlowListPanel.style.width = `${newWidth}px`;
+            interceptFlowListPanel.style.flexShrink = '0';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isInterceptResizing) {
+            isInterceptResizing = false;
+            interceptResizeHandle.classList.remove('active');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         }
@@ -9482,16 +11071,16 @@ function renderCollabApiKeyRequired(message) {
         content.innerHTML = `
             <div style="width: 100%; display: flex; align-items: center; justify-content: center; padding: 20px 0;">
                 <div style="max-width: 420px; width: 90%; padding: 22px; border: 1px solid rgba(0,255,255,0.25); border-radius: 12px; background: #181a23; color: #fff; font-family: 'Segoe UI', sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,0.35);">
-                    <h3 style="margin: 0 0 8px 0; color: #00ffff; font-size: 20px;">Pro feature – API key requise</h3>
-                    <p style="margin: 6px 0 12px 0; color: rgba(255,255,255,0.9);">${message || 'Collaboration Pro nécessite une API key valide.'}</p>
+                    <h3 style="margin: 0 0 8px 0; color: #00ffff; font-size: 20px;">Pro feature – API key required</h3>
+                    <p style="margin: 6px 0 12px 0; color: rgba(255,255,255,0.9);">${message || 'Collaboration Pro requires a valid API key.'}</p>
                     <div style="padding: 12px; border: 1px dashed rgba(0,255,255,0.35); border-radius: 10px; background: rgba(0,255,255,0.06); color: rgba(255,255,255,0.95); font-size: 13px;">
-                        <p style="margin: 0 0 6px 0;">Ajoutez votre clé dans <code style="background: rgba(255,255,255,0.12); padding: 2px 6px; border-radius: 6px; color: #00ffff;">config.toml</code> :</p>
+                        <p style="margin: 0 0 6px 0;">Add your key in <code style="background: rgba(255,255,255,0.12); padding: 2px 6px; border-radius: 6px; color: #00ffff;">config.toml</code> :</p>
                         <p style="margin: 0; font-family: Consolas, monospace;">
                             [FRAMEWORK]<br>
-                            api_key = "votre_api_key"
+                            api_key = "your_api_key"
                         </p>
                     </div>
-                    <p style="margin: 14px 0 0 0; color: rgba(255,255,255,0.75); font-size: 12px;">Redémarrez KittyProxy après mise à jour.</p>
+                    <p style="margin: 14px 0 0 0; color: rgba(255,255,255,0.75); font-size: 12px;">Restart KittyProxy after updating.</p>
                 </div>
             </div>
         `;
@@ -9508,7 +11097,7 @@ async function ensureCollabAuth() {
         const res = await fetch('/api/collab/auth');
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            renderCollabApiKeyRequired(data.message || 'API key invalide ou absente.');
+            renderCollabApiKeyRequired(data.message || 'API key invalid or missing.');
             collabAuthValid = false;
             return false;
         }
@@ -9524,7 +11113,7 @@ async function ensureCollabAuth() {
         }
         return collabAuthValid;
     } catch (e) {
-        renderCollabApiKeyRequired('Impossible de valider l’API key.');
+        renderCollabApiKeyRequired('Unable to validate API key.');
         collabAuthValid = false;
         return false;
     }
@@ -9815,7 +11404,7 @@ function createCollaborationSession() {
 // Confirme la création de session
 async function confirmCreateSession() {
     if (!collabAuthValid) {
-        renderCollabApiKeyRequired('API key requise pour la collaboration.');
+        renderCollabApiKeyRequired('API key required for collaboration.');
         return;
     }
     const nameInput = document.getElementById('modal-session-name');
@@ -9871,7 +11460,7 @@ function joinCollaborationSession(sessionId = null) {
 // Confirme le join de session
 async function confirmJoinSession() {
     if (!collabAuthValid) {
-        renderCollabApiKeyRequired('API key requise pour la collaboration.');
+        renderCollabApiKeyRequired('API key required for collaboration.');
         return;
     }
     const codeInput = document.getElementById('modal-invite-code');
@@ -10134,7 +11723,7 @@ function handleCollaborationMessage(data) {
             if (data.user_id !== currentUserId) {
                 const participant = collaborationParticipants.find(p => p.user_id === data.user_id);
                 if (participant) {
-                    console.log(`${participant.username} a sélectionné un flow`);
+                    console.log(`${participant.username} selected a flow`);
                 }
             }
             break;
@@ -13597,13 +15186,13 @@ if (document.readyState === 'loading') {
 
 async function startBrowserMirroring() {
     if (!currentSessionId || !currentUserId || !collaborationWebSocket) {
-        alert('Vous devez être dans une session de collaboration');
+        alert('You must be in a collaboration session');
         return;
     }
     
     // Vérifier que le WebSocket de collaboration est prêt
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
-        alert('Connexion WebSocket non établie. Veuillez patienter...');
+        alert('WebSocket connection not established. Please wait...');
         return;
     }
     
@@ -13666,7 +15255,7 @@ async function startBrowserMirroring() {
         saveCollaborationState();
     } catch (error) {
         console.error('[Collaboration] Error starting mirror:', error);
-        alert(`Erreur lors du démarrage du mirroring: ${error.message}`);
+        alert(`Error starting mirroring: ${error.message}`);
     }
 }
 
@@ -14105,7 +15694,7 @@ function addChatMessage(message) {
     const timestamp = document.createElement('div');
     if (message.created_at) {
         const date = new Date(message.created_at * 1000);
-        timestamp.textContent = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        timestamp.textContent = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         timestamp.style.cssText = 'font-size: 10px; color: #999; margin-top: 4px;';
         div.appendChild(timestamp);
     }

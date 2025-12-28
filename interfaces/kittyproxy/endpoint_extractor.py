@@ -63,24 +63,29 @@ class EndpointExtractor:
             print(f"[ENDPOINT EXTRACTION] Skipping flow {flow.request.url if flow.request else 'unknown'}: no response or empty content")
             return endpoints
         
+        # Vérifier si le flow a une réponse (nécessaire pour l'extraction)
+        if not flow.response or not flow.response.content:
+            # Pas de réponse disponible, retourner des endpoints vides
+            return endpoints
+        
         try:
             content = flow.response.content.decode('utf-8', errors='ignore')
             content_type = flow.response.headers.get('Content-Type', '').lower()
             base_url = flow.request.url
             
-            # Vérifier si ce flow a déjà été analysé
             # Utiliser l'URL de la requête comme identifiant unique
             flow_id = base_url
-            if flow_id in self.analyzed_flows:
-                # Flow déjà analysé, retourner les endpoints mis en cache
-                if flow_id in self.cached_endpoints:
-                    print(f"[ENDPOINT EXTRACTION] Flow {flow_id} already analyzed, returning {sum(len(urls) for urls in self.cached_endpoints[flow_id].values())} cached endpoints")
-                    return self.cached_endpoints[flow_id].copy()
-                else:
-                    print(f"[ENDPOINT EXTRACTION] Flow {flow_id} already analyzed but no cache found, returning empty")
-                    return endpoints
+            
+            # Vérifier si ce flow a déjà été analysé avec une réponse complète
+            # Si le flow a déjà été analysé ET qu'on a un cache, on peut le retourner
+            # Mais si le flow a été analysé sans réponse (lors de la requête), on doit réanalyser
+            if flow_id in self.analyzed_flows and flow_id in self.cached_endpoints:
+                # Flow déjà analysé avec réponse, retourner les endpoints mis en cache
+                print(f"[ENDPOINT EXTRACTION] Flow {flow_id} already analyzed, returning {sum(len(urls) for urls in self.cached_endpoints[flow_id].values())} cached endpoints")
+                return self.cached_endpoints[flow_id].copy()
             
             # Marquer ce flow comme analysé AVANT l'extraction pour éviter les doublons
+            # (ou réanalyser si le cache n'existe pas, ce qui signifie qu'il a été analysé sans réponse)
             self.analyzed_flows.add(flow_id)
             print(f"[ENDPOINT EXTRACTION] Analyzing flow {flow_id}, content_type: {content_type}, content_length: {len(content)}")
             

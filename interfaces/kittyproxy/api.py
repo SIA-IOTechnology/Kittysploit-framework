@@ -20,6 +20,8 @@ import json
 import asyncio
 import time
 import uuid
+import random
+import string
 from core.config import Config
 
 # Framework will be initialized by main.py
@@ -2597,7 +2599,7 @@ def get_browser_icon(browser_name: str):
 COLLAB_SAAS_URL = "https://proxy.kittysploit.com"
 
 def _load_collab_api_key() -> str:
-    """Charge l'API key depuis env ou config.toml"""
+    """Load API key from env or config.toml"""
     env_key = os.getenv("COLLABORATION_API_KEY") or os.getenv("KITTYSPLOIT_API_KEY")
     if env_key:
         key = env_key.strip()
@@ -2643,9 +2645,9 @@ def _load_collab_api_key() -> str:
     return ""
 
 def _validate_collab_api_key(api_key: str):
-    """Valide l'API key auprès du SaaS et retourne la réponse complète si valide"""
+    """Validate API key with SaaS and return full response if valid"""
     if not api_key:
-        raise HTTPException(status_code=401, detail="API key absente. Renseignez [FRAMEWORK].api_key dans config.toml.")
+        raise HTTPException(status_code=401, detail="API key missing. Set [FRAMEWORK].api_key in config.toml.")
     url = f"{COLLAB_SAAS_URL}/api/auth/validate-api-key"
     try:
         resp = requests.get(url, params={"api_key": api_key}, timeout=10)
@@ -2655,11 +2657,11 @@ def _validate_collab_api_key(api_key: str):
         except Exception:
             pass
         if resp.status_code != 200:
-            raise HTTPException(status_code=401, detail=f"Validation échouée (HTTP {resp.status_code})")
+            raise HTTPException(status_code=401, detail=f"Validation failed (HTTP {resp.status_code})")
         try:
             data = resp.json()
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Réponse SaaS non JSON: {e}")
+            raise HTTPException(status_code=502, detail=f"SaaS response not JSON: {e}")
         if data.get("valid") is True and data.get("token"):
             return data
         raise HTTPException(status_code=401, detail=data.get("message") or "API key invalide")
@@ -2677,7 +2679,7 @@ def _mask_key(key: str) -> str:
 
 @app.get("/api/collab/auth")
 def collab_auth():
-    """Valide l'API key (Pro) et renvoie le token si valide"""
+    """Validate API key (Pro) and return token if valid"""
     print(f"[COLLAB] Validating API key", flush=True)
     api_key = _load_collab_api_key()
     try:
@@ -2685,9 +2687,301 @@ def collab_auth():
     except Exception:
         pass
     data = _validate_collab_api_key(api_key)
-    # Ajouter server_url pour le front
+    # Add server_url for front
     data["server_url"] = COLLAB_SAAS_URL
     return data
+
+# === SIDECHANNEL ENDPOINTS ===
+# SideChannel uses the same API key and SaaS as Collaboration
+
+class SideChannelTestRequest(BaseModel):
+    flow_id: str
+    attack_type: str
+
+@app.post("/api/sidechannel/test")
+def sidechannel_test(request: SideChannelTestRequest):
+    """Test an attack of type XXE, SSRF, etc. on a flow"""
+    # Load API key from config (same source as collaboration)
+    api_key = _load_collab_api_key()
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key not configured. Please set [FRAMEWORK].api_key in config.toml or KITTYSPLOIT_API_KEY environment variable.")
+    
+    try:
+        # Get flow
+        flow = flow_manager.get_flow(request.flow_id)
+        if not flow:
+            raise HTTPException(status_code=404, detail="Flow not found")
+        
+        # Prepare flow data for analysis
+        flow_data = {
+            "request": {
+                "method": flow.get("request", {}).get("method", "GET"),
+                "url": flow.get("request", {}).get("url", ""),
+                "headers": flow.get("request", {}).get("headers", {}),
+                "content": flow.get("request", {}).get("content", ""),
+            },
+            "response": {
+                "status_code": flow.get("response", {}).get("status_code", 0),
+                "headers": flow.get("response", {}).get("headers", {}),
+                "content": flow.get("response", {}).get("content", ""),
+            }
+        }
+        
+        # Step 1: Ask SaaS to generate a unique URL and create the modified payload
+        url = f"{COLLAB_SAAS_URL}/api/sidechannel/prepare"
+        payload = {
+            "api_key": api_key,
+            "attack_type": request.attack_type,
+            "flow": flow_data
+        }
+        
+        resp = requests.post(url, json=payload, timeout=30)
+        
+        if resp.status_code != 200:
+            try:
+                error_data = resp.json()
+                raise HTTPException(status_code=resp.status_code, detail=error_data.get("message", "Failed to prepare attack"))
+            except:
+                raise HTTPException(status_code=resp.status_code, detail=f"Failed to prepare attack (HTTP {resp.status_code})")
+        
+        prepare_data = resp.json()
+        sidechannel_url = prepare_data.get("sidechannel_url")  # Unique URL generated
+        modified_request = prepare_data.get("modified_request")  # Request with injected payload
+        test_id = prepare_data.get("test_id")  # ID du test pour le polling
+        
+        if not sidechannel_url or not modified_request or not test_id:
+            raise HTTPException(status_code=500, detail="Invalid response from SaaS: missing required fields")
+        
+        # Step 2: Send the modified request to the target
+        import base64
+        target_url = modified_request.get("url")
+        target_method = modified_request.get("method", "GET")
+        target_headers = modified_request.get("headers", {})
+        target_body_b64 = modified_request.get("body_bs64", "")
+        
+        # Clean headers for HTTP send
+        cleaned_headers = {}
+        for key, value in target_headers.items():
+            if key.lower() not in ['x-kittyproxy-source']:
+                cleaned_headers[key] = str(value) if not isinstance(value, str) else value
+        
+        # Decode body if present
+        body_content = b""
+        if target_body_b64:
+            try:
+                body_content = base64.b64decode(target_body_b64)
+            except Exception as e:
+                print(f"[SIDECHANNEL] Error decoding body: {e}", flush=True)
+        
+        # Send request via proxy
+        proxies = {
+            "http": "http://127.0.0.1:8080",
+            "https": "http://127.0.0.1:8080",
+        }
+        
+        start_time = time.time()
+        try:
+            if target_method.upper() == "GET":
+                target_resp = requests.get(target_url, headers=cleaned_headers, proxies=proxies, timeout=30, allow_redirects=False)
+            elif target_method.upper() == "POST":
+                target_resp = requests.post(target_url, headers=cleaned_headers, data=body_content, proxies=proxies, timeout=30, allow_redirects=False)
+            elif target_method.upper() == "PUT":
+                target_resp = requests.put(target_url, headers=cleaned_headers, data=body_content, proxies=proxies, timeout=30, allow_redirects=False)
+            elif target_method.upper() == "PATCH":
+                target_resp = requests.patch(target_url, headers=cleaned_headers, data=body_content, proxies=proxies, timeout=30, allow_redirects=False)
+            else:
+                target_resp = requests.request(target_method, target_url, headers=cleaned_headers, data=body_content, proxies=proxies, timeout=30, allow_redirects=False)
+        except Exception as e:
+            print(f"[SIDECHANNEL] Error sending request to target: {e}", flush=True)
+            # Continue anyway to check if a request has been received
+        
+        request_duration = int((time.time() - start_time) * 1000)
+        
+        # Step 3: Check if a request has been received on the SideChannel URL
+        # Wait a little bit to let the request arrive at the SaaS
+        import time as time_module
+        time_module.sleep(2)
+        
+        check_url = f"{COLLAB_SAAS_URL}/api/sidechannel/check/{test_id}"
+        check_resp = requests.get(check_url, params={"api_key": api_key}, timeout=10)
+        
+        if check_resp.status_code == 200:
+            check_data = check_resp.json()
+            detected = check_data.get("detected", False)
+            request_details = check_data.get("request_details", {})
+            
+            return {
+                "flow_id": request.flow_id,
+                "attack_type": request.attack_type,
+                "test_id": test_id,
+                "sidechannel_url": sidechannel_url,
+                "detected": detected,
+                "request_duration": request_duration,
+                "target_response_status": target_resp.status_code if 'target_resp' in locals() else None,
+                "details": {
+                    "message": "Vulnerability detected!" if detected else "No vulnerability detected",
+                    "evidence": request_details if detected else None,
+                    "recommendations": [
+                        "Disable external entity processing in XML parsers",
+                        "Use whitelist for allowed URLs in SSRF",
+                        "Implement proper input validation"
+                    ] if detected else None
+                }
+            }
+        else:
+            # Si on ne peut pas vérifier, on retourne un statut indéterminé
+            return {
+                "flow_id": request.flow_id,
+                "attack_type": request.attack_type,
+                "test_id": test_id,
+                "sidechannel_url": sidechannel_url,
+                "detected": False,
+                "request_duration": request_duration,
+                "target_response_status": target_resp.status_code if 'target_resp' in locals() else None,
+                "details": {
+                    "message": "Unable to verify vulnerability. Please check manually.",
+                    "evidence": None,
+                    "recommendations": None
+                }
+            }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SIDECHANNEL] Error testing attack: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to test attack: {str(e)}")
+
+@app.get("/api/sidechannel/check/{test_id}")
+def sidechannel_check_test(test_id: str):
+    """Vérifie le statut d'un test SideChannel (polling)"""
+    api_key = _load_collab_api_key()
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key not configured")
+    
+    try:
+        # Vérifier auprès du SaaS si une requête a été reçue
+        url = f"{COLLAB_SAAS_URL}/api/sidechannel/check/{test_id}"
+        resp = requests.get(url, params={"api_key": api_key}, timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            request_details = data.get("request_details", {})
+            detected = data.get("detected", False)
+            return {
+                "test_id": test_id,
+                "detected": detected,
+                "details": {
+                    "message": "Vulnerability detected!" if detected else "No request received yet",
+                    "evidence": request_details if detected and request_details else None,
+                    "recommendations": [
+                        "Disable external entity processing in XML parsers",
+                        "Use whitelist for allowed URLs in SSRF",
+                        "Implement proper input validation"
+                    ] if detected else None
+                }
+            }
+        elif resp.status_code == 404:
+            # Test non trouvé ou expiré
+            return {
+                "test_id": test_id,
+                "detected": False,
+                "details": {},
+                "message": "Test not found or expired"
+            }
+        else:
+            try:
+                error_data = resp.json()
+                raise HTTPException(status_code=resp.status_code, detail=error_data.get("message", "Check failed"))
+            except:
+                raise HTTPException(status_code=resp.status_code, detail=f"Check failed (HTTP {resp.status_code})")
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SIDECHANNEL] Error checking test {test_id}: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Failed to check test: {str(e)}")
+
+class SideChannelGenerateUrlRequest(BaseModel):
+    attack_type: str
+
+@app.post("/api/sidechannel/generate-url")
+def sidechannel_generate_url(request: SideChannelGenerateUrlRequest):
+    """Génère une URL SideChannel unique pour injection manuelle
+    
+    Le SaaS génère un sous-domaine disponible au format abc.proxy.kittysploit.com
+    """
+    api_key = _load_collab_api_key()
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key not configured")
+    
+    try:
+        # Demander au SaaS de générer une URL unique
+        # Le SaaS s'occupe de générer un sous-domaine disponible au format abc.proxy.kittysploit.com
+        url = f"{COLLAB_SAAS_URL}/api/sidechannel/generate-url"
+        payload = {
+            "api_key": api_key,
+            "attack_type": request.attack_type
+        }
+        
+        resp = requests.post(url, json=payload, timeout=30)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            sidechannel_url = data.get("sidechannel_url", "")
+            
+            # Normaliser l'URL pour utiliser HTTPS et le domaine proxy.kittysploit.com
+            if sidechannel_url:
+                try:
+                    from urllib.parse import urlparse, urlunparse
+                    parsed = urlparse(sidechannel_url)
+                    
+                    # Extraire le sous-domaine (ex: "i94hme2kilqk" depuis "i94hme2kilqk.sidechannel.kittysploit.com")
+                    hostname = parsed.hostname or ""
+                    if hostname:
+                        # Trouver le sous-domaine (première partie avant le premier point)
+                        parts = hostname.split('.')
+                        if len(parts) > 0:
+                            subdomain = parts[0]
+                            # Reconstruire l'URL avec HTTPS et proxy.kittysploit.com
+                            normalized_hostname = f"{subdomain}.proxy.kittysploit.com"
+                            normalized_url = urlunparse((
+                                "https",  # Forcer HTTPS
+                                normalized_hostname,
+                                parsed.path,
+                                parsed.params,
+                                parsed.query,
+                                parsed.fragment
+                            ))
+                            sidechannel_url = normalized_url
+                except Exception as e:
+                    print(f"[SIDECHANNEL] Warning: Failed to normalize URL {sidechannel_url}: {e}", flush=True)
+                    # En cas d'erreur, essayer une correction simple
+                    if sidechannel_url.startswith("http://"):
+                        sidechannel_url = sidechannel_url.replace("http://", "https://")
+                    if "sidechannel.kittysploit.com" in sidechannel_url:
+                        sidechannel_url = sidechannel_url.replace("sidechannel.kittysploit.com", "proxy.kittysploit.com")
+            
+            return {
+                "test_id": data.get("test_id"),
+                "sidechannel_url": sidechannel_url,
+                "attack_type": request.attack_type
+            }
+        else:
+            try:
+                error_data = resp.json()
+                raise HTTPException(status_code=resp.status_code, detail=error_data.get("message", "Failed to generate URL"))
+            except:
+                raise HTTPException(status_code=resp.status_code, detail=f"Failed to generate URL (HTTP {resp.status_code})")
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[SIDECHANNEL] Error generating URL: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate URL: {str(e)}")
 
 # Serve static files (Frontend) — mounted after API routes to avoid shadowing /api/*
 static_dir = os.path.join(os.path.dirname(__file__), "static")

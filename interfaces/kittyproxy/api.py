@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -2559,6 +2559,27 @@ def get_workspace_info(workspace_name: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting workspace info: {str(e)}")
+
+@app.delete("/api/workspaces/{workspace_name}")
+def delete_workspace(workspace_name: str, force: bool = Query(False, description="Force deletion even if workspace contains data")):
+    """Delete a workspace"""
+    if not framework:
+        raise HTTPException(status_code=503, detail="Framework not initialized")
+    try:
+        # Check if it's the current workspace
+        current = framework.get_current_workspace_name()
+        if current == workspace_name:
+            raise HTTPException(status_code=400, detail="Cannot delete current workspace. Switch to another workspace first.")
+        
+        success = framework.delete_workspace(workspace_name, force=force)
+        if success:
+            return {"status": "ok", "name": workspace_name}
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to delete workspace: {workspace_name}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting workspace: {str(e)}")
 
 # Serve logo and favicon from interfaces/static/img/
 # These routes must be defined before the static files mount to take precedence

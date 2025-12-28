@@ -99,14 +99,16 @@ const debouncedSidechannelSearch = debounce(() => renderSidechannelFlows(), 150)
 const launchBtn = document.getElementById('launch-browser-btn');
 const launchStatus = document.getElementById('launch-status');
 
-// Workspace Management - DISABLED
-// const workspaceSelect = document.getElementById('workspace-select');
-// const workspaceRefreshBtn = document.getElementById('workspace-refresh-btn');
-// const workspaceCreateBtn = document.getElementById('workspace-create-btn');
-// const workspaceSaveDataCheck = document.getElementById('workspace-save-data');
-// const workspaceInfo = document.getElementById('workspace-info');
-// const workspaceDescription = document.getElementById('workspace-description');
-// let workspaceSaveEnabled = true; // Par défaut, on enregistre dans le workspace
+// Workspace Management
+const workspaceSelect = document.getElementById('workspace-select');
+const workspaceRefreshBtn = document.getElementById('workspace-refresh-btn');
+const workspaceCreateBtn = document.getElementById('workspace-create-btn');
+const workspaceDeleteBtn = document.getElementById('workspace-delete-btn');
+const workspaceSaveDataCheck = document.getElementById('workspace-save-data');
+const workspaceInfo = document.getElementById('workspace-info');
+const workspaceDescription = document.getElementById('workspace-description');
+let workspaceSaveEnabled = true; // Par défaut, on enregistre dans le workspace
+let currentWorkspaceName = null;
 
 // Interception
 const interceptToggleBtn = document.getElementById('intercept-toggle-btn');
@@ -1742,25 +1744,466 @@ switchView = function(viewId, navItem = null) {
     }
 };
 
-// === WORKSPACE MANAGEMENT === DISABLED
-// Workspace functionality has been removed from the main browser view
-/*
+// === WORKSPACE MANAGEMENT ===
 async function loadWorkspaces() {
-    // ... workspace code commented out
+    try {
+        const res = await fetch(`${API_BASE}/workspaces`);
+        if (!res.ok) {
+            console.error('[Workspace] Failed to load workspaces');
+            return;
+        }
+        const data = await res.json();
+        const workspaces = data.workspaces || [];
+        const current = data.current || null;
+        currentWorkspaceName = current;
+        
+        // Clear and populate select
+        workspaceSelect.innerHTML = '';
+        
+        if (workspaces.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No workspaces';
+            workspaceSelect.appendChild(option);
+        } else {
+            workspaces.forEach(ws => {
+                const option = document.createElement('option');
+                option.value = ws;
+                option.textContent = ws;
+                if (ws === current) {
+                    option.selected = true;
+                }
+                workspaceSelect.appendChild(option);
+            });
+        }
+        
+        // Create custom workspace select (same style as browser select)
+        if (workspaces.length > 0) {
+            createCustomWorkspaceSelect(workspaces, current);
+        }
+        
+        // Show/hide delete button
+        workspaceDeleteBtn.style.display = current ? 'inline-flex' : 'none';
+        
+        // Update workspace indicator in all top bars
+        updateWorkspaceIndicator(current);
+        
+        // Load current workspace info
+        await loadCurrentWorkspaceInfo();
+    } catch (err) {
+        console.error('[Workspace] Error loading workspaces:', err);
+    }
+}
+
+// Créer un select personnalisé pour les workspaces (même style que le browser select)
+function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
+    const workspaceSelectEl = document.getElementById('workspace-select');
+    if (!workspaceSelectEl) return;
+    
+    // Supprimer l'ancien select personnalisé s'il existe
+    const existingContainer = document.getElementById('custom-workspace-select-container');
+    if (existingContainer) {
+        existingContainer.remove();
+    }
+    
+    // Créer le conteneur du select personnalisé
+    const customSelectContainer = document.createElement('div');
+    customSelectContainer.id = 'custom-workspace-select-container';
+    customSelectContainer.style.cssText = 'position: relative; width: 100%; flex: 1;';
+    
+    // Créer le bouton du select (affichage) - même style que browser select
+    const customSelectButton = document.createElement('div');
+    customSelectButton.id = 'custom-workspace-select-button';
+    customSelectButton.style.cssText = 'width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; font-size: 0.95rem; background: white; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: border 0.2s, box-shadow 0.2s; box-sizing: border-box;';
+    customSelectButton.setAttribute('tabindex', '0'); // Make it focusable
+    
+    // Créer la liste déroulante
+    const customSelectDropdown = document.createElement('div');
+    customSelectDropdown.id = 'custom-workspace-select-dropdown';
+    customSelectDropdown.style.cssText = 'display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 10px; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; max-height: 300px; overflow-y: auto;';
+    
+    let selectedWorkspace = currentWorkspace || workspaces[0];
+    
+    // Helper function to format workspace name with (temporary) for default
+    function formatWorkspaceName(workspace) {
+        if (workspace === 'default') {
+            return 'default (temporary)';
+        }
+        return workspace;
+    }
+    
+    // Fonction pour mettre à jour l'affichage
+    function updateDisplay(workspace, skipEvent = false) {
+        selectedWorkspace = workspace;
+        const displayName = formatWorkspaceName(workspace);
+        customSelectButton.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">folder</span>
+            <span style="flex: 1;">${displayName}</span>
+            <span class="material-symbols-outlined" style="font-size: 18px; color: #666;">arrow_drop_down</span>
+        `;
+        workspaceSelectEl.value = workspace;
+        customSelectDropdown.style.display = 'none';
+        
+        // Only trigger change event if not skipping (to avoid double notification)
+        if (!skipEvent) {
+            workspaceSelectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+    
+    // Initialiser l'affichage
+    if (selectedWorkspace) {
+        updateDisplay(selectedWorkspace);
+    } else {
+        customSelectButton.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">folder</span>
+            <span style="flex: 1;">Select workspace...</span>
+            <span class="material-symbols-outlined" style="font-size: 18px; color: #666;">arrow_drop_down</span>
+        `;
+    }
+    
+    // Créer les options
+    workspaces.forEach(workspace => {
+        const option = document.createElement('div');
+        option.style.cssText = 'padding: 12px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s;';
+        option.onmouseover = () => option.style.background = '#f5f5f5';
+        option.onmouseout = () => option.style.background = '';
+        option.onclick = () => {
+            if (workspace !== currentWorkspaceName) {
+                // Update display without triggering change event (skipEvent = true)
+                updateDisplay(workspace, true);
+                // Then switch workspace (this will show the notification)
+                switchWorkspace(workspace);
+            } else {
+                // Just close the dropdown if same workspace
+                customSelectDropdown.style.display = 'none';
+                const arrow = customSelectButton.querySelector('.material-symbols-outlined:last-child');
+                if (arrow) {
+                    arrow.style.transform = 'rotate(0deg)';
+                }
+            }
+        };
+        
+        const displayName = formatWorkspaceName(workspace);
+        option.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">folder</span>
+            <span>${displayName}</span>
+        `;
+        
+        customSelectDropdown.appendChild(option);
+    });
+    
+    // Toggle dropdown
+    customSelectButton.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = customSelectDropdown.style.display === 'block';
+        customSelectDropdown.style.display = isOpen ? 'none' : 'block';
+        
+        // Update arrow rotation
+        const arrow = customSelectButton.querySelector('.material-symbols-outlined:last-child');
+        if (arrow) {
+            arrow.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+            arrow.style.transition = 'transform 0.2s';
+        }
+    };
+    
+    // Fermer quand on clique ailleurs
+    document.addEventListener('click', (e) => {
+        if (!customSelectContainer.contains(e.target)) {
+            customSelectDropdown.style.display = 'none';
+            const arrow = customSelectButton.querySelector('.material-symbols-outlined:last-child');
+            if (arrow) {
+                arrow.style.transform = 'rotate(0deg)';
+            }
+        }
+    });
+    
+    // Hover effect
+    customSelectButton.onmouseenter = () => {
+        customSelectButton.style.borderColor = 'var(--primary-color)';
+        customSelectButton.style.boxShadow = '0 0 0 3px rgba(98, 0, 234, 0.08)';
+    };
+    customSelectButton.onmouseleave = () => {
+        if (document.activeElement !== customSelectButton) {
+            customSelectButton.style.borderColor = 'var(--border-color)';
+            customSelectButton.style.boxShadow = 'none';
+        }
+    };
+    
+    // Focus effect
+    customSelectButton.onfocus = () => {
+        customSelectButton.style.borderColor = 'var(--primary-color)';
+        customSelectButton.style.boxShadow = '0 0 0 3px rgba(98, 0, 234, 0.1)';
+    };
+    customSelectButton.onblur = () => {
+        customSelectButton.style.borderColor = 'var(--border-color)';
+        customSelectButton.style.boxShadow = 'none';
+    };
+    
+    // Assembler le select personnalisé
+    customSelectContainer.appendChild(customSelectButton);
+    customSelectContainer.appendChild(customSelectDropdown);
+    
+    // Remplacer le select natif dans le workspace-select-row
+    const workspaceSelectRow = workspaceSelectEl.closest('.workspace-select-row');
+    if (workspaceSelectRow) {
+        workspaceSelectEl.style.display = 'none';
+        workspaceSelectRow.insertBefore(customSelectContainer, workspaceSelectEl);
+    }
 }
 
 async function loadCurrentWorkspaceInfo() {
-    // ... workspace code commented out
+    try {
+        const res = await fetch(`${API_BASE}/workspaces/current`);
+        if (!res.ok) {
+            workspaceInfo.style.display = 'none';
+            return;
+        }
+        const data = await res.json();
+        if (data.name) {
+            workspaceDescription.textContent = data.description || `Workspace: ${data.name}`;
+            workspaceInfo.style.display = 'block';
+        } else {
+            workspaceInfo.style.display = 'none';
+        }
+    } catch (err) {
+        console.error('[Workspace] Error loading current workspace info:', err);
+        workspaceInfo.style.display = 'none';
+    }
 }
 
 async function switchWorkspace(workspaceName) {
-    // ... workspace code commented out
+    if (!workspaceName) {
+        console.warn('[Workspace] No workspace name provided');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/workspaces/${encodeURIComponent(workspaceName)}/switch`, {
+            method: 'POST'
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            showToast(`Failed to switch workspace: ${error.detail || 'Unknown error'}`, 'error');
+            return;
+        }
+        
+        const data = await res.json();
+        currentWorkspaceName = data.workspace;
+        showToast(`Switched to workspace: ${data.workspace}`, 'success');
+        
+        // Update workspace indicator
+        updateWorkspaceIndicator(data.workspace);
+        
+        // Reload workspaces to update UI
+        await loadWorkspaces();
+    } catch (err) {
+        console.error('[Workspace] Error switching workspace:', err);
+        showToast(`Error switching workspace: ${err.message}`, 'error');
+    }
 }
 
 function showCreateWorkspaceModal() {
-    // ... workspace code commented out
+    document.getElementById('modal-workspace-name').value = '';
+    document.getElementById('modal-workspace-description').value = '';
+    document.getElementById('modal-create-workspace').style.display = 'flex';
 }
-*/
+
+function showDeleteWorkspaceModal() {
+    const workspaceName = workspaceSelect.value;
+    if (!workspaceName) {
+        showToast('No workspace selected', 'error');
+        return;
+    }
+    
+    const message = `Are you sure you want to delete workspace "${workspaceName}"? This action cannot be undone.`;
+    document.getElementById('modal-delete-workspace-message').textContent = message;
+    document.getElementById('modal-delete-workspace-force').checked = false;
+    document.getElementById('modal-delete-workspace').style.display = 'flex';
+}
+
+async function confirmCreateWorkspace() {
+    const name = document.getElementById('modal-workspace-name').value.trim();
+    const description = document.getElementById('modal-workspace-description').value.trim();
+    
+    if (!name) {
+        showToast('Workspace name is required', 'error');
+        return;
+    }
+    
+    // Validate workspace name (alphanumeric, hyphens, underscores)
+    if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        showToast('Workspace name can only contain alphanumeric characters, hyphens, and underscores', 'error');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/workspaces`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                name: name,
+                description: description
+            })
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            showToast(`Failed to create workspace: ${error.detail || 'Unknown error'}`, 'error');
+            return;
+        }
+        
+        const data = await res.json();
+        showToast(`Workspace "${data.name}" created successfully`, 'success');
+        closeModal('modal-create-workspace');
+        
+        // Reload workspaces and switch to the new one
+        await loadWorkspaces();
+        await switchWorkspace(data.name);
+    } catch (err) {
+        console.error('[Workspace] Error creating workspace:', err);
+        showToast(`Error creating workspace: ${err.message}`, 'error');
+    }
+}
+
+async function confirmDeleteWorkspace() {
+    const workspaceName = workspaceSelect.value;
+    if (!workspaceName) {
+        showToast('No workspace selected', 'error');
+        return;
+    }
+    
+    const force = document.getElementById('modal-delete-workspace-force').checked;
+    
+    try {
+        const url = `${API_BASE}/workspaces/${encodeURIComponent(workspaceName)}?force=${force}`;
+        const res = await fetch(url, {
+            method: 'DELETE'
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            showToast(`Failed to delete workspace: ${error.detail || 'Unknown error'}`, 'error');
+            return;
+        }
+        
+        const data = await res.json();
+        showToast(`Workspace "${data.name}" deleted successfully`, 'success');
+        closeModal('modal-delete-workspace');
+        
+        // Reload workspaces
+        await loadWorkspaces();
+    } catch (err) {
+        console.error('[Workspace] Error deleting workspace:', err);
+        showToast(`Error deleting workspace: ${err.message}`, 'error');
+    }
+}
+
+// Event listeners for workspace controls
+if (workspaceSelect) {
+    let isSwitchingWorkspace = false; // Flag to prevent double notifications
+    workspaceSelect.addEventListener('change', async (e) => {
+        const workspaceName = e.target.value;
+        if (workspaceName && workspaceName !== currentWorkspaceName && !isSwitchingWorkspace) {
+            isSwitchingWorkspace = true;
+            await switchWorkspace(workspaceName);
+            isSwitchingWorkspace = false;
+        }
+    });
+}
+
+if (workspaceRefreshBtn) {
+    workspaceRefreshBtn.addEventListener('click', async () => {
+        await loadWorkspaces();
+        showToast('Workspaces refreshed', 'success');
+    });
+}
+
+if (workspaceCreateBtn) {
+    workspaceCreateBtn.addEventListener('click', () => {
+        showCreateWorkspaceModal();
+    });
+}
+
+if (workspaceDeleteBtn) {
+    workspaceDeleteBtn.addEventListener('click', () => {
+        showDeleteWorkspaceModal();
+    });
+}
+
+if (workspaceSaveDataCheck) {
+    workspaceSaveDataCheck.addEventListener('change', (e) => {
+        workspaceSaveEnabled = e.target.checked;
+        showToast(
+            workspaceSaveEnabled 
+                ? 'Workspace saving enabled' 
+                : 'Workspace saving disabled - data will not be saved to workspace',
+            workspaceSaveEnabled ? 'success' : 'warning'
+        );
+    });
+}
+
+// Function to update workspace indicator in all top bars
+function updateWorkspaceIndicator(workspaceName) {
+    const indicators = document.querySelectorAll('.workspace-indicator');
+    const indicatorNames = document.querySelectorAll('#workspace-indicator-name');
+    
+    if (workspaceName) {
+        // Format workspace name with (temporary) for default
+        const displayName = workspaceName === 'default' ? 'default (temporary)' : workspaceName;
+        
+        // Show indicators and update text
+        indicators.forEach(indicator => {
+            indicator.style.display = 'flex';
+        });
+        indicatorNames.forEach(nameEl => {
+            nameEl.textContent = displayName;
+        });
+    } else {
+        // Hide indicators if no workspace
+        indicators.forEach(indicator => {
+            indicator.style.display = 'none';
+        });
+    }
+}
+
+// Function to add workspace indicator to all top bars
+function addWorkspaceIndicatorToTopBars() {
+    const topBars = document.querySelectorAll('.top-bar');
+    
+    topBars.forEach(topBar => {
+        // Check if indicator already exists
+        if (topBar.querySelector('.workspace-indicator')) {
+            return;
+        }
+        
+        // Create indicator element
+        const indicator = document.createElement('div');
+        indicator.className = 'workspace-indicator';
+        indicator.id = 'workspace-indicator';
+        indicator.style.display = 'none';
+        indicator.innerHTML = `
+            <span class="material-symbols-outlined" style="font-size: 18px;">folder</span>
+            <span id="workspace-indicator-name">-</span>
+        `;
+        
+        // Add to top bar (on the right side)
+        topBar.appendChild(indicator);
+    });
+}
+
+// Load workspaces on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        addWorkspaceIndicatorToTopBars();
+        loadWorkspaces();
+    });
+} else {
+    addWorkspaceIndicatorToTopBars();
+    loadWorkspaces();
+}
 
 // === BROWSER LAUNCH ===
 // Mapping des navigateurs vers leurs icônes
@@ -11092,17 +11535,54 @@ function renderCollabApiKeyRequired(message) {
     if (createBtn) createBtn.disabled = true;
 }
 
-async function ensureCollabAuth() {
+async function ensureCollabAuth(forceRetry = false) {
+    // Si forceRetry est true, on ignore le cache et on réessaie
+    if (!forceRetry) {
+        // Vérifier si on a déjà tenté de valider et que ça a échoué
+        // Si c'est le cas, on ne refait pas la requête (il faudra redémarrer pour retester)
+        const lastFailed = localStorage.getItem('collab_auth_last_failed');
+        if (lastFailed === 'true') {
+            console.log('[COLLAB] Previous validation failed. Clearing cache and retrying...');
+            // Nettoyer le cache et réessayer automatiquement
+            localStorage.removeItem('collab_auth_last_failed');
+            // Réessayer une fois après avoir nettoyé le cache
+            return await ensureCollabAuth(true);
+        }
+    } else {
+        // Si on force le retry, on nettoie le cache
+        localStorage.removeItem('collab_auth_last_failed');
+    }
+    
     try {
-        const res = await fetch('/api/collab/auth');
+        const res = await fetch(`${API_BASE}/collab/auth`);
         if (!res.ok) {
             const data = await res.json().catch(() => ({}));
-            renderCollabApiKeyRequired(data.message || 'API key invalid or missing.');
+            const errorMsg = data.detail || data.message || 'API key invalid or missing.';
+            renderCollabApiKeyRequired(errorMsg);
             collabAuthValid = false;
+            // Marquer l'échec dans le cache (permanent jusqu'au rechargement)
+            localStorage.setItem('collab_auth_last_failed', 'true');
+            console.error('[COLLAB] Auth failed:', errorMsg);
             return false;
         }
         const data = await res.json();
-        collabAuthValid = !!data.valid;
+        console.log('[COLLAB] Auth response:', { valid: data.valid, hasToken: !!data.token, server_url: data.server_url });
+        
+        // Vérifier à la fois valid ET token (comme pour SideChannel)
+        collabAuthValid = !!(data.valid === true && data.token);
+        
+        // Si la validation réussit, on supprime le cache d'échec
+        if (collabAuthValid) {
+            localStorage.removeItem('collab_auth_last_failed');
+            console.log('[COLLAB] Auth successful');
+        } else {
+            // Si valid est false, on marque l'échec
+            const errorMsg = data.detail || data.message || `API key invalid (valid: ${data.valid}, hasToken: ${!!data.token})`;
+            console.error('[COLLAB] Auth failed:', errorMsg);
+            localStorage.setItem('collab_auth_last_failed', 'true');
+            renderCollabApiKeyRequired(errorMsg);
+        }
+        
         if (data.server_url) {
             COLLABORATION_SERVER_URL = normalizeCollabUrl(data.server_url);
             localStorage.setItem('collaboration_server_url', COLLABORATION_SERVER_URL);
@@ -11113,8 +11593,11 @@ async function ensureCollabAuth() {
         }
         return collabAuthValid;
     } catch (e) {
+        console.error('[COLLAB] Auth error:', e);
         renderCollabApiKeyRequired('Unable to validate API key.');
         collabAuthValid = false;
+        // Marquer l'échec dans le cache (permanent jusqu'au rechargement)
+        localStorage.setItem('collab_auth_last_failed', 'true');
         return false;
     }
 }
@@ -13277,7 +13760,7 @@ function renderAIHistoryDetails(id) {
     if (!detail) return;
     const item = (aiHistoryCache || []).find(e => e.id === id);
     if (!item) {
-        detail.innerHTML = '<div style="color:#666;">No details.</div>';
+        detail.innerHTML = '<div style="color:#666; padding: 20px; text-align: center;">No details available.</div>';
         return;
     }
     const date = new Date(item.ts);
@@ -13285,40 +13768,141 @@ function renderAIHistoryDetails(id) {
     const quota = item.limit !== undefined && item.remaining !== undefined
         ? `Quota: ${item.limit - item.remaining}/${item.limit} used`
         : '';
-    const formatEntry = (val) => {
-        if (val === null || val === undefined) return '';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'object') {
-            if (val.text) return val.text;
-            if (val.content) return val.content;
-            return JSON.stringify(val);
-        }
-        return String(val);
-    };
-
-    const suggestionsHtml = (item.suggestions && item.suggestions.length)
-        ? `<ul style="margin:8px 0 12px 18px; padding:0; color:#333;">${item.suggestions.map(s => `<li style="margin-bottom:6px;">${formatEntry(s)}</li>`).join('')}</ul>`
-        : '<div style="color:#888; font-size:12px;">No suggestions.</div>';
+    
+    // Format suggestions avec structure améliorée
+    let suggestionsHtml = '';
+    if (item.suggestions && item.suggestions.length) {
+        suggestionsHtml = item.suggestions.map((s, idx) => {
+            // Si c'est un objet structuré (comme dans l'image)
+            if (typeof s === 'object' && s !== null && !Array.isArray(s)) {
+                const technique = s.technique || s.title || 'Unknown technique';
+                const description = s.description || s.desc || '';
+                const confidence = s.confidence !== undefined ? (s.confidence * 100).toFixed(0) + '%' : '';
+                const targetParam = s.target_param || '';
+                const evidence = s.evidence || [];
+                const payloads = s.payloads || [];
+                
+                const confidenceColor = s.confidence >= 0.8 ? '#4caf50' : s.confidence >= 0.6 ? '#ff9800' : '#f44336';
+                
+                return `
+                    <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                        <div style="display: flex; align-items: start; justify-content: space-between; margin-bottom: 12px;">
+                            <h4 style="margin: 0; font-size: 15px; font-weight: 600; color: #333; flex: 1;">${technique}</h4>
+                            ${confidence ? `<span style="background: ${confidenceColor}; color: white; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;">${confidence}</span>` : ''}
+                        </div>
+                        ${description ? `<p style="margin: 0 0 12px 0; color: #555; font-size: 13px; line-height: 1.5;">${description}</p>` : ''}
+                        ${targetParam ? `<div style="margin-bottom: 8px;"><span style="font-size: 12px; color: #666; font-weight: 600;">Target Parameter:</span> <code style="background: #f5f5f5; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #333;">${targetParam}</code></div>` : ''}
+                        ${evidence.length > 0 ? `
+                            <div style="margin-bottom: 12px;">
+                                <div style="font-size: 12px; color: #666; font-weight: 600; margin-bottom: 6px;">Evidence:</div>
+                                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                    ${evidence.map(e => `<span style="background: #e3f2fd; color: #1976d2; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-family: monospace;">${typeof e === 'string' ? e : JSON.stringify(e)}</span>`).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${payloads.length > 0 ? `
+                            <div>
+                                <div style="font-size: 12px; color: #666; font-weight: 600; margin-bottom: 6px;">Payloads:</div>
+                                ${payloads.map((p, pIdx) => {
+                                    const payloadValue = typeof p === 'object' ? (p.value || p.payload || JSON.stringify(p)) : p;
+                                    const payloadDesc = typeof p === 'object' ? (p.description || '') : '';
+                                    return `
+                                        <div style="background: #f9f9f9; border-left: 3px solid var(--primary-color); padding: 10px; margin-bottom: 8px; border-radius: 4px;">
+                                            ${payloadDesc ? `<div style="font-size: 11px; color: #666; margin-bottom: 4px;">${payloadDesc}</div>` : ''}
+                                            <code style="background: white; padding: 6px 8px; border-radius: 4px; font-size: 11px; color: #333; display: block; word-break: break-all; font-family: 'Fira Code', monospace;">${payloadValue}</code>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            } else {
+                // Format simple pour les strings
+                const text = typeof s === 'string' ? s : JSON.stringify(s);
+                return `<div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 12px;"><div style="color: #333; font-size: 13px; line-height: 1.5;">${text}</div></div>`;
+            }
+        }).join('');
+    } else {
+        suggestionsHtml = '<div style="color:#888; font-size:13px; padding: 20px; text-align: center; background: white; border-radius: 8px;">No suggestions available.</div>';
+    }
+    
+    // Format next steps
     const nextStepsHtml = (item.nextSteps && item.nextSteps.length)
-        ? `<ul style="margin:8px 0 12px 18px; padding:0; color:#333;">${item.nextSteps.map(s => `<li style="margin-bottom:6px;">${formatEntry(s)}</li>`).join('')}</ul>`
-        : '<div style="color:#888; font-size:12px;">No next steps.</div>';
+        ? item.nextSteps.map(s => {
+            const text = typeof s === 'string' ? s : (s.text || s.content || JSON.stringify(s));
+            return `<li style="margin-bottom: 8px; padding-left: 8px; color: #333; font-size: 13px; line-height: 1.5;">${text}</li>`;
+        }).join('')
+        : '<div style="color:#888; font-size:13px; padding: 20px; text-align: center;">No next steps available.</div>';
+    
+    // Format tech stack
     const techHtml = (item.techStack && Object.keys(item.techStack).length)
-        ? `<div style="margin-top:6px; font-size:12px; color:#444;">${Object.entries(item.techStack).map(([k,v])=>`<div><strong>${k}:</strong> ${JSON.stringify(v)}</div>`).join('')}</div>`
-        : '<div style="color:#888; font-size:12px;">No tech stack info.</div>';
+        ? Object.entries(item.techStack).map(([k, v]) => {
+            const values = Array.isArray(v) ? v : [v];
+            return `
+                <div style="margin-bottom: 12px; padding: 10px; background: white; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <div style="font-weight: 600; font-size: 12px; color: #666; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">${k}</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        ${values.map(val => `<span style="background: #f0f0f0; color: #333; padding: 4px 10px; border-radius: 12px; font-size: 11px;">${val}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+        }).join('')
+        : '<div style="color:#888; font-size:13px; padding: 20px; text-align: center; background: white; border-radius: 8px;">No tech stack information available.</div>';
 
     detail.innerHTML = `
-        <div style="font-size:12px; color:#666; margin-bottom:6px;">${time}</div>
-        <div style="font-size:14px; color:#333; margin-bottom:6px;">
-            ${item.method ? `<strong>${item.method}</strong> ` : ''}${item.url || ''}${item.status ? ` • ${item.status}` : ''}
+        <div style="max-width: 900px; margin: 0 auto;">
+            <!-- Header -->
+            <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; border: 1px solid var(--border-color);">
+                <div style="font-size: 12px; color: #666; margin-bottom: 8px;">${time}</div>
+                <div style="font-size: 16px; color: #333; margin-bottom: 8px; font-weight: 600;">
+                    ${item.method ? `<span style="background: ${getMethodColor(item.method)}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 8px;">${item.method}</span>` : ''}
+                    <span style="word-break: break-all;">${item.url || 'No URL'}</span>
+                    ${item.status ? `<span style="margin-left: 8px; color: #666;">• ${item.status}</span>` : ''}
+                </div>
+                ${item.summary ? `<div style="font-size: 14px; color: #555; line-height: 1.6; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color);">${item.summary}</div>` : ''}
+                ${quota ? `<div style="font-size: 11px; color: #888; margin-top: 8px;">${quota}</div>` : ''}
+            </div>
+            
+            <!-- Suggestions Section -->
+            <div style="margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+                    <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">lightbulb</span>
+                    <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #333;">Suggestions</h3>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0;">
+                    ${suggestionsHtml}
+                </div>
+            </div>
+            
+            <!-- Next Steps Section -->
+            ${item.nextSteps && item.nextSteps.length > 0 ? `
+                <div style="margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">arrow_forward</span>
+                        <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #333;">Next Steps</h3>
+                    </div>
+                    <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                        <ul style="margin: 0; padding-left: 20px; color: #333;">
+                            ${nextStepsHtml}
+                        </ul>
+                    </div>
+                </div>
+            ` : ''}
+            
+            <!-- Tech Stack Section -->
+            ${item.techStack && Object.keys(item.techStack).length > 0 ? `
+                <div style="margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">memory</span>
+                        <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #333;">Tech Stack</h3>
+                    </div>
+                    <div>
+                        ${techHtml}
+                    </div>
+                </div>
+            ` : ''}
         </div>
-        <div style="font-size:13px; color:#555; margin-bottom:8px;">${item.summary || 'No summary'}</div>
-        <div style="font-size:12px; color:#777; margin-bottom:10px;">${quota || ''}</div>
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">Suggestions</div>
-        ${suggestionsHtml}
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">Next steps</div>
-        ${nextStepsHtml}
-        <div style="font-size:13px; font-weight:600; margin-bottom:4px;">Tech stack</div>
-        ${techHtml}
     `;
 }
 

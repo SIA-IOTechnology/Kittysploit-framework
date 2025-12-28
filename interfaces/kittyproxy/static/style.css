@@ -458,6 +458,31 @@ body {
     font-weight: 600;
 }
 
+/* Workspace Indicator */
+.workspace-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(98, 0, 234, 0.08);
+    border: 1px solid rgba(98, 0, 234, 0.2);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    transition: all 0.2s ease;
+}
+
+.workspace-indicator:hover {
+    background: rgba(98, 0, 234, 0.12);
+    border-color: rgba(98, 0, 234, 0.3);
+}
+
+.workspace-indicator .material-symbols-outlined {
+    font-size: 18px;
+    color: var(--primary-color);
+}
+
 /* View Sections */
 .view-section {
     flex: 1;
@@ -473,39 +498,258 @@ body {
 }
 
 /* Browser Launch View */
-.browser-launch-container {
+.browser-view-container {
     flex: 1;
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto 32px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    align-items: center;
+    align-content: center;
+    justify-items: stretch;
+    gap: 32px;
+    padding: 40px 48px;
+    min-height: calc(100vh - 140px);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, rgba(98, 0, 234, 0.04) 60%, rgba(255, 255, 255, 0) 100%);
+    box-sizing: border-box;
+}
+
+.browser-column {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.browser-card {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    padding: 28px 32px;
+    box-shadow: 0 20px 60px rgba(15, 15, 15, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    box-sizing: border-box;
+}
+
+.browser-card-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.browser-card-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f8f9fa;
+    background: #1e1e1e;
+    color: #fff;
+    overflow: hidden;
 }
 
-.launch-card {
-    background: #fff;
-    padding: 40px;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-    text-align: center;
-    max-width: 400px;
-    border: 1px solid var(--border-color);
+.browser-card-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 8px;
+    box-sizing: border-box;
 }
 
-.launch-icon {
-    font-size: 64px;
-    color: var(--primary-color);
-    margin-bottom: 20px;
+.browser-card-icon.neutral {
+    background: rgba(0, 0, 0, 0.05);
+    color: #444;
 }
 
-.launch-card h3 {
-    margin: 0 0 10px 0;
-    font-size: 1.5rem;
+.card-eyebrow {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
 }
 
-.launch-card p {
-    color: #666;
-    margin-bottom: 30px;
+.card-description {
+    color: var(--text-secondary);
+    margin: 0;
     line-height: 1.5;
+    font-size: 0.95rem;
+}
+
+.browser-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.browser-field label {
+    font-weight: 600;
+    color: var(--text-color);
+    font-size: 0.9rem;
+}
+
+.browser-select,
+.workspace-select {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 0.95rem;
+    background: #fff;
+    transition: border 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+
+.browser-select:focus,
+.workspace-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.1);
+}
+
+.browser-launch-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.browser-launch-actions .launch-status {
+    margin-top: 0;
+    min-height: auto;
+}
+
+.browser-hint-block {
+    display: flex;
+    gap: 12px;
+    padding: 14px 16px;
+    background: rgba(98, 0, 234, 0.06);
+    border-radius: 12px;
+    color: var(--text-color);
+    align-items: flex-start;
+}
+
+.browser-hint-block p {
+    margin: 4px 0 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.hint-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.browser-hint-block .material-symbols-outlined {
+    font-size: 22px;
+    color: var(--primary-color);
+}
+
+.workspace-select-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.workspace-select-row .btn {
+    padding: 10px 14px;
+    min-width: auto;
+}
+
+.workspace-info-panel {
+    padding: 14px 16px;
+    background: #f7f7f9;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.workspace-info-title {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.workspace-info-text {
+    font-size: 0.92rem;
+    color: var(--text-color);
+}
+
+.workspace-toggle-block label {
+    display: flex;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: #fafafa;
+    cursor: pointer;
+    transition: border 0.2s, box-shadow 0.2s;
+    align-items: center;
+}
+
+.workspace-toggle-block label div {
+    flex: 1;
+}
+
+.workspace-toggle-block label:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 8px 20px rgba(98, 0, 234, 0.12);
+}
+
+.workspace-toggle-block input {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.workspace-toggle-block .toggle-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-color);
+}
+
+.workspace-toggle-block p {
+    margin: 2px 0 0 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.workspace-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.workspace-actions .btn {
+    flex: 1;
+}
+
+@media (max-width: 1200px) {
+    .browser-view-container {
+        grid-template-columns: 1fr;
+        padding: 24px;
+    }
+}
+
+@media (max-width: 600px) {
+    .browser-launch-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .workspace-select-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .workspace-select-row .btn {
+        width: 100%;
+        justify-content: center;
+    }
 }
 
 .primary-btn {

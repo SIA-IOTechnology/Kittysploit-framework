@@ -147,26 +147,27 @@
 /* Workspace Select */
 .workspace-select {
     padding: 6px 12px;
-    border: none;
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     font-size: 0.95rem;
-    background: transparent;
+    background: white;
     cursor: pointer;
     transition: all 0.3s;
     font-family: 'Inter', sans-serif;
     min-width: 140px;
-    color: #ffffff;
-    font-weight: 600;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    color: var(--text-color);
+    font-weight: 500;
 }
 
 .workspace-select:hover {
-    background: rgba(255, 255, 255, 0.15);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.08);
 }
 
 .workspace-select:focus {
     outline: none;
-    background: rgba(255, 255, 255, 0.2);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(98, 0, 234, 0.15);
 }
 
 .workspace-select option {
@@ -249,6 +250,17 @@
 .workspace-toggle input:checked+.material-symbols-outlined {
     color: #ffffff;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+}
+
+/* Workspace Card Styles */
+.workspace-card {
+    text-align: left;
+}
+
+@media (max-width: 1024px) {
+    .browser-view-container {
+        grid-template-columns: 1fr;
+    }
 }
 
 .workspace-toggle:hover .material-symbols-outlined {

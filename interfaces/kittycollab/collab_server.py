@@ -66,10 +66,24 @@ class CollabWebServer:
         self.app = Flask(__name__,
                         template_folder=template_dir,
                         static_folder=static_dir)
-        CORS(self.app)
+        # Configurer CORS pour permettre toutes les origines (nécessaire pour Socket.IO)
+        CORS(self.app, resources={
+            r"/*": {
+                "origins": "*",
+                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                "allow_headers": ["Content-Type", "Authorization", "X-API-Key"]
+            }
+        })
 
         # Validate API key once at startup
+        if self.verbose:
+            print_info(f"Validating API key against {self.saas_url}...")
         self._validate_api_key()
+        if self.verbose:
+            if self.api_key_valid:
+                print_success("API key validation successful")
+            else:
+                print_error(f"API key validation failed: {self.api_key_error}")
 
         self._setup_routes()
 
@@ -98,7 +112,10 @@ class CollabWebServer:
         try:
             response = requests.get(
                 validation_url,
-                params={'api_key': self.api_key},
+                headers={
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                },
                 timeout=10
             )
 
@@ -116,10 +133,21 @@ class CollabWebServer:
                         return True
                     self.api_key_error = data.get('message', "API key invalide.")
                 else:
-                    self.api_key_error = "Unexpected response from the server when validating the API key."
+                    self.api_key_error = f"Unexpected response from the server when validating the API key. Content-Type: {response.headers.get('Content-Type', 'unknown')}"
             else:
-                self.api_key_error = f"Failed to validate the API key (HTTP {response.status_code})."
+                # Essayer de récupérer plus d'informations sur l'erreur
+                try:
+                    error_body = response.text[:200]
+                    self.api_key_error = f"Failed to validate the API key (HTTP {response.status_code}): {error_body}"
+                except:
+                    self.api_key_error = f"Failed to validate the API key (HTTP {response.status_code})."
 
+        except requests.exceptions.Timeout:
+            self.api_key_error = f"Timeout while connecting to {self.saas_url}. The server may be unreachable or slow."
+        except requests.exceptions.SSLError as e:
+            self.api_key_error = f"SSL error when connecting to {self.saas_url}: {e}. Check your SSL certificates."
+        except requests.exceptions.ConnectionError as e:
+            self.api_key_error = f"Connection error: Unable to reach {self.saas_url}. Check your internet connection. Error: {e}"
         except requests.RequestException as e:
             self.api_key_error = f"Unable to validate the API key: {e}"
 
@@ -246,6 +274,63 @@ class CollabWebServer:
             except Exception as e:
                 print_error(f"Error deleting session: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 500
+        
+        # Route proxy pour /api/rooms vers le serveur SaaS
+        @self.app.route('/api/rooms', methods=['GET'])
+        def proxy_rooms():
+            """Proxy pour récupérer la liste des rooms depuis le serveur SaaS"""
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                token = request.args.get('token', '')
+                url = f"{self.saas_url}/api/rooms"
+                headers = {
+                    'X-API-Key': self.api_key,  # Utiliser l'API key originale pour l'authentification
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                # Ajouter le token de session si disponible (pour les rooms privées)
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                # Ajouter le token passé en paramètre si fourni
+                if token:
+                    url += f'?token={token}'
+                
+                resp = requests.get(url, headers=headers, timeout=10)
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying rooms request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour créer un salon via HTTP (alternative à Socket.IO)
+        @self.app.route('/api/rooms/create', methods=['POST'])
+        def proxy_create_room():
+            """Proxy pour créer un salon via HTTP vers le serveur SaaS"""
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                payload = request.get_json(force=True) or {}
+                url = f"{self.saas_url}/api/rooms/create"
+                headers = {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': self.api_key,  # Utiliser l'API key originale pour l'authentification
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                # Ajouter le token d'accès si fourni
+                if payload.get('access_token'):
+                    headers['X-Access-Token'] = payload.get('access_token')
+                
+                resp = requests.post(url, json=payload, headers=headers, timeout=10)
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying create room request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
         
         # Route de test
         @self.app.route('/test')

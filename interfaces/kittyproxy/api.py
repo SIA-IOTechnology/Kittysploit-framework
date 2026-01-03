@@ -417,6 +417,26 @@ def toggle_intercept(data: Dict):
     flow_manager.toggle_intercept(enabled)
     return {"status": "ok", "enabled": enabled}
 
+@app.get("/api/performance/fast-mode")
+def get_fast_mode():
+    """Get current fast mode settings."""
+    return {
+        "fast_mode": flow_manager.fast_mode,
+        "threshold_kb": flow_manager.fast_mode_threshold_kb
+    }
+
+@app.post("/api/performance/fast-mode")
+def set_fast_mode(data: Dict):
+    """Set fast mode settings."""
+    enabled = data.get("enabled", True)
+    threshold_kb = data.get("threshold_kb", 100)
+    flow_manager.set_fast_mode(enabled, threshold_kb)
+    return {
+        "status": "ok",
+        "fast_mode": flow_manager.fast_mode,
+        "threshold_kb": flow_manager.fast_mode_threshold_kb
+    }
+
 @app.get("/api/intercept/pending")
 def get_pending_intercepts():
     pending = []
@@ -2671,7 +2691,7 @@ def _validate_collab_api_key(api_key: str):
         raise HTTPException(status_code=401, detail="API key missing. Set [FRAMEWORK].api_key in config.toml.")
     url = f"{COLLAB_SAAS_URL}/api/auth/validate-api-key"
     try:
-        resp = requests.get(url, params={"api_key": api_key}, timeout=10)
+        resp = requests.get(url, headers={"X-API-Key": api_key, "User-Agent": "Kittysploit-Framework/2.0"}, timeout=10)
         try:
             body_preview = resp.text[:300]
             print(f"[COLLAB] SaaS validate status={resp.status_code} body={body_preview}", flush=True)
@@ -2824,7 +2844,7 @@ def sidechannel_test(request: SideChannelTestRequest):
         time_module.sleep(2)
         
         check_url = f"{COLLAB_SAAS_URL}/api/sidechannel/check/{test_id}"
-        check_resp = requests.get(check_url, params={"api_key": api_key}, timeout=10)
+        check_resp = requests.get(check_url, headers={"X-API-Key": api_key}, timeout=10)
         
         if check_resp.status_code == 200:
             check_data = check_resp.json()
@@ -2884,7 +2904,7 @@ def sidechannel_check_test(test_id: str):
     try:
         # Vérifier auprès du SaaS si une requête a été reçue
         url = f"{COLLAB_SAAS_URL}/api/sidechannel/check/{test_id}"
-        resp = requests.get(url, params={"api_key": api_key}, timeout=10)
+        resp = requests.get(url, headers={"X-API-Key": api_key}, timeout=10)
         
         if resp.status_code == 200:
             data = resp.json()

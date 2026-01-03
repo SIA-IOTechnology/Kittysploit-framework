@@ -23,6 +23,10 @@ const PAGE_SIZE = 50;
 let currentPage = 1;
 let totalPages = 1;
 
+// Flow polling optimization
+const FLOW_POLL_SIZE = 300; // Reduced from 10000 to limit backend load
+let flowsHash = ''; // Lightweight hash to detect changes
+
 // Sorting
 let sortColumn = null; // 'method', 'status', 'time', or null
 let sortOrder = 'asc'; // 'asc' or 'desc'
@@ -48,14 +52,14 @@ function showToast(message, type = 'info') {
         container.style.cssText = 'position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 2000; pointer-events: none;';
         document.body.appendChild(container);
     }
-    
+
     const toast = document.createElement('div');
     const bg = type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#333';
     toast.style.cssText = `min-width: 220px; max-width: 320px; padding: 10px 12px; border-radius: 8px; color: #fff; background: ${bg}; box-shadow: 0 8px 20px rgba(0,0,0,0.2); font-size: 13px; display: flex; align-items: center; gap: 8px; pointer-events: auto;`;
     toast.textContent = message;
-    
+
     container.appendChild(toast);
-    
+
     setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transition = 'opacity 0.2s ease';
@@ -215,28 +219,33 @@ const SIDECHANNEL_MIN_FLOW_FETCH_INTERVAL = 900;
 
 // === NAVIGATION ===
 function switchView(viewId, navItem = null) {
-        currentViewId = viewId;
-        navItems.forEach(nav => nav.classList.remove('active'));
+    currentViewId = viewId;
+    navItems.forEach(nav => nav.classList.remove('active'));
     if (navItem) {
         navItem.classList.add('active');
     }
 
-        viewSections.forEach(section => {
-            section.style.display = 'none';
-            section.classList.remove('active');
-        });
+    viewSections.forEach(section => {
+        section.style.display = 'none';
+        section.classList.remove('active');
+    });
 
-        const activeSection = document.getElementById(`${viewId}-view`);
-        if (activeSection) {
-            activeSection.style.display = 'flex';
-            activeSection.classList.add('active');
-        }
+    const activeSection = document.getElementById(`${viewId}-view`);
+    if (activeSection) {
+        activeSection.style.display = 'flex';
+        activeSection.classList.add('active');
+    }
 
-        updateTopBarForView(viewId);
-        
-        if (viewId === 'api') {
-            newReactApisCount = 0;
-            updateApiTabBadge(0);
+    updateTopBarForView(viewId);
+
+    if (viewId === 'api') {
+        newReactApisCount = 0;
+        updateApiTabBadge(0);
+    }
+
+    // WebSocket tab: load connections
+    if (viewId === 'websocket') {
+        loadWebSocketConnections();
     }
 
     // Collaboration tab: validate auth; otherwise remove overlay
@@ -251,7 +260,7 @@ function switchView(viewId, navItem = null) {
     } else {
         removeCollabApiOverlay();
     }
-    
+
     // SideChannel tab: validate auth; otherwise remove overlay
     if (viewId === 'sidechannel') {
         checkSidechannelApiKey();
@@ -319,8 +328,25 @@ function updateTopBarForView(viewId) {
 
 // Initialize top bar on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Load fast mode settings on startup
+    loadFastModeSettings();
+
+    // S'assurer que le body et le sidebar commencent en haut
+    window.scrollTo(0, 0);
+    document.body.scrollTop = 0;
+    document.documentElement.scrollTop = 0;
+
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        sidebar.scrollTop = 0;
+    }
+    const mainNav = document.querySelector('.main-nav');
+    if (mainNav) {
+        mainNav.scrollTop = 0;
+    }
+
     updateCollabLiveIndicator(false);
-    
+
     // Restaurer l'état de la collaboration au chargement
     const savedState = restoreCollaborationState();
     if (savedState && savedState.sessionId) {
@@ -328,14 +354,14 @@ document.addEventListener('DOMContentLoaded', () => {
         currentSessionId = savedState.sessionId;
         currentUserId = savedState.userId;
         currentUsername = savedState.username || currentUsername;
-        
+
         // Rejoindre la session automatiquement
         joinCollaborationSession(savedState.sessionId);
     }
-    
+
     // Restaurer les données SideChannel au chargement
     restoreSidechannelData();
-    
+
     // Find the active view
     const activeNavItem = document.querySelector('.nav-item.active');
     if (activeNavItem && activeNavItem.dataset.view) {
@@ -344,33 +370,32 @@ document.addEventListener('DOMContentLoaded', () => {
         // Default to browser view (accessible via logo)
         switchView('browser');
     }
-    
+
     // Sidebar toggle functionality
-    const sidebar = document.querySelector('.sidebar');
-    
+
     // Fonction pour créer et ajouter le bouton toggle à une top-bar
     function addToggleButtonToTopBar(topBar) {
         // Vérifier si le bouton existe déjà
         if (topBar.querySelector('#sidebar-toggle-btn')) {
             return;
         }
-        
+
         const toggleBtn = document.createElement('button');
         toggleBtn.id = 'sidebar-toggle-btn';
         toggleBtn.className = 'btn btn-secondary';
         toggleBtn.title = 'Toggle Sidebar';
         toggleBtn.style.cssText = 'padding: 8px 12px; min-width: auto;';
         toggleBtn.innerHTML = '<span class="material-symbols-outlined" id="sidebar-toggle-icon">menu</span>';
-        
+
         // Insérer le bouton au début de la top-bar
         const firstChild = topBar.firstElementChild;
-        
+
         // Vérifier si le premier enfant est déjà un conteneur flex
-        const isFlexContainer = firstChild && 
-            firstChild.style && 
-            firstChild.style.display === 'flex' && 
+        const isFlexContainer = firstChild &&
+            firstChild.style &&
+            firstChild.style.display === 'flex' &&
             firstChild.style.alignItems === 'center';
-        
+
         if (isFlexContainer) {
             // Si le premier élément est déjà un conteneur flex, ajouter le bouton dedans au début
             firstChild.insertBefore(toggleBtn, firstChild.firstChild);
@@ -379,7 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const container = document.createElement('div');
             container.style.cssText = 'display: flex; align-items: center; gap: 12px;';
             container.appendChild(toggleBtn);
-            
+
             // Déplacer tous les enfants existants dans le nouveau container
             const existingChildren = Array.from(topBar.childNodes);
             existingChildren.forEach(child => {
@@ -387,16 +412,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     container.appendChild(child);
                 }
             });
-            
+
             // Ajouter le container à la top-bar
             topBar.appendChild(container);
         }
     }
-    
+
     // Ajouter le bouton toggle à toutes les top-bar
     const allTopBars = document.querySelectorAll('.top-bar');
     allTopBars.forEach(addToggleButtonToTopBar);
-    
+
     // Observer pour ajouter le bouton aux top-bar créées dynamiquement
     const topBarObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
@@ -414,12 +439,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     });
-    
+
     topBarObserver.observe(document.body, {
         childList: true,
         subtree: true
     });
-    
+
     if (sidebar) {
         // Restaurer l'état du sidebar depuis localStorage
         const sidebarExpanded = localStorage.getItem('sidebarExpanded') === 'true';
@@ -427,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
             sidebar.classList.add('expanded');
             updateToggleIcon();
         }
-        
+
         // Gérer le clic sur le bouton toggle (délégation d'événements)
         document.addEventListener('click', (e) => {
             if (e.target.closest('#sidebar-toggle-btn')) {
@@ -438,7 +463,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateToggleIcon();
             }
         });
-        
+
         // Fonction pour mettre à jour l'icône
         function updateToggleIcon() {
             const icons = document.querySelectorAll('#sidebar-toggle-icon');
@@ -447,7 +472,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 icon.textContent = isExpanded ? 'chevron_left' : 'menu';
             });
         }
-        
+
         // Observer les changements de classe pour mettre à jour l'icône
         const sidebarObserver = new MutationObserver(() => {
             updateToggleIcon();
@@ -596,7 +621,7 @@ function restoreSidechannelData() {
         const savedData = localStorage.getItem('sidechannelData');
         if (savedData) {
             const data = JSON.parse(savedData);
-            
+
             // Restaurer les URLs générées
             if (data.generatedUrls && Array.isArray(data.generatedUrls)) {
                 sidechannelGeneratedUrls = data.generatedUrls.map(url => ({
@@ -604,7 +629,7 @@ function restoreSidechannelData() {
                     generated_at: url.generated_at ? new Date(url.generated_at) : new Date()
                 }));
             }
-            
+
             // Restaurer les tests
             if (data.tests && Array.isArray(data.tests)) {
                 sidechannelTests = data.tests.map(test => ({
@@ -612,7 +637,7 @@ function restoreSidechannelData() {
                     timestamp: test.timestamp ? new Date(test.timestamp) : new Date()
                 }));
             }
-            
+
             // Restaurer les détections
             if (data.detections && Array.isArray(data.detections)) {
                 sidechannelDetections = data.detections.map(detection => ({
@@ -620,13 +645,13 @@ function restoreSidechannelData() {
                     detected_at: detection.detected_at ? new Date(detection.detected_at) : new Date()
                 }));
             }
-            
+
             // Mettre à jour l'affichage
             if (currentViewId === 'sidechannel') {
                 renderSidechannelUrls();
                 renderSidechannelResults();
                 updateSidechannelResultsBadge();
-                
+
                 // Redémarrer le polling si nécessaire
                 const hasPendingTests = sidechannelTests.some(t => t.status === 'pending');
                 if (hasPendingTests) {
@@ -686,7 +711,7 @@ function removeSidechannelApiOverlay() {
 // Load and check API key status from server (utilise le même endpoint que collaboration)
 async function checkSidechannelApiKey() {
     if (currentViewId !== 'sidechannel') return;
-    
+
     try {
         // Utilise le même endpoint que la collaboration
         const res = await fetch(`${API_BASE}/collab/auth`);
@@ -698,7 +723,7 @@ async function checkSidechannelApiKey() {
         }
         const data = await res.json();
         sidechannelApiKeyValid = !!(data.valid && data.token);
-        
+
         if (sidechannelApiKeyValid) {
             removeSidechannelApiOverlay();
             updateSidechannelTestButtonState();
@@ -879,7 +904,7 @@ function renderSidechannelFlows() {
         const item = document.createElement('div');
         item.className = 'sidechannel-flow-item' + (isSelected ? ' selected' : '');
         item.title = url;
-        
+
         item.innerHTML = `
             <div class="sidechannel-flow-header">
                 <div class="sidechannel-flow-badges">
@@ -1148,7 +1173,7 @@ hydrateSidechannelDom();
 // Mode switching
 function switchSidechannelMode(mode) {
     currentSidechannelMode = mode;
-    
+
     // Update tabs
     const tabs = [sidechannelTabManual, sidechannelTabUrls, sidechannelTabResults];
     tabs.forEach(tab => {
@@ -1159,7 +1184,7 @@ function switchSidechannelMode(mode) {
             tab.style.fontWeight = '500';
         }
     });
-    
+
     if (mode === 'manual' && sidechannelTabManual) {
         sidechannelTabManual.classList.add('active');
         sidechannelTabManual.style.borderBottomColor = 'var(--primary-color, #6200ea)';
@@ -1176,14 +1201,14 @@ function switchSidechannelMode(mode) {
         sidechannelTabResults.style.color = 'var(--primary-color, #6200ea)';
         sidechannelTabResults.style.fontWeight = '600';
     }
-    
+
     // Update panels
     if (sidechannelManualMode && sidechannelUrlsMode && sidechannelResultsMode) {
         // Hide all panels first
         sidechannelManualMode.style.display = 'none';
         sidechannelUrlsMode.style.display = 'none';
         sidechannelResultsMode.style.display = 'none';
-        
+
         if (mode === 'manual') {
             sidechannelManualMode.style.display = 'block';
         } else if (mode === 'urls') {
@@ -1230,24 +1255,24 @@ window.deleteSidechannelTest = deleteSidechannelTest;
 async function checkSidechannelTest(testId) {
     const test = sidechannelTests.find(t => t.id === testId);
     if (!test) return;
-    
+
     // Ne vérifier que les tests en attente
     if (test.status !== 'pending') return;
-    
+
     try {
         const res = await fetch(`${API_BASE}/sidechannel/check/${testId}`, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         if (res.ok) {
             const data = await res.json();
             test.status = data.detected ? 'detected' : (data.message && data.message.includes('expired') ? 'error' : 'pending');
             test.detected = data.detected || false;
             if (data.details) {
                 // Merger les détails, en préservant l'evidence existante
-                test.details = { 
-                    ...test.details, 
+                test.details = {
+                    ...test.details,
                     ...data.details,
                     evidence: data.details.evidence || test.details.evidence || data.details.request_details || test.details.evidence
                 };
@@ -1256,7 +1281,7 @@ async function checkSidechannelTest(testId) {
             if (currentSidechannelMode === 'urls') {
                 renderSidechannelUrls();
             }
-            
+
             // Si une vulnérabilité est détectée, ajouter à la liste des détections
             if (data.detected) {
                 // Vérifier si cette détection n'existe pas déjà
@@ -1296,7 +1321,7 @@ async function checkSidechannelTest(testId) {
 // Démarrer le polling automatique
 function startSidechannelPolling() {
     if (sidechannelPollInterval) return; // Déjà en cours
-    
+
     sidechannelPollInterval = setInterval(() => {
         sidechannelTests.filter(t => t.status === 'pending').forEach(test => {
             checkSidechannelTest(test.id);
@@ -1321,9 +1346,9 @@ function showSidechannelTestDetails(test) {
     const overlay = document.getElementById('sidechannel-details-overlay');
     const panel = document.getElementById('sidechannel-details-panel');
     const content = document.getElementById('sidechannel-details-content');
-    
+
     if (!overlay || !panel || !content) return;
-    
+
     // Construire le contenu de la modal
     let html = `
         <div style="display: flex; flex-direction: column; gap: 20px;">
@@ -1375,7 +1400,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             </div>
     `;
-    
+
     // Si une vulnérabilité a été détectée, afficher les détails de la requête
     if (test.status === 'detected' && test.details && test.details.evidence) {
         const evidence = test.details.evidence;
@@ -1387,7 +1412,7 @@ function showSidechannelTestDetails(test) {
                 </h3>
                 <div style="display: flex; flex-direction: column; gap: 16px;">
         `;
-        
+
         // IP Source
         if (evidence.ip || evidence.remote_addr) {
             html += `
@@ -1399,7 +1424,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // Headers
         if (evidence.headers) {
             html += `
@@ -1411,7 +1436,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // User-Agent
         if (evidence.user_agent || (evidence.headers && evidence.headers['User-Agent'])) {
             html += `
@@ -1423,7 +1448,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // Method
         if (evidence.method) {
             html += `
@@ -1435,7 +1460,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // Body
         if (evidence.body) {
             html += `
@@ -1447,7 +1472,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // Timestamp de la requête
         if (evidence.timestamp || evidence.request_time) {
             html += `
@@ -1459,7 +1484,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         // Raw evidence (si disponible)
         if (Object.keys(evidence).length > 0) {
             html += `
@@ -1471,7 +1496,7 @@ function showSidechannelTestDetails(test) {
                 </div>
             `;
         }
-        
+
         html += `
                 </div>
             </div>
@@ -1493,7 +1518,7 @@ function showSidechannelTestDetails(test) {
             </div>
         `;
     }
-    
+
     // Recommendations
     if (test.details && test.details.recommendations && test.details.recommendations.length > 0) {
         html += `
@@ -1508,11 +1533,11 @@ function showSidechannelTestDetails(test) {
             </div>
         `;
     }
-    
+
     html += `
         </div>
     `;
-    
+
     content.innerHTML = html;
     overlay.style.display = 'block';
     panel.style.display = 'block';
@@ -1530,7 +1555,7 @@ window.closeSidechannelDetails = closeSidechannelDetails;
 // Render generated URLs list
 function renderSidechannelUrls() {
     if (!sidechannelUrlsList) return;
-    
+
     if (sidechannelGeneratedUrls.length === 0) {
         sidechannelUrlsList.innerHTML = `
             <div style="text-align: center; padding: 40px 20px; color: #888; font-size: 0.9rem;">
@@ -1539,24 +1564,24 @@ function renderSidechannelUrls() {
         `;
         return;
     }
-    
+
     sidechannelUrlsList.innerHTML = '';
-    
+
     // Trier par date (plus récent en premier)
     const sortedUrls = [...sidechannelGeneratedUrls].sort((a, b) => b.generated_at - a.generated_at);
-    
+
     sortedUrls.forEach(urlEntry => {
         const item = document.createElement('div');
         item.className = 'sidechannel-url-item';
         item.style.cssText = 'background: #f5f5f5; border-radius: 6px; padding: 12px; margin-bottom: 8px; border-left: 3px solid #2196f3;';
-        
+
         // Trouver le test correspondant pour le statut
         const test = sidechannelTests.find(t => t.id === urlEntry.test_id);
         const status = test ? test.status : urlEntry.status;
         const statusColor = status === 'detected' ? '#f44336' : status === 'not_detected' ? '#4caf50' : '#2196f3';
         const statusIcon = status === 'detected' ? 'warning' : status === 'not_detected' ? 'check_circle' : 'hourglass_empty';
         const statusText = status === 'detected' ? 'Vulnerability Detected' : status === 'not_detected' ? 'No Vulnerability' : 'Monitoring...';
-        
+
         item.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                 <div style="flex: 1;">
@@ -1587,7 +1612,7 @@ function renderSidechannelUrls() {
                 </button>
             </div>
         `;
-        
+
         sidechannelUrlsList.appendChild(item);
     });
 }
@@ -1607,7 +1632,7 @@ window.deleteSidechannelUrl = deleteSidechannelUrl;
 // Render results (détections)
 function renderSidechannelResults() {
     if (!sidechannelResultsList) return;
-    
+
     if (sidechannelDetections.length === 0) {
         sidechannelResultsList.innerHTML = `
             <div style="text-align: center; padding: 80px 20px; color: var(--text-secondary);">
@@ -1617,24 +1642,24 @@ function renderSidechannelResults() {
         `;
         return;
     }
-    
+
     sidechannelResultsList.innerHTML = '';
-    
+
     // Trier par date (plus récent en premier)
     const sortedDetections = [...sidechannelDetections].sort((a, b) => b.detected_at - a.detected_at);
-    
+
     sortedDetections.forEach(detection => {
         const item = document.createElement('div');
         item.className = 'sidechannel-detection-item';
         item.style.cssText = 'background: white; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-left: 4px solid #f44336;';
-        
+
         const evidence = detection.evidence || {};
         const ip = evidence.ip || evidence.remote_addr || 'Unknown';
         const method = evidence.method || 'GET';
         const userAgent = evidence.user_agent || (evidence.headers && evidence.headers['User-Agent']) || 'Unknown';
         const body = evidence.body || '';
         const headers = evidence.headers || {};
-        
+
         item.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
                 <div style="flex: 1;">
@@ -1701,7 +1726,7 @@ function renderSidechannelResults() {
                 <pre style="background: #f5f5f5; padding: 12px; border-radius: 4px; margin-top: 4px; font-size: 0.7rem; overflow-x: auto; max-height: 400px; overflow-y: auto; font-family: 'Fira Code', monospace;">${JSON.stringify(evidence, null, 2)}</pre>
             </details>
         `;
-        
+
         // Plus besoin d'ouvrir une modal, toutes les infos sont déjà affichées
         sidechannelResultsList.appendChild(item);
     });
@@ -1731,7 +1756,7 @@ function updateSidechannelResultsBadge() {
 
 // Load flows when SideChannel view is opened
 const originalSwitchView = switchView;
-switchView = function(viewId, navItem = null) {
+switchView = function (viewId, navItem = null) {
     originalSwitchView(viewId, navItem);
     if (viewId === 'sidechannel' && sidechannelApiKeyValid) {
         // Démarrer le polling si activé et qu'il y a des tests en cours
@@ -1756,10 +1781,10 @@ async function loadWorkspaces() {
         const workspaces = data.workspaces || [];
         const current = data.current || null;
         currentWorkspaceName = current;
-        
+
         // Clear and populate select
         workspaceSelect.innerHTML = '';
-        
+
         if (workspaces.length === 0) {
             const option = document.createElement('option');
             option.value = '';
@@ -1776,18 +1801,18 @@ async function loadWorkspaces() {
                 workspaceSelect.appendChild(option);
             });
         }
-        
+
         // Create custom workspace select (same style as browser select)
         if (workspaces.length > 0) {
             createCustomWorkspaceSelect(workspaces, current);
         }
-        
+
         // Show/hide delete button
         workspaceDeleteBtn.style.display = current ? 'inline-flex' : 'none';
-        
+
         // Update workspace indicator in all top bars
         updateWorkspaceIndicator(current);
-        
+
         // Load current workspace info
         await loadCurrentWorkspaceInfo();
     } catch (err) {
@@ -1799,31 +1824,31 @@ async function loadWorkspaces() {
 function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
     const workspaceSelectEl = document.getElementById('workspace-select');
     if (!workspaceSelectEl) return;
-    
+
     // Supprimer l'ancien select personnalisé s'il existe
     const existingContainer = document.getElementById('custom-workspace-select-container');
     if (existingContainer) {
         existingContainer.remove();
     }
-    
+
     // Créer le conteneur du select personnalisé
     const customSelectContainer = document.createElement('div');
     customSelectContainer.id = 'custom-workspace-select-container';
     customSelectContainer.style.cssText = 'position: relative; width: 100%; flex: 1;';
-    
+
     // Créer le bouton du select (affichage) - même style que browser select
     const customSelectButton = document.createElement('div');
     customSelectButton.id = 'custom-workspace-select-button';
     customSelectButton.style.cssText = 'width: 100%; padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; font-size: 0.95rem; background: white; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: border 0.2s, box-shadow 0.2s; box-sizing: border-box;';
     customSelectButton.setAttribute('tabindex', '0'); // Make it focusable
-    
+
     // Créer la liste déroulante
     const customSelectDropdown = document.createElement('div');
     customSelectDropdown.id = 'custom-workspace-select-dropdown';
     customSelectDropdown.style.cssText = 'display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 10px; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; max-height: 300px; overflow-y: auto;';
-    
+
     let selectedWorkspace = currentWorkspace || workspaces[0];
-    
+
     // Helper function to format workspace name with (temporary) for default
     function formatWorkspaceName(workspace) {
         if (workspace === 'default') {
@@ -1831,7 +1856,7 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
         }
         return workspace;
     }
-    
+
     // Fonction pour mettre à jour l'affichage
     function updateDisplay(workspace, skipEvent = false) {
         selectedWorkspace = workspace;
@@ -1843,13 +1868,13 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
         `;
         workspaceSelectEl.value = workspace;
         customSelectDropdown.style.display = 'none';
-        
+
         // Only trigger change event if not skipping (to avoid double notification)
         if (!skipEvent) {
             workspaceSelectEl.dispatchEvent(new Event('change', { bubbles: true }));
         }
     }
-    
+
     // Initialiser l'affichage
     if (selectedWorkspace) {
         updateDisplay(selectedWorkspace);
@@ -1860,7 +1885,7 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
             <span class="material-symbols-outlined" style="font-size: 18px; color: #666;">arrow_drop_down</span>
         `;
     }
-    
+
     // Créer les options
     workspaces.forEach(workspace => {
         const option = document.createElement('div');
@@ -1882,22 +1907,22 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
                 }
             }
         };
-        
+
         const displayName = formatWorkspaceName(workspace);
         option.innerHTML = `
             <span class="material-symbols-outlined" style="font-size: 20px; color: var(--primary-color);">folder</span>
             <span>${displayName}</span>
         `;
-        
+
         customSelectDropdown.appendChild(option);
     });
-    
+
     // Toggle dropdown
     customSelectButton.onclick = (e) => {
         e.stopPropagation();
         const isOpen = customSelectDropdown.style.display === 'block';
         customSelectDropdown.style.display = isOpen ? 'none' : 'block';
-        
+
         // Update arrow rotation
         const arrow = customSelectButton.querySelector('.material-symbols-outlined:last-child');
         if (arrow) {
@@ -1905,7 +1930,7 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
             arrow.style.transition = 'transform 0.2s';
         }
     };
-    
+
     // Fermer quand on clique ailleurs
     document.addEventListener('click', (e) => {
         if (!customSelectContainer.contains(e.target)) {
@@ -1916,7 +1941,7 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
             }
         }
     });
-    
+
     // Hover effect
     customSelectButton.onmouseenter = () => {
         customSelectButton.style.borderColor = 'var(--primary-color)';
@@ -1928,7 +1953,7 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
             customSelectButton.style.boxShadow = 'none';
         }
     };
-    
+
     // Focus effect
     customSelectButton.onfocus = () => {
         customSelectButton.style.borderColor = 'var(--primary-color)';
@@ -1938,11 +1963,11 @@ function createCustomWorkspaceSelect(workspaces, currentWorkspace) {
         customSelectButton.style.borderColor = 'var(--border-color)';
         customSelectButton.style.boxShadow = 'none';
     };
-    
+
     // Assembler le select personnalisé
     customSelectContainer.appendChild(customSelectButton);
     customSelectContainer.appendChild(customSelectDropdown);
-    
+
     // Remplacer le select natif dans le workspace-select-row
     const workspaceSelectRow = workspaceSelectEl.closest('.workspace-select-row');
     if (workspaceSelectRow) {
@@ -1976,25 +2001,25 @@ async function switchWorkspace(workspaceName) {
         console.warn('[Workspace] No workspace name provided');
         return;
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/workspaces/${encodeURIComponent(workspaceName)}/switch`, {
             method: 'POST'
         });
-        
+
         if (!res.ok) {
             const error = await res.json();
             showToast(`Failed to switch workspace: ${error.detail || 'Unknown error'}`, 'error');
             return;
         }
-        
+
         const data = await res.json();
         currentWorkspaceName = data.workspace;
         showToast(`Switched to workspace: ${data.workspace}`, 'success');
-        
+
         // Update workspace indicator
         updateWorkspaceIndicator(data.workspace);
-        
+
         // Reload workspaces to update UI
         await loadWorkspaces();
     } catch (err) {
@@ -2015,7 +2040,7 @@ function showDeleteWorkspaceModal() {
         showToast('No workspace selected', 'error');
         return;
     }
-    
+
     const message = `Are you sure you want to delete workspace "${workspaceName}"? This action cannot be undone.`;
     document.getElementById('modal-delete-workspace-message').textContent = message;
     document.getElementById('modal-delete-workspace-force').checked = false;
@@ -2025,18 +2050,18 @@ function showDeleteWorkspaceModal() {
 async function confirmCreateWorkspace() {
     const name = document.getElementById('modal-workspace-name').value.trim();
     const description = document.getElementById('modal-workspace-description').value.trim();
-    
+
     if (!name) {
         showToast('Workspace name is required', 'error');
         return;
     }
-    
+
     // Validate workspace name (alphanumeric, hyphens, underscores)
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
         showToast('Workspace name can only contain alphanumeric characters, hyphens, and underscores', 'error');
         return;
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/workspaces`, {
             method: 'POST',
@@ -2048,17 +2073,17 @@ async function confirmCreateWorkspace() {
                 description: description
             })
         });
-        
+
         if (!res.ok) {
             const error = await res.json();
             showToast(`Failed to create workspace: ${error.detail || 'Unknown error'}`, 'error');
             return;
         }
-        
+
         const data = await res.json();
         showToast(`Workspace "${data.name}" created successfully`, 'success');
         closeModal('modal-create-workspace');
-        
+
         // Reload workspaces and switch to the new one
         await loadWorkspaces();
         await switchWorkspace(data.name);
@@ -2074,25 +2099,25 @@ async function confirmDeleteWorkspace() {
         showToast('No workspace selected', 'error');
         return;
     }
-    
+
     const force = document.getElementById('modal-delete-workspace-force').checked;
-    
+
     try {
         const url = `${API_BASE}/workspaces/${encodeURIComponent(workspaceName)}?force=${force}`;
         const res = await fetch(url, {
             method: 'DELETE'
         });
-        
+
         if (!res.ok) {
             const error = await res.json();
             showToast(`Failed to delete workspace: ${error.detail || 'Unknown error'}`, 'error');
             return;
         }
-        
+
         const data = await res.json();
         showToast(`Workspace "${data.name}" deleted successfully`, 'success');
         closeModal('modal-delete-workspace');
-        
+
         // Reload workspaces
         await loadWorkspaces();
     } catch (err) {
@@ -2137,8 +2162,8 @@ if (workspaceSaveDataCheck) {
     workspaceSaveDataCheck.addEventListener('change', (e) => {
         workspaceSaveEnabled = e.target.checked;
         showToast(
-            workspaceSaveEnabled 
-                ? 'Workspace saving enabled' 
+            workspaceSaveEnabled
+                ? 'Workspace saving enabled'
                 : 'Workspace saving disabled - data will not be saved to workspace',
             workspaceSaveEnabled ? 'success' : 'warning'
         );
@@ -2149,11 +2174,11 @@ if (workspaceSaveDataCheck) {
 function updateWorkspaceIndicator(workspaceName) {
     const indicators = document.querySelectorAll('.workspace-indicator');
     const indicatorNames = document.querySelectorAll('#workspace-indicator-name');
-    
+
     if (workspaceName) {
         // Format workspace name with (temporary) for default
         const displayName = workspaceName === 'default' ? 'default (temporary)' : workspaceName;
-        
+
         // Show indicators and update text
         indicators.forEach(indicator => {
             indicator.style.display = 'flex';
@@ -2172,13 +2197,13 @@ function updateWorkspaceIndicator(workspaceName) {
 // Function to add workspace indicator to all top bars
 function addWorkspaceIndicatorToTopBars() {
     const topBars = document.querySelectorAll('.top-bar');
-    
+
     topBars.forEach(topBar => {
         // Check if indicator already exists
         if (topBar.querySelector('.workspace-indicator')) {
             return;
         }
-        
+
         // Create indicator element
         const indicator = document.createElement('div');
         indicator.className = 'workspace-indicator';
@@ -2188,7 +2213,7 @@ function addWorkspaceIndicatorToTopBars() {
             <span class="material-symbols-outlined" style="font-size: 18px;">folder</span>
             <span id="workspace-indicator-name">-</span>
         `;
-        
+
         // Add to top bar (on the right side)
         topBar.appendChild(indicator);
     });
@@ -2228,22 +2253,22 @@ async function loadDetectedBrowsers() {
         }
         const data = await res.json();
         const browsers = data.browsers || [];
-        
+
         const browserSelect = document.getElementById('browser-select');
         if (!browserSelect) return;
-        
+
         // Vider la liste actuelle
         browserSelect.innerHTML = '';
-        
+
         // Ajouter uniquement les navigateurs détectés avec icônes
         browsers.forEach(browser => {
             const option = document.createElement('option');
             option.value = browser.value;
-            
+
             // Créer le contenu avec icône
             const iconName = browserIconMap[browser.value] || 'unknown';
             const iconUrl = `/browser-icons/${iconName}`;
-            
+
             // Pour les selects HTML natifs, on ne peut pas mettre d'images directement
             // On va créer un select personnalisé à la place
             option.textContent = browser.label;
@@ -2253,7 +2278,7 @@ async function loadDetectedBrowsers() {
             }
             browserSelect.appendChild(option);
         });
-        
+
         // Créer un select personnalisé avec icônes
         if (browsers.length > 0) {
             createCustomBrowserSelect(browsers);
@@ -2267,24 +2292,24 @@ async function loadDetectedBrowsers() {
 function createCustomBrowserSelect(browsers) {
     const browserSelect = document.getElementById('browser-select');
     if (!browserSelect) return;
-    
+
     // Créer le conteneur du select personnalisé
     const customSelectContainer = document.createElement('div');
     customSelectContainer.id = 'custom-browser-select-container';
     customSelectContainer.style.cssText = 'position: relative; width: 100%;';
-    
+
     // Créer le bouton du select (affichage)
     const customSelectButton = document.createElement('div');
     customSelectButton.id = 'custom-browser-select-button';
     customSelectButton.style.cssText = 'width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.95rem; background: white; cursor: pointer; display: flex; align-items: center; gap: 10px;';
-    
+
     // Créer la liste déroulante
     const customSelectDropdown = document.createElement('div');
     customSelectDropdown.id = 'custom-browser-select-dropdown';
     customSelectDropdown.style.cssText = 'display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 6px; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; max-height: 300px; overflow-y: auto;';
-    
+
     let selectedBrowser = browsers[0];
-    
+
     // Fonction pour mettre à jour l'affichage
     function updateDisplay(browser) {
         selectedBrowser = browser;
@@ -2298,10 +2323,10 @@ function createCustomBrowserSelect(browsers) {
         browserSelect.value = browser.value;
         customSelectDropdown.style.display = 'none';
     }
-    
+
     // Initialiser l'affichage
     updateDisplay(selectedBrowser);
-    
+
     // Créer les options
     browsers.forEach(browser => {
         const option = document.createElement('div');
@@ -2309,35 +2334,35 @@ function createCustomBrowserSelect(browsers) {
         option.onmouseover = () => option.style.background = '#f5f5f5';
         option.onmouseout = () => option.style.background = '';
         option.onclick = () => updateDisplay(browser);
-        
+
         const iconName = browserIconMap[browser.value] || 'unknown';
         const iconUrl = `/browser-icons/${iconName}`;
         option.innerHTML = `
             <img src="${iconUrl}" alt="${browser.label}" style="width: 20px; height: 20px; object-fit: contain;" onerror="this.style.display='none';">
             <span>${browser.label}</span>
         `;
-        
+
         customSelectDropdown.appendChild(option);
     });
-    
+
     // Toggle dropdown
     customSelectButton.onclick = (e) => {
         e.stopPropagation();
         const isOpen = customSelectDropdown.style.display === 'block';
         customSelectDropdown.style.display = isOpen ? 'none' : 'block';
     };
-    
+
     // Fermer quand on clique ailleurs
     document.addEventListener('click', (e) => {
         if (!customSelectContainer.contains(e.target)) {
             customSelectDropdown.style.display = 'none';
         }
     });
-    
+
     // Assembler le select personnalisé
     customSelectContainer.appendChild(customSelectButton);
     customSelectContainer.appendChild(customSelectDropdown);
-    
+
     // Remplacer le select natif
     browserSelect.style.display = 'none';
     browserSelect.parentNode.insertBefore(customSelectContainer, browserSelect);
@@ -2360,7 +2385,7 @@ if (launchBtn) {
             // Récupérer le navigateur sélectionné
             const browserSelect = document.getElementById('browser-select');
             const selectedBrowser = browserSelect ? browserSelect.value : 'auto';
-            
+
             const res = await fetch(`${API_BASE}/launch_browser`, {
                 method: 'POST',
                 headers: {
@@ -2837,7 +2862,7 @@ function renderModuleConfig(moduleId) {
         }
     }
 
-    const recentUrlsHtml = recentUrls.map(f => 
+    const recentUrlsHtml = recentUrls.map(f =>
         `<option value="${escapeHtml(f.url)}">${escapeHtml(f.method)} ${escapeHtml(f.url.length > 60 ? f.url.substring(0, 57) + '...' : f.url)}</option>`
     ).join('');
 
@@ -2896,7 +2921,7 @@ function renderModuleConfig(moduleId) {
         </div>
         <div id="module-output" style="margin-top: 15px; padding: 15px; background: #1e1e1e; color: #d4d4d4; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.85em; height: 45vh; max-height: 50vh; min-height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; line-height: 1.5;"></div>
     `;
-    
+
     // Restore cached output if available
     restoreModuleOutput(moduleId);
 }
@@ -3064,7 +3089,7 @@ if (runModuleBtn) {
 async function autoConfigureModuleFromUrl(moduleId, silent = false) {
     const urlInput = document.getElementById('module-target-url');
     if (!urlInput) return;
-    
+
     const url = urlInput.value.trim();
     if (!url) {
         if (!silent) {
@@ -3072,7 +3097,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
         }
         return;
     }
-    
+
     // Validate URL format
     try {
         new URL(url);
@@ -3082,7 +3107,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
         }
         return;
     }
-    
+
     // Show loading state (only if not silent)
     const btn = event?.target?.closest('button');
     const originalText = btn ? btn.innerHTML : '';
@@ -3090,7 +3115,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
         btn.disabled = true;
         btn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px; animation: spin 1s linear infinite;">refresh</span> Configuring...';
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/auto_configure_module_from_url`, {
             method: 'POST',
@@ -3100,9 +3125,9 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
                 url: url
             })
         });
-        
+
         const data = await res.json();
-        
+
         if (res.ok && data.options) {
             // Fill option fields
             let filledCount = 0;
@@ -3113,7 +3138,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
                     filledCount++;
                 }
             });
-            
+
             // Show success message (only if not silent)
             if (!silent) {
                 if (filledCount > 0) {
@@ -3241,7 +3266,7 @@ function switchApiSidebarTab(tabName) {
     document.getElementById('api-history-list').style.display = tabName === 'history' ? 'block' : 'none';
     document.getElementById('api-collections-list').style.display = tabName === 'collections' ? 'block' : 'none';
     document.getElementById('api-react-apis-list').style.display = tabName === 'react-apis' ? 'block' : 'none';
-    
+
     // Charger les API React si on passe à cet onglet
     if (tabName === 'react-apis') {
         loadReactApis();
@@ -3275,7 +3300,7 @@ function startReactApiPolling() {
                 const res = await fetch(`${API_BASE}/endpoints`);
                 const data = await res.json();
                 const reactApis = data.react_api_endpoints || [];
-                
+
                 // Check for new APIs and update notification badge
                 if (reactApis.length > lastReactApisCount) {
                     newReactApisCount += (reactApis.length - lastReactApisCount);
@@ -3303,30 +3328,30 @@ async function loadReactApis() {
         console.warn('[REACT APIs] api-react-apis-list element not found');
         return;
     }
-    
+
     console.log('[REACT APIs] Loading React APIs...');
-    
+
     try {
         const res = await fetch(`${API_BASE}/endpoints`);
         const data = await res.json();
-        
+
         console.log('[REACT APIs] Response received:', data);
         console.log('[REACT APIs] react_api_endpoints:', data.react_api_endpoints);
-        
+
         const reactApis = data.react_api_endpoints || [];
         console.log(`[REACT APIs] Found ${reactApis.length} React API(s)`);
-        
+
         // Check for new APIs and update notification badge
         if (reactApis.length > lastReactApisCount) {
             newReactApisCount += (reactApis.length - lastReactApisCount);
             updateApiTabBadge(newReactApisCount);
         }
         lastReactApisCount = reactApis.length;
-        
+
         // Store globally
         reactApisData.apis = reactApis;
         reactApisData.graphqlQueries = data.graphql_queries || {};
-        
+
         if (reactApis.length === 0) {
             console.log('[REACT APIs] No React APIs found, showing empty state');
             reactApisList.innerHTML = `
@@ -3340,9 +3365,9 @@ async function loadReactApis() {
             `;
             return;
         }
-        
+
         const graphqlQueries = data.graphql_queries || {};
-        
+
         reactApisList.innerHTML = reactApis.map((api, index) => {
             // Extraire le chemin de l'URL
             let path = api;
@@ -3352,11 +3377,11 @@ async function loadReactApis() {
             } catch (e) {
                 // Si ce n'est pas une URL complète, utiliser tel quel
             }
-            
+
             // Vérifier si c'est un endpoint GraphQL avec des requêtes
             const isGraphQL = graphqlQueries[api] && graphqlQueries[api].length > 0;
             const queries = isGraphQL ? graphqlQueries[api] : [];
-            
+
             // Déterminer la méthode HTTP probable (basé sur le chemin)
             let method = 'GET';
             if (isGraphQL || path.toLowerCase().includes('graphql')) {
@@ -3375,10 +3400,10 @@ async function loadReactApis() {
                     }
                 }
             }
-            
+
             // Badge GraphQL si applicable
             const graphqlBadge = isGraphQL ? `<span style="background: #e10098; color: white; font-size: 9px; padding: 2px 4px; border-radius: 3px; margin-left: 4px;">GraphQL (${queries.length})</span>` : '';
-            
+
             // Utiliser l'index pour récupérer les données depuis la variable globale
             return `
                 <div class="api-react-api-item" 
@@ -3416,7 +3441,7 @@ async function loadReactApis() {
                 </div>
             `;
         }).join('');
-        
+
     } catch (err) {
         console.error('Error loading React APIs:', err);
         reactApisList.innerHTML = `
@@ -3434,37 +3459,37 @@ function loadReactApiFromItem(index, url, method = 'GET') {
     if (reactApisData.graphqlQueries[url] && reactApisData.graphqlQueries[url].length > 0) {
         graphqlQueries = reactApisData.graphqlQueries[url];
     }
-    
+
     loadReactApiIntoRequest(url, method, graphqlQueries);
 }
 
 // Load a React API into the request builder
 function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
     createNewApiRequest();
-    
+
     // Mettre à jour l'objet currentApiRequest AVANT de rendre
     currentApiRequest.method = method;
     currentApiRequest.url = url;
-    
+
     // Si c'est un endpoint GraphQL avec des requêtes, pré-remplir le body
     if (graphqlQueries && graphqlQueries.length > 0 && (method === 'POST' || url.toLowerCase().includes('graphql'))) {
         // Utiliser la première requête GraphQL
         const firstQuery = graphqlQueries[0];
         // Extraire la requête GraphQL (peut être une string ou déjà un objet)
         let queryString = firstQuery.full_content || firstQuery.content || '';
-        
+
         // Si c'est déjà un objet JSON, le convertir en string formatée
         if (typeof queryString === 'object') {
             queryString = JSON.stringify(queryString, null, 2);
         }
-        
+
         // Nettoyer et formater la requête GraphQL (préserver les retours à la ligne)
         queryString = queryString.trim();
-        
+
         const graphqlBody = {
             query: queryString
         };
-        
+
         // Ajouter les variables si présentes
         if (firstQuery.variables) {
             // Parser les variables depuis la string (ex: "$billingPlatform: BillingPlatform, $planGroup: String")
@@ -3495,12 +3520,12 @@ function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
                 graphqlBody.variables = vars;
             }
         }
-        
+
         // Pré-remplir le body avec la requête GraphQL (formaté avec indentation)
         currentApiRequest.bodyType = 'json';
         // Utiliser JSON.stringify avec indentation pour un formatage propre
         currentApiRequest.body = JSON.stringify(graphqlBody, null, 2);
-        
+
         // Ajouter le header Content-Type pour GraphQL
         const contentTypeHeader = currentApiRequest.headers.find(h => h.key.toLowerCase() === 'content-type');
         if (!contentTypeHeader) {
@@ -3509,9 +3534,9 @@ function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
             contentTypeHeader.value = 'application/json';
         }
     }
-    
+
     renderApiRequest();
-    
+
     // Si c'est GraphQL, basculer automatiquement sur l'onglet Body
     if (graphqlQueries && graphqlQueries.length > 0) {
         setTimeout(() => {
@@ -3528,13 +3553,13 @@ function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
 function updateApiTabBadge(count) {
     const apiNavItem = document.querySelector('[data-view="api"]');
     if (!apiNavItem) return;
-    
+
     // Remove existing badge
     const existingBadge = apiNavItem.querySelector('.api-notification-badge');
     if (existingBadge) {
         existingBadge.remove();
     }
-    
+
     // Add new badge if count > 0
     if (count > 0) {
         const badge = document.createElement('span');
@@ -3567,7 +3592,7 @@ function showGraphQLQuerySelector(apiUrl, apiIndex) {
         alert('No GraphQL queries found for this endpoint');
         return;
     }
-    
+
     // Create modal
     const modal = document.createElement('div');
     modal.id = 'graphql-query-selector-modal';
@@ -3583,7 +3608,7 @@ function showGraphQLQuerySelector(apiUrl, apiIndex) {
         justify-content: center;
         z-index: 10000;
     `;
-    
+
     modal.innerHTML = `
         <div style="background: white; border-radius: 12px; padding: 24px; max-width: 600px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
@@ -3620,13 +3645,13 @@ function showGraphQLQuerySelector(apiUrl, apiIndex) {
             </div>
         </div>
     `;
-    
+
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             closeGraphQLQuerySelector();
         }
     });
-    
+
     document.body.appendChild(modal);
 }
 
@@ -3651,11 +3676,11 @@ function loadGraphQLQuery(apiUrl, apiIndex, queryIndex) {
         alert('Query not found');
         return;
     }
-    
+
     const selectedQuery = queries[queryIndex];
     const isGraphQL = apiUrl.toLowerCase().includes('graphql') || apiUrl.toLowerCase().includes('gql');
     const method = isGraphQL ? 'POST' : 'GET';
-    
+
     loadReactApiIntoRequest(apiUrl, method, [selectedQuery]);
 }
 
@@ -3829,7 +3854,7 @@ function toggleBodyType() {
         } else {
             container.style.display = 'flex';
             msg.style.display = 'none';
-            
+
             // Show JSON formatted view for JSON type, textarea for raw
             if (type === 'json') {
                 if (jsonView) jsonView.style.display = 'flex';
@@ -3850,16 +3875,16 @@ function formatAndDisplayJson() {
     const jsonView = document.getElementById('api-body-json-view');
     const jsonFormatted = document.getElementById('api-body-json-formatted');
     const bodyEditor = document.getElementById('api-body-editor');
-    
+
     if (!jsonView || !jsonFormatted || !bodyEditor) return;
-    
+
     const bodyText = bodyEditor.value || currentApiRequest.body || '';
-    
+
     if (!bodyText.trim()) {
         jsonFormatted.textContent = '';
         return;
     }
-    
+
     try {
         // Try to parse and format JSON
         let jsonObj;
@@ -3873,14 +3898,14 @@ function formatAndDisplayJson() {
             cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
             jsonObj = JSON.parse(cleaned);
         }
-        
+
         const formatted = JSON.stringify(jsonObj, null, 2);
         jsonFormatted.textContent = formatted;
         jsonFormatted.style.color = '#abb2bf';
         jsonFormatted.style.whiteSpace = 'pre';
         jsonFormatted.style.wordWrap = 'normal';
         jsonFormatted.style.overflowWrap = 'normal';
-        
+
         // Apply syntax highlighting
         if (window.hljs) {
             jsonFormatted.className = 'language-json';
@@ -3899,9 +3924,9 @@ function formatAndDisplayJson() {
 function updateApiBody() {
     const bodyEditor = document.getElementById('api-body-editor');
     if (!bodyEditor) return;
-    
+
     currentApiRequest.body = bodyEditor.value;
-    
+
     // If JSON type is selected and we're in formatted view, update it
     if (currentApiRequest.bodyType === 'json') {
         const jsonView = document.getElementById('api-body-json-view');
@@ -3915,7 +3940,7 @@ function updateApiBody() {
 function switchToJsonEditor() {
     const jsonView = document.getElementById('api-body-json-view');
     const bodyEditor = document.getElementById('api-body-editor');
-    
+
     if (jsonView && bodyEditor) {
         jsonView.style.display = 'none';
         bodyEditor.style.display = 'block';
@@ -3927,16 +3952,16 @@ function switchToJsonEditor() {
 function formatJsonBody() {
     const bodyEditor = document.getElementById('api-body-editor');
     if (!bodyEditor) return;
-    
+
     const bodyText = bodyEditor.value || '';
     if (!bodyText.trim()) return;
-    
+
     try {
         const jsonObj = JSON.parse(bodyText);
         const formatted = JSON.stringify(jsonObj, null, 2);
         bodyEditor.value = formatted;
         currentApiRequest.body = formatted;
-        
+
         // If JSON type is selected, update the formatted view
         if (currentApiRequest.bodyType === 'json') {
             formatAndDisplayJson();
@@ -3955,7 +3980,7 @@ async function sendApiRequest() {
 
     if (methodEl) currentApiRequest.method = methodEl.value;
     if (urlEl) currentApiRequest.url = urlEl.value;
-    
+
     // Get body from editor (even if hidden, it still has the value)
     if (bodyEl) {
         currentApiRequest.body = bodyEl.value;
@@ -4234,7 +4259,7 @@ if (clearBtn) {
         detailContentEl.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Select a flow to view details</div>';
         currentFlowId = null;
         updateDetailButtons();
-        
+
         // Clear all tab histories
         clearAllTabHistories();
     });
@@ -4246,11 +4271,11 @@ function clearAllTabHistories() {
     apiHistory = [];
     localStorage.removeItem('kittyproxy_api_history');
     renderApiSidebar();
-    
+
     // Clear API Collections
     apiCollections = [];
     localStorage.removeItem('kittyproxy_api_collections');
-    
+
     // Clear Repeater tabs
     repeaterTabs = [];
     activeRepeaterTabId = null;
@@ -4259,7 +4284,7 @@ function clearAllTabHistories() {
     if (typeof renderRepeaterTabs === 'function') {
         renderRepeaterTabs();
     }
-    
+
     // Clear Intruder tabs
     intruderTabs = [];
     activeIntruderTabId = null;
@@ -4268,13 +4293,13 @@ function clearAllTabHistories() {
     if (typeof renderIntruderTabs === 'function') {
         renderIntruderTabs();
     }
-    
+
     // Clear Collaboration state
     localStorage.removeItem('kittyproxy_collaboration_state');
     if (typeof clearCollaborationState === 'function') {
         clearCollaborationState();
     }
-    
+
     console.log('All tab histories cleared');
 }
 
@@ -5207,24 +5232,24 @@ function renderIntruderResults(results) {
 // Gérer le redimensionnement des panneaux Intruder
 let intruderResizeData = null;
 
-window.startIntruderResize = function(e, tabId) {
+window.startIntruderResize = function (e, tabId) {
     e.preventDefault();
     const leftPanel = document.getElementById(`intruder-left-panel-${tabId}`);
     const rightPanel = document.getElementById(`intruder-right-panel-${tabId}`);
-    
+
     if (!leftPanel || !rightPanel) return;
-    
+
     const startX = e.clientX;
     const startWidth = leftPanel.offsetWidth;
     const containerWidth = leftPanel.parentElement.offsetWidth;
-    
+
     intruderResizeData = {
         tabId,
         startX,
         startWidth,
         containerWidth
     };
-    
+
     document.addEventListener('mousemove', handleIntruderResize);
     document.addEventListener('mouseup', stopIntruderResize);
     document.body.style.cursor = 'col-resize';
@@ -5233,16 +5258,16 @@ window.startIntruderResize = function(e, tabId) {
 
 function handleIntruderResize(e) {
     if (!intruderResizeData) return;
-    
+
     const { tabId, startX, startWidth, containerWidth } = intruderResizeData;
     const leftPanel = document.getElementById(`intruder-left-panel-${tabId}`);
     const rightPanel = document.getElementById(`intruder-right-panel-${tabId}`);
-    
+
     if (!leftPanel || !rightPanel) return;
-    
+
     const diff = e.clientX - startX;
     const newWidth = Math.max(300, Math.min(containerWidth - 300, startWidth + diff));
-    
+
     leftPanel.style.width = `${newWidth}px`;
     leftPanel.style.flexShrink = '0';
     rightPanel.style.flex = '1';
@@ -5324,7 +5349,7 @@ async function startIntruderAttack(tabId) {
         // Délai entre les requêtes pour éviter de surcharger
         // Utiliser setTimeout pour permettre au navigateur de traiter les événements utilisateur
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
         // Forcer le navigateur à traiter les événements en attente (scroll, resize, etc.)
         await new Promise(resolve => setTimeout(resolve, 0));
     }
@@ -5500,7 +5525,7 @@ function escapeRegex(str) {
 }
 
 // Afficher les détails d'un résultat Intruder (fonction globale)
-window.viewIntruderResult = function(resultIndex) {
+window.viewIntruderResult = function (resultIndex) {
     const activeTab = intruderTabs.find(t => t.id === activeIntruderTabId);
     if (!activeTab || !activeTab.results || !activeTab.results[resultIndex]) {
         alert('Result not found');
@@ -5678,15 +5703,33 @@ tabs.forEach(tab => {
     });
 });
 
+// Lightweight hash function for flow changes detection
+function computeFlowsHash(flows) {
+    if (!flows || flows.length === 0) return '';
+    // Create a lightweight hash from flow IDs, status codes, and timestamps
+    // Only use first 50 flows for hash to keep it fast
+    const sampleSize = Math.min(50, flows.length);
+    const hashParts = flows.slice(0, sampleSize).map(flow => {
+        const id = flow.id || '';
+        const status = flow.status_code || '';
+        const timestamp = flow.timestamp_start || '';
+        return `${id}:${status}:${timestamp}`;
+    });
+    // Add total count and latest flow ID
+    const latestFlow = flows[0];
+    const latestId = latestFlow ? (latestFlow.id || '') : '';
+    return `${flows.length}:${latestId}:${hashParts.join('|')}`;
+}
+
 async function fetchFlows() {
     try {
-        // Récupérer tous les flows avec pagination côté serveur
-        const res = await fetch(`${API_BASE}/flows?page=1&size=10000`);
-        
+        // Récupérer les flows avec pagination côté serveur (réduit de 10000 à 300)
+        const res = await fetch(`${API_BASE}/flows?page=1&size=${FLOW_POLL_SIZE}`);
+
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}: ${res.statusText}`);
         }
-        
+
         const data = await res.json();
 
         // L'API retourne maintenant une structure paginée
@@ -5699,7 +5742,7 @@ async function fetchFlows() {
                 // Vérifier les headers (peuvent être un objet, dict, ou Headers)
                 let sourceHeader = null;
                 const headers = flow.request.headers;
-                
+
                 // Essayer différentes façons d'accéder aux headers
                 if (typeof headers === 'object') {
                     if (headers.get && typeof headers.get === 'function') {
@@ -5707,13 +5750,13 @@ async function fetchFlows() {
                         sourceHeader = headers.get('X-KittyProxy-Source') || headers.get('x-kittyproxy-source');
                     } else {
                         // Objet simple
-                        sourceHeader = headers['X-KittyProxy-Source'] || 
-                                     headers['x-kittyproxy-source'] ||
-                                     headers.get?.('X-KittyProxy-Source') ||
-                                     headers.get?.('x-kittyproxy-source');
+                        sourceHeader = headers['X-KittyProxy-Source'] ||
+                            headers['x-kittyproxy-source'] ||
+                            headers.get?.('X-KittyProxy-Source') ||
+                            headers.get?.('x-kittyproxy-source');
                     }
                 }
-                
+
                 // Exclure les flows provenant de l'Intruder
                 if (sourceHeader === 'intruder') {
                     return false;
@@ -5722,16 +5765,22 @@ async function fetchFlows() {
             return true; // Garder les flows sans header source ou avec un autre source
         });
 
-        if (JSON.stringify(flows) !== JSON.stringify(flowsData)) {
+        // Compute lightweight hash to detect changes
+        const newHash = computeFlowsHash(flows);
+
+        // Only update if hash changed (much faster than JSON.stringify comparison)
+        if (newHash !== flowsHash) {
+            flowsHash = newHash;
             flowsData = flows;
             renderFlowList();
+            loadWebSocketConnections();
 
             // Update domains list if visualization view is visible
             const visualizeView = document.getElementById('visualize-view');
             if (visualizeView && visualizeView.style.display !== 'none') {
                 extractAndDisplayDomains();
             }
-            
+
             // Synchroniser avec la collaboration si une session est active
             if (currentSessionId && collaborationWebSocket) {
                 syncFlowsToCollaboration();
@@ -5911,17 +5960,17 @@ function renderFlowList() {
         flowItem.appendChild(urlEl);
         flowItem.appendChild(sizeEl);
         flowItem.appendChild(timeEl);
-        
+
         // Ajouter une colonne "Share" pour la collaboration
         const shareCol = document.createElement('div');
         shareCol.className = 'flow-share';
-        
+
         // Vérifier si connecté à un espace de collaboration
         const isConnected = currentSessionId && collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN;
-        
+
         if (isConnected) {
             const isShared = sharedFlows.has(flow.id);
-            shareCol.innerHTML = isShared 
+            shareCol.innerHTML = isShared
                 ? '<span class="material-symbols-outlined" style="font-size: 18px; color: #4caf50;">check_circle</span>'
                 : '<span class="material-symbols-outlined" style="font-size: 18px; color: #666;">group</span>';
             shareCol.title = isShared ? 'Click to unshare' : 'Share in collaboration';
@@ -5940,7 +5989,7 @@ function renderFlowList() {
                 e.stopPropagation();
             };
         }
-        
+
         flowItem.appendChild(shareCol);
 
         // Add context menu (right-click) for "Run module on this URL"
@@ -6002,21 +6051,21 @@ function updateDetailButtons() {
     const replayBtn = document.getElementById('replay-btn');
     const sendToRepeaterBtn = document.getElementById('send-to-repeater-btn');
     const sendToIntruderBtn = document.getElementById('send-to-intruder-btn');
-    
+
     const hasSelection = currentFlowId !== null;
-    
+
     if (replayBtn) {
         replayBtn.disabled = !hasSelection;
         replayBtn.style.opacity = hasSelection ? '1' : '0.5';
         replayBtn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
     }
-    
+
     if (sendToRepeaterBtn) {
         sendToRepeaterBtn.disabled = !hasSelection;
         sendToRepeaterBtn.style.opacity = hasSelection ? '1' : '0.5';
         sendToRepeaterBtn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
     }
-    
+
     if (sendToIntruderBtn) {
         sendToIntruderBtn.disabled = !hasSelection;
         sendToIntruderBtn.style.opacity = hasSelection ? '1' : '0.5';
@@ -6027,7 +6076,7 @@ function updateDetailButtons() {
 async function renderDetail() {
     // Mettre à jour les boutons même si aucun flow n'est sélectionné
     updateDetailButtons();
-    
+
     if (!currentFlowId || !detailContentEl) {
         // Afficher un message si aucun flow n'est sélectionné
         if (detailContentEl) {
@@ -6153,7 +6202,7 @@ function renderRequestTab(flow) {
     } else if (flow.request.content) {
         bodyContent = typeof flow.request.content === 'string' ? flow.request.content : String(flow.request.content);
     }
-    
+
     let bodyHtml = '';
     if (bodyContent && bodyContent.trim()) {
         try {
@@ -6233,6 +6282,115 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function renderWebSocketTab(flow) {
+    if (!flow) {
+        detailContentEl.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">No flow selected</div>';
+        return;
+    }
+
+    const messages = getWebSocketMessages(flow);
+    const hasWebSocket = isWebSocketFlow(flow);
+
+    if (!hasWebSocket) {
+        detailContentEl.innerHTML = `
+            <div style="padding: 40px; text-align: center; color: #888;">
+                <span class="material-symbols-outlined" style="font-size: 64px; color: #ddd; margin-bottom: 20px; display: block;">hub</span>
+                <p style="font-size: 1rem; margin: 0;">This flow does not contain WebSocket data</p>
+                <p style="font-size: 0.85rem; margin: 10px 0 0 0; color: #aaa;">WebSocket connections will appear here when captured</p>
+            </div>
+        `;
+        return;
+    }
+
+    const statusCode = flow.status_code ?? flow.response?.status_code ?? 'N/A';
+    let html = '<div style="padding: 20px;">';
+
+    // Overview section
+    html += '<div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">';
+    html += '<h3 style="margin: 0 0 15px 0; color: #333;">WebSocket Connection</h3>';
+    html += `<div style="display: grid; grid-template-columns: auto 1fr; gap: 10px 20px; font-size: 0.9em;">`;
+    html += `<div style="color: #666;">URL:</div><div style="font-family: monospace; word-break: break-all;">${flow.url || 'N/A'}</div>`;
+    html += `<div style="color: #666;">Messages:</div><div>${messages.length}</div>`;
+    html += `<div style="color: #666;">Status:</div><div>${statusCode}</div>`;
+    html += `</div>`;
+    html += '</div>';
+
+    // Messages section
+    if (messages.length > 0) {
+        html += '<div style="background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">';
+        html += '<h3 style="margin: 0 0 15px 0; color: #333;">Messages (' + messages.length + ')</h3>';
+        html += '<div style="display: flex; flex-direction: column; gap: 12px;">';
+
+        messages.forEach((msg, idx) => {
+            const isClient = msg.from_client !== false && msg.direction !== 'server';
+            const direction = isClient ? 'Client → Server' : 'Server → Client';
+            const directionColor = isClient ? '#2196f3' : '#4caf50';
+            const content = msg.content || msg.text || msg.data || '';
+            const isText = msg.type === 'text' || typeof content === 'string';
+            const timestamp = msg.timestamp || (flow.timestamp_start || 0) + (idx * 0.001);
+            const date = new Date(timestamp * 1000);
+            const size = typeof content === 'string' ? content.length : (content.byteLength || 0);
+
+            // Try to parse JSON if it's text
+            let parsedContent = null;
+            let isJson = false;
+            if (isText && typeof content === 'string' && content.trim()) {
+                const trimmed = content.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                    try {
+                        parsedContent = JSON.parse(content);
+                        isJson = true;
+                    } catch (e) {
+                        // Not valid JSON
+                    }
+                }
+            }
+
+            html += `<div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color); border-left: 4px solid ${directionColor};">`;
+            html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">`;
+            html += `<div>`;
+            html += `<span style="color: ${directionColor}; font-weight: 600; font-size: 13px;">${direction}</span>`;
+            html += `<span style="margin-left: 12px; font-size: 11px; color: #666;">${date.toLocaleTimeString()}</span>`;
+            html += `</div>`;
+            html += `<div style="font-size: 11px; color: #666;">`;
+            html += `${isText ? 'Text' : 'Binary'} • ${size} bytes`;
+            if (isJson) {
+                html += ` • <span style="color: #4caf50; font-weight: 600;">JSON</span>`;
+            }
+            html += `</div>`;
+            html += `</div>`;
+
+            // Content display
+            html += `<div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; word-break: break-all; position: relative;">`;
+
+            if (isJson && parsedContent) {
+                // Pretty print JSON
+                html += `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #333;">${escapeHtml(JSON.stringify(parsedContent, null, 2))}</pre>`;
+            } else if (isText) {
+                html += `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #333;">${escapeHtml(String(content))}</pre>`;
+            } else {
+                // Binary data
+                html += `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #666;">Binary data (${size} bytes)</pre>`;
+                if (size < 1024) {
+                    // Show hex dump for small binary data
+                    const hex = Array.from(new Uint8Array(content)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                    html += `<pre style="margin: 8px 0 0 0; font-size: 11px; color: #888;">${hex}</pre>`;
+                }
+            }
+
+            html += `</div>`;
+            html += `</div>`;
+        });
+
+        html += '</div>';
+        html += '</div>';
+    }
+
+    html += '</div>';
+    detailContentEl.innerHTML = html;
+}
+
 function renderResponseTab(flow) {
     if (!flow || !flow.response) {
         detailContentEl.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">No response yet</div>';
@@ -6304,7 +6462,7 @@ function renderResponseTab(flow) {
     } else if (flow.response.content) {
         bodyContent = typeof flow.response.content === 'string' ? flow.response.content : String(flow.response.content);
     }
-    
+
     let bodyHtml = '';
     if (bodyContent && bodyContent.trim()) {
         try {
@@ -6406,7 +6564,7 @@ function renderHexdumpTab(flow) {
     } else if (flow.request && flow.request.content) {
         reqContent = typeof flow.request.content === 'string' ? flow.request.content : String(flow.request.content);
     }
-    
+
     let resContent = '';
     if (flow.response && flow.response.content_bs64) {
         try {
@@ -6685,7 +6843,7 @@ function showFlowContextMenu(event, flow) {
     if (existingMenu) {
         existingMenu.remove();
     }
-    
+
     // Create context menu
     const menu = document.createElement('div');
     menu.id = 'flow-context-menu';
@@ -6701,7 +6859,7 @@ function showFlowContextMenu(event, flow) {
         min-width: 200px;
         padding: 4px 0;
     `;
-    
+
     menu.innerHTML = `
         <div 
             class="context-menu-item"
@@ -6713,9 +6871,9 @@ function showFlowContextMenu(event, flow) {
             <span style="font-weight: 500;">Run module on this URL</span>
         </div>
     `;
-    
+
     document.body.appendChild(menu);
-    
+
     // Close menu when clicking outside
     const closeMenu = (e) => {
         if (!menu.contains(e.target)) {
@@ -6724,7 +6882,7 @@ function showFlowContextMenu(event, flow) {
             document.removeEventListener('contextmenu', closeMenu);
         }
     };
-    
+
     setTimeout(() => {
         document.addEventListener('click', closeMenu);
         document.addEventListener('contextmenu', closeMenu);
@@ -6738,13 +6896,13 @@ function openModuleSelectorFromFlow(flowId) {
         alert('Flow not found');
         return;
     }
-    
+
     // Remove existing context menu
     const existingMenu = document.getElementById('flow-context-menu');
     if (existingMenu) {
         existingMenu.remove();
     }
-    
+
     // Create modal
     let modal = document.getElementById('module-selector-modal');
     if (!modal) {
@@ -6764,24 +6922,24 @@ function openModuleSelectorFromFlow(flowId) {
         `;
         document.body.appendChild(modal);
     }
-    
+
     // Filter modules (prefer HTTP/web-related modules)
     const filteredModules = modulesData.filter(mod => {
         const name = (mod.name || '').toLowerCase();
         const desc = (mod.description || '').toLowerCase();
         const category = (mod.category || '').toLowerCase();
-        return name.includes('http') || name.includes('web') || name.includes('scanner') || 
-               desc.includes('http') || desc.includes('web') || category.includes('web') ||
-               category.includes('scanner') || category.includes('auxiliary');
+        return name.includes('http') || name.includes('web') || name.includes('scanner') ||
+            desc.includes('http') || desc.includes('web') || category.includes('web') ||
+            category.includes('scanner') || category.includes('auxiliary');
     });
-    
+
     // Sort: HTTP/web modules first, then others
     const sortedModules = [
         ...filteredModules.filter(m => (m.name || '').toLowerCase().includes('http')),
         ...filteredModules.filter(m => !(m.name || '').toLowerCase().includes('http'))
     ];
-    
-    const modulesHtml = sortedModules.length > 0 
+
+    const modulesHtml = sortedModules.length > 0
         ? sortedModules.map(mod => `
             <div 
                 class="module-selector-item"
@@ -6797,7 +6955,7 @@ function openModuleSelectorFromFlow(flowId) {
             </div>
         `).join('')
         : '<div style="padding: 20px; text-align: center; color: #888;">No suitable modules found</div>';
-    
+
     modal.innerHTML = `
         <div style="background: white; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2);">
             <div style="padding: 20px 24px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
@@ -6829,7 +6987,7 @@ function openModuleSelectorFromFlow(flowId) {
             </div>
         </div>
     `;
-    
+
     modal.style.display = 'flex';
 }
 
@@ -6844,26 +7002,26 @@ function closeModuleSelectorModal() {
 // Select and configure module from flow (without executing)
 async function selectModuleFromFlow(moduleName, flowId) {
     closeModuleSelectorModal();
-    
+
     const flow = flowsData.find(f => f.id === flowId);
     if (!flow) {
         alert('Flow not found');
         return;
     }
-    
+
     // Switch to modules view
     const modulesView = document.getElementById('modules-view');
     const modulesNavItem = document.querySelector('[data-view="modules"]');
     if (modulesView && modulesNavItem) {
         modulesNavItem.click();
-        
+
         // Wait for the view to render, then select the module
         setTimeout(() => {
             // Select the module in the list
             selectedModuleId = moduleName;
             renderModuleList();
             renderModuleConfig(moduleName);
-            
+
             // Wait a bit more for the config to render, then pre-fill URL and auto-configure
             setTimeout(async () => {
                 // Pre-fill the URL from the flow
@@ -6871,11 +7029,11 @@ async function selectModuleFromFlow(moduleName, flowId) {
                 if (urlInput && flow.url) {
                     urlInput.value = flow.url;
                 }
-                
+
                 // Auto-configure the options
                 if (flow.url) {
                     await autoConfigureModuleFromUrl(moduleName, true);
-                    
+
                     // Show a notification about which flow was used
                     const moduleOutput = document.getElementById('module-output');
                     if (moduleOutput) {
@@ -7091,8 +7249,8 @@ async function executeModuleFromFlow(moduleName, flowId) {
                 moduleOutput.style.color = '#f44336';
                 // Scroll to bottom
                 moduleOutput.scrollTop = moduleOutput.scrollHeight;
-        } else {
-            alert(`Error during execution: ${data.detail || 'Unknown error'}`);
+            } else {
+                alert(`Error during execution: ${data.detail || 'Unknown error'}`);
             }
         }
     } catch (err) {
@@ -7104,7 +7262,7 @@ async function executeModuleFromFlow(moduleName, flowId) {
             // Scroll to bottom
             moduleOutput.scrollTop = moduleOutput.scrollHeight;
         } else {
-        alert(`Connection error: ${err.message}`);
+            alert(`Connection error: ${err.message}`);
         }
     } finally {
         // Restore button
@@ -7189,7 +7347,7 @@ async function renderEndpointsTab(flow) {
     // Récupérer tous les endpoints découverts depuis ce flow spécifique
     // Vérifier flow.discovered_endpoints (liste aplatie) et flow.endpoints (dictionnaire catégorisé)
     let discoveredEndpoints = flow.discovered_endpoints || [];
-    
+
     // Si flow.endpoints existe, extraire tous les endpoints depuis toutes les catégories
     if (flow.endpoints && typeof flow.endpoints === 'object') {
         const endpointsFromDict = [];
@@ -7201,7 +7359,7 @@ async function renderEndpointsTab(flow) {
         // Combiner avec discovered_endpoints et dédupliquer
         discoveredEndpoints = [...new Set([...discoveredEndpoints, ...endpointsFromDict])];
     }
-    
+
     // Debug: log pour comprendre ce qui se passe
     console.log('[Endpoints Tab] Flow endpoints:', {
         discovered_endpoints: flow.discovered_endpoints?.length || 0,
@@ -7254,14 +7412,14 @@ async function renderEndpointsTab(flow) {
                     endpointUrl = new URL(endpoint, 'http://localhost');
                 }
             }
-            
+
             const normalized = `${endpointUrl.origin}${endpointUrl.pathname}`;
             const normalizedWithQuery = endpointUrl.href.split('#')[0]; // Sans hash
-            
+
             // Vérifier si cet endpoint a été réellement appelé
             // Comparer avec différentes variantes
-            if (calledUrls.has(normalized) || 
-                calledUrls.has(normalizedWithQuery) || 
+            if (calledUrls.has(normalized) ||
+                calledUrls.has(normalizedWithQuery) ||
                 calledUrls.has(endpointUrl.href) ||
                 calledUrls.has(endpoint)) {
                 calledEndpoints.push(endpointUrl.href);
@@ -7310,7 +7468,7 @@ async function renderEndpointsTab(flow) {
         html += `Called Endpoints <span style="font-size: 0.85em; color: #666; font-weight: normal;">(${calledEndpoints.length})</span>`;
         html += `</h3>`;
         html += '<p style="color: #666; font-size: 0.9em; margin-top: -8px; margin-bottom: 16px;">Endpoints that were actually requested</p>';
-        
+
         // Afficher par domaine
         const sortedCalledDomains = Array.from(calledByDomain.keys()).sort((a, b) => {
             if (flowDomain) {
@@ -7319,7 +7477,7 @@ async function renderEndpointsTab(flow) {
             }
             return a.localeCompare(b);
         });
-        
+
         sortedCalledDomains.forEach(domain => {
             const domainEndpoints = calledByDomain.get(domain);
             if (domainEndpoints && domainEndpoints.length > 0) {
@@ -7327,14 +7485,14 @@ async function renderEndpointsTab(flow) {
                 html += `<h4 style="color: #666; font-size: 0.9em; margin-bottom: 8px; font-weight: 600;">${domain}</h4>`;
                 html += '<div style="max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 8px;">';
                 domainEndpoints.forEach((endpoint, index) => {
-            html += `<div style="padding: 8px 15px; border-bottom: 1px solid #eee; ${index % 2 === 0 ? 'background: #fafafa;' : ''}">`;
+                    html += `<div style="padding: 8px 15px; border-bottom: 1px solid #eee; ${index % 2 === 0 ? 'background: #fafafa;' : ''}">`;
                     html += `<a href="${endpoint}" target="_blank" style="color: #4caf50; text-decoration: none; font-family: \'Fira Code\', monospace; font-size: 0.9em; font-weight: 500;">${endpoint}</a>`;
-            html += `</div>`;
-        });
-        html += '</div></div>';
+                    html += `</div>`;
+                });
+                html += '</div></div>';
             }
         });
-        
+
         html += '</div>';
     }
 
@@ -7346,7 +7504,7 @@ async function renderEndpointsTab(flow) {
         html += `Discovered Endpoints (Not Called) <span style="font-size: 0.85em; color: #666; font-weight: normal;">(${discoveredNotCalled.length})</span>`;
         html += `</h3>`;
         html += '<p style="color: #666; font-size: 0.9em; margin-top: -8px; margin-bottom: 16px;">Endpoints found in the response content but not yet requested</p>';
-        
+
         // Afficher par domaine
         const sortedDiscoveredDomains = Array.from(discoveredByDomain.keys()).sort((a, b) => {
             if (flowDomain) {
@@ -7355,7 +7513,7 @@ async function renderEndpointsTab(flow) {
             }
             return a.localeCompare(b);
         });
-        
+
         sortedDiscoveredDomains.forEach(domain => {
             const domainEndpoints = discoveredByDomain.get(domain);
             if (domainEndpoints && domainEndpoints.length > 0) {
@@ -7370,7 +7528,7 @@ async function renderEndpointsTab(flow) {
                 html += '</div></div>';
             }
         });
-        
+
         html += '</div>';
     }
 
@@ -7771,6 +7929,50 @@ if (vizResizeHandle && vizDomainsSidebar) {
         if (isVizResizing) {
             isVizResizing = false;
             vizResizeHandle.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
+}
+
+// === WEBSOCKET RESIZE HANDLE ===
+const wsResizeHandle = document.getElementById('ws-resize-handle');
+const wsListPanel = document.getElementById('ws-list-panel');
+const wsDetailPanel = document.getElementById('ws-detail-panel');
+
+let isWsResizing = false;
+let wsStartX = 0;
+let wsStartWidth = 0;
+
+if (wsResizeHandle && wsListPanel && wsDetailPanel) {
+    wsResizeHandle.addEventListener('mousedown', (e) => {
+        isWsResizing = true;
+        wsStartX = e.clientX;
+        wsStartWidth = wsListPanel.offsetWidth;
+        wsResizeHandle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isWsResizing) return;
+
+        const diff = e.clientX - wsStartX;
+        const newWidth = wsStartWidth + diff;
+        const minWidth = 250;
+        const maxWidth = window.innerWidth * 0.8;
+
+        if (newWidth >= minWidth && newWidth <= maxWidth) {
+            wsListPanel.style.width = `${newWidth}px`;
+            wsListPanel.style.flexShrink = '0';
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isWsResizing) {
+            isWsResizing = false;
+            wsResizeHandle.classList.remove('active');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
         }
@@ -8498,60 +8700,60 @@ function switchVizTab(tabName, forceReload = false) {
 // Fonction pour détecter le type de fichier depuis une URL
 function getFileTypeFromUrl(url) {
     if (!url) return 'other';
-    
+
     const urlLower = url.toLowerCase();
     const path = urlLower.split('?')[0]; // Enlever les query params
-    
+
     // Images
     if (/\.(svg|png|jpg|jpeg|gif|webp|bmp|ico)$/i.test(path)) {
         return 'image';
     }
-    
+
     // JavaScript
     if (/\.(js|mjs)$/i.test(path)) {
         return 'javascript';
     }
-    
+
     // CSS
     if (/\.css$/i.test(path)) {
         return 'css';
     }
-    
+
     // HTML
     if (/\.(html|htm)$/i.test(path)) {
         return 'html';
     }
-    
+
     // JSON
     if (/\.json$/i.test(path)) {
         return 'json';
     }
-    
+
     // Fonts
     if (/\.(woff|woff2|ttf|otf|eot)$/i.test(path)) {
         return 'font';
     }
-    
+
     // Videos
     if (/\.(mp4|webm|ogg|avi|mov)$/i.test(path)) {
         return 'video';
     }
-    
+
     // Audio
     if (/\.(mp3|wav|ogg|aac)$/i.test(path)) {
         return 'audio';
     }
-    
+
     // PDF
     if (/\.pdf$/i.test(path)) {
         return 'pdf';
     }
-    
+
     // XML
     if (/\.xml$/i.test(path)) {
         return 'xml';
     }
-    
+
     return 'other';
 }
 
@@ -8560,18 +8762,18 @@ function isValidEndpoint(path) {
     if (!path || path.length < 2) {
         return false;
     }
-    
+
     // Exclure les fragments, data URIs, mailto, etc.
     if (path.startsWith('#') || path.startsWith('data:') || path.startsWith('mailto:') || path.startsWith('javascript:')) {
         return false;
     }
-    
+
     // Exclure spécifiquement les faux positifs JavaScript courants
     const pathLower = path.toLowerCase().trim();
     if (pathLower === 'javascript:;' || pathLower === 'javascript:void(0)' || pathLower === 'javascript:void(0);' || pathLower === 'javascript:' || pathLower === 'javascript: ') {
         return false;
     }
-    
+
     // Vérifier les chemins qui commencent par /
     if (path.startsWith('/')) {
         // Exclure les chemins trop courts (moins de 2 caractères après le /)
@@ -8580,7 +8782,7 @@ function isValidEndpoint(path) {
         if (pathPart.length < 2 && !['', 'api', 'v1', 'v2', 'v3', 'v4', 'v5'].includes(pathPart)) {
             return false;
         }
-        
+
         // Exclure les chemins qui commencent par des caractères suspects
         // Comme /-u, /[QÜV, etc.
         if (pathPart.length > 0) {
@@ -8589,7 +8791,7 @@ function isValidEndpoint(path) {
             if (!/[a-zA-Z0-9._-]/.test(firstChar)) {
                 return false;
             }
-            
+
             // Exclure les chemins avec trop de caractères encodés consécutifs
             const encodedPattern = /%[0-9A-Fa-f]{2}%[0-9A-Fa-f]{2}%[0-9A-Fa-f]{2}%[0-9A-Fa-f]{2}/;
             if (encodedPattern.test(path)) {
@@ -8597,7 +8799,7 @@ function isValidEndpoint(path) {
             }
         }
     }
-    
+
     return true;
 }
 
@@ -8613,10 +8815,10 @@ async function showDependenciesGraph() {
     if (currentFlowId) {
         // Chercher dans le cache d'abord
         selectedFlow = flowsData.find(f => f.id === currentFlowId);
-        
+
         // Si pas trouvé ou si le flow n'a pas tous les détails, le récupérer
         if (!selectedFlow || !selectedFlow.endpoints) {
-    try {
+            try {
                 const res = await fetch(`${API_BASE}/flows/${currentFlowId}`);
                 if (res.ok) {
                     selectedFlow = await res.json();
@@ -8625,19 +8827,19 @@ async function showDependenciesGraph() {
                     if (index !== -1) {
                         flowsData[index] = selectedFlow;
                     }
-        }
-    } catch (e) {
+                }
+            } catch (e) {
                 console.error("Failed to fetch selected flow", e);
             }
         }
     }
-    
+
     // Récupérer les endpoints uniquement du flow sélectionné
     let flowEndpoints = [];
     if (selectedFlow) {
         // Utiliser flow.discovered_endpoints (liste aplatie) et flow.endpoints (dictionnaire catégorisé)
         flowEndpoints = selectedFlow.discovered_endpoints || [];
-        
+
         // Si flow.endpoints existe, extraire tous les endpoints depuis toutes les catégories
         if (selectedFlow.endpoints && typeof selectedFlow.endpoints === 'object') {
             const endpointsFromDict = [];
@@ -8658,7 +8860,7 @@ async function showDependenciesGraph() {
     const edgeKeys = new Set(); // Pour éviter les doublons d'arêtes
     const nodeFlows = new Map(); // Stocker les flows associés à chaque nœud
     const domainsMap = new Map(); // Stocker les domaines et leurs statistiques
-    
+
     // Créer un index des URLs réellement chargées pour distinguer appels directs vs découverts
     const loadedUrls = new Set();
     flowsData.forEach(flow => {
@@ -8746,7 +8948,7 @@ async function showDependenciesGraph() {
                 const edgeKey = `${domain}->${pathId}`;
                 if (!edgeKeys.has(edgeKey)) {
                     edgeKeys.add(edgeKey);
-                edges.push({
+                    edges.push({
                         data: {
                             source: domain,
                             target: pathId,
@@ -8769,12 +8971,12 @@ async function showDependenciesGraph() {
                         const refNormalizedUrl = `${refUrl.origin}${refUrl.pathname}`;
 
                         if (!refDomain) return;
-                        
+
                         // Filtrer les faux endpoints (comme /-u, /[QÜV, etc.)
                         if (!isValidEndpoint(refPath)) {
                             return;
                         }
-                        
+
                         // Vérifier si cette ressource a été réellement chargée (appel direct)
                         const isDirectCall = loadedUrls.has(refFullUrl) || loadedUrls.has(refNormalizedUrl);
 
@@ -8793,7 +8995,7 @@ async function showDependenciesGraph() {
                             const edgeKey = `${domain}->${refDomain}`;
                             if (!edgeKeys.has(edgeKey)) {
                                 edgeKeys.add(edgeKey);
-                            edges.push({
+                                edges.push({
                                     data: {
                                         source: domain,
                                         target: refDomain,
@@ -8835,7 +9037,7 @@ async function showDependenciesGraph() {
                             const edgeKey = `${domain}->${refPathId}`;
                             if (!edgeKeys.has(edgeKey)) {
                                 edgeKeys.add(edgeKey);
-                            edges.push({
+                                edges.push({
                                     data: {
                                         source: domain,
                                         target: refPathId,
@@ -8881,90 +9083,90 @@ async function showDependenciesGraph() {
                         return; // Pas de base URL, ignorer
                     }
                 }
-                
+
                 const domain = endpointUrl.hostname;
                 const path = endpointUrl.pathname;
                 const normalized = `${endpointUrl.origin}${endpointUrl.pathname}`;
 
-            if (!domain) return;
+                if (!domain) return;
 
-            // Filtrer si un domaine est sélectionné
-            if (selectedDomainForGraph && domain !== selectedDomainForGraph) {
-                return;
-            }
-                
+                // Filtrer si un domaine est sélectionné
+                if (selectedDomainForGraph && domain !== selectedDomainForGraph) {
+                    return;
+                }
+
                 // Filtrer les faux endpoints
                 if (!isValidEndpoint(path)) {
                     return;
                 }
-                
+
                 // Vérifier si cet endpoint a été réellement appelé
                 const isDirectCall = loadedUrls.has(normalized) || loadedUrls.has(endpointUrl.href) || loadedUrls.has(endpoint);
-                
+
                 // Ne pas ajouter les endpoints déjà appelés (ils sont déjà dans le graphique via flowsData)
                 if (isDirectCall) {
                     return;
                 }
 
-            // S'assurer que le domaine existe
-            if (!nodes.has(domain)) {
-                nodes.set(domain, {
-                    id: domain,
-                    label: domain,
-                    group: 1,
-                    value: 1,
-                    flows: []
-                });
-                nodeFlows.set(domain, []);
+                // S'assurer que le domaine existe
+                if (!nodes.has(domain)) {
+                    nodes.set(domain, {
+                        id: domain,
+                        label: domain,
+                        group: 1,
+                        value: 1,
+                        flows: []
+                    });
+                    nodeFlows.set(domain, []);
                     domainsMap.set(domain, {
                         domain: domain,
                         requestCount: 0,
                         endpointCount: 0,
                         discoveredEndpointCount: 0
                     });
-            }
+                }
 
                 // Ajouter l'endpoint découvert (non-appelé) s'il n'existe pas
-            if (path && path !== '/') {
-                const pathId = `${domain}${path}`;
+                if (path && path !== '/') {
+                    const pathId = `${domain}${path}`;
                     const fileType = getFileTypeFromUrl(endpointUrl.href);
-                if (!nodes.has(pathId)) {
-                    nodes.set(pathId, {
-                        id: pathId,
-                        label: path,
-                        group: 2,
-                        value: 1,
-                        parent: domain,
-                        flows: [],
+                    if (!nodes.has(pathId)) {
+                        nodes.set(pathId, {
+                            id: pathId,
+                            label: path,
+                            group: 2,
+                            value: 1,
+                            parent: domain,
+                            flows: [],
                             discovered: true, // Endpoint découvert mais non-appelé
                             fileType: fileType
-                    });
-                    nodeFlows.set(pathId, []);
-                        
+                        });
+                        nodeFlows.set(pathId, []);
+
                         // Mettre à jour le compteur
                         if (domainsMap.has(domain)) {
                             domainsMap.get(domain).discoveredEndpointCount++;
                         }
 
-                    const edgeKey = `${domain}->${pathId}`;
-                    if (!edgeKeys.has(edgeKey)) {
-                        edgeKeys.add(edgeKey);
-                    edges.push({
-                            data: {
-                                source: domain,
-                                target: pathId,
-                                type: 'to',
+                        const edgeKey = `${domain}->${pathId}`;
+                        if (!edgeKeys.has(edgeKey)) {
+                            edgeKeys.add(edgeKey);
+                            edges.push({
+                                data: {
+                                    source: domain,
+                                    target: pathId,
+                                    type: 'to',
                                     dashed: true, // Ligne pointillée pour endpoints découverts
                                     discovered: 'true' // String pour Cytoscape
-                            }
-                        });
+                                }
+                            });
+                        }
                     }
                 }
-            }
-        } catch (e) {
+            } catch (e) {
                 // Ignorer les URLs invalides
-        }
-    });
+            }
+        });
     }
 
     // Convertir les nodes pour Cytoscape
@@ -9002,11 +9204,11 @@ async function showDependenciesGraph() {
 
     // Initialiser Cytoscape
     panel.innerHTML = '';
-    
+
     // Compter les nœuds et edges créés
     const totalNodes = nodes.size;
     const totalEdges = edges.length;
-    
+
     // Ajouter des contrôles avancés pour filtrer et gérer le graphique
     const controlsContainer = document.createElement('div');
     controlsContainer.style.cssText = 'padding: 12px; background: white; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 12px; flex-shrink: 0;';
@@ -9069,7 +9271,7 @@ async function showDependenciesGraph() {
         </div>
     `;
     panel.appendChild(controlsContainer);
-    
+
     const cyContainer = document.createElement('div');
     cyContainer.id = 'cy';
     cyContainer.style.width = '100%';
@@ -9155,9 +9357,9 @@ async function showDependenciesGraph() {
             animate: true,
             randomize: true,
             componentSpacing: 150, // Augmenter l'espacement pour mieux gérer beaucoup de nœuds
-            nodeRepulsion: function (node) { 
+            nodeRepulsion: function (node) {
                 // Augmenter la répulsion pour mieux espacer les nœuds
-                return 800000; 
+                return 800000;
             },
             nodeOverlap: 20, // Augmenter pour éviter le chevauchement
             idealEdgeLength: function (edge) { return 150; }, // Augmenter la longueur idéale
@@ -9183,7 +9385,7 @@ async function showDependenciesGraph() {
         const hideDiscovered = document.getElementById('viz-hide-discovered')?.checked || false;
         const showOnlyDirect = document.getElementById('viz-show-only-direct')?.checked || false;
         const searchTerm = (document.getElementById('viz-search-nodes')?.value || '').toLowerCase().trim();
-        
+
         // Récupérer les filtres par type de fichier
         const showImages = document.getElementById('viz-filter-image')?.checked !== false;
         const showJavaScript = document.getElementById('viz-filter-javascript')?.checked !== false;
@@ -9191,10 +9393,10 @@ async function showDependenciesGraph() {
         const showHtml = document.getElementById('viz-filter-html')?.checked !== false;
         const showJson = document.getElementById('viz-filter-json')?.checked !== false;
         const showOther = document.getElementById('viz-filter-other')?.checked !== false;
-        
+
         cy.elements().forEach(element => {
             let shouldShow = true;
-            
+
             // Filtrer par type (découvert vs direct)
             if (hideDiscovered) {
                 const discovered = element.data('discovered');
@@ -9202,7 +9404,7 @@ async function showDependenciesGraph() {
                     shouldShow = false;
                 }
             }
-            
+
             // Filtrer pour n'afficher que les requêtes directes
             if (showOnlyDirect) {
                 const discovered = element.data('discovered');
@@ -9210,12 +9412,12 @@ async function showDependenciesGraph() {
                     shouldShow = false;
                 }
             }
-            
+
             // Filtrer par type de fichier (uniquement pour les nœuds)
             if (element.isNode() && shouldShow) {
                 const fileType = element.data('fileType') || 'other';
                 const nodeType = element.data('type');
-                
+
                 // Les domaines (type === 'domain') sont toujours visibles
                 if (nodeType === 'domain') {
                     // Les domaines restent visibles
@@ -9243,7 +9445,7 @@ async function showDependenciesGraph() {
                     }
                 }
             }
-            
+
             // Filtrer par recherche
             if (searchTerm && shouldShow) {
                 if (element.isNode()) {
@@ -9261,10 +9463,10 @@ async function showDependenciesGraph() {
                     }
                 }
             }
-            
+
             element.style('display', shouldShow ? 'element' : 'none');
         });
-        
+
         // Masquer les nœuds isolés (sans arêtes visibles)
         cy.nodes().forEach(node => {
             const connectedEdges = node.connectedEdges().filter(edge => edge.style('display') !== 'none');
@@ -9286,29 +9488,29 @@ async function showDependenciesGraph() {
             }
         });
     }
-    
+
     // Gestionnaire pour masquer/afficher les endpoints découverts
     const hideDiscoveredCheck = document.getElementById('viz-hide-discovered');
     if (hideDiscoveredCheck) {
         hideDiscoveredCheck.addEventListener('change', updateVisibility);
     }
-    
+
     // Gestionnaire pour afficher uniquement les requêtes directes
     const showOnlyDirectCheck = document.getElementById('viz-show-only-direct');
     if (showOnlyDirectCheck) {
         showOnlyDirectCheck.addEventListener('change', updateVisibility);
     }
-    
+
     // Gestionnaire pour la recherche
     const searchInput = document.getElementById('viz-search-nodes');
     if (searchInput) {
         let searchTimeout;
-        searchInput.addEventListener('input', function() {
+        searchInput.addEventListener('input', function () {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(updateVisibility, 300); // Debounce de 300ms
         });
     }
-    
+
     // Gestionnaires pour les filtres par type de fichier
     const fileTypeFilters = ['viz-filter-image', 'viz-filter-javascript', 'viz-filter-css', 'viz-filter-html', 'viz-filter-json', 'viz-filter-other'];
     fileTypeFilters.forEach(filterId => {
@@ -9317,33 +9519,33 @@ async function showDependenciesGraph() {
             filterCheck.addEventListener('change', updateVisibility);
         }
     });
-    
+
     // Gestionnaire pour le bouton Reset
     const resetButton = document.getElementById('viz-reset-view');
     if (resetButton) {
-        resetButton.addEventListener('click', function() {
+        resetButton.addEventListener('click', function () {
             // Réinitialiser tous les filtres
             if (hideDiscoveredCheck) hideDiscoveredCheck.checked = false;
             if (showOnlyDirectCheck) showOnlyDirectCheck.checked = false;
             if (searchInput) searchInput.value = '';
-            
+
             // Réinitialiser les filtres par type de fichier
             fileTypeFilters.forEach(filterId => {
                 const filterCheck = document.getElementById(filterId);
                 if (filterCheck) filterCheck.checked = true;
             });
-            
+
             // Réinitialiser la vue
             cy.elements().style('display', 'element');
             cy.fit();
             cy.center();
         });
     }
-    
+
     // Gestionnaire pour limiter le nombre de nœuds
     const limitNodesCheck = document.getElementById('viz-limit-nodes');
     if (limitNodesCheck) {
-        limitNodesCheck.addEventListener('change', function() {
+        limitNodesCheck.addEventListener('change', function () {
             // Si on limite, masquer les nœuds découverts en excès
             if (this.checked) {
                 let visibleCount = 0;
@@ -9856,7 +10058,7 @@ function showTimeline() {
             }
             html += `</div>`;
 
-        html += '</div>';
+            html += '</div>';
         });
 
     html += '</div>'; // Fin de la liste
@@ -9941,49 +10143,49 @@ function showTimeline() {
         .forEach((endpointData) => {
             const flows = endpointData.flows;
             // Calculer les lanes pour cet endpoint
-        const { lanes, barHeight } = calculateLanes(flows, startTime, duration, timelineWidth);
+            const { lanes, barHeight } = calculateLanes(flows, startTime, duration, timelineWidth);
             const endpointHeight = Math.max(lanes.length * (barHeight + 6), rowHeight);
-        const yPos = paddingTop + (rowIndex * rowHeight);
+            const yPos = paddingTop + (rowIndex * rowHeight);
 
             // Label de l'endpoint (dans la sidebar, déjà fait)
             // Ici on trace juste les barres dans la zone de timeline
 
             // Barres de requêtes dans leurs lanes respectives - Design amélioré
-        lanes.forEach((lane, laneIndex) => {
-            lane.forEach(({ flow, start, width, lane: laneNum }) => {
-                const timePos = start * 100;
+            lanes.forEach((lane, laneIndex) => {
+                lane.forEach(({ flow, start, width, lane: laneNum }) => {
+                    const timePos = start * 100;
                     const barWidth = Math.max(width, 4);
 
                     let statusColor, statusGradient, statusIcon, statusText;
-                if (flow.status_code >= 500) {
-                    statusColor = '#d32f2f';
+                    if (flow.status_code >= 500) {
+                        statusColor = '#d32f2f';
                         statusGradient = 'linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)';
-                    statusIcon = 'error';
-                    statusText = 'Server error';
-                } else if (flow.status_code >= 400) {
-                    statusColor = '#f44336';
+                        statusIcon = 'error';
+                        statusText = 'Server error';
+                    } else if (flow.status_code >= 400) {
+                        statusColor = '#f44336';
                         statusGradient = 'linear-gradient(135deg, #f44336 0%, #c62828 100%)';
-                    statusIcon = 'warning';
-                    statusText = 'Client error';
-                } else if (flow.status_code >= 300) {
-                    statusColor = '#ff9800';
+                        statusIcon = 'warning';
+                        statusText = 'Client error';
+                    } else if (flow.status_code >= 300) {
+                        statusColor = '#ff9800';
                         statusGradient = 'linear-gradient(135deg, #ff9800 0%, #f57c00 100%)';
-                    statusIcon = 'redirect';
-                    statusText = 'Redirection';
-                } else if (flow.status_code >= 200) {
-                    statusColor = '#4caf50';
+                        statusIcon = 'redirect';
+                        statusText = 'Redirection';
+                    } else if (flow.status_code >= 200) {
+                        statusColor = '#4caf50';
                         statusGradient = 'linear-gradient(135deg, #4caf50 0%, #388e3c 100%)';
-                    statusIcon = 'check_circle';
-                    statusText = 'Success';
-                } else {
-                    statusColor = '#9e9e9e';
+                        statusIcon = 'check_circle';
+                        statusText = 'Success';
+                    } else {
+                        statusColor = '#9e9e9e';
                         statusGradient = 'linear-gradient(135deg, #9e9e9e 0%, #616161 100%)';
-                    statusIcon = 'help';
-                    statusText = 'Inconnu';
-                }
+                        statusIcon = 'help';
+                        statusText = 'Inconnu';
+                    }
 
-                // Couleur selon la méthode HTTP
-                let methodColor = '#2196f3';
+                    // Couleur selon la méthode HTTP
+                    let methodColor = '#2196f3';
                     let methodGradient = 'linear-gradient(135deg, #2196f3 0%, #1976d2 100%)';
                     if (flow.method === 'GET') {
                         methodColor = '#4caf50';
@@ -10062,7 +10264,7 @@ function showTimeline() {
                         ">${escapeHtml(shortPath)}</span>`;
                     }
                     if (actualBarWidth > 80) {
-                    html += `<span style="
+                        html += `<span style="
                             font-weight: 600;
                             font-size: 10px;
                         color: white;
@@ -10071,10 +10273,10 @@ function showTimeline() {
                             font-family: 'Fira Code', monospace;
                     ">${flow.status_code || 'N/A'}</span>`;
                     }
-                html += `</div>`;
+                    html += `</div>`;
 
                     // Tooltip amélioré
-                const duration_ms = flow.duration_ms || 50;
+                    const duration_ms = flow.duration_ms || 50;
                     const date = new Date((flow.timestamp_start || 0) * 1000);
                     const tooltipText = `${flow.method || 'GET'} ${flow.url || 'N/A'}\nStatus: ${flow.status_code || 'N/A'}\nDuration: ${duration_ms}ms\nTime: ${date.toLocaleString('fr-FR')}`;
                     html += `<div style="
@@ -10098,9 +10300,9 @@ function showTimeline() {
                         line-height: 1.6;
                     " class="timeline-tooltip">${escapeHtml(tooltipText)}</div>`;
 
-                html += '</div>';
+                    html += '</div>';
+                });
             });
-        });
 
             // Ligne de séparation entre endpoints
             html += `<div style="
@@ -10182,13 +10384,13 @@ function showTimeline() {
         const selectedMethod = filterMethod ? filterMethod.value : 'all';
         const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
         const percentage = filterSlider ? filterSlider.value : 100;
-            const maxTime = startTime + (duration * percentage / 100);
+        const maxTime = startTime + (duration * percentage / 100);
 
         let visibleCount = 0;
 
-            document.querySelectorAll('.timeline-bar').forEach(bar => {
-                const flowId = bar.getAttribute('data-flow-id');
-                const flow = sortedFlows.find(f => f.id === flowId);
+        document.querySelectorAll('.timeline-bar').forEach(bar => {
+            const flowId = bar.getAttribute('data-flow-id');
+            const flow = sortedFlows.find(f => f.id === flowId);
             if (!flow) return;
 
             const status = flow.status_code || 0;
@@ -10746,36 +10948,36 @@ function selectNavTreeNode(path) {
             console.log('[NAV TREE] Found', matchingFlows.length, 'flows from DOM data attribute');
         }
     }
-    
+
     // Si pas de flows trouvés via DOM, utiliser la recherche par chemin
     if (matchingFlows.length === 0) {
         matchingFlows = flowsData.filter(flow => {
             try {
                 const url = new URL(flow.url);
                 const flowPath = `${url.hostname}${url.pathname}`;
-                
+
                 // Correspondance exacte
                 if (flowPath === path) {
                     return true;
                 }
-                
+
                 // Normaliser les chemins (enlever trailing slash)
                 const normalizedPath = path.replace(/\/$/, '');
                 const normalizedFlowPath = flowPath.replace(/\/$/, '');
                 if (normalizedFlowPath === normalizedPath) {
                     return true;
                 }
-                
+
                 // Correspondance : le flowPath commence par le path (pour les dossiers)
                 if (normalizedFlowPath.startsWith(normalizedPath + '/') || normalizedFlowPath === normalizedPath) {
                     return true;
                 }
-                
+
                 // Correspondance inverse : le path contient le flowPath complet
                 if (normalizedPath.includes(normalizedFlowPath) && normalizedFlowPath.length > 5) {
                     return true;
                 }
-                
+
                 // Correspondance par nom de fichier (dernier segment)
                 const pathFileName = normalizedPath.split('/').pop();
                 const flowFileName = normalizedFlowPath.split('/').pop();
@@ -10787,7 +10989,7 @@ function selectNavTreeNode(path) {
                         return true;
                     }
                 }
-                
+
                 return false;
             } catch (e) {
                 console.warn('[NAV TREE] Error processing flow:', e, flow.url);
@@ -10878,10 +11080,10 @@ async function showFileContentModal(flow, path) {
     // Récupérer le contenu de la réponse
     let bodyContent = '';
     let contentType = '';
-    
+
     if (flow.response) {
         contentType = flow.response.headers?.['content-type'] || '';
-        
+
         if (flow.response.content_bs64) {
             try {
                 bodyContent = atob(flow.response.content_bs64);
@@ -10890,8 +11092,8 @@ async function showFileContentModal(flow, path) {
                 bodyContent = '';
             }
         } else if (flow.response.content) {
-            bodyContent = typeof flow.response.content === 'string' 
-                ? flow.response.content 
+            bodyContent = typeof flow.response.content === 'string'
+                ? flow.response.content
                 : String(flow.response.content);
         }
     }
@@ -10899,7 +11101,7 @@ async function showFileContentModal(flow, path) {
     // Déterminer le type de contenu et formater en conséquence
     let formattedContent = '';
     let iconName = 'description';
-    
+
     if (!bodyContent || bodyContent.trim() === '') {
         formattedContent = '<div style="padding: 40px; text-align: center; color: #888;"><p>No content available</p></div>';
         iconName = 'description';
@@ -10908,10 +11110,10 @@ async function showFileContentModal(flow, path) {
         iconName = 'image';
         try {
             // Créer une data URL pour l'image
-            const imageDataUrl = flow.response.content_bs64 
+            const imageDataUrl = flow.response.content_bs64
                 ? `data:${contentType || 'image/png'};base64,${flow.response.content_bs64}`
                 : null;
-            
+
             if (imageDataUrl) {
                 formattedContent = `
                     <div style="text-align: center; padding: 20px;">
@@ -10921,7 +11123,7 @@ async function showFileContentModal(flow, path) {
                              onerror="this.parentElement.innerHTML='<div style=\\'padding: 40px; color: #f44336;\\'>Error loading image</div>'">
                     </div>
                 `;
-        } else {
+            } else {
                 formattedContent = '<div style="padding: 40px; text-align: center; color: #888;"><p>Image data not available in base64 format</p></div>';
             }
         } catch (e) {
@@ -10996,7 +11198,7 @@ async function showFileContentModal(flow, path) {
 function closeFileContentModal() {
     const overlay = document.getElementById('file-content-overlay');
     const modal = document.getElementById('file-content-modal');
-    
+
     if (overlay) overlay.style.display = 'none';
     if (modal) modal.style.display = 'none';
 }
@@ -11005,11 +11207,11 @@ function closeFileContentModal() {
 function isImageContent(contentType, fileName) {
     const imageTypes = ['image/', 'image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp', 'image/ico'];
     const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico', '.ico'];
-    
+
     if (contentType) {
         return imageTypes.some(type => contentType.toLowerCase().includes(type));
     }
-    
+
     const lowerFileName = fileName.toLowerCase();
     return imageExtensions.some(ext => lowerFileName.endsWith(ext));
 }
@@ -11018,17 +11220,17 @@ function isJsonContent(contentType, bodyContent) {
     if (contentType && contentType.toLowerCase().includes('json')) {
         return true;
     }
-    
+
     const trimmed = bodyContent.trim();
-    return (trimmed.startsWith('{') && trimmed.endsWith('}')) || 
-           (trimmed.startsWith('[') && trimmed.endsWith(']'));
+    return (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'));
 }
 
 function isHtmlContent(contentType, fileName) {
     if (contentType && contentType.toLowerCase().includes('html')) {
         return true;
     }
-    
+
     const lowerFileName = fileName.toLowerCase();
     return lowerFileName.endsWith('.html') || lowerFileName.endsWith('.htm');
 }
@@ -11037,7 +11239,7 @@ function isCssContent(contentType, fileName) {
     if (contentType && contentType.toLowerCase().includes('css')) {
         return true;
     }
-    
+
     const lowerFileName = fileName.toLowerCase();
     return lowerFileName.endsWith('.css');
 }
@@ -11046,7 +11248,7 @@ function isJavaScriptContent(contentType, fileName) {
     if (contentType && (contentType.toLowerCase().includes('javascript') || contentType.toLowerCase().includes('application/javascript'))) {
         return true;
     }
-    
+
     const lowerFileName = fileName.toLowerCase();
     return lowerFileName.endsWith('.js') || lowerFileName.endsWith('.mjs');
 }
@@ -11106,7 +11308,7 @@ function showHeatmap() {
         // Exclure les fichiers statiques (CSS, JS, images, fonts, etc.) car ils référencent naturellement d'autres ressources
         const fileType = getFileTypeFromUrl(flow.url);
         const isStaticFile = ['css', 'javascript', 'image', 'font', 'video', 'audio'].includes(fileType);
-        
+
         if (flow.endpoints && !isStaticFile) {
             const endpointCount = Object.values(flow.endpoints).flat().length;
             risk += Math.min(endpointCount / 10, 2);
@@ -11219,6 +11421,10 @@ async function loadPerformanceData() {
     if (!monitorContent) return;
 
     try {
+        // Load fast mode settings
+        await loadFastModeSettings();
+
+        // Load performance data
         const res = await fetch(`${API_BASE}/performance`);
         const data = await res.json();
 
@@ -11229,8 +11435,90 @@ async function loadPerformanceData() {
     }
 }
 
+// Fast mode state (disabled by default)
+let fastModeEnabled = false;
+let fastModeThreshold = 100;
+
+async function loadFastModeSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/performance/fast-mode`);
+        if (res.ok) {
+            const data = await res.json();
+            fastModeEnabled = data.fast_mode;
+            fastModeThreshold = data.threshold_kb;
+        }
+    } catch (err) {
+        console.error("Failed to load fast mode settings", err);
+    }
+}
+
+async function saveFastModeSettings() {
+    try {
+        const res = await fetch(`${API_BASE}/performance/fast-mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                enabled: fastModeEnabled,
+                threshold_kb: fastModeThreshold
+            })
+        });
+        if (res.ok) {
+            showToast('Fast mode settings saved', 'success');
+        } else {
+            showToast('Failed to save fast mode settings', 'error');
+        }
+    } catch (err) {
+        console.error("Failed to save fast mode settings", err);
+        showToast('Failed to save fast mode settings', 'error');
+    }
+}
+
+function updateFastModeThresholdState() {
+    const thresholdInput = document.getElementById('fast-mode-threshold');
+    if (thresholdInput) {
+        thresholdInput.disabled = !fastModeEnabled;
+    }
+}
+
 function renderPerformanceDashboard(data) {
     let html = '<div style="padding: 30px; max-width: 1400px; margin: 0 auto; background: var(--bg-color);">';
+
+    // Fast Mode Settings Section
+    html += '<div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">';
+    html += '<h3 style="margin: 0 0 15px 0; color: #333; font-size: 1.1em;">Performance Optimization</h3>';
+    html += '<div style="display: flex; flex-direction: column; gap: 15px;">';
+
+    // Fast Mode Toggle
+    html += '<div style="display: flex; align-items: center; justify-content: space-between;">';
+    html += '<div>';
+    html += '<div style="font-weight: 600; color: #333; margin-bottom: 5px;">Fast Mode</div>';
+    html += '<div style="font-size: 0.85em; color: #666;">Skip heavy analysis (tech detection, fingerprinting, endpoint extraction) for large responses to improve proxy responsiveness</div>';
+    html += '</div>';
+    html += `<label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+        <input type="checkbox" id="fast-mode-toggle" ${fastModeEnabled ? 'checked' : ''} 
+               onchange="fastModeEnabled = this.checked; saveFastModeSettings(); updateFastModeThresholdState();"
+               style="width: 18px; height: 18px; cursor: pointer;">
+        <span style="color: ${fastModeEnabled ? '#4caf50' : '#888'}; font-weight: 500;">
+            Enable
+        </span>
+    </label>`;
+    html += '</div>';
+
+    // Threshold Setting
+    html += '<div style="display: flex; align-items: center; justify-content: space-between;">';
+    html += '<div>';
+    html += '<div style="font-weight: 600; color: #333; margin-bottom: 5px;">Response Size Threshold</div>';
+    html += '<div style="font-size: 0.85em; color: #666;">Skip analysis for responses larger than this size (KB)</div>';
+    html += '</div>';
+    html += `<input type="number" id="fast-mode-threshold" value="${fastModeThreshold}" min="10" max="10000" step="10"
+            onchange="fastModeThreshold = parseInt(this.value) || 100; saveFastModeSettings(); updateFastModeThresholdState();"
+            style="width: 100px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9em;"
+            ${!fastModeEnabled ? 'disabled' : ''}>`;
+    html += '<span style="margin-left: 8px; color: #666;">KB</span>';
+    html += '</div>';
+
+    html += '</div>';
+    html += '</div>';
 
     // En-tête avec alertes
     html += '<div style="margin-bottom: 30px;">';
@@ -11552,7 +11840,7 @@ async function ensureCollabAuth(forceRetry = false) {
         // Si on force le retry, on nettoie le cache
         localStorage.removeItem('collab_auth_last_failed');
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/collab/auth`);
         if (!res.ok) {
@@ -11567,10 +11855,10 @@ async function ensureCollabAuth(forceRetry = false) {
         }
         const data = await res.json();
         console.log('[COLLAB] Auth response:', { valid: data.valid, hasToken: !!data.token, server_url: data.server_url });
-        
+
         // Vérifier à la fois valid ET token (comme pour SideChannel)
         collabAuthValid = !!(data.valid === true && data.token);
-        
+
         // Si la validation réussit, on supprime le cache d'échec
         if (collabAuthValid) {
             localStorage.removeItem('collab_auth_last_failed');
@@ -11582,7 +11870,7 @@ async function ensureCollabAuth(forceRetry = false) {
             localStorage.setItem('collab_auth_last_failed', 'true');
             renderCollabApiKeyRequired(errorMsg);
         }
-        
+
         if (data.server_url) {
             COLLABORATION_SERVER_URL = normalizeCollabUrl(data.server_url);
             localStorage.setItem('collaboration_server_url', COLLABORATION_SERVER_URL);
@@ -11645,7 +11933,7 @@ function updateCollabLiveIndicator(isLive) {
     const indicator = collabLiveIndicator || document.getElementById('collab-live-indicator');
     const collabNavItem = document.querySelector('.nav-item[data-view="collaborate"]');
     if (!indicator || !collabNavItem) return;
-    
+
     if (isLive) {
         indicator.style.display = 'flex';
         indicator.setAttribute('aria-hidden', 'false');
@@ -11686,7 +11974,7 @@ function saveAIAssistantResults() {
 // Restaurer les résultats de l'IA Assistant
 function restoreAIAssistantResults() {
     if (!currentSessionId) return;
-    
+
     try {
         const key = `kittyproxy_ai_results_${currentSessionId}`;
         const saved = localStorage.getItem(key);
@@ -11721,7 +12009,7 @@ function restoreCollaborationState() {
     try {
         const saved = localStorage.getItem('kittyproxy_collaboration_state');
         if (!saved) return null;
-        
+
         const state = JSON.parse(saved);
         console.log('[Collaboration] Restoring state:', state);
         return state;
@@ -11734,16 +12022,16 @@ function restoreCollaborationState() {
 async function restoreCollaborationStateAfterJoin() {
     const state = restoreCollaborationState();
     if (!state) return;
-    
+
     // Restaurer le texte du champ de chat
     const collabChatInput = document.getElementById('collab-chat-input');
     if (collabChatInput && state.chatInput) {
         collabChatInput.value = state.chatInput;
     }
-    
+
     // Restaurer les résultats IA
     restoreAIAssistantResults();
-    
+
     // Restaurer l'affichage des résultats IA si un flow était analysé
     if (state.currentAIFlowId && collabAIResults[state.currentAIFlowId]) {
         const aiResults = collabAIResults[state.currentAIFlowId];
@@ -11764,7 +12052,7 @@ async function restoreCollaborationStateAfterJoin() {
             updateSelectedAIFlow(state.currentAIFlowId);
         }, 500);
     }
-    
+
     // Restaurer le mirroring si il était actif
     if (state.isMirroring && currentUserId === state.userId) {
         // Attendre un peu pour que le WebSocket soit bien connecté
@@ -11776,7 +12064,7 @@ async function restoreCollaborationStateAfterJoin() {
             }
         }, 1000);
     }
-    
+
     // Les flows et messages seront chargés automatiquement via les messages WebSocket
     // et loadChatHistory()
 }
@@ -11834,17 +12122,17 @@ function showErrorModal(message) {
 }
 
 // Fermer les modales en cliquant sur l'overlay
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
-        overlay.addEventListener('click', function(e) {
+        overlay.addEventListener('click', function (e) {
             if (e.target === overlay) {
                 overlay.style.display = 'none';
             }
         });
     });
-    
+
     // Fermer les modales avec la touche Escape
-    document.addEventListener('keydown', function(e) {
+    document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
             document.querySelectorAll('.modal-overlay').forEach(modal => {
                 if (modal.style.display === 'flex') {
@@ -11853,25 +12141,25 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
     });
-    
+
     // Permettre de soumettre avec Enter dans les modales
     const sessionNameInput = document.getElementById('modal-session-name');
     if (sessionNameInput) {
-        sessionNameInput.addEventListener('keypress', function(e) {
+        sessionNameInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 confirmCreateSession();
             }
         });
     }
-    
+
     const inviteCodeInput = document.getElementById('modal-invite-code');
     if (inviteCodeInput) {
         // Transformer automatiquement en majuscules
-        inviteCodeInput.addEventListener('input', function(e) {
+        inviteCodeInput.addEventListener('input', function (e) {
             e.target.value = e.target.value.toUpperCase();
         });
-        
-        inviteCodeInput.addEventListener('keypress', function(e) {
+
+        inviteCodeInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 confirmJoinSession();
             }
@@ -11892,18 +12180,18 @@ async function confirmCreateSession() {
     }
     const nameInput = document.getElementById('modal-session-name');
     const name = nameInput ? nameInput.value.trim() : '';
-    
+
     if (!name) {
         showErrorModal('Please enter a session name.');
         return;
     }
-    
+
     closeModal('modal-create-session');
-    
+
     try {
         // Créer une session (pas besoin d'API key)
         const apiUrl = `${COLLABORATION_SERVER_URL}/api/v1/sessions`;
-        
+
         const res = await fetch(apiUrl, {
             method: 'POST',
             headers: collabHeaders({
@@ -11914,7 +12202,7 @@ async function confirmCreateSession() {
                 target_url: ''
             })
         });
-        
+
         if (res.ok) {
             const data = await res.json();
             currentSessionId = data.id || data.session_id;
@@ -11948,14 +12236,14 @@ async function confirmJoinSession() {
     }
     const codeInput = document.getElementById('modal-invite-code');
     const code = codeInput ? codeInput.value.trim() : '';
-    
+
     if (!code || code.trim() === '') {
         showErrorModal('Please enter an invitation code.');
         return;
     }
-    
+
     closeModal('modal-join-session');
-    
+
     // Tenter d'abord de résoudre comme ID de session (UUID), puis comme code d'invitation
     try {
         const trimmedCode = code.trim();
@@ -11970,22 +12258,22 @@ async function confirmJoinSession() {
 
             if (resById.ok) {
                 console.log(`[DEBUG] Session found by ID: ${trimmedCode}`);
-            await doJoinCollaborationSession(trimmedCode);
-            return;
+                await doJoinCollaborationSession(trimmedCode);
+                return;
             } else {
                 console.log(`[DEBUG] No session for ID ${trimmedCode}, trying invite code... (status ${resById.status})`);
             }
         } catch (err) {
             console.warn(`[WARN] Error while checking session by ID: ${err.message}. Will try invite code.`);
         }
-        
+
         // 2) Essayer comme code d'invitation (quelle que soit la longueur)
         console.log(`[DEBUG] Joining session with invite code: ${normalizedCode}`);
         const res = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/sessions/invite/${normalizedCode}`, {
             method: 'GET',
             headers: collabHeaders({ 'Content-Type': 'application/json' })
         });
-        
+
         if (res.ok) {
             const data = await res.json();
             const sessionId = data.id || data.session_id;
@@ -12007,18 +12295,18 @@ async function confirmJoinSession() {
 // Effectue réellement la connexion à la session
 async function doJoinCollaborationSession(sessionId) {
     if (!sessionId) return;
-    
+
     if (!sessionId) return;
-    
+
     try {
         // Construire l'URL WebSocket (toujours utiliser le serveur SaaS)
         const wsProtocol = COLLABORATION_SERVER_URL.startsWith('https') ? 'wss:' : 'ws:';
         const wsHost = COLLABORATION_SERVER_URL.replace('http://', '').replace('https://', '');
         const wsUrl = `${wsProtocol}//${wsHost}/ws/v1/sessions/${sessionId}`;
-        
+
         console.log('Connecting to WebSocket:', wsUrl);
         collaborationWebSocket = new WebSocket(wsUrl);
-        
+
         collaborationWebSocket.onopen = () => {
             console.log('WebSocket connected, sending join message...');
             // Send join message (pas besoin d'API key)
@@ -12028,20 +12316,20 @@ async function doJoinCollaborationSession(sessionId) {
                 color: getRandomColor(),
                 user_id: currentUserId || `user_${Date.now()}`
             };
-            
+
             console.log('Sending join data:', { ...joinData, api_key: joinData.api_key ? '***' : undefined });
             collaborationWebSocket.send(JSON.stringify(joinData));
-            
+
             currentSessionId = sessionId;
             if (!currentUserId) {
                 currentUserId = joinData.user_id;
             }
             saveCollaborationState();
             showCollaborationSession();
-            
+
             // Vérifier l'accès à l'IA
             checkAIAccess(sessionId);
-            
+
             // Synchroniser les flows existants après un court délai pour laisser le WebSocket se stabiliser
             setTimeout(() => {
                 syncExistingFlowsToCollaboration();
@@ -12049,7 +12337,7 @@ async function doJoinCollaborationSession(sessionId) {
                 syncSharedFlowsFromCollaboration();
             }, 1000);
         };
-        
+
         collaborationWebSocket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -12059,12 +12347,12 @@ async function doJoinCollaborationSession(sessionId) {
                 console.error('[Collaboration] Error parsing message:', error, event.data);
             }
         };
-        
+
         collaborationWebSocket.onerror = (error) => {
             console.error('WebSocket error:', error);
             showErrorModal('WebSocket connection error');
         };
-        
+
         collaborationWebSocket.onclose = (event) => {
             console.log('WebSocket closed:', event.code, event.reason);
             if (event.code !== 1000) {
@@ -12075,7 +12363,7 @@ async function doJoinCollaborationSession(sessionId) {
             }
             leaveCollaborationSession();
         };
-        
+
     } catch (err) {
         console.error('Error joining session:', err);
         showErrorModal('Connection error');
@@ -12088,19 +12376,19 @@ function leaveCollaborationSession() {
         collaborationWebSocket.close();
         collaborationWebSocket = null;
     }
-    
+
     // Arrêter le mirroring si actif
     if (browserMirror && browserMirror.isMirroring) {
         stopBrowserMirroring();
     }
-    
+
     currentSessionId = null;
     currentUserId = null;
     collaborationFlows = [];
     collaborationParticipants = [];
     collaborationMessages = [];
     clearCollaborationState();
-    
+
     resetCollaborationHeader();
     hideCollaborationSession();
 }
@@ -12111,7 +12399,7 @@ function handleCollaborationMessage(data) {
         case 'session_joined':
             updateSessionInfo(data.session);
             console.log('[Collaboration] session_joined, session data:', data.session);
-            
+
             // Vérifier si le serveur renvoie les flows existants dans la session
             if (data.session && data.session.flows && Array.isArray(data.session.flows)) {
                 console.log('[Collaboration] Found', data.session.flows.length, 'flows in session data');
@@ -12124,15 +12412,15 @@ function handleCollaborationMessage(data) {
             } else {
                 console.log('[Collaboration] No flows found in session data, flows:', data.session?.flows);
             }
-            
+
             // Charger l'historique du chat
             loadChatHistory();
-            
+
             // Charger les flows existants partagés dans la session depuis les messages
             setTimeout(() => {
                 loadExistingSharedFlows();
             }, 500);
-            
+
             // Demander au serveur de renvoyer tous les flows existants de la session
             // En envoyant un message pour demander les flows
             if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
@@ -12154,7 +12442,7 @@ function handleCollaborationMessage(data) {
                         if (userId !== currentUserId) {
                             // Simuler un message mirror_started pour chaque utilisateur qui partage déjà son écran
                             handleMirrorStarted(userId);
-                            
+
                             // Si on regardait cet utilisateur avant le refresh, restaurer la vue
                             if (savedState && savedState.viewingMirrorUserId === userId) {
                                 setTimeout(() => {
@@ -12305,13 +12593,13 @@ function handleCollaborationMessage(data) {
                     timestamp: data.timestamp || Date.now()
                 };
                 console.log('[Collaboration] Received AI results for flow:', flowId, 'from user:', data.user_id);
-                
+
                 // Sauvegarder les résultats IA
                 saveAIAssistantResults();
-                
+
                 // Toujours mettre à jour la liste des flows AI (même si l'onglet n'est pas actif, pour qu'elle soit prête)
                 loadAIFlowsList();
-                
+
                 // Si c'est le flow actuellement sélectionné, afficher les résultats
                 if (collabCurrentAIFlow && collabCurrentAIFlow.id === flowId) {
                     renderAISuggestions(
@@ -12328,13 +12616,13 @@ function handleCollaborationMessage(data) {
             if (data.user_id && data.new_name) {
                 console.log('[Collaboration] Received name change:', data);
                 // Chercher le participant de plusieurs façons pour être sûr de le trouver
-                let participant = collaborationParticipants.find(p => 
-                    (p.user_id && p.user_id === data.user_id) || 
+                let participant = collaborationParticipants.find(p =>
+                    (p.user_id && p.user_id === data.user_id) ||
                     (p.id && p.id === data.user_id) ||
                     (p.collaborator && p.collaborator.id === data.user_id) ||
                     (p.collaborator && p.collaborator.user_id === data.user_id)
                 );
-                
+
                 if (participant) {
                     console.log('[Collaboration] Found participant, updating name:', participant);
                     participant.name = data.new_name;
@@ -12411,13 +12699,13 @@ function updateSessionInfo(session) {
 
 function renderParticipants() {
     if (!collabParticipantsList) return;
-    
+
     collabParticipantsList.innerHTML = '';
-    
+
     if (collabParticipantCount) {
         collabParticipantCount.textContent = collaborationParticipants.length;
     }
-    
+
     collaborationParticipants.forEach(participant => {
         const div = document.createElement('div');
         div.className = 'participant-item';
@@ -12432,27 +12720,27 @@ function renderParticipants() {
                 div.style.background = '#f5f5f5';
             }
         };
-        
+
         const statusDot = document.createElement('div');
         const color = participant.color || '#4caf50';
         statusDot.style.cssText = `width: 10px; height: 10px; border-radius: 50%; background: ${color}; border: 2px solid white; box-shadow: 0 0 0 1px rgba(0,0,0,0.1);`;
-        
+
         const nameContainer = document.createElement('div');
         nameContainer.style.cssText = 'flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0;';
-        
+
         const name = document.createElement('span');
         name.textContent = participant.name || participant.username || 'Anonymous';
         name.style.cssText = 'font-size: 13px; color: #333; flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
         name.id = `participant-name-${participant.user_id}`;
-        
+
         nameContainer.appendChild(name);
-        
+
         // Indicateur si c'est l'utilisateur actuel
         const isCurrentUser = participant.user_id === currentUserId;
         if (isCurrentUser) {
             div.style.background = '#e3f2fd';
             div.style.borderLeft = `3px solid ${color}`;
-            
+
             // Ajouter un bouton d'édition pour l'utilisateur actuel
             const editBtn = document.createElement('button');
             editBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 16px;">edit</span>';
@@ -12468,10 +12756,10 @@ function renderParticipants() {
             editBtn.addEventListener('mouseleave', () => {
                 editBtn.style.opacity = '0.6';
             });
-            
+
             nameContainer.appendChild(editBtn);
         }
-        
+
         div.appendChild(statusDot);
         div.appendChild(nameContainer);
         collabParticipantsList.appendChild(div);
@@ -12481,26 +12769,26 @@ function renderParticipants() {
 // Fonction pour éditer le nom d'un participant (seulement pour l'utilisateur actuel)
 function editParticipantName(participant) {
     if (participant.user_id !== currentUserId) return;
-    
+
     const nameEl = document.getElementById(`participant-name-${participant.user_id}`);
     if (!nameEl) return;
-    
+
     const currentName = participant.name || participant.username || 'Anonymous';
-    
+
     // Créer un input inline
     const input = document.createElement('input');
     input.type = 'text';
     input.value = currentName;
     input.style.cssText = 'font-size: 13px; color: #333; font-weight: 500; border: 1px solid #2196f3; border-radius: 4px; padding: 4px 8px; width: 100%; background: white; font-family: inherit;';
     input.maxLength = 50;
-    
+
     // Remplacer le span par l'input
     const nameContainer = nameEl.parentElement;
     nameEl.style.display = 'none';
     nameContainer.insertBefore(input, nameEl);
     input.focus();
     input.select();
-    
+
     // Fonction pour sauvegarder
     const saveName = () => {
         const newName = input.value.trim();
@@ -12509,12 +12797,12 @@ function editParticipantName(participant) {
             participant.name = newName;
             participant.username = newName;
             currentUsername = newName;
-            
+
             // Mettre à jour l'affichage
             nameEl.textContent = newName;
             nameEl.style.display = 'block';
             input.remove();
-            
+
             // Synchroniser avec les autres utilisateurs
             if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
                 try {
@@ -12531,7 +12819,7 @@ function editParticipantName(participant) {
             } else {
                 console.warn('[Collaboration] WebSocket not ready, cannot send name change');
             }
-            
+
             // Re-rendre pour mettre à jour l'affichage
             renderParticipants();
             // Mettre à jour immédiatement tous les flows pour refléter le nouveau nom
@@ -12542,7 +12830,7 @@ function editParticipantName(participant) {
             input.remove();
         }
     };
-    
+
     // Sauvegarder sur Enter ou blur
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -12554,7 +12842,7 @@ function editParticipantName(participant) {
             input.remove();
         }
     });
-    
+
     input.addEventListener('blur', saveName);
 }
 
@@ -12565,9 +12853,9 @@ function addParticipant(participant) {
         id: participant.id || participant.user_id || participant.collaborator?.id,
         user_id: participant.user_id || participant.id || participant.collaborator?.id
     };
-    
-    if (!collaborationParticipants.find(p => 
-        (p.id && p.id === normalizedParticipant.id) || 
+
+    if (!collaborationParticipants.find(p =>
+        (p.id && p.id === normalizedParticipant.id) ||
         (p.user_id && p.user_id === normalizedParticipant.user_id) ||
         (p.id && p.id === participant.id)
     )) {
@@ -12578,12 +12866,12 @@ function addParticipant(participant) {
 
 function removeParticipant(userId) {
     // Retirer le participant de la liste (vérifier à la fois id et user_id)
-    collaborationParticipants = collaborationParticipants.filter(p => 
+    collaborationParticipants = collaborationParticipants.filter(p =>
         (p.id !== userId) && (p.user_id !== userId) &&
         (p.collaborator?.id !== userId) && (p.collaborator?.user_id !== userId)
     );
     renderParticipants();
-    
+
     // Si cet utilisateur partageait son écran, retirer aussi le mirroring
     if (mirrorViewers[userId]) {
         console.log(`[Collaboration] User ${userId} left and was sharing screen, removing mirroring`);
@@ -12593,30 +12881,30 @@ function removeParticipant(userId) {
 
 function addCollaborationFlow(flow, userId) {
     console.log('[Collaboration] Adding flow:', flow?.id, flow?.url, 'from user:', userId);
-    
+
     if (!flow || !flow.id) {
         console.warn('[Collaboration] Invalid flow data:', flow);
         return;
     }
-    
+
     if (!collaborationFlows.find(f => f.id === flow.id)) {
         // Ajouter l'information de l'utilisateur au flow
         flow.shared_by_user_id = userId || currentUserId;
         collaborationFlows.push(flow);
-        
+
         // Si c'est notre propre flow, marquer comme partagé
         if (userId === currentUserId || !userId) {
             sharedFlows.add(flow.id);
         }
-        
+
         console.log('[Collaboration] Flow added, total flows:', collaborationFlows.length);
         renderCollaborationFlows();
-        
+
         // Re-render la liste principale pour mettre à jour le bouton Share
         renderFlowList();
-        
+
         // Toujours mettre à jour la liste des flows AI (même si l'onglet n'est pas actif, pour qu'elle soit prête)
-            loadAIFlowsList();
+        loadAIFlowsList();
     } else {
         console.log('[Collaboration] Flow already exists:', flow.id);
         // Même si le flow existe déjà, s'assurer qu'il est marqué comme partagé si c'est le nôtre
@@ -12634,25 +12922,25 @@ function syncSharedFlowsFromCollaboration() {
     if (!currentSessionId || !collaborationWebSocket) {
         return;
     }
-    
+
     console.log('[Collaboration] Syncing shared flows from collaboration list...');
-    
+
     // Parcourir tous les flows dans collaborationFlows
     collaborationFlows.forEach(collabFlow => {
         // Si le flow appartient à l'utilisateur actuel, le marquer comme partagé
         const isOurFlow = collabFlow.shared_by_user_id === currentUserId;
         // Ou si le flow existe dans notre liste locale (flowsData), c'est qu'on l'a partagé
         const existsInOurFlows = flowsData.find(f => f.id === collabFlow.id);
-        
+
         if (isOurFlow || existsInOurFlows) {
             sharedFlows.add(collabFlow.id);
             console.log('[Collaboration] Marked flow as shared:', collabFlow.id, 'isOurFlow:', isOurFlow, 'existsInOurFlows:', !!existsInOurFlows);
         }
     });
-    
+
     // Re-render la liste principale pour activer les boutons share
     renderFlowList();
-    
+
     console.log('[Collaboration] Shared flows synced, total:', sharedFlows.size);
 }
 
@@ -12662,16 +12950,16 @@ function renderCollaborationFlows() {
         console.warn('[Collaboration] collab-flows-list element not found');
         return;
     }
-    
+
     console.log('[Collaboration] Rendering flows, count:', collaborationFlows.length);
-    
+
     if (collaborationFlows.length === 0) {
         collabFlowsList.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No flow shared</div>';
         return;
     }
-    
+
     collabFlowsList.innerHTML = '';
-    
+
     collaborationFlows.forEach(flow => {
         // Status code avec classe appropriée
         const statusCode = flow.status_code;
@@ -12783,16 +13071,16 @@ function renderCollaborationFlows() {
         flowItem.appendChild(urlEl);
         flowItem.appendChild(sizeEl);
         flowItem.appendChild(timeEl);
-        
+
         // Ajouter une colonne "Share" - visible uniquement pour le propriétaire du flow
         const shareCol = document.createElement('div');
         shareCol.className = 'flow-share';
         shareCol.style.cssText = 'display: flex; align-items: center; justify-content: center; padding: 4px;';
-        
+
         // Vérifier si l'utilisateur actuel est le propriétaire du flow
         const isOwner = sharedByUserId === currentUserId;
         const isShared = sharedFlows.has(flow.id);
-        
+
         if (isOwner) {
             // Le propriétaire peut un-share
             if (isShared) {
@@ -12800,7 +13088,7 @@ function renderCollaborationFlows() {
                 shareCol.title = 'Click to unshare';
                 shareCol.style.cursor = 'pointer';
                 shareCol.onclick = (e) => {
-                e.stopPropagation();
+                    e.stopPropagation();
                     toggleShareFlow(flow);
                 };
             } else {
@@ -12819,7 +13107,7 @@ function renderCollaborationFlows() {
             shareCol.style.cursor = 'default';
             shareCol.style.opacity = '0.7';
         }
-        
+
         flowItem.appendChild(shareCol);
 
         flowItem.addEventListener('click', () => {
@@ -12834,10 +13122,10 @@ function renderCollaborationFlows() {
                     console.error('[Collaboration] Error sending flow_selected:', error);
                 }
             }
-            
+
             // Afficher la modal avec les détails
             showCollaborationFlowModal(flow);
-            
+
             // Option: Charger dans le Repeater avec un double-clic ou un bouton
             // Pour l'instant, on peut ajouter un bouton dans la modal
         });
@@ -12859,15 +13147,15 @@ function showCollaborationFlowModal(flow) {
             }
         };
         document.body.appendChild(modal);
-        
+
         const modalContent = document.createElement('div');
         modalContent.id = 'collab-flow-modal-content';
         modalContent.style.cssText = 'background: white; margin: 20px auto; max-width: 95%; width: 1400px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); overflow: hidden; border: 1px solid #e0e0e0;';
         modal.appendChild(modalContent);
     }
-    
+
     const modalContent = document.getElementById('collab-flow-modal-content');
-    
+
     // Récupérer les détails complets du flow
     fetch(`${API_BASE}/flows/${flow.id}`)
         .then(res => res.json())
@@ -12910,14 +13198,14 @@ function sendSharedFlowToPersonalRepeater(flow) {
         } else if (typeof flow.request.content === 'string') {
             bodyContent = flow.request.content;
         }
-        
+
         createRepeaterTab({
             method: flow.method || 'GET',
             url: flow.url || '',
             headers: JSON.stringify(headers, null, 2),
             body: bodyContent
         });
-        
+
         const replayNavItem = document.querySelector('[data-view="replay"]');
         if (replayNavItem) {
             replayNavItem.click();
@@ -12946,7 +13234,7 @@ function sendSharedFlowToIntruder(flow) {
         } else if (typeof flow.request.content === 'string') {
             bodyContent = flow.request.content;
         }
-        
+
         createIntruderTab({
             method: flow.method || 'GET',
             url: flow.url || '',
@@ -12956,7 +13244,7 @@ function sendSharedFlowToIntruder(flow) {
             marker: '§payload§',
             attackType: 'url'
         });
-        
+
         const intruderNavItem = document.querySelector('[data-view="intruder"]');
         if (intruderNavItem) {
             intruderNavItem.click();
@@ -12985,7 +13273,7 @@ function renderCollaborationFlowDetails(container, flow) {
         statusColor = '#c62828';
         statusBorder = '#c62828';
     }
-    
+
     // Utiliser les couleurs du projet pour les méthodes HTTP
     const methodColors = {
         'GET': { bg: '#e3f2fd', color: '#61affe', border: '#61affe' },
@@ -12995,13 +13283,13 @@ function renderCollaborationFlowDetails(container, flow) {
         'PATCH': { bg: '#e0f2f1', color: '#00695c', border: '#00695c' }
     };
     const methodStyle = methodColors[flow.method] || { bg: '#f5f5f5', color: '#666', border: '#ddd' };
-    
+
     // Trouver l'utilisateur qui a partagé ce flow
     let sharedByUser = null;
     if (flow.shared_by_user_id) {
         sharedByUser = collaborationParticipants.find(p => p.user_id === flow.shared_by_user_id);
     }
-    
+
     let html = `
         <div style="background: #fff; border-bottom: 1px solid #e0e0e0; padding: 20px 24px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
@@ -13035,7 +13323,7 @@ function renderCollaborationFlowDetails(container, flow) {
         </div>
         <div style="padding: 24px; background: #fafafa;">
     `;
-    
+
     // Requête complète
     html += `
         <div style="margin-bottom: 32px;">
@@ -13045,7 +13333,7 @@ function renderCollaborationFlowDetails(container, flow) {
             </h3>
             <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
     `;
-    
+
     // Request Line
     const requestLine = `${flow.method || 'GET'} ${flow.url || flow.path || '/'} HTTP/1.1`;
     html += `
@@ -13053,7 +13341,7 @@ function renderCollaborationFlowDetails(container, flow) {
             <div style="font-family: 'Fira Code', monospace; font-size: 13px; font-weight: 600; color: ${methodStyle.color}; word-break: break-all;">${escapeHtml(requestLine)}</div>
         </div>
     `;
-    
+
     // Request Headers
     if (flow.request && flow.request.headers) {
         html += `<div style="border-bottom: 1px solid #e0e0e0; max-height: 300px; overflow-y: auto;">`;
@@ -13065,7 +13353,7 @@ function renderCollaborationFlowDetails(container, flow) {
         }
         html += `</div>`;
     }
-    
+
     // Request Body
     let requestBody = '';
     if (flow.request) {
@@ -13088,20 +13376,20 @@ function renderCollaborationFlowDetails(container, flow) {
                 }
             }
         }
-        
+
         if (requestBody) {
-        html += `
+            html += `
             <div style="background: #282c34; padding: 15px; border-top: 2px solid #e0e0e0;">
                     <div style="font-family: 'Fira Code', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; color: #abb2bf; max-height: 400px; overflow-y: auto;">${escapeHtml(requestBody)}</div>
             </div>
         `;
         } else {
-        html += `<div style="padding: 12px 16px; color: #999; font-size: 12px; font-style: italic;">No request body</div>`;
+            html += `<div style="padding: 12px 16px; color: #999; font-size: 12px; font-style: italic;">No request body</div>`;
         }
     }
-    
+
     html += `</div></div>`;
-    
+
     // Réponse complète
     html += `
         <div style="margin-bottom: 32px;">
@@ -13111,7 +13399,7 @@ function renderCollaborationFlowDetails(container, flow) {
             </h3>
             <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
     `;
-    
+
     // Status Line
     const statusLine = `HTTP/1.1 ${statusCode} ${getStatusText(statusCode)}`;
     html += `
@@ -13119,7 +13407,7 @@ function renderCollaborationFlowDetails(container, flow) {
             <div style="font-family: 'Fira Code', monospace; font-size: 13px; font-weight: 600; color: ${statusColor};">${escapeHtml(statusLine)}</div>
         </div>
     `;
-    
+
     // Response Headers
     if (flow.response && flow.response.headers) {
         html += `<div style="border-bottom: 1px solid #e0e0e0; max-height: 300px; overflow-y: auto;">`;
@@ -13131,7 +13419,7 @@ function renderCollaborationFlowDetails(container, flow) {
         }
         html += `</div>`;
     }
-    
+
     // Response Body
     let responseBody = '';
     if (flow.response) {
@@ -13154,26 +13442,26 @@ function renderCollaborationFlowDetails(container, flow) {
                 }
             }
         }
-        
+
         if (responseBody) {
-        html += `
+            html += `
             <div style="background: #282c34; padding: 15px; border-top: 2px solid #e0e0e0;">
                     <div style="font-family: 'Fira Code', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; color: #abb2bf; max-height: 500px; overflow-y: auto;">${escapeHtml(responseBody)}</div>
             </div>
         `;
         } else {
-        html += `<div style="padding: 12px 16px; color: #999; font-size: 12px; font-style: italic;">No response body</div>`;
+            html += `<div style="padding: 12px 16px; color: #999; font-size: 12px; font-style: italic;">No response body</div>`;
         }
     }
-    
+
     html += `</div></div>`;
-    
+
     // Informations supplémentaires
     html += `
         <div style="margin-top: 32px; padding-top: 24px; border-top: 2px solid #e0e0e0;">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
     `;
-    
+
     if (flow.timestamp_start) {
         const date = new Date(flow.timestamp_start * 1000);
         html += `
@@ -13183,7 +13471,7 @@ function renderCollaborationFlowDetails(container, flow) {
             </div>
         `;
     }
-    
+
     if (flow.duration_ms) {
         html += `
             <div>
@@ -13192,7 +13480,7 @@ function renderCollaborationFlowDetails(container, flow) {
             </div>
         `;
     }
-    
+
     if (flow.response_size) {
         html += `
             <div>
@@ -13201,12 +13489,12 @@ function renderCollaborationFlowDetails(container, flow) {
             </div>
         `;
     }
-    
+
     html += `
             </div>
         </div>
     `;
-    
+
     html += `</div>`;
     container.innerHTML = html;
 }
@@ -13238,7 +13526,7 @@ function initCollaborationTabs() {
     const collabRepeaterContainer = document.getElementById('collab-repeater-container');
     const collabMirrorContainer = document.getElementById('collab-mirror-container');
     const collabAIContainer = document.getElementById('collab-ai-container');
-    
+
     // Gestion des onglets
     if (collabTabFlows) {
         collabTabFlows.addEventListener('click', () => {
@@ -13271,7 +13559,7 @@ function initCollaborationTabs() {
             }
         });
     }
-    
+
     if (collabTabRepeater) {
         collabTabRepeater.addEventListener('click', () => {
             collabTabRepeater.classList.add('active');
@@ -13303,14 +13591,14 @@ function initCollaborationTabs() {
             }
         });
     }
-    
+
     if (collabTabMirror) {
         collabTabMirror.addEventListener('click', () => {
             collabTabMirror.classList.add('active');
             if (collabTabFlows) collabTabFlows.classList.remove('active');
             if (collabTabRepeater) collabTabRepeater.classList.remove('active');
             if (collabTabAI) collabTabAI.classList.remove('active');
-            
+
             // Désactiver tous les boutons utilisateurs pour revenir à la vue "Live Mirror"
             document.querySelectorAll('.collab-mirror-user-tab').forEach(btn => {
                 btn.classList.remove('active');
@@ -13318,7 +13606,7 @@ function initCollaborationTabs() {
                 btn.style.color = '';
             });
             currentMirrorUserId = null;
-            
+
             if (collabFlowsListContainer) {
                 collabFlowsListContainer.style.display = 'none';
                 collabFlowsListContainer.classList.remove('active');
@@ -13335,13 +13623,13 @@ function initCollaborationTabs() {
                 collabAIContainer.style.display = 'none';
                 collabAIContainer.classList.remove('active');
             }
-            
+
             // Afficher les contrôles pour permettre de partager son propre écran
             const collabMirrorControls = document.getElementById('collab-mirror-controls');
             if (collabMirrorControls) {
                 collabMirrorControls.style.display = 'flex';
             }
-            
+
             // Si on regardait l'écran d'un autre utilisateur, afficher le placeholder
             const placeholder = document.getElementById('collab-mirror-placeholder');
             const content = document.getElementById('collab-mirror-content');
@@ -13351,7 +13639,7 @@ function initCollaborationTabs() {
             }
         });
     }
-    
+
     // Gestion de l'onglet AI Assistant
     if (collabTabAI) {
         collabTabAI.addEventListener('click', () => {
@@ -13359,7 +13647,7 @@ function initCollaborationTabs() {
             if (collabTabFlows) collabTabFlows.classList.remove('active');
             if (collabTabRepeater) collabTabRepeater.classList.remove('active');
             if (collabTabMirror) collabTabMirror.classList.remove('active');
-            
+
             // Désactiver tous les boutons utilisateurs
             document.querySelectorAll('.collab-mirror-user-tab').forEach(btn => {
                 btn.classList.remove('active');
@@ -13367,7 +13655,7 @@ function initCollaborationTabs() {
                 btn.style.color = '';
             });
             currentMirrorUserId = null;
-            
+
             if (collabFlowsListContainer) {
                 collabFlowsListContainer.style.display = 'none';
                 collabFlowsListContainer.classList.remove('active');
@@ -13384,12 +13672,12 @@ function initCollaborationTabs() {
                 collabAIContainer.style.display = 'flex';
                 collabAIContainer.classList.add('active');
             }
-            
+
             // Toujours charger la liste des flows (même si collabAIAccess n'est pas encore défini)
             // Le check d'accès sera fait lors de l'analyse, pas lors de l'affichage de la liste
             console.log('[Collaboration] Loading AI flows list on tab click, total flows:', collaborationFlows.length);
-                loadAIFlowsList();
-            
+            loadAIFlowsList();
+
             // Restaurer les résultats IA si disponibles
             const state = restoreCollaborationState();
             if (state && state.currentAIFlowId && collabAIResults[state.currentAIFlowId]) {
@@ -13412,22 +13700,22 @@ function initCollaborationTabs() {
             }
         });
     }
-    
+
     // Initialiser les boutons de mirroring
     const collabMirrorStartBtn = document.getElementById('collab-mirror-start-btn');
     const collabMirrorStopBtn = document.getElementById('collab-mirror-stop-btn');
-    
+
     if (collabMirrorStartBtn) {
         collabMirrorStartBtn.addEventListener('click', startBrowserMirroring);
     }
-    
+
     if (collabMirrorStopBtn) {
         collabMirrorStopBtn.addEventListener('click', stopBrowserMirroring);
     }
-    
+
     // Initialiser l'éditeur Repeater
     initCollaborationRepeater();
-    
+
     // Initialiser l'AI Assistant
     initAIAssistant();
 }
@@ -13443,15 +13731,15 @@ function initAIAssistant() {
     // Ajouter les event listeners pour les boutons de configuration
     const createKeyBtn = document.getElementById('collab-ai-create-key-btn');
     const configureKeyBtn = document.getElementById('collab-ai-configure-key-btn');
-    
+
     if (createKeyBtn) {
         createKeyBtn.addEventListener('click', createAIAPIKey);
     }
-    
+
     if (configureKeyBtn) {
         configureKeyBtn.addEventListener('click', configureAIAPIKey);
     }
-    
+
     // Vérifier l'accès quand une session est active
     if (currentSessionId) {
         checkAIAccess(currentSessionId);
@@ -13461,19 +13749,19 @@ function initAIAssistant() {
 // Vérifier l'accès à l'IA
 async function checkAIAccess(sessionId) {
     if (!sessionId || aiAccessUnavailable) return;
-    
+
     const sessionPathId = (sessionId || '').toLowerCase();
-    
+
     try {
         // API key non requise côté serveur pour l'IA ; on garde 'public' pour compat mais on ne bloque pas si absente
         const apiKey = localStorage.getItem('collab_api_key') || 'public';
-        
+
         // Toujours afficher l'onglet AI pour permettre la configuration
         const aiTab = document.getElementById('collab-tab-ai');
         if (aiTab) {
             aiTab.style.display = 'flex';
         }
-        
+
         const headers = {
             'Content-Type': 'application/json'
         };
@@ -13488,17 +13776,17 @@ async function checkAIAccess(sessionId) {
         const response = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/sessions/${sessionPathId}/ai/check-access`, {
             headers
         });
-        
+
         if (response.ok) {
             const data = await response.json();
             collabAIAccess = data || { has_access: true };
             if (collabAIAccess.has_access === undefined) collabAIAccess.has_access = true;
             window.collabAIAccess = collabAIAccess;
-            
+
             // Afficher/masquer l'onglet AI
             const aiNoAccess = document.getElementById('collab-ai-no-access');
             const aiMain = document.getElementById('collab-ai-main');
-            
+
             if (collabAIAccess.has_access) {
                 if (aiNoAccess) aiNoAccess.style.display = 'none';
                 if (aiMain) aiMain.style.display = 'flex';
@@ -13542,12 +13830,12 @@ async function checkAIAccess(sessionId) {
 function updateAIConfigStatus(message) {
     const statusEl = document.getElementById('collab-ai-config-status');
     const infoEl = document.getElementById('collab-ai-config-info');
-    
+
     if (!statusEl || !infoEl) return;
-    
+
     const apiKey = localStorage.getItem('collab_api_key');
     const serverUrl = localStorage.getItem('collaboration_server_url') || 'https://proxy.kittysploit.com';
-    
+
     let html = '';
     if (apiKey) {
         html += `<div style="margin-bottom: 8px;"><strong>API Key:</strong> <code style="background: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${apiKey.substring(0, 20)}...</code></div>`;
@@ -13555,11 +13843,11 @@ function updateAIConfigStatus(message) {
         html += `<div style="margin-bottom: 8px; color: #d32f2f;"><strong>API Key:</strong> Not configured</div>`;
     }
     html += `<div style="margin-bottom: 8px;"><strong>Server URL:</strong> <code style="background: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px;">${serverUrl}</code></div>`;
-    
+
     if (message) {
         html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e0e0e0; color: #d32f2f;">${escapeHtml(message)}</div>`;
     }
-    
+
     infoEl.innerHTML = html;
     statusEl.style.display = 'block';
 }
@@ -13569,7 +13857,7 @@ async function createAIAPIKey() {
     try {
         const name = prompt('Enter a name for your API key:', 'My API Key');
         if (!name) return;
-        
+
         const response = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/api-keys`, {
             method: 'POST',
             headers: {
@@ -13580,14 +13868,14 @@ async function createAIAPIKey() {
                 plan: 'free'
             })
         });
-        
+
         if (response.ok) {
             const data = await response.json();
             // Sauvegarder la clé API
             localStorage.setItem('collab_api_key', data.key);
-            
+
             alert(`API Key created successfully!\n\nYour API Key: ${data.key}\n\nThis key has been saved. Please refresh the page.`);
-            
+
             // Recharger la page pour appliquer les changements
             location.reload();
         } else {
@@ -13603,21 +13891,21 @@ async function createAIAPIKey() {
 function configureAIAPIKey() {
     const currentKey = localStorage.getItem('collab_api_key') || '';
     const serverUrl = localStorage.getItem('collaboration_server_url') || 'https://proxy.kittysploit.com';
-    
+
     const apiKey = prompt('Enter your API key (starts with kp_):', currentKey);
     if (apiKey === null) return; // User cancelled
-    
+
     if (apiKey && !apiKey.startsWith('kp_')) {
         alert('Invalid API key format. API keys must start with "kp_"');
         return;
     }
-    
+
     if (apiKey) {
         localStorage.setItem('collab_api_key', apiKey);
     } else {
         localStorage.removeItem('collab_api_key');
     }
-    
+
     const newServerUrl = prompt('Enter collaboration server URL:', serverUrl);
     if (newServerUrl !== null) {
         if (newServerUrl) {
@@ -13626,7 +13914,7 @@ function configureAIAPIKey() {
             localStorage.removeItem('collaboration_server_url');
         }
     }
-    
+
     alert('Configuration saved! Refreshing page...');
     location.reload();
 }
@@ -13768,7 +14056,7 @@ function renderAIHistoryDetails(id) {
     const quota = item.limit !== undefined && item.remaining !== undefined
         ? `Quota: ${item.limit - item.remaining}/${item.limit} used`
         : '';
-    
+
     // Format suggestions avec structure améliorée
     let suggestionsHtml = '';
     if (item.suggestions && item.suggestions.length) {
@@ -13781,9 +14069,9 @@ function renderAIHistoryDetails(id) {
                 const targetParam = s.target_param || '';
                 const evidence = s.evidence || [];
                 const payloads = s.payloads || [];
-                
+
                 const confidenceColor = s.confidence >= 0.8 ? '#4caf50' : s.confidence >= 0.6 ? '#ff9800' : '#f44336';
-                
+
                 return `
                     <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
                         <div style="display: flex; align-items: start; justify-content: space-between; margin-bottom: 12px;">
@@ -13804,15 +14092,15 @@ function renderAIHistoryDetails(id) {
                             <div>
                                 <div style="font-size: 12px; color: #666; font-weight: 600; margin-bottom: 6px;">Payloads:</div>
                                 ${payloads.map((p, pIdx) => {
-                                    const payloadValue = typeof p === 'object' ? (p.value || p.payload || JSON.stringify(p)) : p;
-                                    const payloadDesc = typeof p === 'object' ? (p.description || '') : '';
-                                    return `
+                    const payloadValue = typeof p === 'object' ? (p.value || p.payload || JSON.stringify(p)) : p;
+                    const payloadDesc = typeof p === 'object' ? (p.description || '') : '';
+                    return `
                                         <div style="background: #f9f9f9; border-left: 3px solid var(--primary-color); padding: 10px; margin-bottom: 8px; border-radius: 4px;">
                                             ${payloadDesc ? `<div style="font-size: 11px; color: #666; margin-bottom: 4px;">${payloadDesc}</div>` : ''}
                                             <code style="background: white; padding: 6px 8px; border-radius: 4px; font-size: 11px; color: #333; display: block; word-break: break-all; font-family: 'Fira Code', monospace;">${payloadValue}</code>
                                         </div>
                                     `;
-                                }).join('')}
+                }).join('')}
                             </div>
                         ` : ''}
                     </div>
@@ -13826,7 +14114,7 @@ function renderAIHistoryDetails(id) {
     } else {
         suggestionsHtml = '<div style="color:#888; font-size:13px; padding: 20px; text-align: center; background: white; border-radius: 8px;">No suggestions available.</div>';
     }
-    
+
     // Format next steps
     const nextStepsHtml = (item.nextSteps && item.nextSteps.length)
         ? item.nextSteps.map(s => {
@@ -13834,7 +14122,7 @@ function renderAIHistoryDetails(id) {
             return `<li style="margin-bottom: 8px; padding-left: 8px; color: #333; font-size: 13px; line-height: 1.5;">${text}</li>`;
         }).join('')
         : '<div style="color:#888; font-size:13px; padding: 20px; text-align: center;">No next steps available.</div>';
-    
+
     // Format tech stack
     const techHtml = (item.techStack && Object.keys(item.techStack).length)
         ? Object.entries(item.techStack).map(([k, v]) => {
@@ -13910,14 +14198,14 @@ function renderAIHistoryDetails(id) {
 function updateSelectedAIFlow(flowId) {
     const flowsList = document.getElementById('collab-ai-flows-list');
     if (!flowsList) return;
-    
+
     // Retirer le style "selected" de tous les flows
     const allFlowItems = flowsList.querySelectorAll('[data-flow-id]');
     allFlowItems.forEach(item => {
         item.style.background = 'white';
         item.style.borderLeft = 'none';
     });
-    
+
     // Appliquer le style "selected" au flow actuel
     if (flowId) {
         const selectedItem = flowsList.querySelector(`[data-flow-id="${flowId}"]`);
@@ -13932,13 +14220,13 @@ function updateSelectedAIFlow(flowId) {
 function updateFlowCheckIcon(flowId) {
     const flowsList = document.getElementById('collab-ai-flows-list');
     if (!flowsList) return;
-    
+
     const flowItem = flowsList.querySelector(`[data-flow-id="${flowId}"]`);
     if (!flowItem) return;
-    
+
     const hasResults = collabAIResults[flowId] ? true : false;
     const checkIconContainer = flowItem.querySelector('.ai-flow-check-icon');
-    
+
     if (hasResults) {
         // Ajouter l'icône check si elle n'existe pas
         if (!checkIconContainer) {
@@ -13947,7 +14235,7 @@ function updateFlowCheckIcon(flowId) {
             checkIcon.style.cssText = 'font-size: 14px; color: #4caf50;';
             checkIcon.setAttribute('title', 'Analysis results available');
             checkIcon.textContent = 'check_circle';
-            
+
             // Insérer avant le bouton d'analyse
             const analyzeBtn = flowItem.querySelector('.ai-analyze-flow-btn');
             if (analyzeBtn && analyzeBtn.parentNode) {
@@ -13966,13 +14254,13 @@ function updateFlowCheckIcon(flowId) {
 function updateAnalyzeButtonState(flowId, isLoading) {
     const flowsList = document.getElementById('collab-ai-flows-list');
     if (!flowsList) return;
-    
+
     const flowItem = flowsList.querySelector(`[data-flow-id="${flowId}"]`);
     if (!flowItem) return;
-    
+
     const analyzeBtn = flowItem.querySelector('.ai-analyze-flow-btn');
     if (!analyzeBtn) return;
-    
+
     if (isLoading) {
         // Afficher le spinner et désactiver le bouton
         analyzeBtn.disabled = true;
@@ -14003,11 +14291,11 @@ function loadAIFlowsList() {
         console.log('[AI] collab-ai-flows-list element not found');
         return;
     }
-    
+
     console.log('[AI] Loading AI flows list, collaborationFlows.length:', collaborationFlows ? collaborationFlows.length : 0);
-    
+
     flowsList.innerHTML = '';
-    
+
     // Utiliser les flows de collaboration existants
     if (collaborationFlows && collaborationFlows.length > 0) {
         console.log('[AI] Rendering', collaborationFlows.length, 'flows in AI Assistant');
@@ -14018,20 +14306,20 @@ function loadAIFlowsList() {
             flowItem.style.cssText = 'padding: 10px 12px; border-bottom: 1px solid #e8e8e8; cursor: pointer; transition: background 0.2s, border-left 0.2s; background: white; position: relative; border-left: 3px solid transparent;';
             flowItem.onmouseover = () => {
                 if (!flowItem.classList.contains('selected')) {
-                flowItem.style.background = '#fafafa';
+                    flowItem.style.background = '#fafafa';
                 }
             };
             flowItem.onmouseout = () => {
                 if (!flowItem.classList.contains('selected')) {
-                flowItem.style.background = 'white';
+                    flowItem.style.background = 'white';
                 }
             };
-            
+
             const method = flow.method || 'GET';
             const url = flow.url || '';
             const status = flow.response?.status_code || flow.status_code || '-';
             const methodColor = getMethodColor(method);
-            
+
             flowItem.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-weight: 600; color: ${methodColor}; min-width: 50px; font-size: 12px;">${method}</span>
@@ -14043,7 +14331,7 @@ function loadAIFlowsList() {
                     </button>
                 </div>
             `;
-            
+
             // Ajouter l'event listener pour le bouton
             const analyzeBtn = flowItem.querySelector('.ai-analyze-flow-btn');
             if (analyzeBtn) {
@@ -14058,19 +14346,19 @@ function loadAIFlowsList() {
                     }
                 });
             }
-            
+
             // Cliquer sur le flow → afficher les résultats existants (si disponibles)
             flowItem.addEventListener('click', (e) => {
                 // Ne pas déclencher si on clique sur le bouton
                 if (e.target.closest('.ai-analyze-flow-btn')) {
                     return;
                 }
-                
+
                 const flowId = flow.id;
-                
+
                 // Mettre à jour l'indicateur visuel
                 updateSelectedAIFlow(flowId);
-                
+
                 // Vérifier si des résultats existent pour ce flow
                 if (collabAIResults[flowId]) {
                     const aiResults = collabAIResults[flowId];
@@ -14099,7 +14387,7 @@ function loadAIFlowsList() {
                     }
                 }
             });
-            
+
             flowsList.appendChild(flowItem);
         });
     } else {
@@ -14113,35 +14401,35 @@ async function analyzeFlowWithAI(flow) {
         alert('No active session');
         return;
     }
-    
+
     // Dev: ne pas bloquer si has_access absent
     if (!collabAIAccess) {
         collabAIAccess = { has_access: true };
     }
-    
+
     // Mémoriser le flow pour les tests de payload
     try {
         collabCurrentAIFlow = JSON.parse(JSON.stringify(flow || {}));
     } catch (e) {
         collabCurrentAIFlow = flow || null;
     }
-    
+
     // Mettre à jour l'indicateur visuel du flow sélectionné
     if (flow && flow.id) {
         updateSelectedAIFlow(flow.id);
         // Afficher le spinner sur le bouton
         updateAnalyzeButtonState(flow.id, true);
     }
-    
+
     const analysisContainer = document.getElementById('collab-ai-analysis');
     if (!analysisContainer) return;
-    
+
     analysisContainer.innerHTML = '<div style="text-align: center; padding: 60px 20px;"><span class="material-symbols-outlined" style="font-size: 40px; animation: spin 1s linear infinite; display: inline-block; color: #888; margin-bottom: 16px;">sync</span><p style="margin: 0; color: #666; font-size: 14px;">Analyzing with AI...</p></div>';
-    
+
     try {
         // Pour le moment, l'API key est optionnelle
         const apiKey = localStorage.getItem('collab_api_key');
-        
+
         // Préparer les données du flow enrichies
         const requestHeaders = {};
         if (flow.request && flow.request.headers) {
@@ -14149,7 +14437,7 @@ async function analyzeFlowWithAI(flow) {
                 requestHeaders[key] = Array.isArray(value) ? value[0] : value;
             });
         }
-        
+
         let body = '';
         if (flow.request && flow.request.content) {
             try {
@@ -14162,7 +14450,7 @@ async function analyzeFlowWithAI(flow) {
                 console.warn('[AI] Error decoding request body:', e);
             }
         }
-        
+
         // Extraire les paramètres de la requête
         const queryParams = {};
         const bodyParams = {};
@@ -14174,7 +14462,7 @@ async function analyzeFlowWithAI(flow) {
         } catch (e) {
             // URL invalide, ignorer
         }
-        
+
         // Extraire les paramètres du body (JSON ou form-urlencoded)
         try {
             const contentType = requestHeaders['content-type'] || requestHeaders['Content-Type'] || '';
@@ -14190,7 +14478,7 @@ async function analyzeFlowWithAI(flow) {
         } catch (e) {
             // Body non parsable, ignorer
         }
-        
+
         // Préparer la réponse
         let response = '';
         let responseHeaders = {};
@@ -14203,21 +14491,21 @@ async function analyzeFlowWithAI(flow) {
                 });
             }
             if (flow.response.content) {
-            try {
-                if (flow.response.content_bs64) {
-                    response = atob(flow.response.content_bs64);
-                } else if (typeof flow.response.content === 'string') {
-                    response = flow.response.content;
-                }
-            } catch (e) {
-                console.warn('[AI] Error decoding response body:', e);
+                try {
+                    if (flow.response.content_bs64) {
+                        response = atob(flow.response.content_bs64);
+                    } else if (typeof flow.response.content === 'string') {
+                        response = flow.response.content;
+                    }
+                } catch (e) {
+                    console.warn('[AI] Error decoding response body:', e);
                 }
             }
         }
-        
+
         // Technologies détectées
         const technologies = flow.technologies || {};
-        
+
         // Endpoints découverts (principaux seulement pour éviter trop de données)
         const endpoints = {
             api_endpoints: (flow.endpoints?.api_endpoints || []).slice(0, 20),
@@ -14225,7 +14513,7 @@ async function analyzeFlowWithAI(flow) {
             react_api_endpoints: (flow.endpoints?.react_api_endpoints || []).slice(0, 20),
             discovered_endpoints: (flow.discovered_endpoints || []).slice(0, 30)
         };
-        
+
         const aiFetchHeaders = {
             'Content-Type': 'application/json'
         };
@@ -14234,7 +14522,7 @@ async function analyzeFlowWithAI(flow) {
         } else if (apiKey) {
             aiFetchHeaders['X-API-Key'] = apiKey;
         }
-        
+
         const response_api = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/sessions/${currentSessionId}/ai/analyze`, {
             method: 'POST',
             headers: aiFetchHeaders,
@@ -14256,7 +14544,7 @@ async function analyzeFlowWithAI(flow) {
                 }
             })
         });
-        
+
         if (response_api.status === 402) {
             const data = await response_api.json().catch(() => ({}));
             updateAIQuotaDisplay({
@@ -14272,7 +14560,7 @@ async function analyzeFlowWithAI(flow) {
             }
             return;
         }
-        
+
         if (response_api.status === 429) {
             const errorData = await response_api.json().catch(() => ({}));
             updateAIQuotaDisplay({
@@ -14288,7 +14576,7 @@ async function analyzeFlowWithAI(flow) {
             }
             return;
         }
-        
+
         if (!response_api.ok) {
             const err = await response_api.json().catch(() => ({}));
             updateAIQuotaDisplay({
@@ -14298,9 +14586,9 @@ async function analyzeFlowWithAI(flow) {
             });
             throw new Error(err.detail || `HTTP ${response_api.status}`);
         }
-        
+
         const data = await response_api.json();
-        
+
         // Mettre à jour le quota si présent dans la réponse
         updateAIQuotaDisplay({
             remaining: data.requests_remaining,
@@ -14323,7 +14611,7 @@ async function analyzeFlowWithAI(flow) {
             remaining: data.requests_remaining,
             limit: data.requests_limit
         });
-        
+
         // Sauvegarder les résultats IA pour ce flow
         if (flow && flow.id) {
             collabAIResults[flow.id] = {
@@ -14334,7 +14622,7 @@ async function analyzeFlowWithAI(flow) {
                 timestamp: Date.now()
             };
             saveAIAssistantResults();
-            
+
             // Partager les résultats IA avec tous les utilisateurs de la session via WebSocket
             if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
                 try {
@@ -14353,7 +14641,7 @@ async function analyzeFlowWithAI(flow) {
                 }
             }
         }
-        
+
         renderAISuggestions(data.suggestions, data.tech_stack, data.summary, data.next_steps);
         updateAIQuotaDisplay({
             remaining: data.requests_remaining,
@@ -14361,12 +14649,12 @@ async function analyzeFlowWithAI(flow) {
             limit: data.requests_limit
         });
         collabAIAccess.requests_remaining = data.requests_remaining;
-        
+
         // Restaurer l'état normal du bouton après succès
         if (flow && flow.id) {
             updateAnalyzeButtonState(flow.id, false);
         }
-        
+
     } catch (error) {
         console.error('[AI] Error analyzing flow:', error);
         analysisContainer.innerHTML = '<div style="text-align: center; padding: 60px 20px;"><span class="material-symbols-outlined" style="font-size: 40px; color: #d32f2f; margin-bottom: 16px; display: block;">error</span><p style="margin: 0; color: #666; font-size: 14px;">Error analyzing flow. Please try again.</p></div>';
@@ -14386,9 +14674,9 @@ async function analyzeFlowWithAI(flow) {
 function renderAISuggestions(suggestions, techStack = {}, summary = '', nextSteps = []) {
     const container = document.getElementById('collab-ai-analysis');
     if (!container) return;
-    
+
     let html = '<div style="max-width: 1000px; margin: 0 auto; padding: 0 8px;">';
-    
+
     // Afficher le résumé si disponible
     if (summary) {
         html += `
@@ -14398,7 +14686,7 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
             </div>
         `;
     }
-    
+
     // Afficher la tech stack si disponible
     if (techStack && Object.keys(techStack).length > 0) {
         const techItems = [];
@@ -14416,18 +14704,18 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
             `;
         }
     }
-    
+
     if (!suggestions || suggestions.length === 0) {
         html += '<div style="text-align: center; padding: 40px; color: #888; font-size: 14px;">No vulnerability suggestions available</div>';
         html += '</div>';
         container.innerHTML = html;
         return;
     }
-    
+
     suggestions.forEach((suggestion, index) => {
         const icon = getTechniqueIcon(suggestion.technique);
         const confidence = Math.round((suggestion.confidence || 0) * 100);
-        
+
         // Déterminer la couleur de confiance de manière sobre
         let confidenceColor = '#888';
         let confidenceBg = '#f5f5f5';
@@ -14438,7 +14726,7 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
             confidenceColor = '#666';
             confidenceBg = '#f0f0f0';
         }
-        
+
         html += `
             <div style="margin-bottom: 16px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden; background: white; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
                 <div style="background: #fafafa; padding: 14px 16px; border-bottom: 1px solid #e8e8e8;">
@@ -14451,13 +14739,13 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
                 </div>
                 <div style="padding: 12px 16px;">
         `;
-        
+
         if (suggestion.payloads && suggestion.payloads.length > 0) {
             suggestion.payloads.forEach((payload, payloadIndex) => {
                 const payloadValue = payload.value || payload;
                 const payloadDesc = payload.description || '';
                 const encoded = payload.encoded || encodeURIComponent(payloadValue);
-                
+
                 html += `
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: ${payloadIndex < suggestion.payloads.length - 1 ? '10px' : '0'}; padding: 10px 12px; background: #fafafa; border: 1px solid #f0f0f0; border-radius: 4px; transition: background 0.2s;" onmouseover="this.style.background='#f5f5f5'; this.style.borderColor='#e8e8e8';" onmouseout="this.style.background='#fafafa'; this.style.borderColor='#f0f0f0';">
                         <code style="flex: 1; font-size: 12px; word-break: break-all; font-family: 'Fira Code', 'Consolas', monospace; color: #333; line-height: 1.4;">${escapeHtml(payloadValue)}</code>
@@ -14474,13 +14762,13 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
         } else {
             html += '<div style="padding: 12px; color: #888; font-size: 12px; text-align: center;">No payloads available for this technique</div>';
         }
-        
+
         html += `
                 </div>
             </div>
         `;
     });
-    
+
     // Afficher les next steps si disponibles
     if (nextSteps && nextSteps.length > 0) {
         html += `
@@ -14492,10 +14780,10 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
             </div>
         `;
     }
-    
+
     html += '</div>';
     container.innerHTML = html;
-    
+
     // Ajouter les event listeners pour les boutons
     container.querySelectorAll('.ai-copy-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
@@ -14505,7 +14793,7 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
                 console.warn('[AI] No payload to copy');
                 return;
             }
-            
+
             try {
                 const success = await copyToClipboard(payload);
                 if (success) {
@@ -14530,7 +14818,7 @@ function renderAISuggestions(suggestions, techStack = {}, summary = '', nextStep
             }
         });
     });
-    
+
     container.querySelectorAll('.ai-test-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const payload = btn.getAttribute('data-payload');
@@ -14581,7 +14869,7 @@ function testPayloadInRepeater(payload, targetParam) {
         console.warn('[AI] No payload provided.');
         return;
     }
-    
+
     // Vérifier si le payload est une URL complète (commence par http:// ou https://)
     let isFullUrl = false;
     try {
@@ -14590,12 +14878,12 @@ function testPayloadInRepeater(payload, targetParam) {
     } catch (e) {
         // Ce n'est pas une URL valide, on continue avec le traitement normal
     }
-    
+
     // Si le payload est une URL complète, l'utiliser directement
     if (isFullUrl) {
         const method = 'GET'; // Par défaut GET pour les URLs complètes
         const headers = {};
-        
+
         // Créer un nouvel onglet Repeater local avec l'URL directement
         const tabData = {
             method: method,
@@ -14603,26 +14891,26 @@ function testPayloadInRepeater(payload, targetParam) {
             headers: JSON.stringify(headers, null, 2),
             body: ''
         };
-        
+
         const tabId = createRepeaterTab(tabData);
-        
+
         // Basculer vers la vue Repeater locale
         const replayNavItem = document.querySelector('[data-view="replay"]');
         if (replayNavItem) {
             replayNavItem.click();
         }
-        
+
         console.log(`[AI] Full URL sent to local Repeater tab ${tabId}: ${payload}`);
         return;
     }
-    
+
     // Sinon, utiliser le flow analysé comme base
     if (!collabCurrentAIFlow) {
         console.warn('[AI] No analyzed flow available to replay.');
         alert('Please analyze a flow first.');
         return;
     }
-    
+
     // Cloner le flow courant pour éviter de muter l'état
     let flowToReplay;
     try {
@@ -14630,7 +14918,7 @@ function testPayloadInRepeater(payload, targetParam) {
     } catch (e) {
         flowToReplay = { ...(collabCurrentAIFlow || {}) };
     }
-    
+
     // Préparer headers sous forme d'objet (pour le repeater local)
     const headersObj = {};
     if (flowToReplay.request && flowToReplay.request.headers) {
@@ -14643,7 +14931,7 @@ function testPayloadInRepeater(payload, targetParam) {
             }
         });
     }
-    
+
     // Décoder le body si présent
     let body = '';
     if (flowToReplay.request && flowToReplay.request.content) {
@@ -14659,18 +14947,18 @@ function testPayloadInRepeater(payload, targetParam) {
             console.warn('[AI] Error decoding request body:', e);
         }
     }
-    
+
     // Déterminer la méthode en priorité à partir du flow analysé
     const inferredMethod = flowToReplay.method || flowToReplay.request?.method || (flowToReplay.request?.content ? 'POST' : 'GET');
     const method = inferredMethod.toString().toUpperCase();
-    
+
     // Injection du payload : privilégier le body pour POST/PUT/PATCH avec JSON ou x-www-form-urlencoded
     // Sinon, fallback sur la query string.
     let url = flowToReplay.url || '';
     const contentTypeHeader = headersObj['content-type'] || headersObj['Content-Type'] || '';
     const ct = contentTypeHeader ? contentTypeHeader.toLowerCase() : '';
     const shouldUseBody = targetParam && ['POST', 'PUT', 'PATCH'].includes(method) && (ct.includes('application/json') || ct.includes('application/x-www-form-urlencoded'));
-    
+
     if (shouldUseBody) {
         if (ct.includes('application/json')) {
             try {
@@ -14702,12 +14990,12 @@ function testPayloadInRepeater(payload, targetParam) {
     } else if (!body) {
         body = payload;
     }
-    
+
     // Ajouter un Content-Type par défaut si on envoie un body mais qu'il manque
     if (!headersObj['content-type'] && !headersObj['Content-Type'] && body && ['POST', 'PUT', 'PATCH'].includes(method)) {
         headersObj['Content-Type'] = 'application/x-www-form-urlencoded';
     }
-    
+
     // Créer un nouvel onglet Repeater local pré-rempli
     const tabData = {
         method: method,
@@ -14715,15 +15003,15 @@ function testPayloadInRepeater(payload, targetParam) {
         headers: JSON.stringify(headersObj, null, 2),
         body: body
     };
-    
+
     const tabId = createRepeaterTab(tabData);
-    
+
     // Basculer vers la vue Repeater locale
     const replayNavItem = document.querySelector('[data-view="replay"]');
     if (replayNavItem) {
         replayNavItem.click();
     }
-    
+
     console.log(`[AI] Payload sent to local Repeater tab ${tabId} (param: ${targetParam || 'none'})`);
 }
 
@@ -14740,7 +15028,7 @@ function initCollaborationRepeater() {
     if (collabRepeaterTabs.length === 0) {
         createCollabRepeaterTab();
     }
-    
+
     // Rendre les onglets et le contenu
     renderCollabRepeaterTabs();
     renderCollabRepeaterContent();
@@ -14751,7 +15039,7 @@ function createCollabRepeaterTab(tabData = null) {
     const tabId = `collab-repeater-tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const method = tabData?.method || 'GET';
     const url = tabData?.url || '';
-    
+
     const tab = {
         id: tabId,
         method: method,
@@ -14761,12 +15049,12 @@ function createCollabRepeaterTab(tabData = null) {
         response: tabData?.response || null,
         title: generateRepeaterTabTitle(method, url)
     };
-    
+
     collabRepeaterTabs.push(tab);
     activeCollabRepeaterTabId = tabId;
     renderCollabRepeaterTabs();
     renderCollabRepeaterContent();
-    
+
     // Synchroniser la création avec les autres utilisateurs
     if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
         try {
@@ -14778,7 +15066,7 @@ function createCollabRepeaterTab(tabData = null) {
             console.error('[Collaboration] Error sending tab creation:', error);
         }
     }
-    
+
     return tabId;
 }
 
@@ -14786,9 +15074,9 @@ function createCollabRepeaterTab(tabData = null) {
 function renderCollabRepeaterTabs() {
     const tabsContainer = document.getElementById('collab-repeater-tabs-container');
     if (!tabsContainer) return;
-    
+
     tabsContainer.innerHTML = '';
-    
+
     // Ajouter le bouton "New Tab" comme premier onglet
     const newTabEl = document.createElement('div');
     newTabEl.className = 'collab-repeater-tab-item collab-repeater-new-tab';
@@ -14805,29 +15093,29 @@ function renderCollabRepeaterTabs() {
         newTabEl.style.background = '#e8e8e8';
     });
     tabsContainer.appendChild(newTabEl);
-    
+
     // Ajouter les onglets existants
     collabRepeaterTabs.forEach(tab => {
         const tabEl = document.createElement('div');
         tabEl.className = `collab-repeater-tab-item ${activeCollabRepeaterTabId === tab.id ? 'active' : ''}`;
         tabEl.style.cssText = 'display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: #f5f5f5; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12px; border: 1px solid #ddd; border-bottom: none; position: relative;';
-        
+
         if (activeCollabRepeaterTabId === tab.id) {
             tabEl.style.background = '#fff';
             tabEl.style.borderBottom = '2px solid #333';
         }
-        
+
         // Mettre à jour le titre
         tab.title = generateRepeaterTabTitle(tab.method, tab.url);
-        
+
         const titleEl = document.createElement('span');
         titleEl.textContent = tab.title;
         titleEl.style.cssText = 'flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px;';
-        
+
         const methodBadge = document.createElement('span');
         methodBadge.textContent = tab.method;
         methodBadge.style.cssText = 'padding: 2px 6px; background: #333; color: white; border-radius: 3px; font-size: 10px; font-weight: 600;';
-        
+
         const closeBtn = document.createElement('button');
         closeBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 14px;">close</span>';
         closeBtn.style.cssText = 'background: transparent; border: none; cursor: pointer; padding: 2px; display: flex; align-items: center; opacity: 0.6; transition: opacity 0.2s;';
@@ -14841,15 +15129,15 @@ function renderCollabRepeaterTabs() {
         closeBtn.addEventListener('mouseleave', () => {
             closeBtn.style.opacity = '0.6';
         });
-        
+
         tabEl.appendChild(titleEl);
         tabEl.appendChild(methodBadge);
         tabEl.appendChild(closeBtn);
-        
+
         tabEl.addEventListener('click', () => {
             activateCollabRepeaterTab(tab.id);
         });
-        
+
         tabsContainer.appendChild(tabEl);
     });
 }
@@ -14859,7 +15147,7 @@ function activateCollabRepeaterTab(tabId) {
     activeCollabRepeaterTabId = tabId;
     renderCollabRepeaterTabs();
     renderCollabRepeaterContent();
-    
+
     // Synchroniser l'activation avec les autres utilisateurs
     if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
         try {
@@ -14877,9 +15165,9 @@ function activateCollabRepeaterTab(tabId) {
 function closeCollabRepeaterTab(tabId) {
     const index = collabRepeaterTabs.findIndex(t => t.id === tabId);
     if (index === -1) return;
-    
+
     collabRepeaterTabs.splice(index, 1);
-    
+
     // Si l'onglet fermé était actif, activer un autre
     if (activeCollabRepeaterTabId === tabId) {
         if (collabRepeaterTabs.length > 0) {
@@ -14890,10 +15178,10 @@ function closeCollabRepeaterTab(tabId) {
             createCollabRepeaterTab();
         }
     }
-    
+
     renderCollabRepeaterTabs();
     renderCollabRepeaterContent();
-    
+
     // Notifier les autres utilisateurs
     if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
         collaborationWebSocket.send(JSON.stringify({
@@ -14907,13 +15195,13 @@ function closeCollabRepeaterTab(tabId) {
 function renderCollabRepeaterContent() {
     const contentContainer = document.getElementById('collab-repeater-tab-content-container');
     if (!contentContainer) return;
-    
+
     const activeTab = collabRepeaterTabs.find(t => t.id === activeCollabRepeaterTabId);
     if (!activeTab) {
         contentContainer.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No active tab</div>';
         return;
     }
-    
+
     // Créer le contenu de l'onglet avec suivi du curseur
     contentContainer.innerHTML = `
         <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; gap: 0;">
@@ -14980,7 +15268,7 @@ function renderCollabRepeaterContent() {
             </div>
         </div>
     `;
-    
+
     // Initialiser les event listeners pour cet onglet
     initCollabRepeaterTabEvents(activeTab);
 }
@@ -14992,7 +15280,7 @@ function initCollabRepeaterTabEvents(tab) {
     const headersTextEl = document.getElementById(`collab-repeater-headers-text-${tab.id}`);
     const bodyEl = document.getElementById(`collab-repeater-body-${tab.id}`);
     const sendBtn = document.getElementById(`collab-repeater-send-btn-${tab.id}`);
-    
+
     // Synchronisation en temps réel des modifications
     if (methodEl) {
         methodEl.addEventListener('change', () => {
@@ -15002,7 +15290,7 @@ function initCollabRepeaterTabEvents(tab) {
             syncCollabRepeaterTab(tab);
         });
     }
-    
+
     if (urlEl) {
         urlEl.value = tab.url;
         urlEl.addEventListener('input', () => {
@@ -15011,11 +15299,11 @@ function initCollabRepeaterTabEvents(tab) {
             renderCollabRepeaterTabs();
             syncCollabRepeaterTab(tab);
         });
-        
+
         // Suivi du curseur pour l'URL
         setupCursorTracking(urlEl, `url-${tab.id}`, tab.id);
     }
-    
+
     if (headersTextEl) {
         const headersToText = (headersArr = []) => headersArr.map(h => `${h.key || ''}: ${h.value || ''}`.trim()).join('\n');
         const parseHeadersText = (text = '') => {
@@ -15025,30 +15313,30 @@ function initCollabRepeaterTabEvents(tab) {
                 return { key: line.slice(0, sepIndex).trim(), value: line.slice(sepIndex + 1).trim() };
             });
         };
-        
+
         headersTextEl.value = headersToText(tab.headers || []);
         headersTextEl.addEventListener('input', () => {
             tab.headers = parseHeadersText(headersTextEl.value);
             syncCollabRepeaterTab(tab);
         });
-        
+
         // Suivi du curseur pour les headers
         setupCursorTracking(headersTextEl, `headers-${tab.id}`, tab.id);
     }
-    
+
     if (bodyEl) {
         bodyEl.value = tab.body;
         bodyEl.addEventListener('input', () => {
             tab.body = bodyEl.value;
             syncCollabRepeaterTab(tab);
         });
-        
+
         // Suivi du curseur pour le body
         setupCursorTracking(bodyEl, `body-${tab.id}`, tab.id);
     }
-    
+
     // Plus besoin du bouton "Add Header" - les headers sont directement éditables
-    
+
     // Envoyer la requête
     if (sendBtn) {
         sendBtn.addEventListener('click', () => {
@@ -15060,20 +15348,20 @@ function initCollabRepeaterTabEvents(tab) {
 // Configurer le suivi du curseur pour un élément
 function setupCursorTracking(element, fieldId, tabId) {
     if (!element) return;
-    
+
     // Détecter les changements de position du curseur
     element.addEventListener('click', () => {
         sendCursorPosition(fieldId, tabId, element);
     });
-    
+
     element.addEventListener('keyup', () => {
         sendCursorPosition(fieldId, tabId, element);
     });
-    
+
     element.addEventListener('selectionchange', () => {
         sendCursorPosition(fieldId, tabId, element);
     });
-    
+
     // Détecter aussi avec setInterval pour capturer les mouvements
     let lastPosition = -1;
     setInterval(() => {
@@ -15091,15 +15379,15 @@ function setupCursorTracking(element, fieldId, tabId) {
 function sendCursorPosition(fieldId, tabId, element) {
     if (!collaborationWebSocket || collaborationWebSocket.readyState !== WebSocket.OPEN) return;
     if (document.activeElement !== element) return;
-    
+
     const position = element.selectionStart || 0;
     const participant = collaborationParticipants.find(p => p.user_id === currentUserId);
-    
+
     // Debounce pour éviter trop de messages
     if (collabRepeaterCursorDebounceTimer) {
         clearTimeout(collabRepeaterCursorDebounceTimer);
     }
-    
+
     collabRepeaterCursorDebounceTimer = setTimeout(() => {
         try {
             collaborationWebSocket.send(JSON.stringify({
@@ -15120,7 +15408,7 @@ function sendCursorPosition(fieldId, tabId, element) {
 // Afficher le curseur d'un autre utilisateur
 function displayRemoteCursor(userId, tabId, fieldId, position, color, username) {
     if (!tabId || !fieldId) return;
-    
+
     // Stocker la position du curseur
     if (!collabRepeaterCursors[userId]) {
         collabRepeaterCursors[userId] = {};
@@ -15131,17 +15419,17 @@ function displayRemoteCursor(userId, tabId, fieldId, position, color, username) 
         color: color,
         username: username
     };
-    
+
     // Afficher seulement si c'est l'onglet actif
     if (activeCollabRepeaterTabId !== tabId) return;
-    
+
     const cursorContainer = document.getElementById(`collab-repeater-cursors-${fieldId}`);
     if (!cursorContainer) return;
-    
+
     // Supprimer l'ancien curseur de cet utilisateur
     const oldCursor = cursorContainer.querySelector(`[data-user-id="${userId}"]`);
     if (oldCursor) oldCursor.remove();
-    
+
     // Trouver l'élément correspondant
     let element = null;
     if (fieldId.startsWith('url-')) {
@@ -15149,22 +15437,22 @@ function displayRemoteCursor(userId, tabId, fieldId, position, color, username) 
     } else if (fieldId.startsWith('body-')) {
         element = document.getElementById(`collab-repeater-body-${tabId}`);
     }
-    
+
     if (!element) return;
-    
+
     // Calculer la position du curseur de manière plus précise
     const elementRect = element.getBoundingClientRect();
     const containerRect = cursorContainer.getBoundingClientRect();
-    
+
     // Pour les input/textarea, utiliser une méthode plus simple
     let cursorX = 0;
     let cursorY = 0;
-    
+
     if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         // Créer un élément temporaire pour mesurer le texte
         const textBeforeCursor = element.value.substring(0, position);
         const style = window.getComputedStyle(element);
-        
+
         const tempDiv = document.createElement('div');
         tempDiv.style.cssText = `
             position: absolute;
@@ -15181,20 +15469,20 @@ function displayRemoteCursor(userId, tabId, fieldId, position, color, username) 
         `;
         tempDiv.textContent = textBeforeCursor;
         document.body.appendChild(tempDiv);
-        
+
         const tempRect = tempDiv.getBoundingClientRect();
         cursorX = tempRect.width;
-        
+
         // Pour les textarea multilignes, calculer la ligne
         if (element.tagName === 'TEXTAREA') {
             const lines = textBeforeCursor.split('\n');
             const lineHeight = parseInt(style.lineHeight) || parseInt(style.fontSize) * 1.2;
             cursorY = (lines.length - 1) * lineHeight;
         }
-        
+
         document.body.removeChild(tempDiv);
     }
-    
+
     // Créer l'indicateur de curseur
     const cursorEl = document.createElement('div');
     cursorEl.dataset.userId = userId;
@@ -15210,7 +15498,7 @@ function displayRemoteCursor(userId, tabId, fieldId, position, color, username) 
         box-shadow: 0 0 4px ${color};
         animation: blink 1s infinite;
     `;
-    
+
     // Ajouter un label avec le nom d'utilisateur
     const labelEl = document.createElement('div');
     labelEl.textContent = username;
@@ -15228,17 +15516,17 @@ function displayRemoteCursor(userId, tabId, fieldId, position, color, username) 
         z-index: 101;
         opacity: 0.9;
     `;
-    
+
     cursorContainer.appendChild(cursorEl);
     cursorContainer.appendChild(labelEl);
-    
+
     // Supprimer le label après 2 secondes
     setTimeout(() => {
         if (labelEl.parentNode) {
             labelEl.style.opacity = '0.5';
         }
     }, 2000);
-    
+
     // Supprimer le curseur si l'utilisateur n'est plus actif (après 5 secondes sans mise à jour)
     setTimeout(() => {
         if (cursorEl.parentNode) {
@@ -15265,25 +15553,25 @@ function updateCollabRepeaterTabFromSync(syncedTab) {
         tab.body = syncedTab.body !== undefined ? syncedTab.body : tab.body;
         tab.title = generateRepeaterTabTitle(tab.method, tab.url);
     }
-    
+
     // Si c'est l'onglet actif, mettre à jour l'UI
     if (activeCollabRepeaterTabId === tab.id) {
         const methodEl = document.getElementById(`collab-repeater-method-${tab.id}`);
         const urlEl = document.getElementById(`collab-repeater-url-${tab.id}`);
         const bodyEl = document.getElementById(`collab-repeater-body-${tab.id}`);
-        
+
         if (methodEl && methodEl.value !== tab.method) {
             methodEl.value = tab.method;
         }
-        
+
         if (urlEl && urlEl.value !== tab.url) {
             urlEl.value = tab.url;
         }
-        
+
         if (bodyEl && bodyEl.value !== tab.body) {
             bodyEl.value = tab.body;
         }
-        
+
         renderCollabRepeaterHeaders(tab.id);
         renderCollabRepeaterTabs();
     } else {
@@ -15295,11 +15583,11 @@ function updateCollabRepeaterTabFromSync(syncedTab) {
 // Synchroniser un onglet avec les autres utilisateurs
 function syncCollabRepeaterTab(tab) {
     if (!collaborationWebSocket || collaborationWebSocket.readyState !== WebSocket.OPEN) return;
-    
+
     if (collabRepeaterDebounceTimer) {
         clearTimeout(collabRepeaterDebounceTimer);
     }
-    
+
     collabRepeaterDebounceTimer = setTimeout(() => {
         try {
             collaborationWebSocket.send(JSON.stringify({
@@ -15316,15 +15604,15 @@ function syncCollabRepeaterTab(tab) {
 function addCollabRepeaterHeader(tabId, key = '', value = '', isNewRow = false) {
     const tab = collabRepeaterTabs.find(t => t.id === tabId);
     if (!tab) return;
-    
+
     const headersContainer = document.getElementById(`collab-repeater-headers-container-${tabId}`);
     if (!headersContainer) return;
-    
+
     const index = tab.headers.length;
     if (!isNewRow && (key || value)) {
-    tab.headers.push({ key, value });
+        tab.headers.push({ key, value });
     }
-    
+
     const headerRow = document.createElement('div');
     headerRow.className = 'kv-editor-row';
     headerRow.dataset.isNewRow = isNewRow ? 'true' : 'false';
@@ -15342,17 +15630,17 @@ function addCollabRepeaterHeader(tabId, key = '', value = '', isNewRow = false) 
             <span class="material-symbols-outlined" style="font-size: 16px;">close</span>
         </button>
     `;
-    
+
     // Event listeners pour la synchronisation
     const keyInput = headerRow.querySelector('input[data-field="key"]');
     const valueInput = headerRow.querySelector('input[data-field="value"]');
     const removeBtn = headerRow.querySelector('.kv-remove');
-    
+
     // Fonction pour mettre à jour le header dans le tableau
     const updateHeader = () => {
         const isCurrentlyNewRow = headerRow.dataset.isNewRow === 'true';
         const hasContent = keyInput.value.trim() || valueInput.value.trim();
-        
+
         // Si c'est une nouvelle ligne et qu'elle a du contenu, l'ajouter au tableau
         if (isCurrentlyNewRow && hasContent) {
             tab.headers.push({ key: keyInput.value, value: valueInput.value });
@@ -15370,43 +15658,43 @@ function addCollabRepeaterHeader(tabId, key = '', value = '', isNewRow = false) 
         }
         syncCollabRepeaterTab(tab);
     };
-    
+
     keyInput.addEventListener('input', updateHeader);
     valueInput.addEventListener('input', updateHeader);
-    
+
     // Ajouter automatiquement une nouvelle ligne vide quand on tape dans la dernière ligne
     const addNewRowIfNeeded = () => {
         const existingRows = headersContainer.querySelectorAll('.kv-editor-row');
         const isLastRow = existingRows[existingRows.length - 1] === headerRow;
         const hasContent = keyInput.value.trim() || valueInput.value.trim();
         const isCurrentlyNewRow = headerRow.dataset.isNewRow === 'true';
-        
+
         if (isLastRow && hasContent && !isCurrentlyNewRow) {
             // Vérifier qu'il n'y a pas déjà une ligne vide après
             const lastRow = existingRows[existingRows.length - 1];
             const lastKeyInput = lastRow?.querySelector('.kv-key');
             const lastValueInput = lastRow?.querySelector('.kv-value');
             const isEmpty = !lastKeyInput?.value.trim() && !lastValueInput?.value.trim();
-            
+
             if (isEmpty) {
                 // Il y a déjà une ligne vide, ne rien faire
                 return;
             }
-            
+
             // Ajouter une nouvelle ligne vide
             setTimeout(() => {
                 addCollabRepeaterHeader(tabId, '', '', true);
             }, 10);
         }
     };
-    
+
     keyInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === 'Tab') {
             e.preventDefault();
             valueInput.focus();
         }
     });
-    
+
     valueInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === 'Tab') {
             e.preventDefault();
@@ -15428,22 +15716,22 @@ function addCollabRepeaterHeader(tabId, key = '', value = '', isNewRow = false) 
             }
         }
     });
-    
+
     keyInput.addEventListener('input', addNewRowIfNeeded);
     valueInput.addEventListener('input', addNewRowIfNeeded);
-    
+
     // Suivi du curseur pour les headers
     setupCursorTracking(keyInput, `header-key-${tabId}-${index}`, tabId);
     setupCursorTracking(valueInput, `header-value-${tabId}-${index}`, tabId);
-    
+
     removeBtn.addEventListener('click', () => {
         if (index < tab.headers.length) {
-        tab.headers.splice(index, 1);
+            tab.headers.splice(index, 1);
         }
         renderCollabRepeaterHeaders(tabId);
         syncCollabRepeaterTab(tab);
     });
-    
+
     headersContainer.appendChild(headerRow);
 }
 
@@ -15451,17 +15739,17 @@ function addCollabRepeaterHeader(tabId, key = '', value = '', isNewRow = false) 
 function renderCollabRepeaterHeaders(tabId) {
     const tab = collabRepeaterTabs.find(t => t.id === tabId);
     if (!tab) return;
-    
+
     const headersContainer = document.getElementById(`collab-repeater-headers-container-${tabId}`);
     if (!headersContainer) return;
-    
+
     headersContainer.innerHTML = '';
-    
+
     // Rendre les headers existants
     tab.headers.forEach((header, index) => {
         addCollabRepeaterHeader(tabId, header.key, header.value, false);
     });
-    
+
     // Toujours ajouter une ligne vide à la fin pour permettre l'édition directe
     addCollabRepeaterHeader(tabId, '', '', true);
 }
@@ -15469,7 +15757,7 @@ function renderCollabRepeaterHeaders(tabId) {
 // Charger un flow dans un nouvel onglet du Repeater collaboratif
 function loadFlowIntoRepeater(flow) {
     if (!flow) return;
-    
+
     // Préparer les données du flow
     const headers = [];
     if (flow.request && flow.request.headers) {
@@ -15481,7 +15769,7 @@ function loadFlowIntoRepeater(flow) {
             }
         });
     }
-    
+
     let body = '';
     if (flow.request && flow.request.content) {
         try {
@@ -15496,7 +15784,7 @@ function loadFlowIntoRepeater(flow) {
             console.warn('[Collaboration] Error decoding request body:', e);
         }
     }
-    
+
     // Créer un nouvel onglet avec les données du flow
     const tabData = {
         method: flow.method || 'GET',
@@ -15504,9 +15792,9 @@ function loadFlowIntoRepeater(flow) {
         headers: headers,
         body: body
     };
-    
+
     const tabId = createCollabRepeaterTab(tabData);
-    
+
     // Basculer vers l'onglet Repeater
     const collabTabRepeater = document.getElementById('collab-tab-repeater');
     if (collabTabRepeater) {
@@ -15521,7 +15809,7 @@ async function sendCollabRepeaterRequest(tabId) {
         alert('Please enter a URL');
         return;
     }
-    
+
     // Désactiver le bouton pendant l'envoi pour éviter les doubles clics
     const sendBtn = document.getElementById(`collab-repeater-send-btn-${tabId}`);
     if (sendBtn) {
@@ -15529,7 +15817,7 @@ async function sendCollabRepeaterRequest(tabId) {
         sendBtn.style.opacity = '0.7';
         sendBtn.style.cursor = 'not-allowed';
     }
-    
+
     try {
         // Préparer les headers sous forme d'objet
         const headersObj = (tab.headers || []).reduce((acc, h) => {
@@ -15538,9 +15826,9 @@ async function sendCollabRepeaterRequest(tabId) {
             }
             return acc;
         }, {});
-        
+
         const bodyBs64 = tab.body ? btoa(tab.body) : '';
-        
+
         const response = await fetch('/api/send_custom', {
             method: 'POST',
             headers: {
@@ -15553,16 +15841,16 @@ async function sendCollabRepeaterRequest(tabId) {
                 body_bs64: bodyBs64 || undefined
             })
         });
-        
+
         if (response.ok) {
             const result = await response.json();
             console.log('[Collaboration] Request sent successfully:', result);
-            
+
             // Stocker la réponse dans l'onglet et re-render
             tab.response = result;
             renderCollabRepeaterContent();
             syncCollabRepeaterTab(tab);
-            
+
             // Notifier les autres utilisateurs
             if (collaborationWebSocket && collaborationWebSocket.readyState === WebSocket.OPEN) {
                 collaborationWebSocket.send(JSON.stringify({
@@ -15605,7 +15893,7 @@ function toggleParticipantsSidebar() {
     const toggleTop = document.getElementById('collab-toggle-participants-top');
     const grid = document.getElementById('collab-main-grid');
     const mainContent = grid ? grid.children[1] : null; // La colonne du milieu (index 1)
-    
+
     if (sidebar && grid) {
         if (participantsSidebarCollapsed) {
             // Réduire la sidebar - utiliser width: 0 au lieu de display: none pour garder dans la grille
@@ -15653,7 +15941,7 @@ function toggleParticipantsSidebar() {
                 if (iconTop) iconTop.textContent = 'chevron_left';
             }
         }
-        
+
         // S'assurer que le contenu principal ne déborde pas
         if (mainContent) {
             mainContent.style.minWidth = '0';
@@ -15669,7 +15957,7 @@ function toggleChatSidebar() {
     const toggleTop = document.getElementById('collab-toggle-chat-top');
     const grid = document.getElementById('collab-main-grid');
     const mainContent = grid ? grid.children[1] : null; // La colonne du milieu (index 1)
-    
+
     if (sidebar && grid) {
         if (chatSidebarCollapsed) {
             // Réduire la sidebar - utiliser width: 0 au lieu de display: none pour garder dans la grille
@@ -15684,7 +15972,7 @@ function toggleChatSidebar() {
             } else {
                 grid.style.gridTemplateColumns = '250px 1fr 0';
             }
-            
+
             // Mettre à jour le bouton de toggle dans le header
             if (toggleTop) {
                 const iconTop = toggleTop.querySelector('.material-symbols-outlined');
@@ -15704,14 +15992,14 @@ function toggleChatSidebar() {
             } else {
                 grid.style.gridTemplateColumns = '250px 1fr 320px';
             }
-            
+
             // Mettre à jour le bouton de toggle dans le header
             if (toggleTop) {
                 const iconTop = toggleTop.querySelector('.material-symbols-outlined');
                 if (iconTop) iconTop.textContent = 'chevron_right';
             }
         }
-        
+
         // S'assurer que le contenu principal ne déborde pas
         if (mainContent) {
             mainContent.style.minWidth = '0';
@@ -15726,7 +16014,7 @@ function initCollaborationSidebars() {
     const toggleParticipantsTop = document.getElementById('collab-toggle-participants-top');
     const toggleChatTop = document.getElementById('collab-toggle-chat-top');
     const toggleChatFloating = document.getElementById('collab-toggle-chat-floating');
-    
+
     // Event listeners pour les participants
     if (toggleParticipants) {
         toggleParticipants.addEventListener('click', (e) => {
@@ -15734,14 +16022,14 @@ function initCollaborationSidebars() {
             toggleParticipantsSidebar();
         });
     }
-    
+
     if (toggleParticipantsTop) {
         toggleParticipantsTop.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleParticipantsSidebar();
         });
     }
-    
+
     // Event listeners pour le chat
     if (toggleChatTop) {
         toggleChatTop.addEventListener('click', (e) => {
@@ -15749,7 +16037,7 @@ function initCollaborationSidebars() {
             toggleChatSidebar();
         });
     }
-    
+
     // Cacher définitivement le bouton flottant pour éviter les doublons
     if (toggleChatFloating) {
         toggleChatFloating.style.display = 'none';
@@ -15773,67 +16061,67 @@ async function startBrowserMirroring() {
         alert('You must be in a collaboration session');
         return;
     }
-    
+
     // Vérifier que le WebSocket de collaboration est prêt
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
         alert('WebSocket connection not established. Please wait...');
         return;
     }
-    
+
     try {
         // Envoyer un message via le WebSocket de collaboration pour démarrer le mirroring
         collaborationWebSocket.send(JSON.stringify({
             type: 'mirror_start',
             user_id: currentUserId
         }));
-        
+
         // Créer l'instance de mirroring qui utilisera le WebSocket de collaboration
         if (typeof BrowserMirror === 'undefined') {
             alert('BrowserMirror script not loaded. Please refresh the page.');
             return;
         }
-        
+
         // Utiliser le WebSocket de collaboration existant
         browserMirror = new BrowserMirror(null, currentSessionId, currentUserId);
         browserMirror.ws = collaborationWebSocket;
         browserMirror.isMirroring = true;
-        
+
         // Démarrer la capture
         await browserMirror.captureInitialDOM();
         browserMirror.startDOMObserver();
         browserMirror.startScreenshotCapture();
-        
+
         console.log('[Collaboration] Browser mirroring started using collaboration WebSocket');
-        
+
         // Basculer automatiquement vers l'onglet Live Mirror si on est sur un autre onglet
         const collabTabMirror = document.getElementById('collab-tab-mirror');
         if (collabTabMirror && !collabTabMirror.classList.contains('active')) {
             // Simuler un clic sur l'onglet Live Mirror pour basculer
             collabTabMirror.click();
         }
-        
+
         // Mettre à jour l'UI
         const collabMirrorStartBtn = document.getElementById('collab-mirror-start-btn');
         const collabMirrorStopBtn = document.getElementById('collab-mirror-stop-btn');
         if (collabMirrorStartBtn) collabMirrorStartBtn.style.display = 'none';
         if (collabMirrorStopBtn) collabMirrorStopBtn.style.display = 'block';
-        
+
         // Masquer le placeholder et afficher le contenu du mirroring
         const placeholder = document.getElementById('collab-mirror-placeholder');
         const content = document.getElementById('collab-mirror-content');
         const loadingEl = document.getElementById('collab-mirror-loading');
         const imageEl = document.getElementById('collab-mirror-image');
-        
+
         if (placeholder) placeholder.style.display = 'none';
         if (content) content.style.display = 'block';
         if (loadingEl) loadingEl.style.display = 'flex'; // Afficher le message "Sharing in progress..."
         if (imageEl) imageEl.style.display = 'none'; // Cacher l'image jusqu'à ce qu'elle arrive
-        
+
         // S'assurer que currentMirrorUserId est défini pour afficher nos propres images
         if (!currentMirrorUserId) {
             currentMirrorUserId = currentUserId;
         }
-        
+
         console.log('[Collaboration] Browser mirroring started');
         updateCollabLiveIndicator(true);
         saveCollaborationState();
@@ -15851,33 +16139,33 @@ function stopBrowserMirroring() {
             user_id: currentUserId
         }));
     }
-    
+
     if (browserMirror) {
         // Arrêter le mirroring sans fermer le WebSocket (car c'est le même que collaborationWebSocket)
         browserMirror.isMirroring = false;
-        
+
         if (browserMirror.observer) {
             browserMirror.observer.disconnect();
             browserMirror.observer = null;
         }
-        
+
         if (browserMirror.screenshotInterval) {
             clearInterval(browserMirror.screenshotInterval);
             browserMirror.screenshotInterval = null;
         }
-        
+
         // Ne PAS fermer le WebSocket car c'est le même que collaborationWebSocket
         // this.ws.close() serait appelé dans browserMirror.stop(), donc on ne l'appelle pas
-        
+
         browserMirror = null;
     }
-    
+
     // Mettre à jour l'UI
     const collabMirrorStartBtn = document.getElementById('collab-mirror-start-btn');
     const collabMirrorStopBtn = document.getElementById('collab-mirror-stop-btn');
     if (collabMirrorStartBtn) collabMirrorStartBtn.style.display = 'block';
     if (collabMirrorStopBtn) collabMirrorStopBtn.style.display = 'none';
-    
+
     // Réinitialiser la vue
     const placeholder = document.getElementById('collab-mirror-placeholder');
     const content = document.getElementById('collab-mirror-content');
@@ -15890,7 +16178,7 @@ function stopBrowserMirroring() {
         imageEl.src = '';
         imageEl.style.display = 'none';
     }
-    
+
     console.log('[Collaboration] Browser mirroring stopped');
     updateCollabLiveIndicator(false);
     saveCollaborationState();
@@ -15899,15 +16187,15 @@ function stopBrowserMirroring() {
 function handleMirrorStarted(userId) {
     console.log('[Collaboration] Mirror started for user:', userId);
     console.log('[Collaboration] Available participants:', collaborationParticipants);
-    
+
     // Chercher le participant par user_id, id, ou collaborator.id
-    let participant = collaborationParticipants.find(p => 
-        (p.user_id && p.user_id === userId) || 
+    let participant = collaborationParticipants.find(p =>
+        (p.user_id && p.user_id === userId) ||
         (p.id && p.id === userId) ||
         (p.collaborator && p.collaborator.id === userId) ||
         (p.collaborator && p.collaborator.user_id === userId)
     );
-    
+
     // Si pas trouvé, essayer de chercher dans tous les champs possibles
     if (!participant) {
         participant = collaborationParticipants.find(p => {
@@ -15915,7 +16203,7 @@ function handleMirrorStarted(userId) {
             return pStr.includes(userId);
         });
     }
-    
+
     if (participant) {
         console.log(`[Collaboration] Found participant:`, participant);
         const participantName = participant.username || participant.name || participant.collaborator?.name || 'Unknown';
@@ -15953,7 +16241,7 @@ function handleMirrorStarted(userId) {
         };
         addMirrorUserTab(userId, defaultParticipant);
     }
-    
+
     if (userId === currentUserId) {
         updateCollabLiveIndicator(true);
     }
@@ -15961,10 +16249,10 @@ function handleMirrorStarted(userId) {
 
 function handleMirrorStopped(userId) {
     delete mirrorViewers[userId];
-    
+
     // Retirer le bouton de cet utilisateur
     removeMirrorUserTab(userId);
-    
+
     // Si c'est le seul viewer actif, réinitialiser
     if (Object.keys(mirrorViewers).length === 0) {
         const placeholder = document.getElementById('collab-mirror-placeholder');
@@ -15972,9 +16260,9 @@ function handleMirrorStopped(userId) {
         if (placeholder) placeholder.style.display = 'block';
         if (content) content.style.display = 'none';
     }
-    
+
     console.log(`[Collaboration] Mirroring stopped for user ${userId}`);
-    
+
     if (userId === currentUserId) {
         updateCollabLiveIndicator(false);
     }
@@ -15991,37 +16279,37 @@ function restoreCollaborationLayout() {
 function addMirrorUserTab(userId, participant) {
     const tabsContainer = document.getElementById('collab-mirror-users-tabs');
     if (!tabsContainer) return;
-    
+
     // Vérifier si le bouton existe déjà
     if (document.getElementById(`collab-mirror-tab-${userId}`)) return;
-    
+
     const button = document.createElement('button');
     button.id = `collab-mirror-tab-${userId}`;
     button.className = 'collab-tab-btn collab-mirror-user-tab';
     button.style.cssText = 'padding: 6px 12px; border: none; background: #f5f5f5; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px;';
-    
+
     // Point de couleur pour l'utilisateur
     const colorDot = document.createElement('span');
     colorDot.style.cssText = `width: 8px; height: 8px; border-radius: 50%; background: ${participant.color || '#2196f3'}; display: inline-block;`;
     button.appendChild(colorDot);
-    
+
     // Nom de l'utilisateur
     const nameSpan = document.createElement('span');
     nameSpan.textContent = participant.username || participant.name || 'Unknown';
     button.appendChild(nameSpan);
-    
+
     // Icône de partage
     const icon = document.createElement('span');
     icon.className = 'material-symbols-outlined';
     icon.textContent = 'desktop_windows';
     icon.style.cssText = 'font-size: 14px;';
     button.appendChild(icon);
-    
+
     // Event listener
     button.addEventListener('click', () => {
         switchToMirrorUser(userId);
     });
-    
+
     tabsContainer.appendChild(button);
 }
 
@@ -16030,25 +16318,25 @@ function removeMirrorUserTab(userId) {
     if (button) {
         button.remove();
     }
-    
+
     // Si c'était l'utilisateur actuellement affiché, réinitialiser et revenir aux flows
     if (currentMirrorUserId === userId) {
         currentMirrorUserId = null;
-        
+
         // Réinitialiser l'affichage du mirror
         const placeholder = document.getElementById('collab-mirror-placeholder');
         const content = document.getElementById('collab-mirror-content');
         if (placeholder) placeholder.style.display = 'block';
         if (content) content.style.display = 'none';
-        
+
         // Revenir à l'affichage des flows
         const collabFlowsList = document.getElementById('collab-flows-list');
-const collabFlowsListContainer = document.getElementById('collab-flows-list-container');
+        const collabFlowsListContainer = document.getElementById('collab-flows-list-container');
         const collabMirrorContainer = document.getElementById('collab-mirror-container');
         const collabTabFlows = document.getElementById('collab-tab-flows');
         const collabTabMirror = document.getElementById('collab-tab-mirror');
         const collabMirrorControls = document.getElementById('collab-mirror-controls');
-        
+
         if (collabFlowsListContainer) {
             collabFlowsListContainer.style.display = 'flex';
             collabFlowsListContainer.classList.add('active');
@@ -16074,13 +16362,13 @@ function switchToMirrorUser(userId) {
     saveCollaborationState(); // Sauvegarder quel utilisateur on regarde
     const viewer = mirrorViewers[userId];
     if (!viewer) return;
-    
+
     // Vérifier si c'est notre propre écran ou celui d'un autre utilisateur
     const isViewingOwnScreen = userId === currentUserId;
-    
+
     // Afficher le conteneur mirror et masquer les flows
     const collabFlowsList = document.getElementById('collab-flows-list');
-const collabFlowsListContainer = document.getElementById('collab-flows-list-container');
+    const collabFlowsListContainer = document.getElementById('collab-flows-list-container');
     const collabMirrorContainer = document.getElementById('collab-mirror-container');
     const collabTabFlows = document.getElementById('collab-tab-flows');
     const collabTabMirror = document.getElementById('collab-tab-mirror');
@@ -16091,13 +16379,13 @@ const collabFlowsListContainer = document.getElementById('collab-flows-list-cont
     const collabMirrorControls = document.getElementById('collab-mirror-controls');
     const collabMirrorStartBtn = document.getElementById('collab-mirror-start-btn');
     const collabMirrorStopBtn = document.getElementById('collab-mirror-stop-btn');
-    
+
     // Activer l'onglet Live Mirror et désactiver les autres
     if (collabTabMirror) collabTabMirror.classList.add('active');
     if (collabTabFlows) collabTabFlows.classList.remove('active');
     if (collabTabRepeater) collabTabRepeater.classList.remove('active');
     if (collabTabAI) collabTabAI.classList.remove('active');
-    
+
     // Masquer tous les autres conteneurs
     if (collabFlowsListContainer) {
         collabFlowsListContainer.style.display = 'none';
@@ -16118,7 +16406,7 @@ const collabFlowsListContainer = document.getElementById('collab-flows-list-cont
     }
     // Ne pas désactiver le bouton "Live Mirror" - il doit rester cliquable
     // pour permettre de partager son propre écran même quand on regarde celui d'un autre
-    
+
     // Masquer les contrôles "Start Mirroring" si on regarde l'écran d'un autre utilisateur
     if (collabMirrorControls) {
         if (isViewingOwnScreen) {
@@ -16129,28 +16417,28 @@ const collabFlowsListContainer = document.getElementById('collab-flows-list-cont
             collabMirrorControls.style.display = 'none';
         }
     }
-    
+
     // Mettre à jour les styles des boutons
     document.querySelectorAll('.collab-mirror-user-tab').forEach(btn => {
         btn.classList.remove('active');
         btn.style.background = '#f5f5f5';
         btn.style.color = '';
     });
-    
+
     const activeButton = document.getElementById(`collab-mirror-tab-${userId}`);
     if (activeButton) {
         activeButton.classList.add('active');
         activeButton.style.background = '#333';
         activeButton.style.color = 'white';
     }
-    
+
     // Afficher le contenu du mirroring
     const placeholder = document.getElementById('collab-mirror-placeholder');
     const content = document.getElementById('collab-mirror-content');
     const imageEl = document.getElementById('collab-mirror-image');
     const userEl = document.getElementById('collab-mirror-user');
     const urlEl = document.getElementById('collab-mirror-url');
-    
+
     // Si on a une image, l'afficher, sinon afficher un message d'attente
     if (viewer.image && imageEl) {
         // On a une image, l'afficher
@@ -16169,29 +16457,29 @@ const collabFlowsListContainer = document.getElementById('collab-flows-list-cont
         }
         if (content) content.style.display = 'none';
     }
-    
+
     if (viewer.url && urlEl) {
         urlEl.textContent = viewer.url;
     }
-    
+
     if (userEl) {
         userEl.textContent = viewer.user;
         if (viewer.color) {
             userEl.style.color = viewer.color;
         }
     }
-    
+
     // Pas besoin de modifier le layout - on garde les sidebars (participants et chat)
 }
 
 function handleMirrorData(userId, data) {
     const viewer = mirrorViewers[userId];
     if (!viewer) return;
-    
+
     if (data.type === 'screenshot') {
         // Stocker l'image
         viewer.image = data.image;
-        
+
         // Afficher l'image si c'est l'utilisateur actuellement sélectionné
         if (currentMirrorUserId === userId) {
             const imageEl = document.getElementById('collab-mirror-image');
@@ -16203,17 +16491,17 @@ function handleMirrorData(userId, data) {
             if (loadingEl) {
                 loadingEl.style.display = 'none';
             }
-            
+
             const placeholder = document.getElementById('collab-mirror-placeholder');
             const content = document.getElementById('collab-mirror-content');
             if (placeholder) placeholder.style.display = 'none';
             if (content) content.style.display = 'block';
         }
     }
-    
+
     if (data.url) {
         viewer.url = data.url;
-        
+
         // Mettre à jour l'URL seulement si c'est l'utilisateur actuellement sélectionné
         if (currentMirrorUserId === userId) {
             const urlEl = document.getElementById('collab-mirror-url');
@@ -16222,14 +16510,14 @@ function handleMirrorData(userId, data) {
             }
         }
     }
-    
+
     // Si on regarde cet utilisateur mais qu'on n'avait pas encore d'image, mettre à jour l'affichage
     if (currentMirrorUserId === userId && viewer.image) {
         const imageEl = document.getElementById('collab-mirror-image');
         const loadingEl = document.getElementById('collab-mirror-loading');
         const placeholder = document.getElementById('collab-mirror-placeholder');
         const content = document.getElementById('collab-mirror-content');
-        
+
         if (imageEl && viewer.image) {
             imageEl.src = viewer.image;
             imageEl.style.display = 'block';
@@ -16242,25 +16530,25 @@ function handleMirrorData(userId, data) {
 
 function addChatMessage(message) {
     if (!collabChatMessages) return;
-    
+
     // Éviter les doublons
     if (collaborationMessages.find(m => m.id === message.id)) {
         return;
     }
-    
+
     collaborationMessages.push(message);
-    
+
     const div = document.createElement('div');
     div.dataset.userId = message.user_id || '';
     if (message.id) div.dataset.msgId = message.id;
     const isOwnMessage = message.user_id === currentUserId;
     div.style.cssText = `padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: ${isOwnMessage ? '#e3f2fd' : 'white'}; border: 1px solid var(--border-color); max-width: 85%; ${isOwnMessage ? 'margin-left: auto;' : ''}`;
-    
+
     const author = document.createElement('div');
     const participant = collaborationParticipants.find(p => p.user_id === message.user_id);
     const color = participant ? (participant.color || '#666') : '#666';
     author.style.cssText = `font-size: 11px; font-weight: 600; color: ${color}; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;`;
-    
+
     // Ajouter un point de couleur pour l'auteur
     const authorDot = document.createElement('span');
     authorDot.style.cssText = `width: 6px; height: 6px; border-radius: 50%; background: ${color}; display: inline-block;`;
@@ -16269,11 +16557,11 @@ function addChatMessage(message) {
     authorName.className = 'chat-author-name';
     authorName.textContent = message.username || message.author_name || 'Anonymous';
     author.appendChild(authorName);
-    
+
     const content = document.createElement('div');
     content.textContent = message.content;
     content.style.cssText = 'font-size: 13px; color: #333; word-wrap: break-word;';
-    
+
     // Timestamp
     const timestamp = document.createElement('div');
     if (message.created_at) {
@@ -16282,11 +16570,11 @@ function addChatMessage(message) {
         timestamp.style.cssText = 'font-size: 10px; color: #999; margin-top: 4px;';
         div.appendChild(timestamp);
     }
-    
+
     div.insertBefore(author, div.firstChild);
     div.appendChild(content);
     collabChatMessages.appendChild(div);
-    
+
     // Scroll to bottom
     collabChatMessages.scrollTop = collabChatMessages.scrollHeight;
 }
@@ -16304,14 +16592,14 @@ function updateChatAuthorNames(userId, newName) {
 
 async function loadChatHistory() {
     if (!currentSessionId) return;
-    
+
     try {
         const res = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/sessions/${currentSessionId}/messages?limit=100`, {
             headers: {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (res.ok) {
             const data = await res.json();
             if (data.messages && Array.isArray(data.messages)) {
@@ -16337,9 +16625,9 @@ async function loadExistingSharedFlows() {
         console.log('[Collaboration] No session ID, cannot load existing flows');
         return;
     }
-    
+
     console.log('[Collaboration] Loading existing shared flows for session:', currentSessionId);
-    
+
     try {
         // Charger les messages du chat pour extraire les flows partagés et résultats IA
         const res = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/sessions/${currentSessionId}/messages?limit=200`, {
@@ -16347,14 +16635,14 @@ async function loadExistingSharedFlows() {
                 'Content-Type': 'application/json'
             }
         });
-        
+
         if (res.ok) {
             const data = await res.json();
             console.log('[Collaboration] Loaded', data.messages?.length || 0, 'messages from session');
-            
+
             if (data.messages && Array.isArray(data.messages)) {
                 const flowsLoaded = new Set();
-                
+
                 // Parcourir tous les messages pour trouver les flows partagés et résultats IA
                 data.messages.forEach(msg => {
                     console.log('[Collaboration] Processing message type:', msg.type);
@@ -16368,7 +16656,7 @@ async function loadExistingSharedFlows() {
                             console.log('[Collaboration] Loaded existing shared flow:', flowId, 'from user:', msg.user_id || msg.userId);
                         }
                     }
-                    
+
                     // Vérifier si le message contient des résultats IA
                     if (msg.type === 'ai_results' || (msg.type === 'chat_message' && msg.ai_results)) {
                         const aiResults = msg.ai_results || msg.content;
@@ -16386,12 +16674,12 @@ async function loadExistingSharedFlows() {
                             }
                         }
                     }
-                    
+
                     // Vérifier aussi dans le contenu du message si c'est un message de chat avec flow ou résultats IA
                     if (msg.type === 'chat_message' && msg.content) {
                         try {
                             const content = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content;
-                            
+
                             // Flow partagé dans le chat
                             if (content.type === 'flow_added' && content.flow) {
                                 const flowId = content.flow.id || content.flow_id;
@@ -16401,7 +16689,7 @@ async function loadExistingSharedFlows() {
                                     console.log('[Collaboration] Loaded existing shared flow from chat:', flowId);
                                 }
                             }
-                            
+
                             // Résultats IA dans le chat
                             if (content.type === 'ai_results' && content.flow_id) {
                                 if (!collabAIResults[content.flow_id]) {
@@ -16419,11 +16707,11 @@ async function loadExistingSharedFlows() {
                         }
                     }
                 });
-                
+
                 console.log('[Collaboration] Loaded', flowsLoaded.size, 'existing shared flows and', Object.keys(collabAIResults).length, 'AI results');
                 console.log('[Collaboration] Total collaborationFlows after loading:', collaborationFlows.length);
                 console.log('[Collaboration] collaborationFlows details:', collaborationFlows.map(f => ({ id: f.id, url: f.url })));
-                
+
                 // Si aucun flow n'a été trouvé dans les messages, peut-être qu'ils sont dans data.session
                 if (flowsLoaded.size === 0 && data.session && data.session.flows) {
                     console.log('[Collaboration] Found flows in session data:', data.session.flows.length);
@@ -16433,13 +16721,13 @@ async function loadExistingSharedFlows() {
                         }
                     });
                 }
-                
+
                 // Sauvegarder les résultats IA restaurés
                 saveAIAssistantResults();
-                
+
                 // Synchroniser les flows partagés pour activer les boutons share
                 syncSharedFlowsFromCollaboration();
-                
+
                 // Attendre un peu pour s'assurer que tous les flows sont bien ajoutés à collaborationFlows
                 setTimeout(() => {
                     console.log('[Collaboration] Refreshing AI flows list, total flows:', collaborationFlows.length);
@@ -16455,18 +16743,18 @@ async function loadExistingSharedFlows() {
 
 function sendCollabMessage() {
     if (!collabChatInput || !collabChatInput.value.trim() || !collaborationWebSocket) return;
-    
+
     // Vérifier que le WebSocket est prêt
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
         showErrorModal('WebSocket connection not established. Please wait...');
         return;
     }
-    
+
     const message = {
         type: 'chat_message',
         content: collabChatInput.value.trim()
     };
-    
+
     try {
         collaborationWebSocket.send(JSON.stringify(message));
         collabChatInput.value = '';
@@ -16510,7 +16798,7 @@ if (collabChatInput) {
             sendCollabMessage();
         }
     });
-    
+
     // Sauvegarder l'état quand on tape dans le champ de chat (avec debounce)
     let chatInputSaveTimeout = null;
     collabChatInput.addEventListener('input', () => {
@@ -16533,11 +16821,11 @@ if (collabInviteBtn) {
                         'Content-Type': 'application/json'
                     }
                 });
-                
+
                 if (res.ok) {
                     const data = await res.json();
                     const inviteCode = data.invite_code || currentSessionId.substring(0, 8).toUpperCase();
-                    
+
                     const copied = await copyToClipboard(inviteCode);
                     if (copied) {
                         showToast(`Code copied: ${inviteCode}`, 'success');
@@ -16575,19 +16863,19 @@ function toggleShareFlow(flow) {
         alert('Please join a collaboration session first');
         return;
     }
-    
+
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
         alert('Collaboration connection not ready');
         return;
     }
-    
+
     const isShared = sharedFlows.has(flow.id);
-    
+
     if (isShared) {
         // Unshare - retirer le flow de la liste de collaboration
         sharedFlows.delete(flow.id);
         console.log('[Collaboration] Unsharing flow:', flow.id);
-        
+
         // Retirer le flow de la liste de collaboration
         const flowIndex = collaborationFlows.findIndex(f => f.id === flow.id);
         if (flowIndex !== -1) {
@@ -16598,13 +16886,13 @@ function toggleShareFlow(flow) {
         // Share
         sharedFlows.add(flow.id);
         console.log('[Collaboration] Sharing flow:', flow.id, flow.url);
-        
+
         try {
             collaborationWebSocket.send(JSON.stringify({
                 type: 'flow_added',
                 flow: flow
             }));
-            
+
             // Ajouter le flow localement immédiatement pour qu'il apparaisse dans la vue collaboration
             addCollaborationFlow(flow, currentUserId);
         } catch (error) {
@@ -16614,7 +16902,7 @@ function toggleShareFlow(flow) {
             return;
         }
     }
-    
+
     // Re-render pour mettre à jour l'UI
     renderFlowList();
 }
@@ -16625,17 +16913,17 @@ function syncFlowsToCollaboration() {
         console.log('[Collaboration] Cannot sync: no session or websocket');
         return;
     }
-    
+
     // Vérifier que le WebSocket est prêt (OPEN = 1)
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
         console.log('[Collaboration] WebSocket not ready, state:', collaborationWebSocket.readyState);
         return;
     }
-    
+
     // Ne synchroniser que les flows marqués comme partagés
     const flowsToSync = flowsData.filter(flow => sharedFlows.has(flow.id));
     console.log('[Collaboration] Syncing shared flows, count:', flowsToSync.length);
-    
+
     flowsToSync.forEach(flow => {
         if (!collaborationFlows.find(f => f.id === flow.id)) {
             try {
@@ -16715,36 +17003,36 @@ function selectNavTreeNode(path) {
             console.log('[NAV TREE] Found', matchingFlows.length, 'flows from DOM data attribute');
         }
     }
-    
+
     // Si pas de flows trouvés via DOM, utiliser la recherche par chemin
     if (matchingFlows.length === 0) {
         matchingFlows = flowsData.filter(flow => {
             try {
                 const url = new URL(flow.url);
                 const flowPath = `${url.hostname}${url.pathname}`;
-                
+
                 // Correspondance exacte
                 if (flowPath === path) {
                     return true;
                 }
-                
+
                 // Normaliser les chemins (enlever trailing slash)
                 const normalizedPath = path.replace(/\/$/, '');
                 const normalizedFlowPath = flowPath.replace(/\/$/, '');
                 if (normalizedFlowPath === normalizedPath) {
                     return true;
                 }
-                
+
                 // Correspondance : le flowPath commence par le path (pour les dossiers)
                 if (normalizedFlowPath.startsWith(normalizedPath + '/') || normalizedFlowPath === normalizedPath) {
                     return true;
                 }
-                
+
                 // Correspondance inverse : le path contient le flowPath complet
                 if (normalizedPath.includes(normalizedFlowPath) && normalizedFlowPath.length > 5) {
                     return true;
                 }
-                
+
                 // Correspondance par nom de fichier (dernier segment)
                 const pathFileName = normalizedPath.split('/').pop();
                 const flowFileName = normalizedFlowPath.split('/').pop();
@@ -16756,7 +17044,7 @@ function selectNavTreeNode(path) {
                         return true;
                     }
                 }
-                
+
                 return false;
             } catch (e) {
                 console.warn('[NAV TREE] Error processing flow:', e, flow.url);
@@ -16886,3 +17174,944 @@ fetchModules();
 setTimeout(() => {
     initSortingHeaders();
 }, 200);
+
+// ===== WEBSOCKET VIEW FUNCTIONS =====
+
+let wsConnections = [];
+let selectedWsId = null;
+let wsSearchTerm = '';
+
+function getHeaderValue(headers, key) {
+    if (!headers || !key) return null;
+    const lowerKey = key.toLowerCase();
+    if (headers.get && typeof headers.get === 'function') {
+        return headers.get(key) || headers.get(lowerKey) || null;
+    }
+    if (Array.isArray(headers)) {
+        for (const entry of headers) {
+            if (!entry || entry.length < 2) continue;
+            const [entryKey, entryValue] = entry;
+            if (typeof entryKey === 'string' && entryKey.toLowerCase() === lowerKey) {
+                return entryValue;
+            }
+        }
+    }
+    if (typeof headers === 'object') {
+        for (const headerKey of Object.keys(headers)) {
+            if (headerKey.toLowerCase() === lowerKey) {
+                return headers[headerKey];
+            }
+        }
+    }
+    return null;
+}
+
+function getWebSocketMessages(flow) {
+    if (!flow) return [];
+    if (Array.isArray(flow.ws_messages)) {
+        return flow.ws_messages;
+    }
+    if (Array.isArray(flow.messages)) {
+        return flow.messages;
+    }
+    if (flow.websocket && Array.isArray(flow.websocket.messages)) {
+        return flow.websocket.messages;
+    }
+    return [];
+}
+
+function hasWebSocketMessages(flow) {
+    const messages = getWebSocketMessages(flow);
+    return Array.isArray(messages) && messages.length > 0;
+}
+
+function isWebSocketFlow(flow) {
+    if (!flow) return false;
+
+    // Check explicit flag first (set by backend) - this is the most reliable
+    if (flow.is_websocket === true) {
+        return true;
+    }
+
+    const url = (flow.url || flow.request?.url || '').toLowerCase();
+    if (url.startsWith('ws://') || url.startsWith('wss://')) {
+        return true;
+    }
+
+    if (hasWebSocketMessages(flow)) {
+        return true;
+    }
+
+    // Check status code 101 (Switching Protocols) - this is a strong indicator
+    const statusCode = flow.status_code ?? flow.response?.status_code;
+    if (statusCode === 101) {
+        return true;
+    }
+
+    // Check headers (may not be available in minimal serialization)
+    const headers = flow.request?.headers;
+    if (headers) {
+        const upgrade = getHeaderValue(headers, 'Upgrade');
+        const connection = getHeaderValue(headers, 'Connection');
+        if (upgrade && typeof upgrade === 'string' && upgrade.toLowerCase().includes('websocket')) {
+            return true;
+        }
+
+        // Check for specific WebSocket headers
+        const secKey = getHeaderValue(headers, 'Sec-WebSocket-Key');
+        if (secKey) {
+            return true;
+        }
+        if (upgrade && connection && typeof connection === 'string' && connection.toLowerCase().includes('upgrade')) {
+            return true;
+        }
+    }
+
+    if (flow.websocket) {
+        return true;
+    }
+
+    return false;
+}
+
+function getSocketIoInfo(flow) {
+    if (!flow || !flow.url) return null;
+    try {
+        const url = new URL(flow.url);
+        if (!url.pathname.includes('socket.io')) {
+            return null;
+        }
+        const sid = url.searchParams.get('sid');
+        const transport = url.searchParams.get('transport') || 'polling';
+        const timestamp = flow.timestamp_start || flow.request?.timestamp_start || flow.timestamp || Date.now() / 1000;
+        return {
+            sid,
+            transport,
+            url: `${url.origin}${url.pathname}`,
+            displayUrl: flow.url,
+            rawUrl: flow.url,
+            timestamp,
+            query: Object.fromEntries(url.searchParams.entries())
+        };
+    } catch {
+        return null;
+    }
+}
+
+function determineWebSocketStatus(connection) {
+    if (!connection) return 'Pending';
+    if (connection.type === 'socketio') {
+        const info = connection.socketIo || {};
+        const transports = info.transportsArray || [];
+        if (info.connected) {
+            return 'Connected';
+        }
+        if (info.lastError && info.lastError >= 400) {
+            return `Error ${info.lastError}`;
+        }
+        if (transports.includes('websocket')) {
+            return 'Upgrading';
+        }
+        if (transports.includes('polling')) {
+            return 'Polling';
+        }
+        return 'Pending';
+    }
+
+    const statusCode = connection.status_code;
+    if (statusCode === 101 || (connection.messageCount > 0 && !statusCode)) {
+        return 'Connected';
+    }
+    if (statusCode && statusCode >= 400) {
+        return `Error ${statusCode}`;
+    }
+    return 'Pending';
+}
+
+function getStatusClass(status) {
+    if (!status) return 'status-unknown';
+    if (status.startsWith('Error')) return 'status-4xx';
+    if (status === 'Connected') return 'status-2xx';
+    if (status === 'Upgrading') return 'status-3xx';
+    if (status === 'Polling') return 'status-unknown';
+    return 'status-unknown';
+}
+
+function formatTimestamp(ts) {
+    if (!ts) return '';
+    const date = new Date(ts * 1000);
+    return date.toLocaleTimeString();
+}
+
+// Load WebSocket connections from flows
+function loadWebSocketConnections() {
+    // Start with existing connections to preserve closed WebSockets
+    const connectionMap = new Map();
+    
+    // Add existing connections to the map to preserve them
+    wsConnections.forEach(conn => {
+        connectionMap.set(conn.id, { ...conn });
+    });
+
+    console.log('[WEBSOCKET] Checking', flowsData.length, 'flows for WebSocket connections');
+    console.log('[WEBSOCKET] Preserving', connectionMap.size, 'existing WebSocket connections');
+
+    // Debug: log flows with status 101
+    flowsData.forEach((flow, idx) => {
+        if (flow.status_code === 101) {
+            console.log(`[WEBSOCKET DEBUG] Flow ${idx + 1} with status 101:`, {
+                id: flow.id,
+                url: flow.url,
+                method: flow.method,
+                status_code: flow.status_code,
+                is_websocket: flow.is_websocket,
+                has_messages: (flow.ws_messages || flow.messages || []).length > 0
+            });
+        }
+    });
+
+    flowsData.forEach(flow => {
+        const isNativeWebSocket = isWebSocketFlow(flow);
+        const socketIoInfo = !isNativeWebSocket ? getSocketIoInfo(flow) : null;
+
+        if (isNativeWebSocket) {
+            console.log('[WEBSOCKET] Found native WebSocket flow:', flow.id, flow.url, 'is_websocket:', flow.is_websocket, 'status:', flow.status_code);
+        }
+
+        if (!isNativeWebSocket && !socketIoInfo) {
+            return;
+        }
+
+        const key = isNativeWebSocket
+            ? (flow.id || flow.flow_id || `${flow.url || 'ws'}-${flow.timestamp_start || Date.now()}`)
+            : (socketIoInfo.sid || socketIoInfo.url || flow.id);
+
+        if (!connectionMap.has(key)) {
+            connectionMap.set(key, {
+                id: key,
+                type: isNativeWebSocket ? 'native' : 'socketio',
+                url: isNativeWebSocket ? (flow.url || flow.request?.url || 'Unknown URL') : socketIoInfo.url,
+                displayUrl: isNativeWebSocket ? (flow.url || flow.request?.url || 'Unknown URL') : (socketIoInfo.displayUrl || socketIoInfo.rawUrl || socketIoInfo.url),
+                timestamp_start: socketIoInfo?.timestamp || flow.timestamp_start || flow.request?.timestamp_start || Date.now() / 1000,
+                latest_timestamp: socketIoInfo?.timestamp || flow.timestamp_start || flow.request?.timestamp_start || Date.now() / 1000,
+                status_code: flow.status_code ?? flow.response?.status_code ?? null,
+                messages: isNativeWebSocket ? getWebSocketMessages(flow) : [],
+                socketIo: socketIoInfo
+                    ? {
+                        sid: socketIoInfo.sid,
+                        transports: new Set([socketIoInfo.transport || 'polling']),
+                        polls: [{
+                            id: flow.id,
+                            url: flow.url,
+                            method: flow.method,
+                            timestamp: socketIoInfo.timestamp,
+                            status_code: flow.status_code ?? flow.response?.status_code ?? null,
+                            transport: socketIoInfo.transport || 'polling'
+                        }],
+                        query: socketIoInfo.query,
+                        connected: false,
+                        lastError: null
+                    }
+                    : null
+            });
+        } else {
+            const connection = connectionMap.get(key);
+            const ts = socketIoInfo?.timestamp || flow.timestamp_start || flow.request?.timestamp_start || flow.timestamp || Date.now() / 1000;
+            connection.timestamp_start = Math.min(connection.timestamp_start, ts);
+            connection.latest_timestamp = Math.max(connection.latest_timestamp || 0, ts);
+
+            if (!connection.displayUrl && socketIoInfo?.displayUrl) {
+                connection.displayUrl = socketIoInfo.displayUrl;
+            }
+
+            const statusCandidate = flow.status_code ?? flow.response?.status_code ?? null;
+            if (statusCandidate !== null && statusCandidate !== undefined) {
+                connection.status_code = statusCandidate;
+            }
+
+            if (isNativeWebSocket) {
+                const messages = getWebSocketMessages(flow);
+                // Merge messages, keeping the most complete set
+                if (messages.length > 0) {
+                    // Create a map of existing messages by content to avoid duplicates
+                    const existingMessagesMap = new Map();
+                    (connection.messages || []).forEach(msg => {
+                        const msgKey = `${msg.direction}-${msg.content}`;
+                        existingMessagesMap.set(msgKey, msg);
+                    });
+                    
+                    // Add new messages
+                    messages.forEach(msg => {
+                        const msgKey = `${msg.direction}-${msg.content}`;
+                        if (!existingMessagesMap.has(msgKey)) {
+                            existingMessagesMap.set(msgKey, msg);
+                        }
+                    });
+                    
+                    connection.messages = Array.from(existingMessagesMap.values());
+                }
+            } else if (connection.socketIo && socketIoInfo) {
+                // Reconstruct transports Set if needed
+                if (!(connection.socketIo.transports instanceof Set)) {
+                    connection.socketIo.transports = new Set(connection.socketIo.transportsArray || []);
+                }
+                connection.socketIo.transports.add(socketIoInfo.transport || 'polling');
+                
+                // Check if this poll already exists
+                const pollExists = connection.socketIo.polls.some(p => p.id === flow.id);
+                if (!pollExists) {
+                    connection.socketIo.polls.push({
+                        id: flow.id,
+                        url: flow.url,
+                        method: flow.method,
+                        timestamp: ts,
+                        status_code: statusCandidate,
+                        transport: socketIoInfo.transport || 'polling'
+                    });
+                }
+                if (socketIoInfo.transport === 'websocket' && statusCandidate === 101) {
+                    connection.socketIo.connected = true;
+                }
+                if (statusCandidate && statusCandidate >= 400) {
+                    connection.socketIo.lastError = statusCandidate;
+                }
+            }
+        }
+    });
+
+    wsConnections = Array.from(connectionMap.values())
+        .map(conn => {
+            conn.messageCount = conn.type === 'native'
+                ? (Array.isArray(conn.messages) ? conn.messages.length : 0)
+                : (conn.socketIo?.polls?.length || 0);
+
+            if (conn.socketIo) {
+                conn.socketIo.transportsArray = Array.from(conn.socketIo.transports || []);
+                delete conn.socketIo.transports;
+            }
+
+            conn.status = determineWebSocketStatus(conn);
+            conn.statusClass = getStatusClass(conn.status);
+            conn.displayTimestamp = conn.latest_timestamp || conn.timestamp_start || 0;
+            return conn;
+        })
+        .sort((a, b) => (b.displayTimestamp || 0) - (a.displayTimestamp || 0));
+
+    console.log(`[WEBSOCKET] Found ${wsConnections.length} WebSocket connections (${wsConnections.length - (flowsData.filter(f => isWebSocketFlow(f) || getSocketIoInfo(f)).length)} preserved from previous session)`);
+    renderWebSocketList();
+}
+
+// Render WebSocket connections list
+function renderWebSocketList() {
+    const wsList = document.getElementById('ws-list');
+    if (!wsList) return;
+
+    // Filter by search term
+    let filtered = wsConnections;
+    if (wsSearchTerm) {
+        const term = wsSearchTerm.toLowerCase();
+        filtered = wsConnections.filter(ws => {
+            const url = (ws.url || ws.request?.url || '').toLowerCase();
+            const sid = ws.socketIo?.sid ? ws.socketIo.sid.toLowerCase() : '';
+            return url.includes(term) || sid.includes(term);
+        });
+    }
+
+    if (filtered.length === 0) {
+        wsList.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No WebSocket connections found</div>';
+        return;
+    }
+
+    wsList.innerHTML = filtered.map(ws => {
+        const id = ws.id || ws.flow_id || '';
+        const fullUrl = ws.displayUrl || ws.socketIo?.polls?.[0]?.url || ws.url || ws.request?.url || 'Unknown URL';
+        const shortUrl = fullUrl.replace(/^https?:\/\//i, '');
+        const timeStr = formatTimestamp(ws.displayTimestamp);
+        const messageCount = ws.messageCount || 0;
+        const status = ws.status || 'Pending';
+        const statusClass = ws.statusClass || 'status-unknown';
+        const typeBadge = ws.type === 'socketio'
+            ? '<span style="margin-left: 6px; font-size: 10px; text-transform: uppercase; color: #ff9800; font-weight: 600;">Socket.IO</span>'
+            : '';
+        const isSelected = selectedWsId === id;
+        const countLabel = ws.type === 'socketio'
+            ? `${messageCount} ${messageCount === 1 ? 'poll' : 'polls'}`
+            : `${messageCount} msg`;
+
+        return `
+            <div class="flow-item ${isSelected ? 'selected' : ''}" data-ws-id="${id}" style="background: ${isSelected ? '#e3f2fd' : 'white'};">
+                <div style="text-align: center;">
+                    <span class="${statusClass}" style="padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; display: inline-block;">${status}</span>
+                </div>
+                <div class="flow-url" title="${escapeHtml(fullUrl)}">
+                    ${escapeHtml(shortUrl)}${typeBadge}
+                </div>
+                <div class="flow-time">${timeStr}</div>
+                <div style="font-size: 12px; color: #666; text-align: right;">${countLabel}</div>
+            </div>
+        `;
+    }).join('');
+
+    wsList.querySelectorAll('.flow-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const wsId = item.dataset.wsId;
+            selectWebSocket(wsId);
+        });
+    });
+}
+
+// Select a WebSocket connection
+function selectWebSocket(wsId) {
+    selectedWsId = wsId;
+    renderWebSocketList();
+    renderWebSocketDetails(wsId);
+}
+
+// Render WebSocket details
+function renderWebSocketDetails(wsId) {
+    const detailContent = document.getElementById('ws-detail-content');
+    if (!detailContent) return;
+
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === wsId);
+    if (!ws) {
+        detailContent.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">WebSocket connection not found</div>';
+        return;
+    }
+
+    // Get active tab
+    const activeTab = document.querySelector('[data-ws-tab].active');
+    const tabName = activeTab ? activeTab.dataset.wsTab : 'overview';
+
+    switch (tabName) {
+        case 'overview':
+            if (ws.type === 'socketio') {
+                renderSocketIoOverview(ws, detailContent);
+            } else {
+                renderWebSocketOverview(ws, detailContent);
+            }
+            break;
+        case 'messages':
+            if (ws.type === 'socketio') {
+                renderSocketIoMessages(ws, detailContent);
+            } else {
+                renderWebSocketMessages(ws, detailContent);
+            }
+            break;
+        case 'handshake':
+            if (ws.type === 'socketio') {
+                renderSocketIoHandshake(ws, detailContent);
+            } else {
+                renderWebSocketHandshake(ws, detailContent);
+            }
+            break;
+        case 'analysis':
+            if (ws.type === 'socketio') {
+                renderSocketIoAnalysis(ws, detailContent);
+            } else {
+                renderWebSocketAnalysis(ws, detailContent);
+            }
+            break;
+    }
+}
+
+// Render WebSocket overview
+function renderWebSocketOverview(ws, container) {
+    const url = ws.displayUrl || ws.socketIo?.polls?.[0]?.url || ws.url || ws.request?.url || 'Unknown URL';
+    const timestamp = ws.timestamp_start || ws.request?.timestamp_start || ws.timestamp || Date.now() / 1000;
+    const date = new Date(timestamp * 1000);
+    const messages = getWebSocketMessages(ws);
+    const messageCount = Array.isArray(messages) ? messages.length : 0;
+
+    let status = 'Unknown';
+    let statusColor = '#666';
+    const statusCode = ws.status_code ?? ws.response?.status_code;
+    if (statusCode === 101 || (!statusCode && messageCount > 0)) {
+        status = 'Connected';
+        statusColor = '#4caf50';
+    } else if (statusCode) {
+        status = `Error ${statusCode}`;
+        statusColor = '#f44336';
+    } else {
+        status = 'Pending';
+        statusColor = '#ff9800';
+    }
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #333;">WebSocket Connection Overview</h3>
+            
+            <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">URL:</div>
+                    <div style="word-break: break-all; font-family: monospace; font-size: 13px;">${escapeHtml(url)}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Status:</div>
+                    <div><span style="color: ${statusColor}; font-weight: 600;">${status}</span></div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Timestamp:</div>
+                    <div>${date.toLocaleString()}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Messages:</div>
+                    <div>${messageCount}</div>
+                </div>
+            </div>
+            
+            <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 12px 0; color: #333;">Quick Stats</h4>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Client Messages</div>
+                        <div style="font-size: 18px; font-weight: 600; color: #2196f3;">
+                            ${messages.filter(m => m.from_client !== false && m.direction !== 'server').length}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Server Messages</div>
+                        <div style="font-size: 18px; font-weight: 600; color: #4caf50;">
+                            ${messages.filter(m => m.from_client === false || m.direction === 'server').length}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Render WebSocket messages
+function renderWebSocketMessages(ws, container) {
+    const messages = getWebSocketMessages(ws);
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No messages captured</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0; color: #333;">Messages (${messages.length})</h3>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                ${messages.map((msg, idx) => {
+        const isClient = msg.from_client !== false && msg.direction !== 'server';
+        const direction = isClient ? 'Client → Server' : 'Server → Client';
+        const directionColor = isClient ? '#2196f3' : '#4caf50';
+        const content = msg.content || msg.text || msg.data || '';
+        const isText = msg.type === 'text' || typeof content === 'string';
+        const timestamp = msg.timestamp || (ws.timestamp_start || 0) + (idx * 0.001);
+        const date = new Date(timestamp * 1000);
+        const size = typeof content === 'string' ? content.length : (content.byteLength || 0);
+
+        // Try to parse JSON if it's text
+        let parsedContent = null;
+        let isJson = false;
+        if (isText && typeof content === 'string' && content.trim()) {
+            const trimmed = content.trim();
+            if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+                (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                try {
+                    parsedContent = JSON.parse(content);
+                    isJson = true;
+                } catch (e) {
+                    // Not valid JSON
+                }
+            }
+        }
+
+        return `
+                        <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color); border-left: 4px solid ${directionColor};">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                <div>
+                                    <span style="color: ${directionColor}; font-weight: 600; font-size: 13px;">${direction}</span>
+                                    <span style="margin-left: 12px; font-size: 11px; color: #666;">${date.toLocaleTimeString()}</span>
+                                </div>
+                                <div style="font-size: 11px; color: #666;">
+                                    ${isText ? 'Text' : 'Binary'} • ${size} bytes
+                                    ${isJson ? ' • <span style="color: #4caf50; font-weight: 600;">JSON</span>' : ''}
+                                </div>
+                            </div>
+                            <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; word-break: break-all;">
+                                ${isJson && parsedContent
+                ? `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #333;">${escapeHtml(JSON.stringify(parsedContent, null, 2))}</pre>`
+                : isText
+                    ? `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #333;">${escapeHtml(String(content))}</pre>`
+                    : `<pre style="margin: 0; white-space: pre-wrap;">${formatBinaryData(content)}</pre>`
+            }
+                            </div>
+                        </div>
+                    `;
+    }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Render WebSocket handshake
+function renderWebSocketHandshake(ws, container) {
+    const request = ws.request || {};
+    const response = ws.response || {};
+    let reqHeaders = request.headers || {};
+    let resHeaders = response.headers || {};
+
+    // Convert Headers object to plain object if needed
+    if (reqHeaders.get && typeof reqHeaders.get === 'function') {
+        const temp = {};
+        reqHeaders.forEach((value, key) => {
+            temp[key] = value;
+        });
+        reqHeaders = temp;
+    }
+    if (resHeaders.get && typeof resHeaders.get === 'function') {
+        const temp = {};
+        resHeaders.forEach((value, key) => {
+            temp[key] = value;
+        });
+        resHeaders = temp;
+    }
+
+    const reqHeadersList = Object.entries(reqHeaders);
+    const resHeadersList = Object.entries(resHeaders);
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #333;">WebSocket Handshake</h3>
+            
+            <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 12px 0; color: #333;">Request Headers</h4>
+                <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px;">
+                    ${reqHeadersList.length > 0 ? reqHeadersList.map(([key, value]) =>
+        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</div>`
+    ).join('') : '<div style="color: #888;">No headers available</div>'}
+                </div>
+            </div>
+            
+            <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 12px 0; color: #333;">Response Headers</h4>
+                <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px;">
+                    ${resHeadersList.length > 0 ? resHeadersList.map(([key, value]) =>
+        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</div>`
+    ).join('') : '<div style="color: #888;">No headers available</div>'}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Render WebSocket analysis
+function renderWebSocketAnalysis(ws, container) {
+    const messages = getWebSocketMessages(ws);
+    const clientMessages = messages.filter(m => m.from_client !== false && m.direction !== 'server');
+    const serverMessages = messages.filter(m => m.from_client === false || m.direction === 'server');
+
+    // Analyze for potential issues
+    const issues = [];
+
+    // Check for authentication in messages
+    const hasAuth = messages.some(m => {
+        const content = String(m.content || m.text || m.data || '').toLowerCase();
+        return content.includes('token') || content.includes('auth') || content.includes('password') || content.includes('api_key');
+    });
+
+    if (hasAuth) {
+        issues.push({
+            severity: 'high',
+            title: 'Potential Authentication Data',
+            description: 'WebSocket messages may contain authentication tokens or credentials.'
+        });
+    }
+
+    // Check for large messages
+    const largeMessages = messages.filter(m => {
+        const content = m.content || m.text || m.data || '';
+        const size = typeof content === 'string' ? content.length : (content.byteLength || 0);
+        return size > 10000;
+    });
+
+    if (largeMessages.length > 0) {
+        issues.push({
+            severity: 'medium',
+            title: 'Large Messages Detected',
+            description: `${largeMessages.length} message(s) exceed 10KB, which may indicate data exfiltration.`
+        });
+    }
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #333;">Security Analysis</h3>
+            
+            <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <h4 style="margin: 0 0 12px 0; color: #333;">Statistics</h4>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Total Messages</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #333;">${messages.length}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Client Messages</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #2196f3;">${clientMessages.length}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Server Messages</div>
+                        <div style="font-size: 24px; font-weight: 600; color: #4caf50;">${serverMessages.length}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Issues Found</div>
+                        <div style="font-size: 24px; font-weight: 600; color: ${issues.length > 0 ? '#f44336' : '#4caf50'};">${issues.length}</div>
+                    </div>
+                </div>
+            </div>
+            
+            ${issues.length > 0 ? `
+                <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                    <h4 style="margin: 0 0 12px 0; color: #333;">Potential Issues</h4>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        ${issues.map(issue => {
+        const severityColor = issue.severity === 'high' ? '#f44336' : '#ff9800';
+        return `
+                                <div style="border-left: 4px solid ${severityColor}; padding-left: 12px;">
+                                    <div style="font-weight: 600; color: ${severityColor}; margin-bottom: 4px;">${issue.title}</div>
+                                    <div style="font-size: 13px; color: #666;">${issue.description}</div>
+                                </div>
+                            `;
+    }).join('')}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+}
+
+function renderSocketIoOverview(ws, container) {
+    const info = ws.socketIo || {};
+    const transports = info.transportsArray && info.transportsArray.length > 0
+        ? info.transportsArray.join(', ')
+        : 'Unknown';
+    const pollCount = info.polls?.length || 0;
+    const timestamp = ws.timestamp_start || ws.displayTimestamp || Date.now() / 1000;
+    const date = new Date(timestamp * 1000);
+    const sid = info.sid || 'N/A';
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #333;">Socket.IO Connection Overview</h3>
+
+            <div style="background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Endpoint:</div>
+                    <div style="word-break: break-all; font-family: monospace; font-size: 13px;">${escapeHtml(ws.displayUrl || ws.url || 'Unknown URL')}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Session ID:</div>
+                    <div>${escapeHtml(sid)}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Active transport(s):</div>
+                    <div>${escapeHtml(transports)}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div style="font-weight: 600; color: #666;">Last seen:</div>
+                    <div>${date.toLocaleString()}</div>
+                </div>
+                <div style="display: grid; grid-template-columns: 150px 1fr; gap: 12px;">
+                    <div style="font-weight: 600; color: #666;">HTTP polls:</div>
+                    <div>${pollCount}</div>
+                </div>
+            </div>
+
+            <div style="background: #fff7e6; border: 1px solid #ffe0b2; border-radius: 8px; padding: 16px; color: #8c6d1f;">
+                <strong>Notice:</strong> this Socket.IO client is currently communicating via HTTP ${escapeHtml(transports || 'polling')}.
+                WebSocket upgrades will appear automatically once the browser switches to the \`websocket\` transport.
+            </div>
+        </div>
+    `;
+}
+
+function renderSocketIoMessages(ws, container) {
+    const info = ws.socketIo || {};
+    const polls = info.polls || [];
+
+    if (!Array.isArray(polls) || polls.length === 0) {
+        container.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No Socket.IO polling requests captured yet.</div>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0; color: #333;">Polling Requests (${polls.length})</h3>
+                <div style="font-size: 12px; color: #666;">SID: ${escapeHtml(info.sid || 'N/A')}</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                ${polls.map(poll => {
+        const date = poll.timestamp ? new Date(poll.timestamp * 1000) : null;
+        const timeLabel = date ? date.toLocaleTimeString() : '-';
+        const status = poll.status_code != null ? poll.status_code : '-';
+        const statusClass = status >= 400 ? 'status-4xx' : status === 200 ? 'status-2xx' : 'status-unknown';
+        return `
+                        <div style="background: white; border-radius: 8px; padding: 14px; border: 1px solid var(--border-color);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <div style="font-weight: 600; color: #333;">
+                                    ${escapeHtml(poll.method || 'GET')} ▸ ${escapeHtml(poll.transport || 'polling')}
+                                </div>
+                                <div style="font-size: 12px; color: #666;">${timeLabel}</div>
+                            </div>
+                            <div style="font-size: 12px; color: #555; margin-bottom: 6px; word-break: break-all;">
+                                ${escapeHtml(poll.url || ws.url || '')}
+                            </div>
+                            <div style="font-size: 12px; display: flex; align-items: center; gap: 8px;">
+                                <span class="${statusClass}" style="padding: 2px 6px; border-radius: 4px;">Status ${status}</span>
+                                <span style="color: #999;">Flow ID: ${poll.id}</span>
+                            </div>
+                        </div>
+                    `;
+    }).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderSocketIoHandshake(ws, container) {
+    const info = ws.socketIo || {};
+    const transports = info.transportsArray && info.transportsArray.length > 0
+        ? info.transportsArray.join(', ')
+        : 'Unknown';
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 16px 0; color: #333;">Handshake Information</h3>
+            <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                <p style="margin: 0; color: #555;">
+                    This connection is using Socket.IO with the <strong>${escapeHtml(transports)}</strong> transport.
+                    When the client upgrades to the <code>websocket</code> transport, the full handshake (with HTTP 101 upgrade) will appear here automatically.
+                </p>
+                <p style="margin: 12px 0 0 0; font-size: 13px; color: #888;">
+                    If the upgrade never happens, ensure that WebSocket traffic is allowed through the proxy and that the target application supports WebSocket mode.
+                </p>
+            </div>
+        </div>
+    `;
+}
+
+function renderSocketIoAnalysis(ws, container) {
+    const info = ws.socketIo || {};
+    const pollCount = info.polls?.length || 0;
+    const transports = info.transportsArray || [];
+    const hasWebSocketAttempt = transports.includes('websocket');
+    const hasPolling = transports.includes('polling');
+
+    container.innerHTML = `
+        <div style="padding: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #333;">Socket.IO Transport Analysis</h3>
+            <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Total HTTP polls</div>
+                        <div style="font-size: 20px; font-weight: 600; color: #333;">${pollCount}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Transports seen</div>
+                        <div style="font-size: 20px; font-weight: 600; color: #333;">${escapeHtml(transports.join(', ') || 'None')}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">WebSocket upgrade</div>
+                        <div style="font-size: 20px; font-weight: 600; color: ${hasWebSocketAttempt ? '#4caf50' : '#ff9800'};">
+                            ${hasWebSocketAttempt ? 'Attempted' : 'Not attempted'}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #666; margin-bottom: 4px;">Current mode</div>
+                        <div style="font-size: 20px; font-weight: 600; color: ${hasPolling ? '#2196f3' : '#333'};">
+                            ${hasPolling ? 'Polling' : 'Unknown'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 16px; font-size: 13px; color: #555;">
+                ${hasWebSocketAttempt
+            ? 'A WebSocket upgrade was attempted. If it failed, check proxy TLS certificates or CSP restrictions on the target application.'
+            : 'The client is still operating in long-polling mode. Some applications delay the WebSocket upgrade until certain conditions are met.'}
+            </div>
+        </div>
+    `;
+}
+
+// Helper function to format binary data
+function formatBinaryData(data) {
+    if (typeof data === 'string') {
+        return data;
+    }
+    if (data instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(data);
+        return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    }
+    if (Array.isArray(data)) {
+        return data.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    }
+    return String(data);
+}
+
+// Initialize WebSocket view event listeners
+function initWebSocketView() {
+    // Search input
+    const wsSearch = document.getElementById('ws-search');
+    if (wsSearch) {
+        wsSearch.addEventListener('input', (e) => {
+            wsSearchTerm = e.target.value;
+            renderWebSocketList();
+        });
+    }
+
+    // Tab switching
+    const wsTabs = document.querySelectorAll('[data-ws-tab]');
+    wsTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            wsTabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            if (selectedWsId) {
+                renderWebSocketDetails(selectedWsId);
+            }
+        });
+    });
+
+    // Clear button
+    const wsClearBtn = document.getElementById('ws-clear-btn');
+    if (wsClearBtn) {
+        wsClearBtn.addEventListener('click', () => {
+            wsConnections = [];
+            selectedWsId = null;
+            renderWebSocketList();
+            const detailContent = document.getElementById('ws-detail-content');
+            if (detailContent) {
+                detailContent.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Select a WebSocket connection to view details</div>';
+            }
+        });
+    }
+
+    // Export button
+    const wsExportBtn = document.getElementById('ws-export-btn');
+    if (wsExportBtn) {
+        wsExportBtn.addEventListener('click', () => {
+            const dataStr = JSON.stringify(wsConnections, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `websockets_${Date.now()}.json`;
+            link.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+}
+
+// Initialize on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWebSocketView);
+} else {
+    initWebSocketView();
+}
+
+// Hook into fetchFlows to update WebSocket list when flows are updated
+const originalFetchFlows = fetchFlows;

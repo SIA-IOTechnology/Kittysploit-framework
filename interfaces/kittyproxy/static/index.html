@@ -39,7 +39,8 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
-            overflow: hidden;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .main-nav {
@@ -89,6 +90,9 @@
             </div>
             <div class="nav-item" data-view="analyze" data-label="Analyze" title="Analyze">
                 <span class="material-symbols-outlined">analytics</span>
+            </div>
+            <div class="nav-item" data-view="websocket" data-label="WebSocket" title="WebSocket">
+                <span class="material-symbols-outlined">hub</span>
             </div>
             <div class="nav-item" data-view="intercept" data-label="Intercept" title="Intercept">
                 <span class="material-symbols-outlined">gavel</span>
@@ -348,6 +352,57 @@
                     </div>
                     <div id="detail-content" class="detail-content">
                         <div style="padding: 20px; color: #666; text-align: center;">Select a flow to view details</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- WebSocket View -->
+        <div id="websocket-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>WebSocket</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="ws-clear-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">clear_all</span>
+                        Clear
+                    </button>
+                    <button id="ws-export-btn" class="btn btn-secondary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">download</span>
+                        Export
+                    </button>
+                </div>
+            </div>
+            <div class="split-pane">
+                <div class="flow-list-panel" id="ws-list-panel" style="min-width: 400px;">
+                    <div class="flow-search-container">
+                        <input type="text" id="ws-search" placeholder="Filter WebSocket connections..." class="flow-search-input">
+                    </div>
+                    <div class="flow-table-header">
+                        <div>Status</div>
+                        <div>URL</div>
+                        <div class="sortable-header" data-sort="time">
+                            Time
+                            <span class="sort-indicator"></span>
+                        </div>
+                        <div class="sortable-header" data-sort="messages">
+                            Messages
+                            <span class="sort-indicator"></span>
+                        </div>
+                    </div>
+                    <div id="ws-list" class="flow-list"></div>
+                </div>
+                <div class="resize-handle" id="ws-resize-handle"></div>
+                <div class="detail-panel" id="ws-detail-panel">
+                    <div class="detail-header">
+                        <div class="detail-tabs">
+                            <div class="tab active" data-ws-tab="overview">Overview</div>
+                            <div class="tab" data-ws-tab="messages">Messages</div>
+                            <div class="tab" data-ws-tab="handshake">Handshake</div>
+                            <div class="tab" data-ws-tab="analysis">Analysis</div>
+                        </div>
+                    </div>
+                    <div id="ws-detail-content" class="detail-content">
+                        <div style="padding: 20px; color: #666; text-align: center;">Select a WebSocket connection to view details</div>
                     </div>
                 </div>
             </div>

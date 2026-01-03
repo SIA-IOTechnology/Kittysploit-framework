@@ -686,7 +686,9 @@
             window.KITTYCOLLAB_SERVER_URL = sessionStorage.getItem('server_url');
         }
         // Utiliser l'URL du serveur distant si configurée, sinon utiliser l'origine locale
-        const SERVER_URL = window.KITTYCOLLAB_SERVER_URL || window.location.origin;
+        // Pour Socket.IO, utiliser toujours l'origine locale qui fera le proxy vers le SaaS
+        const SERVER_URL = window.location.origin; // Utiliser le serveur local pour éviter CORS
+        const SAAS_URL = window.KITTYCOLLAB_SERVER_URL || "https://collab.kittysploit.com";
         const SERVER_TOKEN = "{{ api_token|default('') }}";
         const TOKEN_VALUE = SERVER_TOKEN.trim();
         if (TOKEN_VALUE) {
@@ -696,6 +698,14 @@
         let currentUsername = '';
         let currentToken = '';
         let cachedRooms = [];
+        let loadRoomsTimeout = null;
+        let isLoadingRooms = false;
+        let loadRoomsAttempts = 0;
+        let maxLoadRoomsAttempts = 5; // Limiter à 5 tentatives
+        let roomListUpdatedListener = null;
+        let hasLoadedRoomsOnce = false; // Pour savoir si on a déjà chargé les rooms une fois
+        let socketConnected = false; // État de connexion Socket.IO (accessible globalement)
+        let useSocketIO = true; // Indicateur pour savoir si on doit utiliser Socket.IO (accessible globalement)
 
         window.addEventListener('load', function () {
             currentUsername = sessionStorage.getItem('username');
@@ -709,20 +719,185 @@
             document.getElementById('userName').textContent = currentUsername;
             document.getElementById('userAvatar').textContent = currentUsername.charAt(0).toUpperCase();
 
-            socket = io(SERVER_URL);
-            socket.on('connect', function () {
-                loadRooms();
-                socket.on('room_list_updated', loadRooms);
-            });
+            // Essayer Socket.IO mais avec gestion d'erreur CORS
+            
+            function tryConnectSocketIO() {
+                if (!useSocketIO) {
+                    console.log('Socket.IO disabled due to CORS, using HTTP polling instead');
+                    // Charger les rooms via HTTP
+                    loadRooms();
+                    // Mettre en place un polling périodique pour les mises à jour
+                    startPolling();
+                    return;
+                }
+                
+                // Ne pas essayer de se connecter si on a déjà échoué
+                if (socket && !socketConnected) {
+                    console.log('Socket.IO already failed, skipping connection attempt');
+                    useSocketIO = false;
+                    loadRooms();
+                    startPolling();
+                    return;
+                }
+                
+                socket = io(SAAS_URL, {
+                    reconnection: false, // Désactiver la reconnexion automatique pour éviter les boucles
+                    reconnectionAttempts: 0, // Pas de tentatives de reconnexion
+                    timeout: 5000, // Timeout plus court pour détecter rapidement les erreurs
+                    transports: ['websocket'], // Utiliser uniquement WebSocket (le serveur n'autorise que WebSocket)
+                    upgrade: false,
+                    forceNew: true // Forcer une nouvelle connexion
+                });
+
+                socket.on('connect', function () {
+                    console.log('Socket.IO connected successfully');
+                    socketConnected = true;
+                    // Charger les rooms une seule fois au démarrage
+                    loadRooms();
+                    // Écouter les mises à jour mais avec debounce et limite pour éviter les scans en boucle
+                    if (roomListUpdatedListener) {
+                        socket.off('room_list_updated', roomListUpdatedListener);
+                    }
+                    roomListUpdatedListener = function() {
+                        // Ne pas écouter les mises à jour si on a déjà fait trop de tentatives
+                        if (loadRoomsAttempts >= maxLoadRoomsAttempts) {
+                            console.warn('Too many room_list_updated events, ignoring to prevent loop');
+                            socket.off('room_list_updated', roomListUpdatedListener);
+                            return;
+                        }
+                        
+                        if (loadRoomsTimeout) {
+                            clearTimeout(loadRoomsTimeout);
+                        }
+                        // Debounce de 5 secondes pour éviter les scans en boucle (augmenté pour load balancer)
+                        loadRoomsTimeout = setTimeout(function() {
+                            if (!isLoadingRooms && hasLoadedRoomsOnce) {
+                                // Ne recharger que si on a déjà chargé une fois (évite les appels initiaux multiples)
+                                loadRooms();
+                            }
+                        }, 5000);
+                    };
+                    socket.on('room_list_updated', roomListUpdatedListener);
+                });
+
+                socket.on('connect_error', function(error) {
+                    console.error('Socket.IO connection error:', error);
+                    
+                    // Détecter les erreurs CORS (peuvent avoir différents formats)
+                    const errorStr = JSON.stringify(error).toLowerCase();
+                    const isCorsError = error.message && (
+                        error.message.includes('CORS') || 
+                        error.message.includes('Access-Control') ||
+                        error.message.includes('TransportError') ||
+                        error.message.includes('xhr poll error') ||
+                        errorStr.includes('cors') ||
+                        errorStr.includes('access-control')
+                    );
+                    
+                    // Toujours désactiver Socket.IO après une erreur de connexion
+                    // Les erreurs CORS ou de transport indiquent que Socket.IO ne peut pas fonctionner
+                    console.warn('Socket.IO connection failed, disabling Socket.IO and using HTTP polling instead');
+                    useSocketIO = false;
+                    socketConnected = false;
+                    
+                    // Désactiver complètement Socket.IO
+                    if (socket) {
+                        socket.removeAllListeners();
+                        socket.disconnect();
+                        socket.close();
+                        socket = null;
+                    }
+                    
+                    // Charger les rooms via HTTP
+                    loadRooms();
+                    // Mettre en place un polling périodique
+                    startPolling();
+                });
+
+                socket.on('disconnect', function(reason) {
+                    console.warn('Socket.IO disconnected:', reason);
+                    socketConnected = false;
+                    // Si déconnecté et Socket.IO était utilisé, basculer vers polling
+                    if (useSocketIO && reason !== 'io client disconnect') {
+                        console.log('Socket.IO disconnected unexpectedly, switching to HTTP polling');
+                        useSocketIO = false;
+                        if (socket) {
+                            socket.removeAllListeners();
+                            socket = null;
+                        }
+                        startPolling();
+                    }
+                });
+                
+                // Écouter aussi les erreurs de transport directement
+                socket.io.on('error', function(error) {
+                    console.error('Socket.IO transport error:', error);
+                    if (useSocketIO) {
+                        console.warn('Transport error detected, disabling Socket.IO');
+                        useSocketIO = false;
+                        socketConnected = false;
+                        if (socket) {
+                            socket.removeAllListeners();
+                            socket.disconnect();
+                            socket.close();
+                            socket = null;
+                        }
+                        loadRooms();
+                        startPolling();
+                    }
+                });
+            }
+            
+            // Fonction pour démarrer le polling HTTP périodique
+            let pollingInterval = null;
+            function startPolling() {
+                if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                }
+                // Polling toutes les 30 secondes pour les mises à jour
+                pollingInterval = setInterval(function() {
+                    if (!isLoadingRooms && hasLoadedRoomsOnce) {
+                        loadRooms();
+                    }
+                }, 30000);
+            }
+            
+            // Essayer de se connecter via Socket.IO
+            tryConnectSocketIO();
 
             // Précharger les sessions sauvegardées pour l'affichage rapide
             loadSavedSessions();
         });
 
         async function loadRooms() {
+            // Éviter les appels simultanés
+            if (isLoadingRooms) {
+                console.log('loadRooms already in progress, skipping');
+                return;
+            }
+            
+            // Limiter le nombre de tentatives
+            if (loadRoomsAttempts >= maxLoadRoomsAttempts) {
+                console.warn('Max loadRooms attempts reached, stopping');
+                const container = document.getElementById('roomsContainer');
+                if (container && !hasLoadedRoomsOnce) {
+                    container.innerHTML = `
+                        <div class="empty-state" style="color: #ffaa00;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <p><strong>Unable to load sessions</strong></p>
+                            <p>Too many connection attempts. Please refresh the page.</p>
+                            <button class="action-btn" onclick="location.reload()" style="margin-top: 15px;">Refresh Page</button>
+                        </div>`;
+                }
+                return;
+            }
+            
+            isLoadingRooms = true;
+            loadRoomsAttempts++;
+            
             try {
-                // Construire l'URL avec le token si disponible
-                let url = SERVER_URL + '/api/rooms';
+                // Utiliser le serveur local qui fait le proxy vers le SaaS (évite CORS)
+                let url = window.location.origin + '/api/rooms';
                 if (currentToken) {
                     url += '?token=' + encodeURIComponent(currentToken);
                 }
@@ -731,18 +906,34 @@
                 const data = await res.json();
 
                 if (data.status === 'success') {
-                    cachedRooms = data.rooms || [];
-                    // Afficher toutes les rooms accessibles (publiques + privées accessibles avec le token)
-                    renderRooms(cachedRooms);
+                    const newRooms = data.rooms || [];
+                    // Vérifier si les données ont réellement changé
+                    const roomsChanged = JSON.stringify(newRooms) !== JSON.stringify(cachedRooms);
+                    if (roomsChanged || !hasLoadedRoomsOnce) {
+                        cachedRooms = newRooms;
+                        hasLoadedRoomsOnce = true;
+                        // Réinitialiser le compteur après un succès
+                        loadRoomsAttempts = 0;
+                        // Afficher toutes les rooms accessibles (publiques + privées accessibles avec le token)
+                        renderRooms(cachedRooms);
+                    } else {
+                        console.log('Rooms data unchanged, skipping render');
+                    }
                 } else {
                     console.error('Error loading rooms:', data.message);
+                    if (!hasLoadedRoomsOnce) {
+                        cachedRooms = [];
+                        renderRooms([]);
+                    }
+                }
+            } catch (e) {
+                console.error('Error loading rooms:', e);
+                if (!hasLoadedRoomsOnce) {
                     cachedRooms = [];
                     renderRooms([]);
                 }
-            } catch (e) {
-                console.error('Error:', e);
-                cachedRooms = [];
-                renderRooms([]);
+            } finally {
+                isLoadingRooms = false;
             }
         }
         
@@ -813,31 +1004,71 @@
             document.getElementById('createRoomModal').style.display = 'none';
         }
 
-        function submitCreateRoom() {
+        async function submitCreateRoom() {
             const description = document.getElementById('roomDescriptionInput').value.trim();
             const roomType = document.querySelector('input[name="roomType"]:checked').value;
             const isPublic = roomType === 'public';
             // Get token from sessionStorage (already provided during login)
             const token = sessionStorage.getItem('token') || '';
 
-            if (socket && socket.connected) {
-                socket.emit('create_room', {
-                    username: currentUsername,
-                    is_public: isPublic,
-                    access_token: token,
-                    description: description
+            // Essayer d'abord via Socket.IO si connecté
+            if (socket && socketConnected && useSocketIO) {
+                try {
+                    socket.emit('create_room', {
+                        username: currentUsername,
+                        is_public: isPublic,
+                        access_token: token,
+                        description: description
+                    });
+
+                    socket.once('room_created', function (data) {
+                        sessionStorage.setItem('currentRoomId', data.room_id);
+                        window.location.href = '/editor';
+                    });
+
+                    socket.once('error', function (data) {
+                        // Si erreur Socket.IO, essayer via HTTP
+                        createRoomViaHTTP(description, isPublic, token);
+                    });
+
+                    closeCreateRoomModal();
+                    return;
+                } catch (e) {
+                    console.error('Socket.IO error, trying HTTP fallback:', e);
+                }
+            }
+            
+            // Fallback: utiliser HTTP via le proxy local
+            await createRoomViaHTTP(description, isPublic, token);
+        }
+
+        async function createRoomViaHTTP(description, isPublic, token) {
+            try {
+                const response = await fetch(window.location.origin + '/api/rooms/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: currentUsername,
+                        is_public: isPublic,
+                        access_token: token,
+                        description: description
+                    })
                 });
 
-                socket.once('room_created', function (data) {
+                const data = await response.json();
+                
+                if (data.status === 'success' && data.room_id) {
                     sessionStorage.setItem('currentRoomId', data.room_id);
+                    closeCreateRoomModal();
                     window.location.href = '/editor';
-                });
-
-                socket.once('error', function (data) {
-                    alert('Error creating room: ' + data.message);
-                });
-
-                closeCreateRoomModal();
+                } else {
+                    alert('Error creating room: ' + (data.message || 'Unknown error'));
+                }
+            } catch (e) {
+                console.error('Error creating room via HTTP:', e);
+                alert('Error creating room: ' + e.message);
             }
         }
 
@@ -853,22 +1084,31 @@
             // Utilise simplement le token courant (sessionStorage) ou celui saisi
             currentToken = sessionStorage.getItem('token') || currentToken || '';
             const descriptionHint = descHint || getRoomDescription(roomId);
-            if (socket && socket.connected) {
-                socket.emit('join_room', {
-                    room_id: roomId,
-                    username: currentUsername,
-                    token: currentToken
-                });
+            // Essayer Socket.IO seulement si connecté
+            if (socket && socketConnected && useSocketIO) {
+                try {
+                    socket.emit('join_room', {
+                        room_id: roomId,
+                        username: currentUsername,
+                        token: currentToken
+                    });
 
-                socket.once('room_joined', function (data) {
-                    sessionStorage.setItem('currentRoomId', data.room_id);
-                    window.location.href = '/editor';
-                });
+                    socket.once('room_joined', function (data) {
+                        sessionStorage.setItem('currentRoomId', data.room_id);
+                        window.location.href = '/editor';
+                    });
 
-                socket.once('error', function (data) {
-                    alert('Access Denied: ' + data.message);
-                });
+                    socket.once('error', function (data) {
+                        alert('Access Denied: ' + data.message);
+                    });
+                    return;
+                } catch (e) {
+                    console.error('Socket.IO error:', e);
+                }
             }
+            
+            // Fallback: afficher un message si Socket.IO n'est pas disponible
+            alert('Cannot join room: Socket.IO connection is not available due to CORS restrictions. Please check your connection or contact support.');
         }
 
         // Saved sessions management (persisted on backend, sans token)

@@ -101,11 +101,17 @@ class InterceptionPluginManager:
 # Global plugin manager
 plugin_manager = InterceptionPluginManager()
 
+# Global reference to the addon instance (set when addon is created)
+interceptor_addon_instance = None
+
 class InterceptorAddon:
     def __init__(self, api_host=None, api_port=None):
         """Initialize the interceptor addon with optional API host/port to ignore"""
         self.api_host = api_host
         self.api_port = api_port
+        # Store WebSocket messages per flow
+        self.websocket_messages = {}  # flow_id -> list of messages
+        self.websocket_flows = {}  # flow_id -> WebSocketFlow
     
     def _is_api_request(self, flow):
         """Check if the request is to the API interface itself"""
@@ -174,6 +180,118 @@ class InterceptorAddon:
         except Exception as e:
             # Ignorer les erreurs de collaboration
             pass
+    
+    def websocket_start(self, flow):
+        """Called when a WebSocket connection starts - receives WebSocketFlow"""
+        try:
+            # Get the HTTP flow ID from the handshake
+            http_flow_id = None
+            if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                http_flow_id = flow.handshake_flow.id
+            else:
+                http_flow_id = flow.id
+            
+            # Ignore WebSocket connections to the API interface itself
+            if http_flow_id and self._is_api_request(flow.handshake_flow if hasattr(flow, 'handshake_flow') and flow.handshake_flow else flow):
+                return
+            
+            # Store the WebSocket flow and initialize messages list
+            self.websocket_flows[http_flow_id] = flow
+            self.websocket_messages[http_flow_id] = []
+            
+            # Add the initial HTTP flow (handshake) to flow manager
+            if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                flow_manager.add_flow(flow.handshake_flow)
+            print(f"[WEBSOCKET] WebSocket connection started for HTTP flow {http_flow_id}")
+        except Exception as e:
+            print(f"[ERROR] Error in websocket_start: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def websocket_message(self, flow):
+        """Capture WebSocket messages - receives WebSocketFlow"""
+        try:
+            # Get the HTTP flow ID from the handshake
+            http_flow_id = None
+            if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                http_flow_id = flow.handshake_flow.id
+            else:
+                # Fallback to WebSocket flow ID
+                http_flow_id = flow.id
+            
+            # Ignore WebSocket messages to the API interface itself
+            if http_flow_id and self._is_api_request(flow.handshake_flow if hasattr(flow, 'handshake_flow') and flow.handshake_flow else flow):
+                return
+            
+            # Get or create message list for this HTTP flow
+            if http_flow_id not in self.websocket_messages:
+                self.websocket_messages[http_flow_id] = []
+            
+            # Get the latest message (websocket_message is called for each message)
+            if hasattr(flow, 'messages') and flow.messages:
+                message = flow.messages[-1]  # Get the latest message
+                
+                # Determine message type
+                try:
+                    from mitmproxy import websocket as ws
+                    msg_type = 'text' if message.type == ws.MessageType.TEXT else 'binary'
+                except:
+                    msg_type = 'text' if hasattr(message, 'type') and message.type == 1 else 'binary'
+                
+                # Store message data
+                timestamp = None
+                if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                    timestamp = flow.handshake_flow.request.timestamp_start if hasattr(flow.handshake_flow.request, 'timestamp_start') else None
+                
+                msg_data = {
+                    'from_client': message.from_client,
+                    'content': message.content.decode('utf-8', errors='replace') if isinstance(message.content, bytes) else str(message.content),
+                    'type': msg_type,
+                    'timestamp': timestamp,
+                    'direction': 'client' if message.from_client else 'server'
+                }
+                
+                # Only add if not already in list (avoid duplicates)
+                if not self.websocket_messages[http_flow_id] or self.websocket_messages[http_flow_id][-1] != msg_data:
+                    self.websocket_messages[http_flow_id].append(msg_data)
+                
+                # Update the HTTP flow in manager with WebSocket messages
+                if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                    flow_manager.add_flow(flow.handshake_flow)
+                print(f"[WEBSOCKET] Captured message for HTTP flow {http_flow_id} (total: {len(self.websocket_messages[http_flow_id])})")
+        except Exception as e:
+            print(f"[ERROR] Error capturing WebSocket message: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def websocket_end(self, flow):
+        """Called when WebSocket connection ends"""
+        try:
+            # Get the HTTP flow ID from the handshake
+            http_flow_id = None
+            if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                http_flow_id = flow.handshake_flow.id
+            else:
+                http_flow_id = flow.id
+            
+            # Ignore WebSocket messages to the API interface itself
+            if http_flow_id and self._is_api_request(flow.handshake_flow if hasattr(flow, 'handshake_flow') and flow.handshake_flow else flow):
+                return
+            
+            # Final update of HTTP flow with all WebSocket messages
+            if http_flow_id in self.websocket_messages:
+                if hasattr(flow, 'handshake_flow') and flow.handshake_flow:
+                    flow_manager.add_flow(flow.handshake_flow)
+                print(f"[WEBSOCKET] WebSocket connection ended for HTTP flow {http_flow_id}, captured {len(self.websocket_messages[http_flow_id])} messages")
+                
+                # Clean up old messages after a delay (keep last 1000 flows)
+                if len(self.websocket_messages) > 1000:
+                    # Remove oldest entries
+                    oldest_ids = list(self.websocket_messages.keys())[:-1000]
+                    for old_id in oldest_ids:
+                        del self.websocket_messages[old_id]
+        except Exception as e:
+            print(f"[ERROR] Error in websocket_end: {e}")
 
 class MitmProxyWrapper:
     def __init__(self, host="127.0.0.1", port=8080, api_host=None, api_port=None):
@@ -192,7 +310,10 @@ class MitmProxyWrapper:
     async def _async_run(self):
         opts = options.Options(listen_host=self.host, listen_port=self.port)
         self.master = DumpMaster(opts, with_termlog=False, with_dumper=False)
-        self.master.addons.add(InterceptorAddon(api_host=self.api_host, api_port=self.api_port))
+        addon = InterceptorAddon(api_host=self.api_host, api_port=self.api_port)
+        global interceptor_addon_instance
+        interceptor_addon_instance = addon
+        self.master.addons.add(addon)
         try:
             await self.master.run()
         except asyncio.CancelledError:

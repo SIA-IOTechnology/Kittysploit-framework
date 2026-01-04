@@ -1,6 +1,8 @@
 // Main Application Logic
 // URL du serveur SaaS pour les salons, chat, édition en temps réel
-const SERVER_URL = window.KITTYCOLLAB_SERVER_URL || window.location.origin;
+// Utiliser toujours le serveur local qui fait le proxy vers le SaaS (évite CORS et problèmes de load balancer)
+const SERVER_URL = window.location.origin; // Utiliser le serveur local pour toutes les requêtes API
+const SAAS_URL = window.KITTYCOLLAB_SERVER_URL || "https://collab.kittysploit.com"; // URL du SaaS pour Socket.IO uniquement
 // URL locale pour les modules (toujours depuis le client local)
 const LOCAL_API_URL = window.location.origin;
 let socket = null;
@@ -40,8 +42,9 @@ function initApp() {
     document.getElementById('roomInfo').textContent = '#' + currentRoomId;
 
     // Initialize Socket
-    console.log('Connecting to SocketIO server:', SERVER_URL);
-    socket = io(SERVER_URL, {
+    // Utiliser SAAS_URL pour Socket.IO (connexion directe nécessaire)
+    console.log('Connecting to SocketIO server:', SAAS_URL);
+    socket = io(SAAS_URL, {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
@@ -361,15 +364,27 @@ function setupSocketHandlers() {
 
     // Editor Sync
     socket.on('edit_operation', (data) => {
-        if (data.module_path === currentModulePath && data.client_id !== socket.id) {
+        // Vérifier que c'est pour le bon module et que ce n'est pas notre propre changement
+        const senderId = data.client_id || data.user_id || data.socket_id;
+        if (data.module_path === currentModulePath && senderId !== socket.id) {
             const op = data.operation;
             const model = editor.getModel();
-            const pos = model.getPositionAt(op.position);
-
+            
+            if (!model) return;
+            
             // Set flag to prevent re-emitting this change
             isApplyingRemoteChange = true;
             
             try {
+                // Vérifier que la position est valide
+                const modelLength = model.getValueLength();
+                if (op.position < 0 || op.position > modelLength) {
+                    console.warn('Invalid operation position:', op.position, 'model length:', modelLength);
+                    return;
+                }
+                
+                const pos = model.getPositionAt(op.position);
+                
                 if (op.type === 'insert') {
                     model.applyEdits([{
                         range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
@@ -377,32 +392,49 @@ function setupSocketHandlers() {
                         forceMoveMarkers: true
                     }]);
                 } else if (op.type === 'delete') {
-                    const endPos = model.getPositionAt(op.position + op.length);
-                    model.applyEdits([{
-                        range: new monaco.Range(pos.lineNumber, pos.column, endPos.lineNumber, endPos.column),
-                        text: ''
-                    }]);
+                    const deleteLength = Math.min(op.length, modelLength - op.position);
+                    if (deleteLength > 0) {
+                        const endPos = model.getPositionAt(op.position + deleteLength);
+                        model.applyEdits([{
+                            range: new monaco.Range(pos.lineNumber, pos.column, endPos.lineNumber, endPos.column),
+                            text: ''
+                        }]);
+                    }
                 }
+            } catch (error) {
+                console.error('Error applying remote edit operation:', error, data);
             } finally {
                 // Reset flag after a short delay to ensure the change event has been processed
                 setTimeout(() => {
                     isApplyingRemoteChange = false;
-                }, 0);
+                }, 10);
             }
         }
     });
 
     // File Edit Sync
     socket.on('file_edit_operation', (data) => {
-        if (data.file_id === currentFileId && data.user_id !== socket.id) {
+        // Vérifier que c'est pour le bon fichier et que ce n'est pas notre propre changement
+        const senderId = data.user_id || data.client_id || data.socket_id;
+        if (data.file_id === currentFileId && senderId !== socket.id) {
             const op = data.operation;
             const model = editor.getModel();
-            const pos = model.getPositionAt(op.position);
-
+            
+            if (!model) return;
+            
             // Set flag to prevent re-emitting this change
             isApplyingRemoteChange = true;
             
             try {
+                // Vérifier que la position est valide
+                const modelLength = model.getValueLength();
+                if (op.position < 0 || op.position > modelLength) {
+                    console.warn('Invalid operation position:', op.position, 'model length:', modelLength);
+                    return;
+                }
+                
+                const pos = model.getPositionAt(op.position);
+                
                 if (op.type === 'insert') {
                     model.applyEdits([{
                         range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
@@ -410,17 +442,22 @@ function setupSocketHandlers() {
                         forceMoveMarkers: true
                     }]);
                 } else if (op.type === 'delete') {
-                    const endPos = model.getPositionAt(op.position + op.length);
-                    model.applyEdits([{
-                        range: new monaco.Range(pos.lineNumber, pos.column, endPos.lineNumber, endPos.column),
-                        text: ''
-                    }]);
+                    const deleteLength = Math.min(op.length, modelLength - op.position);
+                    if (deleteLength > 0) {
+                        const endPos = model.getPositionAt(op.position + deleteLength);
+                        model.applyEdits([{
+                            range: new monaco.Range(pos.lineNumber, pos.column, endPos.lineNumber, endPos.column),
+                            text: ''
+                        }]);
+                    }
                 }
+            } catch (error) {
+                console.error('Error applying remote file edit operation:', error, data);
             } finally {
                 // Reset flag after a short delay to ensure the change event has been processed
                 setTimeout(() => {
                     isApplyingRemoteChange = false;
-                }, 0);
+                }, 10);
             }
         }
     });
@@ -520,7 +557,31 @@ function escapeHtml(text) {
 // État de l'arborescence sauvegardé
 let moduleTreeState = {};
 
+let isLoadingModules = false;
+let loadModulesTimeout = null;
+
 async function loadModules() {
+    // Éviter les appels simultanés
+    if (isLoadingModules) {
+        console.log('loadModules already in progress, skipping');
+        return;
+    }
+    
+    // Debounce pour éviter les appels multiples rapides
+    if (loadModulesTimeout) {
+        clearTimeout(loadModulesTimeout);
+    }
+    loadModulesTimeout = setTimeout(async () => {
+        await _loadModulesInternal();
+    }, 100);
+}
+
+async function _loadModulesInternal() {
+    if (isLoadingModules) {
+        return;
+    }
+    isLoadingModules = true;
+    
     try {
         // Les modules viennent toujours du client local
         const res = await fetch(LOCAL_API_URL + '/api/modules');
@@ -528,14 +589,33 @@ async function loadModules() {
 
         if (data.status === 'success') {
             const list = document.getElementById('moduleList');
+            if (!list) {
+                console.warn('moduleList element not found');
+                return;
+            }
+            
+            // Sauvegarder le chemin du module actuellement sélectionné
+            const previousModulePath = currentModulePath;
+            
+            // Construire l'arborescence de manière atomique
             list.innerHTML = '';
             const tree = buildModuleTree(data.modules);
             renderTree(tree, list);
             // Restaurer l'état de l'arborescence
             restoreTreeState();
+            
+            // Restaurer la sélection si un module est actuellement ouvert
+            if (previousModulePath) {
+                const activeModuleItem = document.querySelector(`.file-item[data-path="${previousModulePath}"]`);
+                if (activeModuleItem) {
+                    activeModuleItem.classList.add('active');
+                }
+            }
         }
     } catch (e) {
         console.error('Error loading modules:', e);
+    } finally {
+        isLoadingModules = false;
     }
 }
 
@@ -1008,13 +1088,83 @@ function deleteNote(id) {
 let currentFileId = null;
 let cursorDecorations = {}; // Track cursor decorations by user_id
 
+let isLoadingFiles = false;
+let loadFilesTimeout = null;
+let filesLoadedOnce = false; // Pour éviter les chargements multiples au démarrage
+let loadFilesRequestId = 0; // Compteur pour ignorer les réponses obsolètes
+let currentFilesAbortController = null; // Pour annuler les requêtes en cours
+
 async function loadFiles() {
+    // Annuler la requête précédente si elle est en cours
+    if (currentFilesAbortController) {
+        currentFilesAbortController.abort();
+    }
+    
+    // Éviter les appels simultanés
+    if (isLoadingFiles) {
+        console.log('loadFiles already in progress, will retry after current load');
+        // Programmer un nouveau chargement après le chargement en cours
+        if (loadFilesTimeout) {
+            clearTimeout(loadFilesTimeout);
+        }
+        loadFilesTimeout = setTimeout(() => {
+            loadFiles();
+        }, 200);
+        return;
+    }
+    
+    // Debounce pour éviter les appels multiples rapides
+    if (loadFilesTimeout) {
+        clearTimeout(loadFilesTimeout);
+    }
+    loadFilesTimeout = setTimeout(async () => {
+        await _loadFilesInternal();
+    }, 150); // Augmenté à 150ms pour mieux grouper les appels
+}
+
+async function _loadFilesInternal() {
+    if (isLoadingFiles) {
+        return;
+    }
+    
+    // Créer un nouvel AbortController pour cette requête
+    currentFilesAbortController = new AbortController();
+    const requestId = ++loadFilesRequestId;
+    isLoadingFiles = true;
+    
     try {
-        const res = await fetch(SERVER_URL + '/api/rooms/' + currentRoomId + '/files');
+        const res = await fetch(SERVER_URL + '/api/rooms/' + currentRoomId + '/files', {
+            signal: currentFilesAbortController.signal
+        });
+        
+        // Vérifier si cette requête est toujours la plus récente
+        if (requestId !== loadFilesRequestId) {
+            console.log(`Ignoring stale loadFiles response (requestId: ${requestId}, current: ${loadFilesRequestId})`);
+            return;
+        }
+        
         const data = await res.json();
         if (data.status === 'success') {
             const list = document.getElementById('filesList');
-            list.innerHTML = data.files.map(f => `
+            if (!list) {
+                console.warn('filesList element not found');
+                return;
+            }
+            
+            // Vérifier à nouveau que la requête est toujours valide avant de mettre à jour le DOM
+            if (requestId !== loadFilesRequestId) {
+                console.log(`Ignoring stale loadFiles response before DOM update (requestId: ${requestId}, current: ${loadFilesRequestId})`);
+                return;
+            }
+            
+            // Sauvegarder l'ID du fichier actuellement sélectionné
+            const previousFileId = currentFileId;
+            
+            // Trier les fichiers par nom pour un affichage cohérent
+            const sortedFiles = [...data.files].sort((a, b) => a.name.localeCompare(b.name));
+            
+            // Construire le HTML de manière atomique
+            const filesHtml = sortedFiles.map(f => `
                 <li class="file-item" data-file-id="${f.id}">
                     <i class="fas fa-file"></i>
                     <span style="flex:1; cursor:pointer;" onclick="openFile('${f.id}', '${f.name}')">${f.name}</span>
@@ -1028,15 +1178,40 @@ async function loadFiles() {
                 </li>
             `).join('');
             
+            // Vérifier une dernière fois avant la mise à jour du DOM
+            if (requestId !== loadFilesRequestId) {
+                console.log(`Ignoring stale loadFiles response at DOM update (requestId: ${requestId}, current: ${loadFilesRequestId})`);
+                return;
+            }
+            
+            // Mettre à jour le DOM de manière atomique
+            list.innerHTML = filesHtml;
+            
             // Restaurer la sélection si un fichier est actuellement ouvert
-            if (currentFileId) {
-                const activeFileItem = document.querySelector(`.file-item[data-file-id="${currentFileId}"]`);
+            if (previousFileId) {
+                const activeFileItem = document.querySelector(`.file-item[data-file-id="${previousFileId}"]`);
                 if (activeFileItem) {
                     activeFileItem.classList.add('active');
                 }
             }
+            
+            filesLoadedOnce = true;
+            console.log(`Loaded ${sortedFiles.length} files (requestId: ${requestId})`);
         }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        // Ignorer les erreurs d'annulation
+        if (e.name === 'AbortError') {
+            console.log('loadFiles request was aborted');
+            return;
+        }
+        console.error('Error loading files:', e);
+    } finally {
+        // Ne réinitialiser que si c'est toujours la requête en cours
+        if (requestId === loadFilesRequestId) {
+            isLoadingFiles = false;
+            currentFilesAbortController = null;
+        }
+    }
 }
 
 async function openFile(fileId, filename) {
@@ -1142,14 +1317,16 @@ function setupFileCursorTracking() {
     });
 
     // Listen for other users' cursors
-    socket.off('cursor_update'); // Remove old listener if any
-    socket.on('cursor_update', (data) => {
+    // Utiliser une fonction nommée pour pouvoir la supprimer proprement
+    const handleFileCursorUpdate = (data) => {
         if (data.file_id !== currentFileId) return;
 
-        const userId = data.user_id;
+        const userId = data.user_id || data.client_id || data.socket_id;
+        if (userId === socket.id) return; // Ignorer notre propre curseur
+        
         const position = data.position;
-        const color = data.color;
-        const username = data.username;
+        const color = data.color || '#00ffff';
+        const username = data.username || 'Unknown';
 
         // Remove old decoration for this user
         if (cursorDecorations[userId]) {
@@ -1189,12 +1366,15 @@ function setupFileCursorTracking() {
         const existingStyle = document.getElementById(style.id);
         if (existingStyle) existingStyle.remove();
         document.head.appendChild(style);
-    });
+    };
+    
+    // Supprimer l'ancien listener s'il existe
+    socket.off('cursor_update', handleFileCursorUpdate);
+    socket.on('cursor_update', handleFileCursorUpdate);
 
     // Remove cursor when user leaves
-    socket.off('user_left_file');
-    socket.on('user_left_file', (data) => {
-        const userId = data.user_id;
+    const handleUserLeftFile = (data) => {
+        const userId = data.user_id || data.client_id || data.socket_id;
         if (cursorDecorations[userId]) {
             editor.deltaDecorations(cursorDecorations[userId], []);
             delete cursorDecorations[userId];
@@ -1202,7 +1382,10 @@ function setupFileCursorTracking() {
             const style = document.getElementById(`cursor-style-${userId}`);
             if (style) style.remove();
         }
-    });
+    };
+    
+    socket.off('user_left_file', handleUserLeftFile);
+    socket.on('user_left_file', handleUserLeftFile);
 }
 
 function setupModuleCursorTracking() {
@@ -1230,11 +1413,12 @@ function setupModuleCursorTracking() {
     });
 
     // Listen for other users' cursors in modules
-    socket.off('module_cursor_update'); // Remove old listener if any
-    socket.on('module_cursor_update', (data) => {
+    const handleModuleCursorUpdate = (data) => {
         if (data.module_path !== currentModulePath) return;
 
-        const userId = data.client_id;
+        const userId = data.client_id || data.user_id || data.socket_id;
+        if (userId === socket.id) return; // Ignorer notre propre curseur
+        
         const position = data.position;
         const color = data.color || '#00ffff';
         const username = data.username || 'Unknown';
@@ -1277,12 +1461,14 @@ function setupModuleCursorTracking() {
         const existingStyle = document.getElementById(style.id);
         if (existingStyle) existingStyle.remove();
         document.head.appendChild(style);
-    });
+    };
+    
+    socket.off('module_cursor_update', handleModuleCursorUpdate);
+    socket.on('module_cursor_update', handleModuleCursorUpdate);
 
     // Remove cursor when user leaves module
-    socket.off('user_left_module');
-    socket.on('user_left_module', (data) => {
-        const userId = data.client_id;
+    const handleUserLeftModule = (data) => {
+        const userId = data.client_id || data.user_id || data.socket_id;
         if (cursorDecorations[userId]) {
             editor.deltaDecorations(cursorDecorations[userId], []);
             delete cursorDecorations[userId];
@@ -1290,7 +1476,10 @@ function setupModuleCursorTracking() {
             const style = document.getElementById(`cursor-style-${userId}`);
             if (style) style.remove();
         }
-    });
+    };
+    
+    socket.off('user_left_module', handleUserLeftModule);
+    socket.on('user_left_module', handleUserLeftModule);
 }
 
 // File Upload

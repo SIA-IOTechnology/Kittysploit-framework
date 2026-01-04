@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Table, Index, CheckConstraint, UniqueConstraint
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Table, Index, CheckConstraint, UniqueConstraint, Float, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker, validates
 from datetime import datetime
@@ -605,3 +605,134 @@ class Session(Base, EncryptedFieldMixin):
             'session_info': self.session_info,
             'workspace_id': self.workspace_id
         }
+
+class ProxyFlow(Base, EncryptedFieldMixin):
+    """Proxy flow model - stores HTTP flows captured by kittyproxy"""
+    __tablename__ = 'proxy_flows'
+    
+    id = Column(Integer, primary_key=True)
+    flow_id = Column(String(100), unique=True, nullable=False)  # Unique flow identifier from mitmproxy (not encrypted for indexing)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+    workspace = relationship("Workspace", backref="proxy_flows")
+    
+    # Request data
+    method = Column(String(10), nullable=False)  # Not encrypted (metadata)
+    scheme = Column(String(10))  # Not encrypted (metadata)
+    host = Column(EncryptedString(255))  # Encrypted (sensitive)
+    path = Column(EncryptedText)  # Encrypted (sensitive)
+    url = Column(EncryptedText)  # Encrypted (sensitive - contains full URL)
+    request_headers = Column(EncryptedText)  # Encrypted (JSON encoded - contains sensitive headers)
+    request_content = Column(EncryptedText)  # Encrypted (Base64 encoded - contains request body)
+    request_content_length = Column(Integer, default=0)  # Not encrypted (metadata)
+    
+    # Response data
+    status_code = Column(Integer)  # Not encrypted (metadata)
+    response_headers = Column(EncryptedText)  # Encrypted (JSON encoded - contains sensitive headers)
+    response_content = Column(EncryptedText)  # Encrypted (Base64 encoded - contains response body)
+    response_content_length = Column(Integer, default=0)  # Not encrypted (metadata)
+    response_reason = Column(EncryptedString(100))  # Encrypted (may contain sensitive info)
+    
+    # Metadata
+    timestamp_start = Column(Float, nullable=False)  # Not encrypted (metadata)
+    duration = Column(Float)  # Not encrypted (metadata)
+    duration_ms = Column(Integer)  # Not encrypted (metadata)
+    response_size = Column(Integer)  # Not encrypted (metadata)
+    intercepted = Column(Boolean, default=False)  # Not encrypted (metadata)
+    source = Column(String(50))  # Not encrypted (metadata - e.g., 'api_tester')
+    
+    # Analysis data (stored as JSON) - encrypted as may contain sensitive info
+    technologies = Column(EncryptedText)  # Encrypted (JSON encoded)
+    fingerprint = Column(EncryptedText)  # Encrypted (JSON encoded)
+    module_suggestions = Column(EncryptedText)  # Encrypted (JSON encoded)
+    endpoints = Column(EncryptedText)  # Encrypted (JSON encoded)
+    discovered_endpoints = Column(EncryptedText)  # Encrypted (JSON encoded list)
+    
+    # WebSocket data
+    is_websocket = Column(Boolean, default=False)  # Not encrypted (metadata)
+    ws_messages = Column(EncryptedText)  # Encrypted (JSON encoded - contains WebSocket messages)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Indexes for performance (only on non-encrypted fields)
+    __table_args__ = (
+        Index('idx_proxy_flows_flow_id', 'flow_id'),
+        Index('idx_proxy_flows_workspace_id', 'workspace_id'),
+        Index('idx_proxy_flows_timestamp', 'timestamp_start'),
+        Index('idx_proxy_flows_created_at', 'created_at'),
+    )
+    
+    def __repr__(self):
+        return f"<ProxyFlow(id={self.id}, flow_id='{self.flow_id}', url='{self.url[:50]}...', workspace_id={self.workspace_id})>"
+    
+    def to_dict(self):
+        """Convert flow to dictionary for JSON serialization"""
+        import json
+        return {
+            'id': self.flow_id,
+            'method': self.method,
+            'scheme': self.scheme,
+            'host': self.host,
+            'path': self.path,
+            'url': self.url,
+            'timestamp_start': self.timestamp_start,
+            'status_code': self.status_code,
+            'duration': self.duration,
+            'duration_ms': self.duration_ms,
+            'intercepted': self.intercepted,
+            'source': self.source,
+            'response_size': self.response_size,
+            'is_websocket': self.is_websocket,
+            'request': {
+                'headers': json.loads(self.request_headers) if self.request_headers else {},
+                'content_bs64': self.request_content or '',
+                'content_length': self.request_content_length
+            },
+            'response': {
+                'headers': json.loads(self.response_headers) if self.response_headers else {},
+                'content_bs64': self.response_content or '',
+                'content_length': self.response_content_length,
+                'reason': self.response_reason or ''
+            } if self.status_code else None,
+            'technologies': json.loads(self.technologies) if self.technologies else {},
+            'fingerprint': json.loads(self.fingerprint) if self.fingerprint else {},
+            'module_suggestions': json.loads(self.module_suggestions) if self.module_suggestions else [],
+            'endpoints': json.loads(self.endpoints) if self.endpoints else {},
+            'discovered_endpoints': json.loads(self.discovered_endpoints) if self.discovered_endpoints else [],
+            'ws_messages': json.loads(self.ws_messages) if self.ws_messages else [],
+            'messages': json.loads(self.ws_messages) if self.ws_messages else [],
+        }
+
+class ProxyEndpoint(Base, EncryptedFieldMixin):
+    """Proxy endpoint model - stores discovered endpoints from flows"""
+    __tablename__ = 'proxy_endpoints'
+    
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False)
+    workspace = relationship("Workspace", backref="proxy_endpoints")
+    
+    # Endpoint data
+    url = Column(EncryptedText, nullable=False)  # Encrypted (sensitive - contains full URL)
+    endpoint_type = Column(String(50))  # Not encrypted (metadata - 'api_endpoint', 'html_link', etc.)
+    category = Column(String(50))  # Not encrypted (metadata - 'html_links', 'api_endpoints', etc.)
+    
+    # Source information
+    source_flow_id = Column(String(100))  # Not encrypted (metadata - Flow ID that discovered this endpoint)
+    source_url = Column(EncryptedText)  # Encrypted (sensitive - URL of the flow that discovered this endpoint)
+    
+    # Metadata
+    discovered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Indexes for performance (only on non-encrypted fields)
+    # Note: Cannot index encrypted fields, so we remove the unique constraint on url
+    __table_args__ = (
+        Index('idx_proxy_endpoints_workspace_id', 'workspace_id'),
+        Index('idx_proxy_endpoints_type', 'endpoint_type'),
+        Index('idx_proxy_endpoints_category', 'category'),
+        Index('idx_proxy_endpoints_discovered_at', 'discovered_at'),
+        # UniqueConstraint removed as url is encrypted and cannot be indexed
+    )
+    
+    def __repr__(self):
+        return f"<ProxyEndpoint(id={self.id}, url='{self.url[:50]}...', type='{self.endpoint_type}', workspace_id={self.workspace_id})>"

@@ -3,7 +3,7 @@
 
 """
 KittySploit Proxy Interface
-Lance l'interface du proxy web avec intégration au framework
+This script starts the KittySploit Proxy Interface with integration to the framework.
 """
 
 import sys

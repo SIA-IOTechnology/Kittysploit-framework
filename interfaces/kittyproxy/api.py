@@ -35,8 +35,20 @@ def set_framework(fw):
     """Set the framework instance"""
     global framework
     framework = fw
+    # Set framework in flow_manager and endpoint_extractor
+    flow_manager.framework = fw
+    endpoint_extractor.framework = fw
     # Load modules cache on framework initialization
     load_modules_cache()
+    # Load flows and endpoints from database for current workspace
+    if fw:
+        current_workspace = fw.get_current_workspace_name()
+        if current_workspace and current_workspace != "default":
+            try:
+                flow_manager.load_flows_from_db(current_workspace)
+                endpoint_extractor.load_endpoints_from_db(current_workspace)
+            except Exception as e:
+                print(f"[API] Error loading flows/endpoints from database: {e}")
 
 app = FastAPI()
 
@@ -2550,6 +2562,13 @@ def switch_workspace(workspace_name: str):
     try:
         success = framework.set_workspace(workspace_name)
         if success:
+            # Load flows and endpoints from database for the new workspace
+            if hasattr(flow_manager, 'load_flows_from_db'):
+                flow_manager.framework = framework
+                flow_manager.load_flows_from_db(workspace_name)
+            if hasattr(endpoint_extractor, 'load_endpoints_from_db'):
+                endpoint_extractor.framework = framework
+                endpoint_extractor.load_endpoints_from_db(workspace_name)
             return {"status": "ok", "workspace": workspace_name}
         else:
             raise HTTPException(status_code=400, detail=f"Failed to switch to workspace: {workspace_name}")

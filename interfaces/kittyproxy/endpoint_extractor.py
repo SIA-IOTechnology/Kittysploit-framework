@@ -15,7 +15,7 @@ from mitmproxy import http
 class EndpointExtractor:
     """Extrait les endpoints, liens et URLs depuis les réponses HTTP"""
     
-    def __init__(self):
+    def __init__(self, framework=None):
         self.discovered_endpoints: Set[str] = set()
         self.discovered_links: Set[str] = set()
         self.react_api_endpoints: Set[str] = set()  # Endpoints spécifiques extraits depuis React
@@ -26,6 +26,7 @@ class EndpointExtractor:
         self.graphql_queries: Dict[str, List[Dict]] = {}  # Endpoint GraphQL -> Liste de requêtes
         self.analyzed_flows: Set[str] = set()  # URLs de flows déjà analysés (pour éviter la réanalyse)
         self.cached_endpoints: Dict[str, Dict[str, List[str]]] = {}  # Cache des endpoints extraits par flow_id
+        self.framework = framework  # Framework instance for database access
 
     def reset(self):
         """Réinitialise tous les jeux de données extraits (utile après un clear)"""
@@ -1219,6 +1220,123 @@ class EndpointExtractor:
             'react_api_endpoints': filtered_react_apis,
             'graphql_queries': graphql_data,  # Endpoint -> Liste de requêtes
         }
+    
+    def _save_endpoint_to_db(self, url: str, category: str, flow):
+        """Save endpoint to database if workspace is not 'default'"""
+        if not self.framework:
+            return
+        
+        try:
+            current_workspace = self.framework.get_current_workspace_name()
+            if current_workspace == "default":
+                return  # Don't save endpoints for default workspace
+            
+            # Get database session
+            db_session = self.framework.get_db_session()
+            if not db_session:
+                return
+            
+            from core.models.models import ProxyEndpoint, Workspace
+            
+            # Get workspace ID
+            workspace = db_session.query(Workspace).filter(Workspace.name == current_workspace).first()
+            if not workspace:
+                return
+            
+            # Determine endpoint type based on category
+            endpoint_type = 'api_endpoint' if category == 'api_endpoints' else \
+                          'html_link' if category == 'html_links' else \
+                          'javascript_endpoint' if category == 'javascript_endpoints' else \
+                          'react_api_endpoint' if category == 'react_api_endpoints' else \
+                          'other'
+            
+            # Check if endpoint already exists
+            # Note: Since url is encrypted, we need to load all endpoints and check in memory
+            # This is less efficient but necessary for encrypted fields
+            existing_endpoints = db_session.query(ProxyEndpoint).filter(
+                ProxyEndpoint.workspace_id == workspace.id,
+                ProxyEndpoint.endpoint_type == endpoint_type
+            ).all()
+            
+            # Check if URL already exists (decrypt and compare)
+            existing = None
+            for ep in existing_endpoints:
+                if ep.url == url:  # Decryption happens automatically via EncryptedText
+                    existing = ep
+                    break
+            
+            if not existing:
+                # Create new endpoint
+                db_endpoint = ProxyEndpoint(
+                    workspace_id=workspace.id,
+                    url=url,
+                    endpoint_type=endpoint_type,
+                    category=category,
+                    source_flow_id=flow.id if hasattr(flow, 'id') else None,
+                    source_url=flow.request.url if hasattr(flow, 'request') and hasattr(flow.request, 'url') else None
+                )
+                db_session.add(db_endpoint)
+                db_session.commit()
+        except Exception as e:
+            print(f"[ENDPOINT EXTRACTOR] Error saving endpoint to database: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                if db_session:
+                    db_session.rollback()
+            except:
+                pass
+    
+    def load_endpoints_from_db(self, workspace_name: str = None):
+        """Load endpoints from database for the current workspace"""
+        if not self.framework:
+            return
+        
+        try:
+            if workspace_name is None:
+                workspace_name = self.framework.get_current_workspace_name()
+            
+            if workspace_name == "default":
+                return  # Don't load endpoints for default workspace
+            
+            # Get database session
+            db_session = self.framework.get_db_session()
+            if not db_session:
+                return
+            
+            from core.models.models import ProxyEndpoint, Workspace
+            
+            # Get workspace ID
+            workspace = db_session.query(Workspace).filter(Workspace.name == workspace_name).first()
+            if not workspace:
+                return
+            
+            # Load endpoints from database
+            db_endpoints = db_session.query(ProxyEndpoint).filter(
+                ProxyEndpoint.workspace_id == workspace.id
+            ).all()
+            
+            print(f"[ENDPOINT EXTRACTOR] Loading {len(db_endpoints)} endpoints from database for workspace '{workspace_name}'")
+            
+            # Clear existing endpoints
+            self.discovered_endpoints.clear()
+            self.discovered_links.clear()
+            self.react_api_endpoints.clear()
+            
+            # Load endpoints into sets
+            for db_endpoint in db_endpoints:
+                if db_endpoint.endpoint_type == 'react_api_endpoint':
+                    self.react_api_endpoints.add(db_endpoint.url)
+                elif db_endpoint.endpoint_type == 'html_link':
+                    self.discovered_links.add(db_endpoint.url)
+                else:
+                    self.discovered_endpoints.add(db_endpoint.url)
+            
+            print(f"[ENDPOINT EXTRACTOR] Successfully loaded {len(self.discovered_endpoints)} endpoints, {len(self.discovered_links)} links, {len(self.react_api_endpoints)} React APIs from database")
+        except Exception as e:
+            print(f"[ENDPOINT EXTRACTOR] Error loading endpoints from database: {e}")
+            import traceback
+            traceback.print_exc()
 
 # Instance globale
 endpoint_extractor = EndpointExtractor()

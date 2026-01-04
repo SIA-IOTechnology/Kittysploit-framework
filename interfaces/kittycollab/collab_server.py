@@ -44,6 +44,9 @@ class CollabWebServer:
         self.api_session_token = None
         self.sessions_lock = Lock()
         self.saved_sessions_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_sessions.json")
+        # Cache pour les fichiers des rooms (évite les incohérences du load balancer)
+        self.room_files_cache = {}  # {room_id: {'data': {...}, 'timestamp': float}}
+        self.cache_ttl = 1.0  # Cache valide pendant 1 seconde (réduit pour plus de réactivité)
         
         # Chemins vers les templates et static
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -86,6 +89,14 @@ class CollabWebServer:
                 print_error(f"API key validation failed: {self.api_key_error}")
 
         self._setup_routes()
+    
+    def _invalidate_room_files_cache(self, room_id: str = None):
+        """Invalide le cache des fichiers d'une room (ou toutes si room_id est None)"""
+        if room_id:
+            if room_id in self.room_files_cache:
+                del self.room_files_cache[room_id]
+        else:
+            self.room_files_cache.clear()
 
     def _load_api_key(self) -> str:
         """Récupère l'API key depuis la configuration ou les variables d'environnement"""
@@ -303,6 +314,174 @@ class CollabWebServer:
                 print_error(f"Error proxying rooms request: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 502
         
+        # Route proxy pour /api/rooms/{room_id}/files vers le serveur SaaS
+        # IMPORTANT: Cette route doit être définie AVANT les routes catch-all pour les fichiers individuels
+        @self.app.route('/api/rooms/<room_id>/files', methods=['GET'], strict_slashes=False)
+        def proxy_room_files(room_id):
+            """Proxy pour récupérer la liste des fichiers d'une room depuis le serveur SaaS avec cache"""
+            if self.verbose:
+                print_info(f"[GET /api/rooms/{room_id}/files] Proxy request received")
+            if not self.api_key_valid:
+                if self.verbose:
+                    print_error(f"[GET /api/rooms/{room_id}/files] API key not valid")
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            import time
+            current_time = time.time()
+            
+            # Vérifier le cache
+            if room_id in self.room_files_cache:
+                cached = self.room_files_cache[room_id]
+                if current_time - cached['timestamp'] < self.cache_ttl:
+                    # Retourner les données en cache
+                    if self.verbose:
+                        file_count = len(cached['data'].get('files', [])) if isinstance(cached['data'], dict) and cached['data'].get('status') == 'success' else 0
+                        print_info(f"[PROXY] /api/rooms/{room_id}/files returned {file_count} files (from cache)")
+                    return jsonify(cached['data']), 200
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/files"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                resp = requests.get(url, headers=headers, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+                
+                # Mettre en cache
+                self.room_files_cache[room_id] = {
+                    'data': data,
+                    'timestamp': current_time
+                }
+                
+                # Nettoyer le cache ancien (garder seulement les 10 dernières rooms)
+                if len(self.room_files_cache) > 10:
+                    oldest_room = min(self.room_files_cache.keys(), 
+                                    key=lambda k: self.room_files_cache[k]['timestamp'])
+                    del self.room_files_cache[oldest_room]
+                
+                # Log pour debug
+                if self.verbose:
+                    file_count = len(data.get('files', [])) if isinstance(data, dict) and data.get('status') == 'success' else 0
+                    print_info(f"[PROXY] /api/rooms/{room_id}/files returned {file_count} files (fresh)")
+                
+                return jsonify(data), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room files request: {e}")
+                # En cas d'erreur, retourner le cache si disponible
+                if room_id in self.room_files_cache:
+                    cached = self.room_files_cache[room_id]
+                    if self.verbose:
+                        print_warning(f"[PROXY] Using cached data due to error")
+                    return jsonify(cached['data']), 200
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy catch-all pour les autres endpoints de fichiers (upload, delete, content, etc.)
+        # Cette route doit être définie APRÈS la route /api/rooms/<room_id>/files pour éviter les conflits
+        @self.app.route('/api/rooms/<room_id>/files/<path:file_path>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+        def proxy_room_file_operations(room_id, file_path):
+            """Proxy catch-all pour les opérations sur les fichiers (upload, delete, content, etc.)"""
+            if self.verbose:
+                print_info(f"[{request.method} /api/rooms/{room_id}/files/{file_path}] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                # Construire l'URL complète vers le SaaS
+                url = f"{self.saas_url}/api/rooms/{room_id}/files/{file_path}"
+                # Ajouter les query parameters si présents
+                if request.query_string:
+                    url += '?' + request.query_string.decode('utf-8')
+                
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                # Copier les headers Content-Type si présents
+                if request.content_type:
+                    headers['Content-Type'] = request.content_type
+                
+                # Préparer les données selon la méthode
+                if request.method in ['POST', 'PUT']:
+                    if request.is_json:
+                        data = request.get_json()
+                        resp = requests.request(request.method, url, json=data, headers=headers, timeout=10)
+                    elif request.content_type and 'multipart/form-data' in request.content_type:
+                        # Pour les uploads de fichiers
+                        files = {}
+                        data = {}
+                        for key, value in request.form.items():
+                            data[key] = value
+                        for key, file in request.files.items():
+                            files[key] = (file.filename, file.stream, file.content_type)
+                        resp = requests.request(request.method, url, files=files, data=data, headers=headers, timeout=30)
+                    else:
+                        resp = requests.request(request.method, url, data=request.data, headers=headers, timeout=10)
+                else:
+                    resp = requests.request(request.method, url, headers=headers, timeout=10)
+                
+                resp.raise_for_status()
+                
+                # Pour les téléchargements de fichiers, retourner le contenu binaire
+                if 'download' in request.args or resp.headers.get('Content-Type', '').startswith('image/'):
+                    from flask import Response
+                    return Response(resp.content, mimetype=resp.headers.get('Content-Type', 'application/octet-stream'))
+                
+                # Sinon, retourner le JSON
+                try:
+                    return jsonify(resp.json()), resp.status_code
+                except:
+                    from flask import Response
+                    return Response(resp.content, mimetype=resp.headers.get('Content-Type', 'text/plain')), resp.status_code
+                    
+            except requests.RequestException as e:
+                print_error(f"Error proxying file operation: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/upload
+        @self.app.route('/api/rooms/<room_id>/upload', methods=['POST'])
+        def proxy_room_upload(room_id):
+            """Proxy pour l'upload de fichiers vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[POST /api/rooms/{room_id}/upload] Proxy upload request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/upload"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                # Préparer les fichiers pour l'upload
+                files = {}
+                data = {}
+                for key, value in request.form.items():
+                    data[key] = value
+                for key, file in request.files.items():
+                    files[key] = (file.filename, file.stream, file.content_type)
+                
+                resp = requests.post(url, files=files, data=data, headers=headers, timeout=30)
+                resp.raise_for_status()
+                
+                # Invalider le cache après un upload
+                self._invalidate_room_files_cache(room_id)
+                
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying upload request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
         # Route proxy pour créer un salon via HTTP (alternative à Socket.IO)
         @self.app.route('/api/rooms/create', methods=['POST'])
         def proxy_create_room():
@@ -332,6 +511,201 @@ class CollabWebServer:
                 print_error(f"Error proxying create room request: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 502
         
+        # Route proxy pour /api/rooms/{room_id}/notes
+        @self.app.route('/api/rooms/<room_id>/notes', methods=['GET', 'POST', 'PUT', 'DELETE'])
+        def proxy_room_notes(room_id):
+            """Proxy pour les notes d'une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[{request.method} /api/rooms/{room_id}/notes] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/notes"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.method == 'GET':
+                    resp = requests.get(url, headers=headers, timeout=10)
+                elif request.method in ['POST', 'PUT']:
+                    if request.is_json:
+                        headers['Content-Type'] = 'application/json'
+                        resp = requests.request(request.method, url, json=request.get_json(), headers=headers, timeout=10)
+                    else:
+                        resp = requests.request(request.method, url, data=request.data, headers=headers, timeout=10)
+                elif request.method == 'DELETE':
+                    resp = requests.delete(url, headers=headers, timeout=10)
+                else:
+                    return jsonify({'status': 'error', 'message': 'Method not allowed'}), 405
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room notes request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/description
+        @self.app.route('/api/rooms/<room_id>/description', methods=['GET', 'POST', 'PUT'])
+        def proxy_room_description(room_id):
+            """Proxy pour la description d'une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[{request.method} /api/rooms/{room_id}/description] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/description"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.method == 'GET':
+                    resp = requests.get(url, headers=headers, timeout=10)
+                elif request.method in ['POST', 'PUT']:
+                    if request.is_json:
+                        headers['Content-Type'] = 'application/json'
+                        resp = requests.request(request.method, url, json=request.get_json(), headers=headers, timeout=10)
+                    else:
+                        resp = requests.request(request.method, url, data=request.data, headers=headers, timeout=10)
+                else:
+                    return jsonify({'status': 'error', 'message': 'Method not allowed'}), 405
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room description request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/join
+        @self.app.route('/api/rooms/<room_id>/join', methods=['POST'])
+        def proxy_room_join(room_id):
+            """Proxy pour rejoindre une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[POST /api/rooms/{room_id}/join] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/join"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.is_json:
+                    headers['Content-Type'] = 'application/json'
+                    resp = requests.post(url, json=request.get_json(), headers=headers, timeout=10)
+                else:
+                    resp = requests.post(url, data=request.data, headers=headers, timeout=10)
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room join request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/leave
+        @self.app.route('/api/rooms/<room_id>/leave', methods=['POST'])
+        def proxy_room_leave(room_id):
+            """Proxy pour quitter une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[POST /api/rooms/{room_id}/leave] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/leave"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.is_json:
+                    headers['Content-Type'] = 'application/json'
+                    resp = requests.post(url, json=request.get_json(), headers=headers, timeout=10)
+                else:
+                    resp = requests.post(url, data=request.data, headers=headers, timeout=10)
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room leave request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/delete
+        @self.app.route('/api/rooms/<room_id>/delete', methods=['DELETE', 'POST'])
+        def proxy_room_delete(room_id):
+            """Proxy pour supprimer une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[{request.method} /api/rooms/{room_id}/delete] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/delete"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.method == 'DELETE':
+                    resp = requests.delete(url, headers=headers, timeout=10)
+                else:  # POST
+                    if request.is_json:
+                        headers['Content-Type'] = 'application/json'
+                        resp = requests.post(url, json=request.get_json(), headers=headers, timeout=10)
+                    else:
+                        resp = requests.post(url, data=request.data, headers=headers, timeout=10)
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room delete request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
+        # Route proxy pour /api/rooms/{room_id}/share_module
+        @self.app.route('/api/rooms/<room_id>/share_module', methods=['POST'])
+        def proxy_room_share_module(room_id):
+            """Proxy pour partager un module dans une room vers le serveur SaaS"""
+            if self.verbose:
+                print_info(f"[POST /api/rooms/{room_id}/share_module] Proxy request received")
+            if not self.api_key_valid:
+                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
+            
+            try:
+                url = f"{self.saas_url}/api/rooms/{room_id}/share_module"
+                headers = {
+                    'X-API-Key': self.api_key,
+                    'User-Agent': 'Kittysploit-Framework/2.0'
+                }
+                if self.api_session_token:
+                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                
+                if request.is_json:
+                    headers['Content-Type'] = 'application/json'
+                    resp = requests.post(url, json=request.get_json(), headers=headers, timeout=10)
+                else:
+                    resp = requests.post(url, data=request.data, headers=headers, timeout=10)
+                
+                resp.raise_for_status()
+                return jsonify(resp.json()), resp.status_code
+            except requests.RequestException as e:
+                print_error(f"Error proxying room share_module request: {e}")
+                return jsonify({'status': 'error', 'message': str(e)}), 502
+        
         # Route de test
         @self.app.route('/test')
         def test():
@@ -341,6 +715,19 @@ class CollabWebServer:
             if self.verbose:
                 print_info(f"[GET /test] Test route called")
             return "<h1>Server is working!</h1><p>If you see this, the server is running correctly.</p>", 200
+        
+        # Route de test pour vérifier les routes proxy
+        @self.app.route('/test-proxy')
+        def test_proxy():
+            """Route de test pour vérifier que les routes proxy sont bien enregistrées"""
+            routes = []
+            for rule in self.app.url_map.iter_rules():
+                routes.append(f"{rule.rule} [{', '.join(rule.methods)}]")
+            return jsonify({
+                'status': 'success',
+                'routes': sorted(routes),
+                'api_key_valid': self.api_key_valid
+            }), 200
         
         # Route spécifique pour le favicon
         @self.app.route('/favicon.ico')

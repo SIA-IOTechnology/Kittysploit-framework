@@ -2,6 +2,9 @@ import uuid
 import copy
 import threading
 import queue
+import json
+import base64
+from datetime import datetime
 from typing import List, Dict, Optional, Callable
 from collections import OrderedDict
 
@@ -13,7 +16,7 @@ from module_suggester import module_suggester
 from endpoint_extractor import endpoint_extractor
 
 class FlowManager:
-    def __init__(self, max_flows: int = 5000, fast_mode: bool = False, fast_mode_threshold_kb: int = 100):
+    def __init__(self, max_flows: int = 5000, fast_mode: bool = False, fast_mode_threshold_kb: int = 100, framework=None):
         self.flows: OrderedDict[str, 'HTTPFlow'] = OrderedDict()
         self.flow_cache: Dict[str, Dict] = {}  # Cache for serialized flows
         self.flow_analysis_cache: Dict[str, Dict] = {}  # Cache for heavy analysis results
@@ -23,6 +26,7 @@ class FlowManager:
         self.pending_intercepts: Dict[str, 'HTTPFlow'] = {}
         self._lock = threading.RLock()
         self.callbacks: List[Callable[[Dict], None]] = []
+        self.framework = framework  # Framework instance for database access
         
         # Fast mode: skip heavy analysis for large responses
         self.fast_mode = fast_mode
@@ -100,6 +104,9 @@ class FlowManager:
                     callback(serialized_flow)
                 except Exception as e:
                     print(f"[ERROR] Error in flow callback: {e}")
+            
+            # Save to database if workspace is not "default"
+            self._save_flow_to_db(flow, serialized_flow)
 
     def get_flows(self) -> List[Dict]:
         """Returns all flows (legacy method)."""
@@ -487,6 +494,9 @@ class FlowManager:
                         endpoint_extractor.discovered_endpoints.add(url)
                     if hasattr(endpoint_extractor, 'discovered_links'):
                         endpoint_extractor.discovered_links.add(url)
+                    # Save to database if workspace is not "default"
+                    if category in ['api_endpoints', 'html_links', 'javascript_endpoints', 'react_api_endpoints']:
+                        endpoint_extractor._save_endpoint_to_db(url, category, flow)
         except Exception as e:
             print(f"[ERROR] Error adding to discovered endpoints: {e}")
         
@@ -591,6 +601,190 @@ class FlowManager:
         self.analysis_worker_running = False
         if self.analysis_worker.is_alive():
             self.analysis_worker.join(timeout=2)
+    
+    def _save_flow_to_db(self, flow: 'HTTPFlow', serialized_flow: Dict):
+        """Save flow to database if workspace is not 'default'"""
+        if not self.framework:
+            return
+        
+        try:
+            current_workspace = self.framework.get_current_workspace_name()
+            if current_workspace == "default":
+                return  # Don't save flows for default workspace
+            
+            # Get database session
+            db_session = self.framework.get_db_session()
+            if not db_session:
+                return
+            
+            from core.models.models import ProxyFlow, Workspace
+            
+            # Get workspace ID
+            workspace = db_session.query(Workspace).filter(Workspace.name == current_workspace).first()
+            if not workspace:
+                return
+            
+            # Check if flow already exists
+            existing_flow = db_session.query(ProxyFlow).filter(
+                ProxyFlow.flow_id == flow.id,
+                ProxyFlow.workspace_id == workspace.id
+            ).first()
+            
+            # Prepare flow data
+            req_content = flow.request.content or b""
+            req_headers = dict(flow.request.headers) if flow.request.headers else {}
+            
+            res_content = b""
+            res_headers = {}
+            if flow.response:
+                res_content = flow.response.content or b""
+                res_headers = dict(flow.response.headers) if flow.response.headers else {}
+            
+            # Get analysis data
+            analysis_data = self.flow_analysis_cache.get(flow.id, {})
+            
+            if existing_flow:
+                # Update existing flow
+                existing_flow.method = flow.request.method
+                existing_flow.scheme = flow.request.scheme
+                existing_flow.host = flow.request.host
+                existing_flow.path = flow.request.path
+                existing_flow.url = flow.request.url
+                existing_flow.request_headers = json.dumps(req_headers)
+                existing_flow.request_content = base64.b64encode(req_content).decode('utf-8')
+                existing_flow.request_content_length = len(req_content)
+                
+                if flow.response:
+                    existing_flow.status_code = flow.response.status_code
+                    existing_flow.response_headers = json.dumps(res_headers)
+                    existing_flow.response_content = base64.b64encode(res_content).decode('utf-8')
+                    existing_flow.response_content_length = len(res_content)
+                    existing_flow.response_reason = getattr(flow.response, 'reason', '') or ''
+                else:
+                    existing_flow.status_code = None
+                    existing_flow.response_headers = None
+                    existing_flow.response_content = None
+                    existing_flow.response_content_length = 0
+                    existing_flow.response_reason = None
+                
+                existing_flow.timestamp_start = flow.request.timestamp_start
+                existing_flow.duration = serialized_flow.get('duration')
+                existing_flow.duration_ms = serialized_flow.get('duration_ms')
+                existing_flow.response_size = serialized_flow.get('response_size')
+                existing_flow.intercepted = flow.intercepted
+                existing_flow.source = serialized_flow.get('source')
+                existing_flow.is_websocket = serialized_flow.get('is_websocket', False)
+                existing_flow.ws_messages = json.dumps(serialized_flow.get('ws_messages', []))
+                
+                # Update analysis data
+                existing_flow.technologies = json.dumps(analysis_data.get('technologies', {}))
+                existing_flow.fingerprint = json.dumps(analysis_data.get('fingerprint', {}))
+                existing_flow.module_suggestions = json.dumps(analysis_data.get('module_suggestions', []))
+                existing_flow.endpoints = json.dumps(analysis_data.get('endpoints', {}))
+                existing_flow.discovered_endpoints = json.dumps(analysis_data.get('discovered_endpoints', []))
+                existing_flow.updated_at = datetime.utcnow()
+            else:
+                # Create new flow
+                db_flow = ProxyFlow(
+                    flow_id=flow.id,
+                    workspace_id=workspace.id,
+                    method=flow.request.method,
+                    scheme=flow.request.scheme,
+                    host=flow.request.host,
+                    path=flow.request.path,
+                    url=flow.request.url,
+                    request_headers=json.dumps(req_headers),
+                    request_content=base64.b64encode(req_content).decode('utf-8'),
+                    request_content_length=len(req_content),
+                    status_code=flow.response.status_code if flow.response else None,
+                    response_headers=json.dumps(res_headers) if flow.response else None,
+                    response_content=base64.b64encode(res_content).decode('utf-8') if flow.response else None,
+                    response_content_length=len(res_content) if flow.response else 0,
+                    response_reason=getattr(flow.response, 'reason', '') or '' if flow.response else None,
+                    timestamp_start=flow.request.timestamp_start,
+                    duration=serialized_flow.get('duration'),
+                    duration_ms=serialized_flow.get('duration_ms'),
+                    response_size=serialized_flow.get('response_size'),
+                    intercepted=flow.intercepted,
+                    source=serialized_flow.get('source'),
+                    is_websocket=serialized_flow.get('is_websocket', False),
+                    ws_messages=json.dumps(serialized_flow.get('ws_messages', [])),
+                    technologies=json.dumps(analysis_data.get('technologies', {})),
+                    fingerprint=json.dumps(analysis_data.get('fingerprint', {})),
+                    module_suggestions=json.dumps(analysis_data.get('module_suggestions', [])),
+                    endpoints=json.dumps(analysis_data.get('endpoints', {})),
+                    discovered_endpoints=json.dumps(analysis_data.get('discovered_endpoints', []))
+                )
+                db_session.add(db_flow)
+            
+            db_session.commit()
+        except Exception as e:
+            print(f"[FLOW MANAGER] Error saving flow to database: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                if db_session:
+                    db_session.rollback()
+            except:
+                pass
+    
+    def load_flows_from_db(self, workspace_name: str = None):
+        """Load flows from database for the current workspace"""
+        if not self.framework:
+            return
+        
+        try:
+            if workspace_name is None:
+                workspace_name = self.framework.get_current_workspace_name()
+            
+            if workspace_name == "default":
+                return  # Don't load flows for default workspace
+            
+            # Get database session
+            db_session = self.framework.get_db_session()
+            if not db_session:
+                return
+            
+            from core.models.models import ProxyFlow, Workspace
+            
+            # Get workspace ID
+            workspace = db_session.query(Workspace).filter(Workspace.name == workspace_name).first()
+            if not workspace:
+                return
+            
+            # Load flows from database
+            db_flows = db_session.query(ProxyFlow).filter(
+                ProxyFlow.workspace_id == workspace.id
+            ).order_by(ProxyFlow.timestamp_start.desc()).limit(self.max_flows).all()
+            
+            print(f"[FLOW MANAGER] Loading {len(db_flows)} flows from database for workspace '{workspace_name}'")
+            
+            with self._lock:
+                # Clear existing flows
+                self.flows.clear()
+                self.flow_cache.clear()
+                self.flow_analysis_cache.clear()
+                
+                # Load flows into cache
+                for db_flow in db_flows:
+                    flow_dict = db_flow.to_dict()
+                    self.flow_cache[db_flow.flow_id] = flow_dict
+                    
+                    # Load analysis data
+                    if db_flow.technologies or db_flow.fingerprint or db_flow.module_suggestions:
+                        self.flow_analysis_cache[db_flow.flow_id] = {
+                            'technologies': json.loads(db_flow.technologies) if db_flow.technologies else {},
+                            'fingerprint': json.loads(db_flow.fingerprint) if db_flow.fingerprint else {},
+                            'module_suggestions': json.loads(db_flow.module_suggestions) if db_flow.module_suggestions else [],
+                            'endpoints': json.loads(db_flow.endpoints) if db_flow.endpoints else {},
+                            'discovered_endpoints': json.loads(db_flow.discovered_endpoints) if db_flow.discovered_endpoints else [],
+                        }
+            
+            print(f"[FLOW MANAGER] Successfully loaded {len(self.flow_cache)} flows from database")
+        except Exception as e:
+            print(f"[FLOW MANAGER] Error loading flows from database: {e}")
+            import traceback
+            traceback.print_exc()
 
 # Global instance
 flow_manager = FlowManager()

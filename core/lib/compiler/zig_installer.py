@@ -23,14 +23,14 @@ from core.output_handler import print_info, print_success, print_error, print_wa
 class ZigInstaller:
     """Automatic Zig compiler installer"""
     
-    # Zig version to download
-    ZIG_VERSION = "0.16.0-dev.1301+cbfa87cbe"
+    # Zig version to download (stable version)
+    ZIG_VERSION = "0.15.2"
     
-    # Direct download URLs for each platform
+    # Direct download URLs for each platform (stable version)
     ZIG_DOWNLOAD_URLS = {
-        'linux': 'https://ziglang.org/builds/zig-x86_64-linux-0.16.0-dev.1301+cbfa87cbe.tar.xz',
-        'macos': 'https://ziglang.org/builds/zig-x86_64-macos-0.16.0-dev.1301+cbfa87cbe.tar.xz',
-        'windows': 'https://ziglang.org/builds/zig-x86_64-windows-0.16.0-dev.1301+cbfa87cbe.zip'
+        'linux': 'https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz',
+        'macos': 'https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz',
+        'windows': 'https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip'
     }
     
     def __init__(self):

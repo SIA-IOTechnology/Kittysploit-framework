@@ -10,15 +10,13 @@ import sys
 import os
 import argparse
 
-# Ajouter le répertoire parent au PYTHONPATH
+# Add parent directory to PYTHONPATH
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Ajouter le répertoire kittyproxy au PYTHONPATH pour les imports relatifs
 kittyproxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interfaces', 'kittyproxy')
 if kittyproxy_dir not in sys.path:
     sys.path.insert(0, kittyproxy_dir)
 
-# Importer depuis le module kittyproxy (imports relatifs comme dans main.py)
 from proxy_core import MitmProxyWrapper
 from api import app, set_framework
 from core.output_handler import print_info, print_success, print_error, print_warning
@@ -105,39 +103,39 @@ Exemples:
         
         # Check charter acceptance
         if not framework.check_charter_acceptance():
-            print_info("Premier démarrage de KittySploit")
+            print_info("First startup of KittySploit")
             if not framework.prompt_charter_acceptance():
-                print_error("Charte non acceptée. Arrêt du framework.")
+                print_error("Charter not accepted. Stopping framework.")
                 return 1
         
         # Handle encryption setup/loading for database unlock
         if not framework.is_encryption_initialized():
-            print_info("Configuration du chiffrement pour la protection des données sensibles...")
+            print_info("Setting up encryption for sensitive data protection...")
             if not framework.initialize_encryption():
-                print_error("Échec de l'initialisation du chiffrement. Arrêt du framework.")
+                print_error("Failed to initialize encryption. Stopping framework.")
                 return 1
         else:
             # Load existing encryption with master key to unlock database
             if not framework.load_encryption():
-                print_error("Échec du chargement du chiffrement. La base de données reste verrouillée. Arrêt du framework.")
+                print_error("Failed to load encryption. Database remains locked. Stopping framework.")
                 return 1
         
-        # Définir le framework dans le module API
+        # Set the framework in the API module
         set_framework(framework)
         
         if args.verbose:
-            print_success("Framework initialisé avec succès")
+            print_success("Framework initialized successfully")
     except Exception as e:
-        print_error(f"Erreur lors de l'initialisation du framework: {e}")
+        print_error(f"Error initializing framework: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
         return 1
     
-    # Démarrer le proxy
+    # Start the proxy
     try:
         if args.verbose:
-            print_info(f"Démarrage du proxy sur le port {args.proxy_port}...")
+            print_info(f"Starting proxy on port {args.proxy_port}...")
         
         proxy = MitmProxyWrapper(
             host="127.0.0.1", 
@@ -147,25 +145,25 @@ Exemples:
         )
         proxy.start()
         
-        print_success(f"Proxy démarré sur 127.0.0.1:{args.proxy_port}")
+        print_success(f"Proxy started on 127.0.0.1:{args.proxy_port}")
     except Exception as e:
-        print_error(f"Erreur lors du démarrage du proxy: {e}")
+        print_error(f"Error starting proxy: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
         return 1
     
-    # Afficher les informations de connexion
+    # Display connection information
     print_success("=" * 60)
-    print_info(f"Interface web: http://{args.api_host}:{args.api_port}")
+    print_info(f"Web interface: http://{args.api_host}:{args.api_port}")
     print_info(f"Proxy: 127.0.0.1:{args.proxy_port}")
-    print_info("Appuyez sur Ctrl+C pour arrêter le serveur")
+    print_info("Press Ctrl+C to stop the server")
     print_success("=" * 60)
     
-    # Démarrer le serveur API
+    # Start the API server
     try:
         if args.verbose:
-            print_info(f"Démarrage du serveur API sur {args.api_host}:{args.api_port}...")
+            print_info(f"Starting API server on {args.api_host}:{args.api_port}...")
         
         uvicorn.run(
             app,
@@ -174,23 +172,23 @@ Exemples:
             log_level="info" if args.verbose else "warning"
         )
     except KeyboardInterrupt:
-        print_info("\nArrêt du serveur...")
+        print_info("\nStopping server...")
     except Exception as e:
-        print_error(f"Erreur lors du démarrage du serveur API: {e}")
+        print_error(f"Error starting API server: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()
         return 1
     finally:
-        # Arrêter le proxy
+        # Stop the proxy
         try:
             proxy.stop()
             if args.verbose:
-                print_info("Proxy arrêté")
+                print_info("Proxy stopped")
         except:
             pass
     
-    print_success("Serveur arrêté.")
+    print_success("Server stopped.")
     return 0
 
 

@@ -63,7 +63,7 @@ class TechnologyDetector:
                 r'\.AspNetCore\.',
                 r'X-Powered-By:\s*ASP\.NET',
             ],
-            # Frontend frameworks (priorité basse - nécessitent des patterns plus spécifiques)
+            # Frontend frameworks (low priority - require more specific patterns)
             'React': [
                 r'__REACT_DEVTOOLS',
                 r'react-dom',
@@ -441,23 +441,23 @@ class TechnologyDetector:
                                 scores[category][tech_name] += 2
                                 break
                     
-                    # Vérifier dans le contenu HTML/JS selon le type
+                    # Check in HTML/JS content according to type
                     if not match_found:
                         if tech_name in ['React', 'Vue.js', 'Angular', 'jQuery', 'Bootstrap']:
-                            # Frameworks frontend : UNIQUEMENT sur les requêtes principales (HTML)
+                            # Frontend frameworks: ONLY on main requests (HTML)
                             if is_main_request and html_content and pattern.search(html_content):
-                                # Vérifier que ce n'est pas un faux positif
+                                # Check that it's not a false positive
                                 if self._is_valid_frontend_detection(tech_name, html_content, pattern.pattern):
                                     match_found = True
                                     scores[category].setdefault(tech_name, 0)
                                     scores[category][tech_name] += 1
                         else:
-                            # Backend/autres : chercher dans le contenu
+                            # Backend/others: search in content
                             if pattern.search(response_text):
-                                # Vérifier que ce n'est pas un faux positif
+                                # Check that it's not a false positive
                                 if self._is_valid_detection(pattern.pattern, response_text, tech_name):
                                     match_found = True
-                                    # Node.js nécessite un score plus élevé car souvent faux positif
+                                    # Node.js requires a higher score because often false positive
                                     score_increment = 2 if tech_name == 'Node.js' else 1
                                     scores[category].setdefault(tech_name, 0)
                                     scores[category][tech_name] += score_increment

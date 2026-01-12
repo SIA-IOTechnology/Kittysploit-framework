@@ -398,21 +398,21 @@ class EndpointExtractor:
             r'(?:const|let|var)\s+(?:API_?(?:BASE|URL|ENDPOINT|ROOT)|BASE_?URL|API_?PATH)\s*=\s*`([^`]+)`',
         ]
         
-        # Patterns pour les appels API avec des variables (ex: `${API_BASE}/users`)
-        # NOTE: On exclut ces patterns car ils génèrent trop de faux positifs
+        # Patterns for API calls with variables (e.g., `${API_BASE}/users`)
+        # NOTE: We exclude these patterns because they generate too many false positives
         # api_template_patterns = [
         #     r'`\$\{[^}]+\}(/[^`]+)`',  # Template literals avec variables
         #     r'["\']\$\{[^}]+\}(/[^"\']+)["\']',  # Template strings dans quotes
         # ]
-        api_template_patterns = []  # Désactivé pour éviter les faux positifs
+        api_template_patterns = []  # Disabled to avoid false positives
         
-        # Patterns pour les objets de configuration API
+        # Patterns for API configuration objects
         api_config_patterns = [
             r'(?:baseURL|base_url|apiUrl|api_url|endpoint|url):\s*["\']([^"\']+)["\']',
             r'(?:baseURL|base_url|apiUrl|api_url|endpoint|url):\s*`([^`]+)`',
         ]
         
-        # Patterns pour les appels API dans les hooks React Query / SWR
+        # Patterns for API calls in React Query / SWR hooks
         react_query_patterns = [
             r'useQuery\([^)]*["\']([^"\']+)["\']',
             r'useQuery\([^)]*`([^`]+)`',
@@ -424,7 +424,7 @@ class EndpointExtractor:
             react_fetch_patterns + react_axios_patterns + 
             api_constant_patterns + 
             api_config_patterns + react_query_patterns
-            # api_template_patterns exclu pour éviter les faux positifs
+            # api_template_patterns excluded to avoid false positives
         )
         
         matches_found = 0
@@ -525,8 +525,8 @@ class EndpointExtractor:
         for pattern in graphql_endpoint_patterns:
             for match in re.finditer(pattern, js, re.IGNORECASE | re.MULTILINE | re.DOTALL):
                 endpoint = match.group(1)
-                if endpoint and '${' not in endpoint:  # Exclure les template literals avec variables
-                    # Nettoyer l'endpoint
+                if endpoint and '${' not in endpoint:  # Exclude template literals with variables
+                    # Clean the endpoint
                     endpoint = endpoint.strip().strip('"').strip("'").strip('`')
                     if endpoint:
                         # Si c'est un chemin relatif, construire l'URL complète
@@ -543,8 +543,8 @@ class EndpointExtractor:
                             endpoints.append(full_url)
                             print(f"[REACT API EXTRACTION] Found GraphQL endpoint pattern: {endpoint} -> {full_url}")
         
-        # Si aucun endpoint spécifique n'est trouvé mais que GraphQL est présent,
-        # essayer de deviner l'endpoint commun
+        # If no specific endpoint is found but GraphQL is present,
+        # try to guess the common endpoint
         if not endpoints:
             # Endpoints GraphQL communs
             common_graphql_endpoints = ['/graphql', '/api/graphql', '/gql', '/query']
@@ -614,7 +614,7 @@ class EndpointExtractor:
         
         # Extraire les requêtes GraphQL depuis les template literals
         for tmpl_match in template_matches:
-            # Récupérer le contenu du template literal (groupe 1 ou 2 selon le pattern)
+            # Get template literal content (group 1 or 2 depending on pattern)
             template_content = tmpl_match.group(1) or tmpl_match.group(2) or ''
             if not template_content:
                 continue
@@ -634,7 +634,7 @@ class EndpointExtractor:
                 query_content, next_pos_in_tmpl = extract_graphql_with_braces(template_content, query_start_in_tmpl)
                 
                 if query_content:
-                    # Nettoyer la requête (déjà dans le template literal, pas besoin de retirer les backticks)
+                    # Clean the query (already in template literal, no need to remove backticks)
                     query_content = query_content.strip()
                     
                     # Extraire le nom de la requête si présent
@@ -689,7 +689,7 @@ class EndpointExtractor:
             query_content, next_pos = extract_graphql_with_braces(js, query_start)
             
             if query_content:
-                # Nettoyer la requête
+                # Clean the query
                 query_content = query_content.strip().strip('`').strip('"').strip("'")
                 
                 # Extraire le nom de la requête si présent
@@ -717,13 +717,13 @@ class EndpointExtractor:
             
             pos = next_pos
         
-        # Essayer de trouver l'endpoint GraphQL associé
-        # Si on a trouvé des requêtes, chercher l'endpoint
+        # Try to find the associated GraphQL endpoint
+        # If we found queries, search for the endpoint
         if all_queries:
-            # Chercher l'endpoint GraphQL dans le code autour des requêtes
+            # Search for GraphQL endpoint in code around queries
             graphql_endpoint = None
             
-            # Patterns pour trouver l'endpoint
+            # Patterns to find the endpoint
             endpoint_patterns = [
                 r'["\']([^"\']*graphql[^"\']*)["\']',
                 r'`([^`]*graphql[^`]*)`',
@@ -862,7 +862,7 @@ class EndpointExtractor:
             for match in re.finditer(pattern, content, re.IGNORECASE):
                 endpoint = match.group(0)
                 if endpoint and len(endpoint) > 1:
-                    # Nettoyer l'endpoint (enlever les caractères de fin indésirables)
+                    # Clean the endpoint (remove unwanted trailing characters)
                     endpoint = endpoint.rstrip('.,;:!?')
                     full_url = urljoin(base_url, endpoint)
                     if self._looks_like_api_endpoint(full_url):

@@ -291,17 +291,17 @@ def send_custom(request: Dict):
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Invalid base64 body: {str(e)}")
         
-        # Préserver le header X-KittyProxy-Source pour le filtrage
+        # Preserve the X-KittyProxy-Source header for filtering
         source_header = headers.get('X-KittyProxy-Source') or headers.get('x-kittyproxy-source')
         
-        # Nettoyer les headers - s'assurer qu'ils sont des strings
-        # Exclure les headers internes de KittyProxy de l'envoi HTTP
+        # Clean headers - ensure they are strings
+        # Exclude internal KittyProxy headers from HTTP sending
         cleaned_headers = {}
         for key, value in headers.items():
-            # Skip internal headers pour l'envoi HTTP (mais on les garde pour le flow)
+            # Skip internal headers for HTTP sending (but keep them for the flow)
             if key.lower() in ['x-kittyproxy-source']:
                 continue
-            # Convertir les valeurs en string si nécessaire
+            # Convert values to string if necessary
             if not isinstance(value, str):
                 cleaned_headers[key] = str(value)
             else:
@@ -336,7 +336,7 @@ def send_custom(request: Dict):
             print(f"[API TESTER ERROR] {error_msg}")
             print(f"[API TESTER] Attempting direct request (without proxy)...")
             try:
-                # Essayer sans proxy en fallback
+                # Try without proxy as fallback
                 response = requests.request(
                     method=method,
                     url=url,
@@ -475,7 +475,7 @@ def get_detected_browsers():
         
         detected = []
         
-        # Fonction pour trouver Chromium
+        # Function to find Chromium
         def find_chromium():
             paths = []
             if is_windows:
@@ -496,13 +496,15 @@ def get_detected_browsers():
                     "/usr/bin/chromium",
                     "/usr/bin/chromium-browser",
                     "/snap/bin/chromium",
+                    "/usr/local/bin/chromium",
+                    "/usr/local/bin/chromium-browser",
                 ]
             for path in paths:
                 if os.path.exists(path):
                     return path
             return shutil.which("chromium") or shutil.which("chromium-browser")
         
-        # Fonction pour trouver Chrome
+        # Function to find Chrome
         def find_chrome():
             paths = []
             if is_windows:
@@ -526,7 +528,7 @@ def get_detected_browsers():
                     return path
             return shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("google-chrome-stable")
         
-        # Fonction pour trouver Edge
+        # Function to find Edge
         def find_edge():
             paths = []
             if is_windows:
@@ -543,13 +545,16 @@ def get_detected_browsers():
                 paths += [
                     "/usr/bin/microsoft-edge",
                     "/usr/bin/microsoft-edge-stable",
+                    "/usr/bin/microsoft-edge-beta",
+                    "/usr/bin/microsoft-edge-dev",
+                    "/snap/bin/microsoft-edge",
                 ]
             for path in paths:
                 if os.path.exists(path):
                     return path
             return shutil.which("msedge") or shutil.which("microsoft-edge") or shutil.which("microsoft-edge-stable")
         
-        # Fonction pour trouver Firefox
+        # Function to find Firefox
         def find_firefox():
             paths = []
             if is_windows:
@@ -572,7 +577,7 @@ def get_detected_browsers():
                     return path
             return shutil.which("firefox")
         
-        # Détecter chaque navigateur
+        # Detect each browser
         if find_chromium():
             detected.append({"value": "chromium", "label": "Chromium"})
         if find_chrome():
@@ -585,7 +590,7 @@ def get_detected_browsers():
         return {"browsers": detected}
     except Exception as e:
         print(f"[ERROR] Error detecting browsers: {e}")
-        # En cas d'erreur, retourner une liste vide
+        # In case of error, return an empty list
         return {"browsers": []}
 
 @app.post("/api/launch_browser")
@@ -602,7 +607,7 @@ def launch_browser(request: Dict = None):
         is_mac = sys.platform == "darwin"
         is_linux = sys.platform.startswith("linux")
 
-        # Fonction pour trouver Chromium (portable ou installé)
+        # Function to find Chromium (portable or installed)
         def find_chromium():
             paths = []
             if is_windows:
@@ -629,7 +634,7 @@ def launch_browser(request: Dict = None):
                     return path
             return shutil.which("chromium") or shutil.which("chromium-browser")
         
-        # Fonction pour trouver Chrome
+        # Function to find Chrome
         def find_chrome():
             paths = []
             if is_windows:
@@ -653,7 +658,7 @@ def launch_browser(request: Dict = None):
                     return path
             return shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("google-chrome-stable")
         
-        # Fonction pour trouver Edge
+        # Function to find Edge
         def find_edge():
             paths = []
             if is_windows:
@@ -676,7 +681,7 @@ def launch_browser(request: Dict = None):
                     return path
             return shutil.which("msedge") or shutil.which("microsoft-edge") or shutil.which("microsoft-edge-stable")
         
-        # Fonction pour trouver Firefox
+        # Function to find Firefox
         def find_firefox():
             paths = []
             if is_windows:
@@ -699,7 +704,7 @@ def launch_browser(request: Dict = None):
                     return path
             return shutil.which("firefox")
         
-        # Sélectionner le navigateur selon le choix
+        # Select browser according to choice
         if browser_choice == "chromium":
             browser_path = find_chromium()
             browser_name = "Chromium"
@@ -713,7 +718,7 @@ def launch_browser(request: Dict = None):
             browser_path = find_firefox()
             browser_name = "Firefox"
         else:  # auto
-            # Essayer dans l'ordre: Chromium, Chrome, Edge, Firefox
+            # Try in order: Chromium, Chrome, Edge, Firefox
             browser_path = find_chromium()
             if browser_path:
                 browser_name = "Chromium"
@@ -739,13 +744,13 @@ def launch_browser(request: Dict = None):
         # Create temp user data dir
         user_data_dir = tempfile.mkdtemp(prefix="kittyproxy_browser_")
         
-        # Launch args selon le navigateur
+        # Launch args according to browser
         if browser_name == "Firefox":
-            # Firefox nécessite une configuration de proxy via un fichier de préférences
-            # Créer le répertoire du profil s'il n'existe pas
+            # Firefox requires proxy configuration via a preferences file
+            # Create profile directory if it doesn't exist
             os.makedirs(user_data_dir, exist_ok=True)
             
-            # Créer le fichier user.js avec les préférences de proxy
+            # Create user.js file with proxy preferences
             user_js_path = os.path.join(user_data_dir, "user.js")
             with open(user_js_path, 'w', encoding='utf-8') as f:
                 f.write("""// Proxy configuration for KittyProxy
@@ -769,21 +774,21 @@ user_pref("security.tls.version.min", 1);
 user_pref("security.tls.version.max", 4);
 """)
             
-            # Essayer de trouver et installer le certificat CA de mitmproxy
-            # Le certificat se trouve généralement dans ~/.mitmproxy/
+            # Try to find and install the mitmproxy CA certificate
+            # The certificate is usually located in ~/.mitmproxy/
             mitmproxy_cert_paths = [
                 os.path.join(os.path.expanduser("~"), ".mitmproxy", "mitmproxy-ca-cert.pem"),
                 os.path.join(os.path.expanduser("~"), ".mitmproxy", "mitmproxy-ca-cert.cer"),
             ]
             
-            # Note: Firefox nécessite une installation manuelle du certificat via about:preferences#privacy
-            # On ne peut pas l'installer automatiquement via user.js
-            # Mais on peut au moins créer un message d'aide
+            # Note: Firefox requires manual certificate installation via about:preferences#privacy
+            # We cannot install it automatically via user.js
+            # But we can at least create a help message
             
-            # Firefox utilise des arguments différents
-            # Ouvrir mitm.it pour installer le certificat CA
-            # Note: L'utilisateur devra accepter le certificat la première fois qu'il visite un site HTTPS
-            # ou installer le certificat CA depuis http://mitm.it
+            # Firefox uses different arguments
+            # Open mitm.it to install the CA certificate
+            # Note: The user will need to accept the certificate the first time they visit an HTTPS site
+            # or install the CA certificate from http://mitm.it
             args = [
                 browser_path,
                 "-new-instance",
@@ -2028,10 +2033,10 @@ async def websocket_collaboration(websocket: WebSocket, session_id: str):
         collaborator_name = data.get('name', 'Anonymous')
         collaborator_color = data.get('color', '#2196f3')
         
-        # Créer ou récupérer la session
+        # Create or retrieve the session
         session = collaboration_manager.get_session(session_id)
         if not session:
-            # Créer une nouvelle session si elle n'existe pas
+            # Create a new session if it doesn't exist
             session = collaboration_manager.create_session(
                 name=f"Session {session_id[:8]}",
                 owner_id=websocket_id,
@@ -2039,7 +2044,7 @@ async def websocket_collaboration(websocket: WebSocket, session_id: str):
             )
             session_id = session.id
         
-        # Créer le collaborateur
+        # Create the collaborator
         collaborator = Collaborator(
             id=websocket_id,
             name=collaborator_name,
@@ -2110,7 +2115,7 @@ async def websocket_collaboration(websocket: WebSocket, session_id: str):
     except Exception as e:
         print(f"[ERROR] WebSocket error: {e}")
     finally:
-        # Nettoyer
+        # Clean up
         collaboration_manager.leave_session(websocket_id)
         with websocket_lock:
             active_websockets.pop(websocket_id, None)
@@ -2183,7 +2188,7 @@ async def websocket_mirror(websocket: WebSocket, session_id: str):
     except Exception as e:
         print(f"[ERROR] Mirror WebSocket error: {e}")
     finally:
-        # Nettoyer
+        # Clean up
         with websocket_lock:
             active_websockets.pop(websocket_id, None)
         
@@ -2665,7 +2670,7 @@ def _load_collab_api_key() -> str:
         key = env_key.strip()
         print(f"[COLLAB] Using API key from env: {_mask_key(key)}", flush=True)
         return key
-    # Essayer via Config (qui cherche dans le CWD et parents)
+    # Try via Config (which searches in CWD and parents)
     try:
         cfg = Config.get_instance().config
         framework_cfg = cfg.get("FRAMEWORK") or cfg.get("framework") or {}
@@ -2676,7 +2681,7 @@ def _load_collab_api_key() -> str:
     except Exception:
         pass
 
-    # Fallback : lire explicitement le config.toml à la racine du projet
+    # Fallback: read config.toml explicitly at project root
     try:
         import tomllib  # Python 3.11+
     except ImportError:
@@ -2889,7 +2894,7 @@ def sidechannel_test(request: SideChannelTestRequest):
                 }
             }
         else:
-            # Si on ne peut pas vérifier, on retourne un statut indéterminé
+            # If we cannot verify, return an undetermined status
             return {
                 "flow_id": request.flow_id,
                 "attack_type": request.attack_type,
@@ -2921,7 +2926,7 @@ def sidechannel_check_test(test_id: str):
         raise HTTPException(status_code=401, detail="API key not configured")
     
     try:
-        # Vérifier auprès du SaaS si une requête a été reçue
+        # Check with SaaS if a request was received
         url = f"{COLLAB_SAAS_URL}/api/sidechannel/check/{test_id}"
         resp = requests.get(url, headers={"X-API-Key": api_key}, timeout=10)
         
@@ -3000,11 +3005,11 @@ def sidechannel_generate_url(request: SideChannelGenerateUrlRequest):
                     # Extraire le sous-domaine (ex: "i94hme2kilqk" depuis "i94hme2kilqk.sidechannel.kittysploit.com")
                     hostname = parsed.hostname or ""
                     if hostname:
-                        # Trouver le sous-domaine (première partie avant le premier point)
+                        # Find the subdomain (first part before the first dot)
                         parts = hostname.split('.')
                         if len(parts) > 0:
                             subdomain = parts[0]
-                            # Reconstruire l'URL avec HTTPS et proxy.kittysploit.com
+                            # Rebuild URL with HTTPS and proxy.kittysploit.com
                             normalized_hostname = f"{subdomain}.proxy.kittysploit.com"
                             normalized_url = urlunparse((
                                 "https",  # Forcer HTTPS
@@ -3017,7 +3022,7 @@ def sidechannel_generate_url(request: SideChannelGenerateUrlRequest):
                             sidechannel_url = normalized_url
                 except Exception as e:
                     print(f"[SIDECHANNEL] Warning: Failed to normalize URL {sidechannel_url}: {e}", flush=True)
-                    # En cas d'erreur, essayer une correction simple
+                    # In case of error, try a simple correction
                     if sidechannel_url.startswith("http://"):
                         sidechannel_url = sidechannel_url.replace("http://", "https://")
                     if "sidechannel.kittysploit.com" in sidechannel_url:

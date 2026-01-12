@@ -2235,7 +2235,7 @@ if (document.readyState === 'loading') {
 const browserIconMap = {
     'auto': 'chrome', // Utiliser l'icône Chrome pour auto-detect
     'chrome': 'chrome',
-    'chromium': 'chrome', // Utiliser l'icône Chrome pour Chromium
+    'chromium': 'chromium', // Utiliser l'icône Chromium pour Chromium
     'edge': 'edge',
     'firefox': 'firefox',
     'brave': 'brave',

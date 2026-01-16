@@ -23,9 +23,64 @@ init(autoreset=True)
 USE_COLORS = True
 _DEBUG_MANAGER = None  # Global reference to debug manager
 
+def _stream_isatty(stream) -> bool:
+    """Safely determine whether a stream is a TTY.
+    
+    Some stdout/stderr redirectors used by the framework may not implement
+    `isatty()`. In those cases (or on error), treat as non-interactive.
+    """
+    try:
+        isatty = getattr(stream, "isatty", None)
+        if callable(isatty):
+            return bool(isatty())
+    except Exception:
+        return False
+    return False
+
+def _coerce_text(data) -> str:
+    """Coerce bytes/other types into a safe text string."""
+    if data is None:
+        return ""
+    if isinstance(data, str):
+        return data
+    if isinstance(data, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(data).decode("utf-8", errors="replace")
+        except Exception:
+            return bytes(data).decode(errors="replace")
+    return str(data)
+
+def _safe_stream_write(stream, data) -> None:
+    """Write text/bytes to a stream without TypeError explosions.
+
+    Prefers writing text. Falls back to writing bytes to `.buffer` when needed.
+    """
+    text = _coerce_text(data)
+    try:
+        stream.write(text)
+        stream.flush()
+        return
+    except TypeError:
+        # Some streams may expect bytes; try buffer if available.
+        try:
+            raw = text.encode(getattr(stream, "encoding", "utf-8") or "utf-8", errors="replace")
+            buf = getattr(stream, "buffer", None)
+            if buf is not None:
+                buf.write(raw)
+                buf.flush()
+                return
+        except Exception:
+            pass
+        # Last resort: best-effort write as str again (may still fail).
+        try:
+            stream.write(text)
+            stream.flush()
+        except Exception:
+            pass
+
 def is_interactive_terminal():
     """Vérifie si le script s'exécute dans un terminal interactif"""
-    return sys.stdout.isatty() and not os.environ.get('KITTYSPLOIT_NO_COLOR')
+    return _stream_isatty(sys.stdout) and not os.environ.get('KITTYSPLOIT_NO_COLOR')
 
 def set_debug_manager(debug_manager):
     """
@@ -102,7 +157,7 @@ def print_table(headers, rows, max_width=80, **kwargs):
     
     # Detect terminal width if available and max_width is default or reasonable
     try:
-        if max_width == 80 or (max_width <= 120 and sys.stdout.isatty()):
+        if max_width == 80 or (max_width <= 120 and _stream_isatty(sys.stdout)):
             terminal_cols = _terminal_size().columns
             # Use terminal width if it's larger than max_width, but cap at reasonable maximum
             if terminal_cols > max_width:
@@ -347,14 +402,45 @@ class OutputHandler:
 
     def __init__(self):
         self.sessions = {}  # Store callbacks for each unique session
-        self.original_stdout = sys.stdout
-        self.original_stderr = sys.stderr
+        # Use the real underlying streams to avoid recursion when libraries
+        # (e.g. colorama/click) wrap sys.stdout/sys.stderr.
+        self.original_stdout = getattr(sys, "__stdout__", sys.stdout)
+        self.original_stderr = getattr(sys, "__stderr__", sys.stderr)
         self.redirecting = False
         self.output_queue = queue.Queue()
         self.output_thread = None
         self.lock = threading.Lock()  # Prevent race conditions
         self.stdout_callbacks = []
         self.stderr_callbacks = []
+        # Per-thread routing context (used by web terminals)
+        self._thread_context = threading.local()
+        # When False, output produced without a thread context (e.g. Werkzeug logs)
+        # will NOT be forwarded to per-session callbacks (prevents server logs
+        # leaking into terminal windows). Global stdout/stderr callbacks still run.
+        self._broadcast_unscoped_to_sessions = False
+
+    def set_broadcast_unscoped_to_sessions(self, enabled: bool):
+        """Enable/disable broadcasting unscoped output to all sessions."""
+        self._broadcast_unscoped_to_sessions = bool(enabled)
+
+    def set_thread_context(self, session_id: str):
+        """Bind stdout/stderr output produced by the current thread to a session.
+
+        The web UI executes terminal commands in background threads. This context
+        allows OutputHandler to route output only to the correct terminal session.
+        """
+        self._thread_context.session_id = session_id
+
+    def clear_thread_context(self):
+        """Clear the current thread's routing context."""
+        try:
+            if hasattr(self._thread_context, "session_id"):
+                delattr(self._thread_context, "session_id")
+        except Exception:
+            pass
+
+    def _get_thread_context(self):
+        return getattr(self._thread_context, "session_id", None)
 
     def start_redirection(self):
         """Start redirecting stdout and stderr"""
@@ -394,10 +480,12 @@ class OutputHandler:
 
     def add_callback(self, session_id, callback, is_stderr=False):
         """Add a callback for a specific session"""
-        if session_id in self.sessions:
-            key = "stderr" if is_stderr else "stdout"
-            if callback not in self.sessions[session_id][key]:
-                self.sessions[session_id][key].append(callback)
+        # Auto-create session buckets for external session IDs (e.g. web terminals)
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {"stdout": [], "stderr": []}
+        key = "stderr" if is_stderr else "stdout"
+        if callback not in self.sessions[session_id][key]:
+            self.sessions[session_id][key].append(callback)
 
     def remove_callback(self, session_id, callback, is_stderr=False):
         """Remove a callback from a specific session"""
@@ -428,10 +516,12 @@ class OutputHandler:
 
     def handle_output(self, text, is_stderr=False):
         """Handle output data"""
+        # Some libraries may write bytes; normalize here.
+        text = _coerce_text(text)
+        ctx_session_id = self._get_thread_context()
         with self.lock:
             if is_stderr:
-                self.original_stderr.write(text)
-                self.original_stderr.flush()
+                _safe_stream_write(self.original_stderr, text)
                 # Appeler les callbacks stderr
                 for callback in self.stderr_callbacks:
                     try:
@@ -439,8 +529,7 @@ class OutputHandler:
                     except Exception as e:
                         logging.error(f"Error in stderr callback: {e}")
             else:
-                self.original_stdout.write(text)
-                self.original_stdout.flush()
+                _safe_stream_write(self.original_stdout, text)
                 # Appeler les callbacks stdout
                 for callback in self.stdout_callbacks:
                     try:
@@ -448,7 +537,8 @@ class OutputHandler:
                     except Exception as e:
                         logging.error(f"Error in stdout callback: {e}")
 
-        self.output_queue.put(("stderr" if is_stderr else "stdout", text))
+        # Keep the session context with the queued message
+        self.output_queue.put(("stderr" if is_stderr else "stdout", text, ctx_session_id))
 
     def _process_output_queue(self):
         """Send data to the appropriate sessions"""
@@ -457,14 +547,31 @@ class OutputHandler:
             if item is None:
                 break
 
-            output_type, text = item
+            # Backward compatible: older queue items may be 2-tuples
+            if isinstance(item, tuple) and len(item) == 2:
+                output_type, text = item
+                target_session_id = None
+            else:
+                output_type, text, target_session_id = item
 
-            for session_id, callbacks in self.sessions.items():
-                for callback in callbacks[output_type]:
+            if target_session_id:
+                # Route only to the intended session (isolated terminal)
+                callbacks = self.sessions.get(target_session_id, {})
+                for callback in callbacks.get(output_type, []) or []:
                     try:
                         callback(text)
                     except Exception as e:
-                        logging.error(f"Error in {output_type} callback (session {session_id}): {e}")
+                        logging.error(f"Error in {output_type} callback (session {target_session_id}): {e}")
+            else:
+                # Unscoped output (e.g. server logs). By default we do NOT forward
+                # this to terminal sessions; it would pollute every terminal.
+                if self._broadcast_unscoped_to_sessions:
+                    for session_id, callbacks in self.sessions.items():
+                        for callback in callbacks.get(output_type, []) or []:
+                            try:
+                                callback(text)
+                            except Exception as e:
+                                logging.error(f"Error in {output_type} callback (session {session_id}): {e}")
 
             self.output_queue.task_done()
     
@@ -499,11 +606,21 @@ class StdoutRedirector:
         self.handler = handler
 
     def write(self, text):
-        if text.strip():  # Ignore empty lines
-            self.handler.handle_output(text)
+        text = _coerce_text(text)
+        # Preserve newlines and formatting. Only ignore truly empty writes.
+        if text == "":
+            return
+        self.handler.handle_output(text)
 
     def flush(self):
         pass
+
+    def isatty(self):
+        """Expose isatty() for compatibility with code expecting a real stream."""
+        try:
+            return _stream_isatty(self.handler.original_stdout)
+        except Exception:
+            return False
 
 class StderrRedirector:
     """Redirects stderr"""
@@ -512,8 +629,18 @@ class StderrRedirector:
         self.handler = handler
 
     def write(self, text):
-        if text.strip():  # Ignore empty lines
-            self.handler.handle_output(text, is_stderr=True)
+        text = _coerce_text(text)
+        # Preserve newlines and formatting. Only ignore truly empty writes.
+        if text == "":
+            return
+        self.handler.handle_output(text, is_stderr=True)
 
     def flush(self):
         pass
+
+    def isatty(self):
+        """Expose isatty() for compatibility with code expecting a real stream."""
+        try:
+            return _stream_isatty(self.handler.original_stderr)
+        except Exception:
+            return False

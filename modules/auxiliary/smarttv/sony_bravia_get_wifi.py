@@ -1,5 +1,5 @@
 from kittysploit import *
-from lib.protocols.http.http_client import HTTPClient
+from lib.protocols.http.http_client import Http_client
 
 class Module(Auxiliary, Http_client):
 	

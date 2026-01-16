@@ -99,4 +99,3 @@ class Module(Post, Bind):
 		}}
 		@socket_close($msgsock);
 """)
-#		self.start_handler()

@@ -736,3 +736,101 @@ class ProxyEndpoint(Base, EncryptedFieldMixin):
     
     def __repr__(self):
         return f"<ProxyEndpoint(id={self.id}, url='{self.url[:50]}...', type='{self.endpoint_type}', workspace_id={self.workspace_id})>"
+
+class Workflow(Base):
+    """Represents a workflow in the framework"""
+    __tablename__ = 'workflows'
+    
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False, index=True)
+    description = Column(Text)
+    trigger = Column(String(100), default='manual')  # manual, platform:windows, platform:linux, etc.
+    enabled = Column(Boolean, default=True)
+    is_template = Column(Boolean, default=False, index=True)
+    nodes = Column(Text)  # JSON array of workflow nodes
+    edges = Column(Text)  # JSON array of workflow edges
+    steps = Column(Text)  # JSON array of workflow steps
+    variables = Column(Text)  # JSON object of workflow variables
+    executions = Column(Integer, default=0)  # Count of executions
+    last_executed = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('LENGTH(name) > 0', name='check_workflow_name_not_empty'),
+        Index('idx_workflow_name', 'name'),
+        Index('idx_workflow_enabled', 'enabled'),
+    )
+    
+    # Relationships
+    executions_rel = relationship("WorkflowExecution", back_populates="workflow", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Workflow {self.name} ({'template' if self.is_template else 'workflow'})>"
+    
+    def to_dict(self):
+        """Convert workflow to dictionary"""
+        import json
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'trigger': self.trigger,
+            'enabled': self.enabled,
+            'is_template': self.is_template,
+            'nodes': json.loads(self.nodes) if self.nodes else [],
+            'edges': json.loads(self.edges) if self.edges else [],
+            'steps': json.loads(self.steps) if self.steps else [],
+            'variables': json.loads(self.variables) if self.variables else {},
+            'executions': self.executions,
+            'last_executed': self.last_executed.isoformat() if self.last_executed else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+class WorkflowExecution(Base):
+    """Represents a workflow execution record"""
+    __tablename__ = 'workflow_executions'
+    
+    id = Column(Integer, primary_key=True)
+    workflow_id = Column(Integer, ForeignKey('workflows.id'), nullable=False, index=True)
+    status = Column(String(50), default='running')  # running, completed, failed, cancelled
+    target_session = Column(String(100))  # Target session ID if applicable
+    context = Column(Text)  # JSON object of execution context
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    completed_at = Column(DateTime)
+    duration = Column(Integer)  # Duration in seconds
+    results = Column(Text)  # JSON object of execution results
+    logs = Column(Text)  # Execution logs
+    error_message = Column(Text)  # Error message if execution failed
+    
+    # Constraints
+    __table_args__ = (
+        CheckConstraint('status IN ("running", "completed", "failed", "cancelled")', name='check_execution_status'),
+        Index('idx_execution_workflow_status', 'workflow_id', 'status'),
+        Index('idx_execution_started_at', 'started_at'),
+    )
+    
+    # Relationships
+    workflow = relationship("Workflow", back_populates="executions_rel")
+    
+    def __repr__(self):
+        return f"<WorkflowExecution(id={self.id}, workflow_id={self.workflow_id}, status='{self.status}')>"
+    
+    def to_dict(self):
+        """Convert execution to dictionary"""
+        import json
+        return {
+            'id': self.id,
+            'workflow_id': self.workflow_id,
+            'status': self.status,
+            'target_session': self.target_session,
+            'context': json.loads(self.context) if self.context else {},
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'duration': self.duration,
+            'results': json.loads(self.results) if self.results else {},
+            'logs': self.logs,
+            'error_message': self.error_message
+        }

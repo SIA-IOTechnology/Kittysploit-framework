@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Windows WSL Alpine Relay Module
-Deploys a persistent reverse relay inside an existing or freshly installed WSL distribution.
-"""
 
 from kittysploit import *
 import base64

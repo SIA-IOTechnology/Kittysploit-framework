@@ -6,7 +6,7 @@ IRC command implementation
 """
 
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_warning
+from core.output_handler import print_info, print_success, print_error, print_warning, print_status
 import argparse
 import socket
 import ssl

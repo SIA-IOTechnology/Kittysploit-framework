@@ -1,7 +1,7 @@
 from kittysploit import *
-from lib.http.http_client import HTTPClient
+from lib.protocols.http.http_client import Http_client
 
-class Module(Auxiliary, HTTPClient):
+class Module(Auxiliary, Http_client):
 	
 	__info__ = {
 		'name': 'Android properties from a Sony TV',

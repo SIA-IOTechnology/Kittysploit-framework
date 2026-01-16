@@ -41,3 +41,4 @@ python-can
 bs4
 uvicorn
 mitmproxy
+boto3

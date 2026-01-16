@@ -1,4 +1,5 @@
 from kittysploit import *
+from lib.protocols.http.http_crawler import Http_crawler
 		
 class Module(Auxiliary, Http_crawler):
 

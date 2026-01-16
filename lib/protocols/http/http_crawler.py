@@ -17,14 +17,14 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 
 class Http_crawler(BaseModule):
     
-    target = OptString("mytarget.com", "Target domain/ip", "yes")
-    port = OptPort(80, "Target HTTP port", "yes")
-    ssl = OptBool(True, "SSL enabled: true/false", "no", True)
+    target = OptString("mytarget.com", "Target domain/ip", True)
+    port = OptPort(443, "Target HTTP port", True)
+    ssl = OptBool(True, "SSL enabled: true/false", True, advanced=True)
     max_crawl = OptInteger(20, "Number of links to crawl, (if 0 = all links)", True)
-    max_threads = OptInteger(5, "Maximum number of threads", True)  # Adjusted default to 5 for better manageability
-    request_timeout = OptInteger(15, "Request timeout in seconds", True)
-    crawler_user = OptString("admin", "User for basic authentication", True)
-    crawler_password = OptString("admin", "Password for basic authentication", True)
+    max_threads = OptInteger(5, "Maximum number of threads", True, advanced=True)  # Adjusted default to 5 for better manageability
+    request_timeout = OptInteger(15, "Request timeout in seconds", True, advanced=True)
+    crawler_user = OptString("admin", "User for basic authentication", True, advanced=True)
+    crawler_password = OptString("admin", "Password for basic authentication", True, advanced=True)
     
     def __init__(self):
         super().__init__()

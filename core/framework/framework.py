@@ -884,6 +884,10 @@ class Framework:
                     from core.models.models import Workspace
                     workspace = session.query(Workspace).filter(Workspace.name == self.current_workspace).first()
                     if workspace:
+                        try:
+                            session.expunge(workspace)
+                        except Exception:
+                            pass
                         self.workspace_manager.current_workspace = workspace
                     else:
                         # If workspace doesn't exist, create it
@@ -891,6 +895,10 @@ class Framework:
                             # Reload to get the created workspace
                             workspace = session.query(Workspace).filter(Workspace.name == self.current_workspace).first()
                             if workspace:
+                                try:
+                                    session.expunge(workspace)
+                                except Exception:
+                                    pass
                                 self.workspace_manager.current_workspace = workspace
             except Exception as e:
                 # If there's an error, fall back to default workspace
@@ -902,6 +910,10 @@ class Framework:
                         from core.models.models import Workspace
                         workspace = session.query(Workspace).filter(Workspace.name == "default").first()
                         if workspace:
+                            try:
+                                session.expunge(workspace)
+                            except Exception:
+                                pass
                             self.workspace_manager.current_workspace = workspace
                 except Exception:
                     # If we can't even get default workspace, just continue

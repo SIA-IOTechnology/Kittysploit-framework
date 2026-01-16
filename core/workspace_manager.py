@@ -150,7 +150,15 @@ class WorkspaceManager:
             if not workspace:
                 print_error(f"Workspace '{name}' not found")
                 return False
-            
+
+            # Detach the instance from the session so it won't get expired/invalidated
+            # when the scoped session is later removed (prevents "Instance is not bound
+            # to a Session" errors when reading attributes like workspace.name).
+            try:
+                session.expunge(workspace)
+            except Exception:
+                pass
+
             self.current_workspace = workspace
             print_success(f"Switched to workspace '{name}'")
             return True
@@ -238,6 +246,10 @@ class WorkspaceManager:
                 print_success("Default workspace created")
             
             # Set as current workspace
+            try:
+                session.expunge(default_workspace)
+            except Exception:
+                pass
             self.current_workspace = default_workspace
             return True
             

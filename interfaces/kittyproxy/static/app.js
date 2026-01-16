@@ -8113,7 +8113,7 @@ async function showDiscoveredEndpoints() {
         let html = '<div style="padding: 20px; max-width: 1200px; margin: 0 auto;">';
         html += '<h3 style="margin-top: 0; color: #6200ea; display: flex; align-items: center; gap: 10px;">';
         html += '<span class="material-symbols-outlined">link</span>';
-        html += `Endpoints Découverts (${data.total || 0})</h3>`;
+        html += `Discovered Endpoints (${data.total || 0})</h3>`;
 
         // Statistiques par catégorie
         if (data.category_counts) {
@@ -8454,10 +8454,10 @@ function showCompareDialog() {
 
     selectedFlows.forEach((flow, index) => {
         html += `<div style="border: 1px solid #ddd; border-radius: 8px; padding: 15px;">`;
-        html += `<h4 style="margin-top: 0;">Requête ${index + 1}</h4>`;
+        html += `<h4 style="margin-top: 0;">Request ${index + 1}</h4>`;
         html += `<p><strong>URL:</strong> ${flow.url}</p>`;
         html += `<p><strong>Status:</strong> ${flow.status_code || 'N/A'}</p>`;
-        html += `<p><strong>Méthode:</strong> ${flow.method}</p>`;
+        html += `<p><strong>Method:</strong> ${flow.method}</p>`;
         if (flow.technologies) {
             const allTechs = [
                 ...(flow.technologies.frameworks || []),
@@ -8633,11 +8633,11 @@ function renderDomainsList() {
                     ${escapeHtml(domainData.domain)}
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.75rem; color: #666; margin-bottom: 8px;">
-                    <span style="display: flex; align-items: center; gap: 4px;"><strong>${domainData.requestCount}</strong> requêtes</span>
+                    <span style="display: flex; align-items: center; gap: 4px;"><strong>${domainData.requestCount}</strong> requests</span>
                     <span style="display: flex; align-items: center; gap: 4px;"><strong>${domainData.endpointCount || 0}</strong> endpoints</span>
-                    ${domainData.discoveredEndpointCount > 0 ? `<span style="color: #ff9800; display: flex; align-items: center; gap: 4px;"><strong>${domainData.discoveredEndpointCount}</strong> découverts</span>` : ''}
+                    ${domainData.discoveredEndpointCount > 0 ? `<span style="color: #ff9800; display: flex; align-items: center; gap: 4px;"><strong>${domainData.discoveredEndpointCount}</strong> discovered</span>` : ''}
                     ${successCount > 0 ? `<span style="color: #4caf50; display: flex; align-items: center; gap: 4px;"><strong>${successCount}</strong> OK</span>` : ''}
-                    ${errorCount > 0 ? `<span style="color: #f44336; display: flex; align-items: center; gap: 4px;"><strong>${errorCount}</strong> erreurs</span>` : ''}
+                    ${errorCount > 0 ? `<span style="color: #f44336; display: flex; align-items: center; gap: 4px;"><strong>${errorCount}</strong> errors</span>` : ''}
                 </div>
                 <div style="font-size: 0.7rem; color: #999; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">
                     ${domainData.methods.map(m => `<span style="background: #f0f0f0; padding: 3px 8px; border-radius: 4px; font-weight: 500;">${m}</span>`).join('')}
@@ -9835,7 +9835,7 @@ function showTimeline() {
     });
 
     if (filteredFlows.length === 0) {
-        timelinePanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">Aucune requête à afficher pour ce domaine</div>';
+        timelinePanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">No requests to display for this domain</div>';
         return;
     }
 
@@ -9845,7 +9845,7 @@ function showTimeline() {
     );
 
     if (sortedFlows.length === 0) {
-        timelinePanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">Aucune requête à afficher</div>';
+        timelinePanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">No requests to display</div>';
         return;
     }
 
@@ -10433,7 +10433,7 @@ function showTimeline() {
         }
 
         if (timelineInfo) {
-            timelineInfo.textContent = `${visibleCount} requêtes affichées${percentage < 100 ? ` (${percentage}% du temps)` : ''}`;
+            timelineInfo.textContent = `${visibleCount} requests displayed${percentage < 100 ? ` (${percentage}% of time)` : ''}`;
         }
     }
 
@@ -10508,7 +10508,7 @@ function showNavigationTree() {
     if (!navPanel) return;
 
     if (flowsData.length === 0) {
-        navPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">Aucune requête à afficher</div>';
+        navPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">No requests to display</div>';
         return;
     }
 
@@ -10525,7 +10525,7 @@ function showNavigationTree() {
         : flowsData;
 
     if (filteredFlows.length === 0) {
-        navPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">Aucune requête à afficher pour ce domaine</div>';
+        navPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">No requests to display for this domain</div>';
         return;
     }
 
@@ -10640,7 +10640,7 @@ function showNavigationTree() {
     html += `</div>`;
     html += `<div style="background: white; border: 1px solid var(--border-color); border-left: 3px solid var(--primary-color); border-radius: 6px; padding: 12px;">`;
     html += `<div style="font-size: 24px; font-weight: 600; color: #333; margin-bottom: 4px;">${totalEndpoints}</div>`;
-    html += `<div style="font-size: 13px; color: var(--text-secondary);">Endpoints Découverts</div>`;
+    html += `<div style="font-size: 13px; color: var(--text-secondary);">Discovered Endpoints</div>`;
     html += `</div>`;
     html += '</div>';
 
@@ -11273,7 +11273,7 @@ function showHeatmap() {
     });
 
     if (filteredFlows.length === 0) {
-        heatmapPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">Aucune requête à afficher pour ce domaine</div>';
+        heatmapPanel.innerHTML = '<div style="text-align: center; padding: 50px; color: #888;">No requests to display for this domain</div>';
         return;
     }
 
@@ -11672,7 +11672,7 @@ function renderPerformanceDashboard(data) {
     if (data.timeouts > 0) {
         html += '<div style="background: white; border-left: 4px solid #f44336; padding: 16px 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">';
         html += '<span class="material-symbols-outlined" style="color: #f44336; font-size: 24px;">error</span>';
-        html += `<div><strong style="color: #f44336; font-size: 1rem;">${data.timeouts} timeout(s) détecté(s)</strong><div style="color: var(--text-secondary); font-size: 0.9em; margin-top: 4px;">Des requêtes ont dépassé le temps d'attente maximum</div></div>`;
+        html += `<div><strong style="color: #f44336; font-size: 1rem;">${data.timeouts} timeout(s) detected</strong><div style="color: var(--text-secondary); font-size: 0.9em; margin-top: 4px;">Some requests exceeded the maximum timeout</div></div>`;
         html += '</div>';
     }
 
@@ -13329,7 +13329,7 @@ function renderCollaborationFlowDetails(container, flow) {
         <div style="margin-bottom: 32px;">
             <h3 style="margin: 0 0 16px 0; font-size: 14px; font-weight: 600; color: #333; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; padding-bottom: 8px; border-bottom: 2px solid #e0e0e0;">
                 <span class="material-symbols-outlined" style="font-size: 18px; color: #61affe;">arrow_upward</span>
-                Requête Complète
+                Complete Request
             </h3>
             <div style="background: #fff; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
     `;

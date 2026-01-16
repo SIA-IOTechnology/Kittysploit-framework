@@ -1,8 +1,8 @@
 from kittysploit import *
-from lib.protocols.http.http_client import HTTPClient
+from lib.protocols.http.http_client import HttpClient
 from base64 import b64encode
 
-class Module(Listener, HTTPClient):
+class Module(Listener, HttpClient):
 	
 	__info__ = {
 		'name': 'Web Cookie Listener',

@@ -10,7 +10,6 @@ class Module(Listener):
         'name': 'Generic Reverse TCP Listener',
         'description': 'Ultra-simple reverse TCP listener - framework handles session management',
         'author': 'KittySploit Team',
-        'version': '1.0.0',
         'handler': Handler.REVERSE,
         'session_type': SessionType.SHELL,
     }

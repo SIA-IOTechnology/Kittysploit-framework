@@ -66,6 +66,7 @@ class Platform(Enum):
     ANDROID = "android"
     IOS = "ios"
     JAVASCRIPT = "javascript"
+    PHP = "php"
     OTHER = "other"
     ALL = "all"
 

@@ -116,7 +116,8 @@ class ASTAnalyzer:
                     result["errors"].append("Payload modules must define a 'generate()' method")
                     result["valid"] = False
             else:
-                if not self.visitor.has_run_method:
+                # Vérifier run() seulement si la classe n'hérite pas d'une classe de base avec run()
+                if not self.visitor.inherits_from_base_with_run and not self.visitor.has_run_method:
                     result["errors"].append("Module doit définir une méthode 'run()'")
                     result["valid"] = False
             
@@ -165,6 +166,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.has_generate_method = False
         self.has_info = False
         self.is_payload = False
+        self.inherits_from_base_with_run = False
     
     def visit_Import(self, node: ast.Import):
         """Visite les imports"""
@@ -186,15 +188,24 @@ class SecurityASTVisitor(ast.NodeVisitor):
         """Visite les définitions de classe"""
         if node.name == "Module":
             self.has_module_class = True
-            # Vérifier si la classe hérite de Payload
+            # Classes de base qui ont déjà une méthode run()
+            base_classes_with_run = ["DockerEnvironment", "Exploit", "Auxiliary", "Listener", "Post", "Scanner", "Encoder"]
+            
+            # Vérifier si la classe hérite de Payload ou d'autres classes de base
             for base in node.bases:
                 if isinstance(base, ast.Name):
                     if base.id == "Payload":
                         self.is_payload = True
                         break
+                    elif base.id in base_classes_with_run:
+                        self.inherits_from_base_with_run = True
+                        break
                 elif isinstance(base, ast.Attribute):
                     if base.attr == "Payload":
                         self.is_payload = True
+                        break
+                    elif base.attr in base_classes_with_run:
+                        self.inherits_from_base_with_run = True
                         break
         self.generic_visit(node)
     

@@ -31,7 +31,8 @@ class ModuleSyncManager:
         self.workspace = workspace
         self.module_loader = None  # Lazy import to avoid circular dependency
         self.sync_thread = None
-        self.is_syncing = False
+        self.is_syncing = False  # Flag for ongoing sync operation
+        self.background_sync_active = False  # Flag for background sync loop
         self.sync_interval = 300  # 5 minutes
         self.last_sync = None
         self._lock = threading.Lock()
@@ -50,13 +51,14 @@ class ModuleSyncManager:
             return
             
         self.sync_interval = interval
+        self.background_sync_active = True  # Set flag before starting thread
         self.sync_thread = threading.Thread(target=self._background_sync_loop, daemon=True)
         self.sync_thread.start()
         print_success(f"Background module sync started (interval: {interval}s)")
     
     def stop_background_sync(self):
         """Stop background synchronization thread"""
-        self.is_syncing = False
+        self.background_sync_active = False  # Stop the background loop
         if self.sync_thread and self.sync_thread.is_alive():
             self.sync_thread.join(timeout=10)
         print_info("Background module sync stopped")
@@ -65,13 +67,23 @@ class ModuleSyncManager:
         """Background synchronization loop"""
         print_info("Module sync background thread started")
         
-        while self.is_syncing:
+        while self.background_sync_active:
             try:
-                self.sync_modules()
-                time.sleep(self.sync_interval)
+                # Call sync_modules with force=True to allow it to run even if is_syncing is True
+                # (which shouldn't happen, but we use force to be safe)
+                self.sync_modules(force=True)
+                # Sleep in small intervals to allow quick stop
+                for _ in range(self.sync_interval):
+                    if not self.background_sync_active:
+                        break
+                    time.sleep(1)
             except Exception as e:
                 print_error(f"Error in background sync: {e}")
-                time.sleep(60)  # Wait 1 minute before retry
+                # Sleep in small intervals to allow quick stop
+                for _ in range(60):
+                    if not self.background_sync_active:
+                        break
+                    time.sleep(1)
     
     def sync_modules(self, force: bool = False) -> Dict[str, int]:
         """Synchronize modules between filesystem and database"""
@@ -398,5 +410,5 @@ class ModuleSyncManager:
             'is_syncing': self.is_syncing,
             'last_sync': self.last_sync.isoformat() if self.last_sync else None,
             'sync_interval': self.sync_interval,
-            'background_sync_active': self.sync_thread and self.sync_thread.is_alive()
+            'background_sync_active': self.background_sync_active and (self.sync_thread and self.sync_thread.is_alive())
         }

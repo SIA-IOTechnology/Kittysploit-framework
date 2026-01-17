@@ -165,15 +165,36 @@ class ModuleValidator:
             if not has_generate:
                 errors.append("Payload modules must define a 'generate()' method")
         else:
-            # For other modules, check for run() method
-            has_run = False
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == "run":
-                    has_run = True
-                    break
+            # Check if Module class inherits from a base class that already has run()
+            inherits_from_base_with_run = False
+            base_classes_with_run = ["DockerEnvironment", "Exploit", "Auxiliary", "Listener", "Post", "Scanner", "Encoder"]
             
-            if not has_run:
-                errors.append("Module doit définir une méthode 'run()'")
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == "Module":
+                    for base in node.bases:
+                        # Check for direct class reference
+                        if isinstance(base, ast.Name):
+                            if base.id in base_classes_with_run:
+                                inherits_from_base_with_run = True
+                                break
+                        # Check for class via attribute (e.g., from kittysploit import *)
+                        elif isinstance(base, ast.Attribute):
+                            if base.attr in base_classes_with_run:
+                                inherits_from_base_with_run = True
+                                break
+                    if inherits_from_base_with_run:
+                        break
+            
+            # For other modules, check for run() method (only if not inheriting from base with run)
+            if not inherits_from_base_with_run:
+                has_run = False
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef) and node.name == "run":
+                        has_run = True
+                        break
+                
+                if not has_run:
+                    errors.append("Module must define a 'run()' method")
         
         return {
             "valid": len(errors) == 0,

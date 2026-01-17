@@ -180,8 +180,13 @@ class SecurityASTVisitor(ast.NodeVisitor):
         """Visite les imports from"""
         if node.module:
             for alias in node.names:
-                full_import = f"{node.module}.{alias.name}"
-                self.imports.add(full_import)
+                if alias.name == "*":
+                    # Import wildcard - on ne peut pas savoir quelles classes sont importées
+                    # mais on note le module pour référence
+                    self.imports.add(f"{node.module}.*")
+                else:
+                    full_import = f"{node.module}.{alias.name}"
+                    self.imports.add(full_import)
         self.generic_visit(node)
     
     def visit_ClassDef(self, node: ast.ClassDef):
@@ -201,12 +206,16 @@ class SecurityASTVisitor(ast.NodeVisitor):
                         self.inherits_from_base_with_run = True
                         break
                 elif isinstance(base, ast.Attribute):
+                    # Pour les imports comme "from module import Class", base.attr contient le nom de la classe
                     if base.attr == "Payload":
                         self.is_payload = True
                         break
                     elif base.attr in base_classes_with_run:
                         self.inherits_from_base_with_run = True
                         break
+                # Gérer aussi les cas où la base est un nom simple (imports wildcard)
+                # Quand on fait "from kittysploit import *", DockerEnvironment sera un ast.Name
+                # Ce cas est déjà géré ci-dessus avec isinstance(base, ast.Name)
         self.generic_visit(node)
     
     def visit_FunctionDef(self, node: ast.FunctionDef):

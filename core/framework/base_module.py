@@ -9,6 +9,7 @@ from core.framework.option.base_option import Option as BaseOption, OptionValida
 from core.framework.utils.dependencies import DependencyManager
 from core.framework.failure import ProcedureError
 import os
+import shutil
 from core.output_handler import print_success, print_error, print_status
 import random
 import string
@@ -279,6 +280,41 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
         """
         return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
     
+    def create_dir(self, dir_path: str) -> bool:
+        """
+        Create a directory. If the directory already exists, it will be removed and recreated.
+        
+        Args:
+            dir_path: Path to the directory
+            
+        Returns:
+            bool: True if the directory has been created with success, False otherwise
+        """
+        # Use output directory relative to current working directory (same as write_out_dir)
+        output_dir = os.path.join(os.getcwd(), "output")
+        full_dir_path = os.path.join(output_dir, dir_path)
+        
+        # Create output directory if it doesn't exist
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Remove directory if it exists
+        if os.path.exists(full_dir_path):
+            try:
+                shutil.rmtree(full_dir_path)
+            except Exception as e:
+                print_error(f"Error removing existing directory: {e}")
+                return False
+        
+        # create directory
+        try:
+            os.makedirs(full_dir_path)
+            return True
+        except Exception as e:
+            print_error(f"Error creating directory: {e}")
+            return False
+    
+
     def write_out_dir(self, file_path: str, content: str) -> bool:
         """
         Write a file to the output directory.

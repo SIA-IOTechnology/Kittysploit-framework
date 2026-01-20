@@ -16,6 +16,7 @@ from .mysql_shell import MySQLShell
 from .ftp_shell import FTPShell
 from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
+from .android_shell import AndroidShell
 from core.output_handler import print_info, print_error, print_success
 
 class ShellManager:
@@ -32,7 +33,8 @@ class ShellManager:
             'mysql': MySQLShell,
             'ftp': FTPShell,
             'aws_sqs': AWSSQSShell,
-            'aws_sqs_command': AWSSQSCommandShell
+            'aws_sqs_command': AWSSQSCommandShell,
+            'android': AndroidShell,
         }
         self.active_shell: Optional[str] = None
     
@@ -59,7 +61,7 @@ class ShellManager:
             shell_class = self.shell_types[shell_type]
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "ftp", "aws_sqs", "aws_sqs_command"):
+            elif shell_type in ("ssh", "php", "mysql", "ftp", "aws_sqs", "aws_sqs_command", "android"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -129,10 +131,13 @@ class ShellManager:
                 if session:
                     # Determine shell type from session type
                     session_type = session.session_type.lower()
+                    session_data = session.data if hasattr(session, 'data') and isinstance(session.data, dict) else {}
                     if session_type == 'ssh':
                         shell_type = 'ssh'
                     elif session_type == 'meterpreter':
                         shell_type = 'meterpreter'
+                    elif session_type == 'android':
+                        shell_type = 'android'
                     elif session_type in ('php', 'http', 'https'):
                         shell_type = 'php'
                     elif session_type == 'mysql':
@@ -201,11 +206,12 @@ class ShellManager:
             return None
         
         shell_class = self.shell_types[shell_type]
+        # Do not instantiate shell classes here: some require constructor args (session_id/framework).
         return {
             'name': shell_class.__name__,
-            'shell_name': shell_class().shell_name if hasattr(shell_class(), 'shell_name') else shell_type,
+            'shell_name': shell_type,
             'description': shell_class.__doc__ or f"{shell_type} shell implementation",
-            'available_commands': len(shell_class().get_available_commands()) if hasattr(shell_class(), 'get_available_commands') else 0
+            'available_commands': 0,
         }
     
     def switch_shell(self, session_id: str) -> bool:

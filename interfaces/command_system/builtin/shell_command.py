@@ -43,6 +43,7 @@ Shell Types:
     classic      Standard shell for regular sessions
     javascript   JavaScript shell for browser sessions
     ssh          SSH shell for SSH sessions
+    android      Android (ADB) shell for Android sessions
     php          PHP shell for webshell/HTTP sessions
     mysql        MySQL shell for MySQL database sessions
     ftp          FTP shell for FTP file transfer sessions

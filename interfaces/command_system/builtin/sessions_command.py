@@ -222,6 +222,9 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "ssh":
                 session_type = "ssh"
                 shell_type = "ssh"
+            elif session and session.session_type and session.session_type.lower() == "android":
+                session_type = "android"
+                shell_type = "android"
             elif session and session.session_type and session.session_type.lower() in ("php", "http", "https"):
                 session_type = session.session_type.lower()
                 shell_type = "php"

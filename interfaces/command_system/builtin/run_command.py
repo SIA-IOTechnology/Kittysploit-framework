@@ -96,6 +96,51 @@ Examples:
                 print_info("Use 'show options' to see required options")
                 return False
             
+            # Vérifier la blacklist du Guardian avant l'exécution
+            if hasattr(self.framework, 'guardian_manager') and self.framework.guardian_manager and self.framework.guardian_manager.enabled and self.framework.guardian_manager.verbose:
+                print_info(f"[GUARDIAN DEBUG] Checking guardian - has guardian_manager: {hasattr(self.framework, 'guardian_manager')}")
+                if hasattr(self.framework, 'guardian_manager'):
+                    print_info(f"[GUARDIAN DEBUG] guardian_manager exists: {self.framework.guardian_manager is not None}")
+                    if self.framework.guardian_manager:
+                        print_info(f"[GUARDIAN DEBUG] guardian_manager.enabled: {self.framework.guardian_manager.enabled}")
+                        print_info(f"[GUARDIAN DEBUG] blacklist size: {len(self.framework.guardian_manager.blacklist)}")
+                        print_info(f"[GUARDIAN DEBUG] blacklist contents: {list(self.framework.guardian_manager.blacklist.keys())}")
+            
+            if hasattr(self.framework, 'guardian_manager') and self.framework.guardian_manager and self.framework.guardian_manager.enabled:
+                target_ip = self.framework._extract_target_ip_from_module()
+                if self.framework.guardian_manager.verbose:
+                    print_info(f"[GUARDIAN DEBUG] Extracted target IP: {target_ip}")
+                if target_ip:
+                    # Vérifier si l'IP est dans la blacklist
+                    is_blacklisted = target_ip in self.framework.guardian_manager.blacklist
+                    if self.framework.guardian_manager.verbose:
+                        print_info(f"[GUARDIAN DEBUG] Is {target_ip} in blacklist? {is_blacklisted}")
+                    if is_blacklisted:
+                        blacklist_entry = self.framework.guardian_manager.blacklist[target_ip]
+                        reason = blacklist_entry.get('reason', 'Unknown reason')
+                        timestamp = blacklist_entry.get('timestamp', 'Unknown')
+                        
+                        print_error(f"[GUARDIAN] Module execution BLOCKED: Target IP {target_ip} is blacklisted")
+                        print_error(f"[GUARDIAN] Reason: {reason} (added: {timestamp})")
+                        
+                        # Créer une alerte Guardian via _create_alert pour mettre à jour les statistiques
+                        alert = self.framework.guardian_manager._create_alert(
+                            target=target_ip,
+                            severity="CRITICAL",
+                            issue=f"Module execution blocked: IP {target_ip} is blacklisted",
+                            confidence=100.0,
+                            recommendations=[
+                                "Remove IP from blacklist if this is intentional",
+                                "Verify target before removing from blacklist"
+                            ],
+                            evidence=[f"IP {target_ip} found in blacklist"]
+                        )
+                        # Marquer l'action comme prise
+                        alert.auto_action_taken = True
+                        alert.action_description = "Module execution blocked"
+                        
+                        return False
+            
             # Show preview if requested
             if parsed_args.preview:
                 self._show_execution_preview(module)
@@ -350,6 +395,8 @@ Examples:
                     shell_type = "aws_sqs_command"
                 else:
                     shell_type = "aws_sqs"
+            elif session_type == "android":
+                shell_type = "android"
             else:
                 shell_type = "classic"
             

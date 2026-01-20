@@ -145,9 +145,21 @@ class BrowserServerCommand(BaseCommand):
             )
             server_thread.start()
             
-            # Wait a moment to ensure server started
-            time.sleep(1)
+            # Wait and check multiple times to ensure server started
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                time.sleep(0.5)  # Wait 0.5 seconds between checks
+                if self.framework.browser_server.is_running():
+                    print_success(f"Browser server started successfully!")
+                    print_status(f"Injection script available at: http://{parsed_args.host}:{parsed_args.port}/inject.js")
+                    print_status(f"XSS injection script: http://{parsed_args.host}:{parsed_args.port}/xss.js")
+                    print_status(f"Management interface: http://{parsed_args.host}:{parsed_args.port}/admin")
+                    print_status(f"Test page: http://{parsed_args.host}:{parsed_args.port}/test")
+                    return True
             
+            # If we get here, server didn't start in time
+            # But check one more time - sometimes the server starts but is_running() hasn't updated yet
+            time.sleep(0.5)
             if self.framework.browser_server.is_running():
                 print_success(f"Browser server started successfully!")
                 print_status(f"Injection script available at: http://{parsed_args.host}:{parsed_args.port}/inject.js")
@@ -156,7 +168,7 @@ class BrowserServerCommand(BaseCommand):
                 print_status(f"Test page: http://{parsed_args.host}:{parsed_args.port}/test")
                 return True
             else:
-                print_error("Failed to start browser server")
+                print_error("Failed to start browser server (timeout waiting for server to start)")
                 return False
                 
         except Exception as e:

@@ -11,11 +11,13 @@ from .shell_manager import ShellManager
 from .classic_shell import ClassicShell
 from .javascript_shell import JavaScriptShell
 from .ssh_shell import SSHShell
+from .android_shell import AndroidShell
 
 __all__ = [
     'BaseShell',
     'ShellManager', 
     'ClassicShell',
     'JavaScriptShell',
-    'SSHShell'
+    'SSHShell',
+    'AndroidShell',
 ]

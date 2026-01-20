@@ -24,6 +24,7 @@ class SessionType(Enum):
     AWS = "aws"
     CANBUS = "canbus"
     BROWSER = "browser"
+    ANDROID = "android"
 
 class ServiceType(Enum):
     """Service types"""

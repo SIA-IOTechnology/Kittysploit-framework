@@ -122,10 +122,12 @@ class GuardianManager:
         
         # Start monitoring thread
         self.stop_monitoring = False
-        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
-        self.monitoring_thread.start()
+        if self.monitoring_thread is None or not self.monitoring_thread.is_alive():
+            self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+            self.monitoring_thread.start()
         
-        self.logger.info("Guardian monitoring enabled")
+        self.logger.info(f"Guardian monitoring enabled (verbose={verbose}, auto_action={auto_action})")
+        print(f"[GUARDIAN] Enabled: {self.enabled}, Verbose: {self.verbose}, Auto Action: {self.auto_action}")
     
     def disable(self):
         """Disable Guardian monitoring"""

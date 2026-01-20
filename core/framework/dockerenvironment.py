@@ -13,6 +13,8 @@ from core.framework.option import OptBool, OptInteger, OptPort, OptString
 class DockerEnvironment(BaseModule):
     """Docker Environment Module"""
 
+    TYPE_MODULE = "docker_environment"
+
     host_port = OptPort(80, "Local port to expose the service", True)
     image_name = OptString("", "Docker image name to use (or image ID/tag)", True)
     container_name = OptString("", "Container name", True)

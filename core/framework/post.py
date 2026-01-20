@@ -19,8 +19,11 @@ class Post(BaseModule):
 
     def _exploit(self):
         try:
-            self.run()
-            return True
+            result = self.run()
+            # Keep backward compatibility: if run() returns None, treat as success.
+            if result is None:
+                return True
+            return bool(result)
         except ProcedureError as e:
             raise e
         except Exception as e:

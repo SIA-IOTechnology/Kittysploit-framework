@@ -205,8 +205,11 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
     def _exploit(self):
 
         try:
-            self.run()
-            return True
+            result = self.run()
+            # Keep backward compatibility: if run() returns None, treat as success.
+            if result is None:
+                return True
+            return bool(result)
         except ProcedureError as e:
             return False
         except Exception as e:

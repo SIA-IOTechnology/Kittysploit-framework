@@ -30,6 +30,7 @@ import os
 import importlib.util
 import sys
 import time
+from datetime import datetime
 
 
 class Framework:
@@ -120,6 +121,16 @@ class Framework:
         
         # Initialize current module
         self.current_module = None
+        
+        # Initialize Guardian Manager
+        try:
+            from core.guardian_manager import GuardianManager
+            self.guardian_manager = GuardianManager()
+        except Exception as e:
+            # Si le Guardian n'est pas disponible, on continue sans
+            self.guardian_manager = None
+            if hasattr(self, 'output_handler'):
+                self.output_handler.print_warning(f"Guardian Manager not available: {e}")
         
         # Initialize workspaces
         self._init_workspaces()
@@ -618,6 +629,58 @@ class Framework:
             self.output_handler.print_warning("Tentative d'exécution sans module chargé")
             return False
         
+        # Vérifier la blacklist du Guardian avant l'exécution
+        if hasattr(self, 'guardian_manager') and self.guardian_manager:
+            if not self.guardian_manager.enabled:
+                # Guardian existe mais n'est pas activé - on ne bloque pas
+                if self.guardian_manager.verbose:
+                    self.output_handler.print_info("[GUARDIAN] Guardian is not enabled, skipping blacklist check")
+            else:
+                target_ip = self._extract_target_ip_from_module()
+                # Debug: logger seulement si verbose est activé
+                if self.guardian_manager.verbose:
+                    self.output_handler.print_info(f"[GUARDIAN] Checking blacklist - Extracted target IP: {target_ip}")
+                    self.output_handler.print_info(f"[GUARDIAN] Guardian enabled: {self.guardian_manager.enabled}, Blacklist size: {len(self.guardian_manager.blacklist)}")
+                
+                if target_ip:
+                    # Vérifier si l'IP est dans la blacklist
+                    if self.guardian_manager.verbose:
+                        self.output_handler.print_info(f"[GUARDIAN] Checking if {target_ip} is in blacklist: {target_ip in self.guardian_manager.blacklist}")
+                    if target_ip in self.guardian_manager.blacklist:
+                        blacklist_entry = self.guardian_manager.blacklist[target_ip]
+                        reason = blacklist_entry.get('reason', 'Unknown reason')
+                        timestamp = blacklist_entry.get('timestamp', 'Unknown')
+                        
+                        self.output_handler.print_error(
+                            f"[GUARDIAN] Module execution BLOCKED: Target IP {target_ip} is blacklisted"
+                        )
+                        self.output_handler.print_error(
+                            f"[GUARDIAN] Reason: {reason} (added: {timestamp})"
+                        )
+                        
+                        # Créer une alerte Guardian via _create_alert pour mettre à jour les statistiques
+                        alert = self.guardian_manager._create_alert(
+                            target=target_ip,
+                            severity="CRITICAL",
+                            issue=f"Module execution blocked: IP {target_ip} is blacklisted",
+                            confidence=100.0,
+                            recommendations=[
+                                "Remove IP from blacklist if this is intentional",
+                                "Verify target before removing from blacklist"
+                            ],
+                            evidence=[f"IP {target_ip} found in blacklist"]
+                        )
+                        # Marquer l'action comme prise
+                        alert.auto_action_taken = True
+                        alert.action_description = "Module execution blocked"
+                        
+                        # Toujours bloquer si l'IP est dans la blacklist (même si auto_action n'est pas activé)
+                        self.output_handler.print_error(
+                            "[GUARDIAN] Execution blocked: IP is blacklisted"
+                        )
+                        
+                        return False
+        
         # Utiliser le Runtime Kernel si demandé
         if use_runtime_kernel:
             module_path = getattr(self.current_module, '__module__', 'unknown')
@@ -1066,6 +1129,104 @@ class Framework:
     def is_proxy_enabled(self) -> bool:
         """Vérifie si le proxy est activé"""
         return self.proxy_config['enabled']
+    
+    def _extract_target_ip_from_module(self) -> Optional[str]:
+        """
+        Extrait l'IP cible du module actuel depuis ses options.
+        
+        Returns:
+            str: L'IP cible si trouvée, None sinon
+        """
+        if not self.current_module:
+            return None
+        
+        import re
+        from urllib.parse import urlparse
+        
+        # Liste des noms d'options possibles pour l'IP cible
+        target_option_names = ['target', 'rhost', 'rhosts', 'host', 'hostname', 'ip', 'RHOST', 'RHOSTS', 'HOST']
+        
+        # Essayer de récupérer depuis les attributs du module (les options sont des descripteurs)
+        for attr_name in target_option_names:
+            try:
+                # Vérifier si l'attribut existe dans la classe ou l'instance
+                if hasattr(self.current_module, attr_name):
+                    # Obtenir la valeur via getattr (cela appellera __get__ du descripteur si c'est une Option)
+                    value = getattr(self.current_module, attr_name)
+                    
+                    # Si c'est une Option (descripteur), la valeur peut être dans _instance_values
+                    if value and not isinstance(value, str):
+                        # Essayer d'accéder à la valeur réelle via le descripteur
+                        option_descriptor = getattr(type(self.current_module), attr_name, None)
+                        if option_descriptor and hasattr(option_descriptor, '_instance_values'):
+                            instance_id = id(self.current_module)
+                            if instance_id in option_descriptor._instance_values:
+                                stored_value = option_descriptor._instance_values[instance_id]
+                                # La valeur peut être dans 'value' ou 'display_value'
+                                value = stored_value.get('value') or stored_value.get('display_value') or value
+                    
+                    # Convertir en string et extraire l'IP
+                    if value:
+                        value_str = str(value).strip()
+                        if value_str and value_str.lower() != 'none':
+                            ip = self._extract_ip_from_value(value_str)
+                            if ip:
+                                # Debug log seulement si Guardian est activé et verbose
+                                if (hasattr(self, 'guardian_manager') and self.guardian_manager and 
+                                    self.guardian_manager.enabled and self.guardian_manager.verbose and
+                                    hasattr(self, 'output_handler') and self.output_handler):
+                                    self.output_handler.print_info(f"[GUARDIAN DEBUG] Found IP {ip} from option {attr_name} = {value_str}")
+                                return ip
+            except Exception as e:
+                # Log l'erreur pour débogage seulement si Guardian est activé et verbose
+                if (hasattr(self, 'guardian_manager') and self.guardian_manager and 
+                    self.guardian_manager.enabled and self.guardian_manager.verbose and
+                    hasattr(self, 'output_handler') and self.output_handler):
+                    self.output_handler.print_info(f"[GUARDIAN DEBUG] Error accessing {attr_name}: {e}")
+                continue
+        
+        return None
+    
+    def _extract_ip_from_value(self, value: str) -> Optional[str]:
+        """
+        Extrait une adresse IP depuis une valeur qui peut être une URL, une IP, etc.
+        
+        Args:
+            value: La valeur à analyser
+            
+        Returns:
+            str: L'IP extraite ou None
+        """
+        import re
+        from urllib.parse import urlparse
+        
+        if not value:
+            return None
+        
+        # Pattern pour une adresse IP (IPv4)
+        ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+        
+        # Si c'est une URL, extraire le hostname
+        if '://' in value or value.startswith('http') or value.startswith('https'):
+            try:
+                parsed = urlparse(value if '://' in value else f'http://{value}')
+                hostname = parsed.hostname
+                if hostname:
+                    # Vérifier si le hostname est une IP
+                    match = re.search(ip_pattern, hostname)
+                    if match:
+                        return match.group(0)
+                    # Sinon, essayer de résoudre (mais on ne le fait pas ici pour éviter les dépendances)
+                    # Pour l'instant, on retourne None si ce n'est pas une IP directe
+            except:
+                pass
+        
+        # Chercher une IP directement dans la valeur (même si c'est une URL malformée)
+        match = re.search(ip_pattern, value)
+        if match:
+            return match.group(0)
+        
+        return None
     
     def get_proxy_url(self) -> Optional[str]:
         """Retourne l'URL du proxy si activé"""

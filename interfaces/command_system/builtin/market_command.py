@@ -12,6 +12,7 @@ import os
 import sys
 import getpass
 import logging
+import time
 from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
@@ -29,11 +30,11 @@ class MarketCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "market [browse|list|search|install|update|uninstall|info|categories|featured|popular|recent|installed|publish]"
+        return "market [list|search|install|update|uninstall|info|installed|publish|register|login|buy]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
-        return ['browse', 'list', 'search', 'install', 'update', 'uninstall', 'info', 'categories', 'featured', 'popular', 'recent', 'installed', 'publish']
+        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'publish', 'register', 'login', 'buy']
     
     @property
     def help_text(self) -> str:
@@ -45,29 +46,24 @@ Usage: {self.usage}
 This command allows you to browse, search, and install modules from the KittySploit marketplace.
 
 Subcommands:
-    browse        Browse available modules by category
-    list          List all available extensions (alias for browse)
+    list          List all available modules
     search <term> Search for modules by name or description
     install [id]  Install a module by its ID (or use --all-free to install all free modules)
     info <id>     Show detailed information about a module
-    categories    List available categories
-    featured      Show featured modules
-    popular       Show popular modules
-    recent        Show recently added modules
     installed     List installed modules
     update [id]   Update installed modules (all or specific module)
     uninstall [id] Uninstall a module (all if --all flag, or specific module)
     publish <dir> Package and publish a module to the marketplace
+    register      Register a new account
+    login         Login to your account
+    buy <id>      Purchase a module from the marketplace
 
 Examples:
-    market browse                    # Browse all modules
     market list                      # List all modules
     market search "proxy"            # Search for proxy-related modules
     market install test-module       # Install module with ID test-module
     market install --all-free       # Install all free modules from marketplace
     market info test-module          # Show info about module test-module
-    market categories                # List all categories
-    market featured                  # Show featured modules
     market installed                 # List installed modules
     market update                    # Update all installed modules
     market update test-module        # Update specific module
@@ -82,7 +78,8 @@ Examples:
         # Use registry server
         self.registry_url = self._get_registry_url()
         self.timeout = 10
-        self.api_key = None
+        self.api_key = None  # Keep for backward compatibility
+        self.token = None  # Bearer token for new API
         self._load_account_config()
     
     def _create_parser(self) -> argparse.ArgumentParser:
@@ -94,14 +91,8 @@ Examples:
         
         subparsers = parser.add_subparsers(dest='action', help='Available actions')
         
-        # Browse command
-        browse_parser = subparsers.add_parser('browse', help='Browse modules by category')
-        browse_parser.add_argument('--category', '-c', help='Filter by category')
-        browse_parser.add_argument('--page', '-p', type=int, default=1, help='Page number')
-        browse_parser.add_argument('--limit', '-l', type=int, default=20, help='Items per page')
-        
-        # List command (alias for browse)
-        list_parser = subparsers.add_parser('list', help='List all available extensions')
+        # List command
+        list_parser = subparsers.add_parser('list', help='List all available modules')
         list_parser.add_argument('--category', '-c', help='Filter by category')
         list_parser.add_argument('--page', '-p', type=int, default=1, help='Page number')
         list_parser.add_argument('--limit', '-l', type=int, default=20, help='Items per page')
@@ -132,21 +123,6 @@ Examples:
         info_parser = subparsers.add_parser('info', help='Show module information')
         info_parser.add_argument('module_id', help='Module ID')
         
-        # Categories command
-        subparsers.add_parser('categories', help='List available categories')
-        
-        # Featured command
-        featured_parser = subparsers.add_parser('featured', help='Show featured modules')
-        featured_parser.add_argument('--limit', '-l', type=int, default=10, help='Number of modules to show')
-        
-        # Popular command
-        popular_parser = subparsers.add_parser('popular', help='Show popular modules')
-        popular_parser.add_argument('--limit', '-l', type=int, default=10, help='Number of modules to show')
-        
-        # Recent command
-        recent_parser = subparsers.add_parser('recent', help='Show recently added modules')
-        recent_parser.add_argument('--limit', '-l', type=int, default=10, help='Number of modules to show')
-        
         # Installed command
         subparsers.add_parser('installed', help='List installed extensions')
         
@@ -155,6 +131,16 @@ Examples:
         publish_parser.add_argument('module_dir', help='Directory containing the module (with extension.toml)')
         publish_parser.add_argument('--package-only', action='store_true', help='Only package, do not upload')
         publish_parser.add_argument('--no-sign', action='store_true', help='Skip signing the bundle (not recommended)')
+        
+        # Register command
+        subparsers.add_parser('register', help='Register a new account')
+        
+        # Login command
+        subparsers.add_parser('login', help='Login to your account')
+        
+        # Buy command
+        buy_parser = subparsers.add_parser('buy', help='Purchase a module from the marketplace')
+        buy_parser.add_argument('module_id', help='Module ID to purchase')
         
         return parser
     
@@ -175,8 +161,8 @@ Examples:
                 return True
             
             # Vérifier l'authentification pour les actions qui en nécessitent
-            requires_auth = parsed_args.action in ['install', 'update', 'publish']
-            if requires_auth and not self.api_key:
+            requires_auth = parsed_args.action in ['install', 'update', 'publish', 'buy']
+            if requires_auth and not self.token and not self.api_key:
                 print_warning("⚠️  This action requires an account")
                 if self._prompt_account_setup():
                     self._load_account_config()
@@ -184,7 +170,7 @@ Examples:
                     return False
             
             # Execute the appropriate action
-            if parsed_args.action == 'browse' or parsed_args.action == 'list':
+            if parsed_args.action == 'list':
                 return self._browse_modules(parsed_args)
             elif parsed_args.action == 'search':
                 return self._search_modules(parsed_args)
@@ -196,18 +182,16 @@ Examples:
                 return self._uninstall_module(parsed_args)
             elif parsed_args.action == 'info':
                 return self._show_module_info(parsed_args)
-            elif parsed_args.action == 'categories':
-                return self._list_categories()
-            elif parsed_args.action == 'featured':
-                return self._show_featured_modules(parsed_args)
-            elif parsed_args.action == 'popular':
-                return self._show_popular_modules(parsed_args)
-            elif parsed_args.action == 'recent':
-                return self._show_recent_modules(parsed_args)
             elif parsed_args.action == 'installed':
                 return self._list_installed_extensions()
             elif parsed_args.action == 'publish':
                 return self._publish_module(parsed_args)
+            elif parsed_args.action == 'register':
+                return self._register_account()
+            elif parsed_args.action == 'login':
+                return self._login_account()
+            elif parsed_args.action == 'buy':
+                return self._buy_module(parsed_args)
             else:
                 print_error(f"Unknown action: {parsed_args.action}")
                 return False
@@ -226,13 +210,24 @@ Examples:
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
                     config = toml.load(f)
-                    registry_url = config.get('registry', {}).get('url', 'http://localhost:5000')
+                    registry_url = config.get('registry', {}).get('url', 'https://app.kittysploit.com')
                     if registry_url:
                         return registry_url.rstrip('/')
         except Exception as e:
             # Silently fall back to default
             pass
-        return "http://localhost:5000"
+        # Try to get from config file
+        try:
+            config_file = os.path.join(os.path.expanduser("~"), ".kittysploit", "registry_config.json")
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    base_url = config.get('base_url')
+                    if base_url:
+                        return base_url.rstrip('/')
+        except Exception:
+            pass
+        return "https://app.kittysploit.com"
     
     def _load_account_config(self):
         """Load account configuration from file"""
@@ -241,7 +236,13 @@ Examples:
             if os.path.exists(config_file):
                 with open(config_file, 'r') as f:
                     config = json.load(f)
-                    self.api_key = config.get('api_key')
+                    # Support both old api_key and new token
+                    self.token = config.get('token')
+                    self.api_key = config.get('api_key')  # Backward compatibility
+                    # Update registry_url from config if available
+                    base_url = config.get('base_url')
+                    if base_url:
+                        self.registry_url = base_url.rstrip('/')
         except Exception:
             pass
     
@@ -259,13 +260,17 @@ Examples:
     def _register_account(self) -> bool:
         """Register a new account"""
         try:
-            print_info("\n=== Registry Account Registration ===")
+            print_info("\n=== Marketplace Account Registration ===")
             email = input("Email: ").strip()
             if not email:
                 print_error("Email is required")
                 return False
             
-            username = input("Username (optional): ").strip() or None
+            username = input("Username: ").strip()
+            if not username:
+                print_error("Username is required")
+                return False
+            
             password = getpass.getpass("Password: ")
             if not password:
                 print_error("Password is required")
@@ -277,21 +282,51 @@ Examples:
                 return False
             
             response = requests.post(
-                f"{self.registry_url}/api/auth/register",
-                json={"email": email, "password": password, "username": username},
+                f"{self.registry_url}/api/cli/register",
+                json={"email": email, "username": username, "password": password},
                 timeout=self.timeout
             )
             
             if response.status_code == 201:
                 result = response.json()
-                self.api_key = result.get('api_key')
-                self._save_account_config(self.api_key, email, username)
-                print_success("Account created successfully!")
-                return True
-            else:
-                error = response.json().get('error', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                if result.get('success'):
+                    user = result.get('user', {})
+                    print_success("Account created successfully!")
+                    print_info(f"Username: {user.get('username', 'N/A')}")
+                    print_info(f"Email: {user.get('email', 'N/A')}")
+                    print_info("You can now login with: market login")
+                    return True
+                else:
+                    error = result.get('error', 'Unknown error')
+                    print_error(f"Registration failed: {error}")
+                    return False
+            elif response.status_code == 409:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', 'Email or username already exists')
                 print_error(f"Registration failed: {error}")
+                print_info("Use 'market login' to connect to your existing account")
                 return False
+            elif response.status_code == 429:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                message = error_data.get('message', 'Too many requests')
+                retry_after = error_data.get('retry_after', 3600)
+                print_error(f"Rate limit exceeded: {message}")
+                print_info(f"Please try again after {retry_after} seconds")
+                return False
+            else:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', response.text)
+                message = error_data.get('message', '')
+                if message:
+                    print_error(f"Registration failed: {error}")
+                    print_error(f"  {message}")
+                else:
+                    print_error(f"Registration failed: {error}")
+                return False
+        except requests.exceptions.ConnectionError:
+            print_error("Failed to connect to marketplace server")
+            print_info(f"Server URL: {self.registry_url}")
+            return False
         except Exception as e:
             print_error(f"Error: {str(e)}")
             return False
@@ -299,7 +334,7 @@ Examples:
     def _login_account(self) -> bool:
         """Login to account"""
         try:
-            print_info("\n=== Registry Account Login ===")
+            print_info("\n=== Marketplace Account Login ===")
             email = input("Email: ").strip()
             if not email:
                 print_error("Email is required")
@@ -311,27 +346,69 @@ Examples:
                 return False
             
             response = requests.post(
-                f"{self.registry_url}/api/auth/login",
+                f"{self.registry_url}/api/cli/login",
                 json={"email": email, "password": password},
                 timeout=self.timeout
             )
             
             if response.status_code == 200:
                 result = response.json()
-                self.api_key = result.get('api_key')
-                user = result.get('user', {})
-                self._save_account_config(self.api_key, user.get('email'), user.get('username'))
-                print_success("Login successful!")
-                return True
-            else:
-                error = response.json().get('error', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
+                if result.get('success'):
+                    token = result.get('token')
+                    expires_at = result.get('expires_at')
+                    user = result.get('user', {})
+                    
+                    if token:
+                        self.token = token
+                        self._save_account_config(token, user.get('email'), user.get('username'), expires_at)
+                        print_success("Login successful!")
+                        print_info(f"Welcome, {user.get('username', 'N/A')}!")
+                        if expires_at:
+                            print_info(f"Token expires at: {expires_at}")
+                        return True
+                    else:
+                        print_error("Login failed: No token received")
+                        return False
+                else:
+                    error = result.get('error', 'Unknown error')
+                    print_error(f"Login failed: {error}")
+                    return False
+            elif response.status_code == 401:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', 'Invalid credentials')
                 print_error(f"Login failed: {error}")
                 return False
+            elif response.status_code == 403:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', 'Account disabled')
+                print_error(f"Login failed: {error}")
+                return False
+            elif response.status_code == 429:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                message = error_data.get('message', 'Too many requests')
+                retry_after = error_data.get('retry_after', 3600)
+                print_error(f"Rate limit exceeded: {message}")
+                print_info(f"Please try again after {retry_after} seconds")
+                return False
+            else:
+                error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', response.text)
+                message = error_data.get('message', '')
+                if message:
+                    print_error(f"Login failed: {error}")
+                    print_error(f"  {message}")
+                else:
+                    print_error(f"Login failed: {error}")
+                return False
+        except requests.exceptions.ConnectionError:
+            print_error("Failed to connect to marketplace server")
+            print_info(f"Server URL: {self.registry_url}")
+            return False
         except Exception as e:
             print_error(f"Error: {str(e)}")
             return False
     
-    def _save_account_config(self, api_key: str, email: str, username: str = None):
+    def _save_account_config(self, token: str = None, email: str = None, username: str = None, expires_at: str = None, api_key: str = None):
         """Save account configuration"""
         try:
             config_dir = os.path.join(os.path.expanduser("~"), ".kittysploit")
@@ -343,25 +420,56 @@ Examples:
                 with open(config_file, 'r') as f:
                     config = json.load(f)
             
-            config['api_key'] = api_key
-            config['registry_url'] = self.registry_url
-            config['email'] = email
+            # Save token (new API) or api_key (old API for backward compatibility)
+            if token:
+                config['token'] = token
+            if api_key:
+                config['api_key'] = api_key  # Backward compatibility
+            
+            config['base_url'] = self.registry_url
+            if email:
+                config['email'] = email
             if username:
                 config['username'] = username
+            if expires_at:
+                config['expires_at'] = expires_at
             
             with open(config_file, 'w') as f:
                 json.dump(config, f, indent=2)
         except Exception:
             pass
     
-    def _make_request(self, endpoint: str, params: Dict = None, method: str = 'GET', requires_auth: bool = False) -> Optional[Dict]:
+    def _make_request(self, endpoint: str, params: Dict = None, method: str = 'GET', requires_auth: bool = False, use_new_api: bool = False) -> Optional[Dict]:
         """Make a request to the registry API"""
         try:
-            url = f"{self.registry_url}/api/registry/{endpoint}"
+            # Use new API format if specified
+            if use_new_api:
+                url = f"{self.registry_url}/api/cli/{endpoint}"
+            else:
+                url = f"{self.registry_url}/api/registry/{endpoint}"
+            
             headers = {}
             
-            if requires_auth and self.api_key:
-                headers['X-API-Key'] = self.api_key
+            # Authentication headers
+            if use_new_api:
+                # Always send bearer token when available for new API (even for public endpoints)
+                if self.token:
+                    headers['Authorization'] = f'Bearer {self.token}'
+                elif requires_auth and self.api_key:
+                    # Some deployments may still accept API keys - send if token missing
+                    headers['X-API-Key'] = self.api_key
+            else:
+                if requires_auth:
+                    if self.api_key:
+                        headers['X-API-Key'] = self.api_key
+                    elif self.token:
+                        headers['X-API-Key'] = self.token
+            
+            # Debug: log the URL being called (only in debug mode)
+            if logging.getLogger().isEnabledFor(logging.DEBUG):
+                logging.debug(f"Making {method} request to: {url}")
+                if params:
+                    logging.debug(f"Params: {params}")
             
             if method == 'GET':
                 response = requests.get(url, params=params, headers=headers, timeout=self.timeout)
@@ -371,55 +479,62 @@ Examples:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.ConnectionError as e:
-            print_error("Failed to connect to registry server")
+            print_error("Failed to connect to marketplace server")
             print_info(f"Server URL: {self.registry_url}")
-            print_info(f"Check if the server is accessible: curl {self.registry_url}/health")
             return None
         except requests.exceptions.Timeout as e:
-            print_error("Connection timeout - registry server is not responding")
+            print_error("Connection timeout - marketplace server is not responding")
             print_info(f"Server URL: {self.registry_url}")
             return None
         except requests.exceptions.HTTPError as e:
             status_code = e.response.status_code
             if status_code == 401:
-                # Pour les routes qui ne nécessitent pas d'auth, un 401 est inattendu
-                if not requires_auth:
-                    print_error("Server returned 401 Unauthorized for a public endpoint")
-                    print_warning("The server might have a global API key configured")
-                    print_info("To allow public access, start the server without --api-key:")
-                    print_info("python registry_server.py")
-                    print_info("Or use a user account: market (then register/login)")
+                if requires_auth:
+                    # Clear invalid token silently
+                    if self.token:
+                        self.token = None
+                        self._save_account_config()
+                    # Don't print error here - let caller handle it
                 else:
-                    print_error("Unauthorized - please login or register")
-                    print_info("Use: market (then register/login)")
+                    # Some public endpoints on the new API may require auth but we can fall back silently
+                    if not use_new_api:
+                        print_error("Server returned 401 Unauthorized for a public endpoint")
+            elif status_code == 403:
+                error_data = e.response.json() if e.response.headers.get('content-type', '').startswith('application/json') else {}
+                error = error_data.get('error', 'Access forbidden')
+                print_error(f"Forbidden: {error}")
+            elif status_code == 404:
+                # Silent 404 - endpoint may not exist, will be handled by caller
+                pass
+            elif status_code == 429:
+                error_data = e.response.json() if e.response.headers.get('content-type', '').startswith('application/json') else {}
+                message = error_data.get('message', 'Too many requests')
+                retry_after = error_data.get('retry_after', 3600)
+                print_error(f"Rate limit exceeded: {message}")
+                print_info(f"Please try again after {retry_after} seconds")
             else:
-                # Afficher plus de détails pour le débogage
                 try:
                     error_body = e.response.json()
                     error_msg = error_body.get('error', 'Unknown error')
-                    print_error(f"🌐 HTTP error {status_code}: {error_msg}")
+                    message = error_body.get('message', '')
+                    if message:
+                        print_error(f"HTTP error {status_code}: {error_msg}")
+                        print_error(f"  {message}")
+                    else:
+                        print_error(f"HTTP error {status_code}: {error_msg}")
                 except:
                     error_text = e.response.text[:200] if hasattr(e.response, 'text') else str(e)
-                    print_error(f"🌐 HTTP error {status_code}: {error_text}")
+                    print_error(f"HTTP error {status_code}: {error_text}")
             return None
         except requests.exceptions.RequestException as e:
-            print_error(f"🌐 Network error: {str(e)}")
+            print_error(f"Network error: {str(e)}")
             return None
         except json.JSONDecodeError as e:
-            print_error(f"📄 Invalid response from registry: {str(e)}")
+            print_error(f"Invalid response from marketplace: {str(e)}")
             return None
     
     def _browse_modules(self, args) -> bool:
         """Browse modules by category"""
-        # Test de connexion d'abord
-        try:
-            health_url = f"{self.registry_url}/health"
-            health_response = requests.get(health_url, timeout=5)
-            if health_response.status_code != 200:
-                print_warning(f"Registry server health check failed (status {health_response.status_code})")
-        except Exception as e:
-            print_error(f"Error: {str(e)}")
-        
         params = {
             'page': args.page,
             'per_page': args.limit
@@ -428,13 +543,29 @@ Examples:
         if args.category:
             params['type'] = args.category
         
-        data = self._make_request('extensions', params, requires_auth=False)
+        # Try new API first, fallback to old API
+        data = self._make_request('market/modules', params, requires_auth=False, use_new_api=True)
+        
+        if not data:
+            # Fallback to old API
+            data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
+        
         if not data:
             return False
         
-        extensions = data.get('extensions', [])
-        total = data.get('total', 0)
-        self._display_extensions(extensions, f"Browse Results (Page {args.page}, Total: {total})")
+        # Handle both new and old API response formats
+        if 'modules' in data:
+            # New API format
+            modules = data.get('modules', [])
+            pagination = data.get('pagination', {})
+            total = pagination.get('total', len(modules))
+            self._display_modules_new_format(modules, f"Browse Results (Page {args.page}, Total: {total})", pagination)
+        else:
+            # Old API format
+            extensions = data.get('extensions', [])
+            total = data.get('total', 0)
+            self._display_extensions(extensions, f"Browse Results (Page {args.page}, Total: {total})")
+        
         return True
     
     def _search_modules(self, args) -> bool:
@@ -448,18 +579,36 @@ Examples:
         if args.category:
             params['type'] = args.category
         
-        data = self._make_request('extensions', params, requires_auth=False)
+        # Try new API first, fallback to old API
+        data = self._make_request('market/modules', params, requires_auth=False, use_new_api=True)
+        
+        if not data:
+            # Fallback to old API
+            data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
+        
         if not data:
             return False
         
-        extensions = data.get('extensions', [])
-        self._display_extensions(extensions, f"Search Results for '{args.query}' (Page {args.page})")
+        # Handle both new and old API response formats
+        if 'modules' in data:
+            # New API format
+            modules = data.get('modules', [])
+            pagination = data.get('pagination', {})
+            total = pagination.get('total', len(modules))
+            self._display_modules_new_format(modules, f"Search Results for '{args.query}' (Page {args.page}, Total: {total})", pagination)
+        else:
+            # Old API format
+            extensions = data.get('extensions', [])
+            self._display_extensions(extensions, f"Search Results for '{args.query}' (Page {args.page})")
+        
         return True
     
     def _install_module(self, args) -> bool:
         """Install a module or all free modules"""
-        if not self.api_key:
-            print_error("Authentication required for installation")
+        # Authentication is required for installation
+        if not self.token and not self.api_key:
+            print_error("Authentication required")
+            print_info("Use 'market login' or 'market register'")
             return False
         
         # If --all-free flag is set, install all free modules
@@ -473,22 +622,96 @@ Examples:
             print_info("   or: market install --all-free")
             return False
         
-        # First get extension info
-        extension_data = self._make_request(f'extensions/{args.module_id}', requires_auth=False)
-        if not extension_data:
-            print_error(f"Extension {args.module_id} not found")
+        # Get module info - search in the modules list
+        params = {'per_page': 100, 'page': 1}
+        data = self._make_request('market/modules', params=params, requires_auth=True, use_new_api=True)
+        
+        if not data:
+            print_error("Authentication required")
+            print_info("Use 'market login' or 'market register'")
             return False
         
-        # Check if extension is free
-        if not extension_data.get('is_free', True):
-            price = extension_data.get('price', 0)
-            currency = extension_data.get('currency', 'USD')
-            print_error(f"Extension '{extension_data.get('name', 'Unknown')}' is not free ({price} {currency})")
-            print_info("Only free extensions can be installed via the market command")
+        module_data = None
+        if 'modules' in data:
+            modules = data.get('modules', [])
+            # Search through pages if needed
+            found = False
+            page = 1
+            while not found and page <= 10:  # Limit to 10 pages
+                for module in modules:
+                    if str(module.get('id')) == str(args.module_id):
+                        module_data = module
+                        found = True
+                        break
+                
+                if not found:
+                    # Try next page
+                    pagination = data.get('pagination', {})
+                    if pagination.get('has_next'):
+                        page += 1
+                        params['page'] = page
+                        data = self._make_request('market/modules', params=params, requires_auth=True, use_new_api=True)
+                        if data and 'modules' in data:
+                            modules = data.get('modules', [])
+                        else:
+                            break
+                    else:
+                        break
+        
+        if not module_data:
+            print_error(f"Module {args.module_id} not found")
             return False
+        
+        # Check if module can be downloaded using the check endpoint (recommended)
+        check_data = self._make_request(f'market/check/{args.module_id}', requires_auth=True, use_new_api=True)
+        
+        if check_data:
+            # Use check endpoint response
+            can_download = check_data.get('can_download', False)
+            has_purchased = check_data.get('has_purchased', False)
+            is_author = check_data.get('is_author', False)
+            price = check_data.get('price', 0)
+            requires_payment = check_data.get('requires_payment', False)
+            module_name = check_data.get('module_name', module_data.get('name', 'Unknown'))
+            
+            if requires_payment or (price > 0 and not can_download and not has_purchased and not is_author):
+                checkout_url = check_data.get('checkout_url') or check_data.get('purchase_url')
+                print_error(f"Module '{module_name}' requires purchase ({price}€)")
+                if checkout_url:
+                    print_info(f"Checkout URL: {checkout_url}")
+                else:
+                    purchase_url = f"{self.registry_url}/market/modules/{args.module_id}/purchase"
+                    print_info(f"Purchase URL: {purchase_url}")
+                print_info(f"Or use: market buy {args.module_id}")
+                return False
+        else:
+            # Fallback: use module_data from list
+            can_download = module_data.get('can_download', False)
+            has_purchased = module_data.get('has_purchased', False)
+            is_author = module_data.get('is_author', False)
+            price = module_data.get('price', 0)
+            is_free = module_data.get('is_free', True)
+            module_name = module_data.get('name', 'Unknown')
+            
+            # Strict check: if price > 0, must have can_download=True OR has_purchased=True OR is_author=True
+            if price > 0:
+                if not can_download and not has_purchased and not is_author:
+                    print_error(f"Module '{module_name}' requires purchase ({price}€)")
+                    purchase_url = f"{self.registry_url}/market/modules/{args.module_id}/purchase"
+                    print_info(f"Purchase URL: {purchase_url}")
+                    print_info(f"Or use: market buy {args.module_id}")
+                    return False
+            
+            # Old API format fallback check
+            if not is_free and price > 0 and not has_purchased and not is_author:
+                currency = module_data.get('currency', 'EUR')
+                print_error(f"Extension '{module_name}' is not free ({price} {currency})")
+                purchase_url = f"{self.registry_url}/market/modules/{args.module_id}/purchase"
+                print_info(f"Purchase URL: {purchase_url}")
+                return False
         
         # Download and install
-        return self._download_and_install_extension(args.module_id, extension_data)
+        return self._download_and_install_extension(args.module_id, module_data)
     
     def _install_all_free_modules(self, args) -> bool:
         """Install all free modules from the marketplace"""
@@ -856,32 +1079,65 @@ Examples:
     
     def _show_featured_modules(self, args) -> bool:
         """Show featured modules (top downloads)"""
-        data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False)
+        # Try new API first
+        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'rating'}, requires_auth=False, use_new_api=True)
+        
+        if not data:
+            # Fallback to old API
+            data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False, use_new_api=False)
+        
         if not data:
             return False
         
-        extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
-        self._display_extensions(extensions[:args.limit], "Featured Modules")
+        if 'modules' in data:
+            modules = sorted(data.get('modules', []), key=lambda x: x.get('rating', 0), reverse=True)
+            pagination = data.get('pagination', {})
+            self._display_modules_new_format(modules[:args.limit], "Featured Modules", pagination)
+        else:
+            extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
+            self._display_extensions(extensions[:args.limit], "Featured Modules")
         return True
     
     def _show_popular_modules(self, args) -> bool:
         """Show popular modules (top downloads)"""
-        data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False)
+        # Try new API first
+        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'downloads'}, requires_auth=False, use_new_api=True)
+        
+        if not data:
+            # Fallback to old API
+            data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False, use_new_api=False)
+        
         if not data:
             return False
         
-        extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
-        self._display_extensions(extensions[:args.limit], "Popular Modules")
+        if 'modules' in data:
+            modules = sorted(data.get('modules', []), key=lambda x: x.get('downloads', 0), reverse=True)
+            pagination = data.get('pagination', {})
+            self._display_modules_new_format(modules[:args.limit], "Popular Modules", pagination)
+        else:
+            extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
+            self._display_extensions(extensions[:args.limit], "Popular Modules")
         return True
     
     def _show_recent_modules(self, args) -> bool:
         """Show recently added modules"""
-        data = self._make_request('extensions', {'per_page': args.limit}, requires_auth=False)
+        # Try new API first
+        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'newest'}, requires_auth=False, use_new_api=True)
+        
+        if not data:
+            # Fallback to old API
+            data = self._make_request('extensions', {'per_page': args.limit}, requires_auth=False, use_new_api=False)
+        
         if not data:
             return False
         
-        extensions = sorted(data.get('extensions', []), key=lambda x: x.get('created_at', ''), reverse=True)
-        self._display_extensions(extensions[:args.limit], "Recently Added Modules")
+        if 'modules' in data:
+            modules = sorted(data.get('modules', []), key=lambda x: x.get('created_at', ''), reverse=True)
+            pagination = data.get('pagination', {})
+            self._display_modules_new_format(modules[:args.limit], "Recently Added Modules", pagination)
+        else:
+            extensions = sorted(data.get('extensions', []), key=lambda x: x.get('created_at', ''), reverse=True)
+            self._display_extensions(extensions[:args.limit], "Recently Added Modules")
         return True
     
     def _get_installed_modules(self) -> List[Dict]:
@@ -1226,6 +1482,503 @@ Examples:
             print_error(f"❌ Error uploading module: {str(e)}")
             return False
     
+    def _buy_module(self, args) -> bool:
+        """Purchase a module from the marketplace"""
+        if not self.token:
+            print_error("Authentication required for purchasing")
+            print_info("Please login first with: market login")
+            return False
+        
+        try:
+            # First get module info
+            module_data = None
+            
+            # Method 1: Try direct endpoint (if it exists)
+            module_data = self._make_request(f'market/modules/{args.module_id}', requires_auth=True, use_new_api=True)
+            
+            # Method 2: If direct endpoint fails, search in the modules list
+            if not module_data:
+                params = {'per_page': 100, 'page': 1}
+                data = self._make_request('market/modules', params=params, requires_auth=True, use_new_api=True)
+                
+                if data and 'modules' in data:
+                    modules = data.get('modules', [])
+                    found = False
+                    page = 1
+                    while not found and page <= 10:
+                        for module in modules:
+                            if str(module.get('id')) == str(args.module_id):
+                                module_data = module
+                                found = True
+                                break
+                        
+                        if not found:
+                            pagination = data.get('pagination', {})
+                            if pagination.get('has_next'):
+                                page += 1
+                                params['page'] = page
+                                data = self._make_request('market/modules', params=params, requires_auth=True, use_new_api=True)
+                                if data and 'modules' in data:
+                                    modules = data.get('modules', [])
+                                else:
+                                    break
+                            else:
+                                break
+            
+            if not module_data:
+                print_error(f"Module {args.module_id} not found")
+                return False
+            
+            # Prefer the check endpoint to determine pricing/entitlements.
+            # Some deployments may return a 200 with an error payload for direct module endpoints,
+            # which can make missing fields look like "free" (price defaults to 0).
+            check_data = self._make_request(f'market/check/{args.module_id}', requires_auth=True, use_new_api=True)
+            
+            module_name = module_data.get('name', 'Unknown')
+            currency = module_data.get('currency', 'EUR')
+            has_purchased = bool(module_data.get('has_purchased', False))
+            can_download = bool(module_data.get('can_download', False))
+            is_author = bool(module_data.get('is_author', False))
+            is_free_flag = module_data.get('is_free') if isinstance(module_data, dict) else None
+            
+            price_raw = module_data.get('price', None)
+            price_value = self._normalize_price(price_raw) if price_raw is not None else None
+            requires_payment = False
+            
+            if isinstance(check_data, dict):
+                module_name = check_data.get('module_name') or module_name
+                currency = check_data.get('currency', currency)
+                has_purchased = bool(check_data.get('has_purchased', has_purchased))
+                can_download = bool(check_data.get('can_download', can_download))
+                is_author = bool(check_data.get('is_author', is_author))
+                requires_payment = bool(check_data.get('requires_payment', False))
+                
+                check_price = check_data.get('price', None)
+                if check_price is not None:
+                    price_raw = check_price
+                    price_value = self._normalize_price(check_price)
+            
+            if has_purchased or can_download or is_author:
+                print_info(f"✅ You already own this module: {module_name}")
+                print_info("You can install it with: market install " + args.module_id)
+                return True
+            
+            is_free_determined = (is_free_flag is True) or (price_value is not None and price_value <= 0)
+            if is_free_determined:
+                print_info(f"ℹ️  This module is free: {module_name}")
+                print_info("You can install it directly with: market install " + args.module_id)
+                return True
+            
+            # If we still can't determine price, avoid assuming "free".
+            if price_value is None and not requires_payment:
+                print_error("Unable to determine module price from the marketplace response")
+                print_info(f"Try: market info {args.module_id}")
+                return False
+            
+            # Show purchase confirmation
+            print_info("=" * 70)
+            print_info("🛒 PURCHASE MODULE")
+            print_info("=" * 70)
+            print_empty()
+            print_info(f"Module: {module_name}")
+            print_info(f"ID: {args.module_id}")
+            price_display = price_raw if isinstance(price_raw, (int, float, str)) else (price_value if price_value is not None else "N/A")
+            print_info(f"Price: {price_display} {currency}")
+            print_empty()
+            
+            confirm = input(f"Do you want to purchase this module for {price_display} {currency}? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print_info("Purchase cancelled")
+                return True
+            
+            # Make purchase request
+            print_info("Processing purchase...")
+            purchase_data = self._make_request(
+                f'market/modules/{args.module_id}/purchase',
+                method='POST',
+                requires_auth=True,
+                use_new_api=True
+            )
+            
+            if not purchase_data:
+                print_error("Purchase failed")
+                return False
+            
+            # Stripe/checkout flow: prefer redirect URL when provided.
+            checkout_url = purchase_data.get('checkout_url') or purchase_data.get('payment_url') or purchase_data.get('stripe_url')
+            if checkout_url:
+                print_success("✅ Checkout created")
+                print_info("Open this URL in your browser to pay:")
+                print_info(f"   {checkout_url}")
+                
+                if purchase_data.get('message'):
+                    print_info(f"   {purchase_data['message']}")
+                
+                # Wait for the server to confirm payment (e.g. Stripe redirect to /purchase/success)
+                print_info("Waiting for payment confirmation...")
+                if self._wait_for_purchase_confirmation(str(args.module_id), timeout_seconds=15 * 60, poll_interval_seconds=3):
+                    print_success("✅ Payment confirmed!")
+                    print_info(f"You can now install the module with: market install {args.module_id}")
+                    return True
+                
+                print_warning("Payment not confirmed yet (timeout).")
+                print_info("If you already paid, try again:")
+                print_info(f"  market install {args.module_id}")
+                print_info(f"  market buy {args.module_id}")
+                return False
+            
+            # If server confirms immediately (e.g. demo/test registry), accept success=true.
+            if purchase_data.get('success'):
+                print_success("✅ Purchase successful!")
+                print_info(f"You can now install the module with: market install {args.module_id}")
+                return True
+            error = purchase_data.get('error', 'Unknown error')
+            print_error(f"Purchase failed: {error}")
+            return False
+                
+        except Exception as e:
+            print_error(f"Error purchasing module: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _wait_for_purchase_confirmation(self, module_id: str, timeout_seconds: int = 900, poll_interval_seconds: int = 3) -> bool:
+        """
+        Poll the marketplace until the module becomes owned/can_download.
+        This is used for Stripe-like flows where payment happens in a browser and
+        the backend confirms asynchronously (e.g. /purchase/success redirect).
+        """
+        start = time.time()
+        last_status_line_at = 0.0
+        initial_token = self.token
+        
+        while time.time() - start < timeout_seconds:
+            # If the token got cleared (401), we can't keep polling meaningfully.
+            if initial_token and not self.token:
+                print_warning("Your marketplace session expired during purchase confirmation.")
+                print_info("Please run: market login")
+                return False
+            
+            # 1) Preferred: check endpoint (cheap JSON).
+            check_data = self._make_request(f'market/check/{module_id}', requires_auth=True, use_new_api=True)
+            if isinstance(check_data, dict):
+                if check_data.get('has_purchased') or check_data.get('can_download') or check_data.get('is_author'):
+                    return True
+                # Some deployments may return a direct download URL once payment is complete.
+                if check_data.get('download_url') or (check_data.get('success') is True):
+                    return True
+            
+            # 2) Fallback: module detail endpoint can reflect ownership sooner.
+            module_data = self._make_request(f'market/modules/{module_id}', requires_auth=True, use_new_api=True)
+            if isinstance(module_data, dict):
+                if module_data.get('has_purchased') or module_data.get('can_download') or module_data.get('is_author'):
+                    return True
+            
+            # 3) Last resort: probe download endpoint headers.
+            # If it returns a bundle (non-JSON), access is granted => purchase confirmed.
+            try:
+                url = f"{self.registry_url}/api/cli/market/download/{module_id}"
+                headers = {}
+                if self.token:
+                    headers['Authorization'] = f'Bearer {self.token}'
+                elif self.api_key:
+                    headers['X-API-Key'] = self.api_key
+                
+                resp = requests.get(url, headers=headers, stream=True, timeout=self.timeout)
+                content_type = (resp.headers.get('content-type') or '').lower()
+                
+                if resp.status_code == 200:
+                    if 'application/json' in content_type:
+                        # Might be an error payload or a success payload; parse safely.
+                        try:
+                            payload = resp.json()
+                            if payload.get('download_url') or payload.get('success') is True:
+                                resp.close()
+                                return True
+                        except Exception:
+                            pass
+                    elif 'text/html' not in content_type:
+                        # Likely a zip/kext stream => download authorized.
+                        resp.close()
+                        return True
+                
+                resp.close()
+            except Exception:
+                # Ignore transient network/probe failures; keep polling.
+                pass
+            
+            # Print a lightweight status line about once per ~15 seconds
+            now = time.time()
+            if now - last_status_line_at >= 15:
+                last_status_line_at = now
+                remaining = int(timeout_seconds - (now - start))
+                print_info(f"   still waiting... ({remaining}s left)")
+            
+            time.sleep(max(1, int(poll_interval_seconds)))
+        
+        return False
+    
+    def _extract_version_value(self, value):
+        """Extract a version string from different payload shapes"""
+        if not value:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        if isinstance(value, dict):
+            for key in ('version', 'number', 'name', 'tag', 'label'):
+                ver = value.get(key)
+                if isinstance(ver, str) and ver.strip():
+                    return ver.strip()
+            nested = value.get('data') or value.get('info')
+            if isinstance(nested, dict):
+                for key in ('version', 'number'):
+                    ver = nested.get(key)
+                    if isinstance(ver, str) and ver.strip():
+                        return ver.strip()
+        return None
+
+    def _get_module_version(self, module: Dict) -> str:
+        """Return the best-known version for a marketplace module"""
+        if not module:
+            return "N/A"
+        
+        direct_sources = [
+            module.get('version'),
+            module.get('latest_version'),
+            module.get('current_version'),
+            module.get('release_version'),
+            module.get('module_version'),
+        ]
+        
+        for source in direct_sources:
+            version = self._extract_version_value(source)
+            if version:
+                return version
+        
+        for key in ('latest_release', 'latest_release_info', 'latest'):
+            version = self._extract_version_value(module.get(key))
+            if version:
+                return version
+        
+        metadata = module.get('metadata') or module.get('manifest') or {}
+        version = self._extract_version_value(metadata)
+        if version:
+            return version
+        
+        for key in ('versions', 'releases', 'release_history'):
+            entries = module.get(key)
+            if not isinstance(entries, list) or not entries:
+                continue
+            for entry in entries:
+                if isinstance(entry, dict) and (entry.get('is_latest') or entry.get('latest') or entry.get('is_current') or entry.get('current')):
+                    version = self._extract_version_value(entry)
+                    if version:
+                        return version
+            first_entry = entries[0]
+            if isinstance(first_entry, dict):
+                version = self._extract_version_value(first_entry)
+            else:
+                version = self._extract_version_value({'version': first_entry})
+            if version:
+                return version
+        
+        return "N/A"
+
+    def _normalize_price(self, value) -> float:
+        """Convert various price representations to a float"""
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            try:
+                return float(value)
+            except Exception:
+                return 0.0
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if not cleaned:
+                return 0.0
+            # Remove common currency suffixes/prefixes
+            for token in ['EUR', 'USD', '€', '$']:
+                cleaned = cleaned.replace(token, '')
+            cleaned = cleaned.strip().replace(',', '.')
+            try:
+                return float(cleaned)
+            except Exception:
+                return 0.0
+        return 0.0
+
+    def _display_modules_new_format(self, modules: List[Dict], title: str, pagination: Dict = None):
+        """Display a list of modules in the new API format"""
+        if not modules:
+            print_info("No modules found")
+            return
+        
+        print_info(f"{title}")
+        print_info("=" * 60)
+        print_empty()
+        
+        for module in modules:
+            module_id = module.get('id', 'N/A')
+            name = module.get('name', 'Unknown')
+            description = module.get('description', 'No description')
+            author = module.get('author', {})
+            if isinstance(author, dict):
+                author_name = author.get('username', 'Unknown')
+            else:
+                author_name = str(author) if author else 'Unknown'
+            
+            price_raw = module.get('price', 0)
+            price_value = self._normalize_price(price_raw)
+            rating = module.get('rating', 0)
+            rating_count = module.get('rating_count', 0)
+            downloads = module.get('downloads', 0)
+            module_type = module.get('type', 'Unknown')
+            version = self._get_module_version(module)
+            can_download = module.get('can_download', False)
+            has_purchased = module.get('has_purchased', False)
+            
+            # Price display
+            if price_value <= 0:
+                price_text = "FREE"
+            else:
+                display_price = price_raw if isinstance(price_raw, (int, float, str)) else price_value
+                price_text = f"{display_price}€"
+                if has_purchased:
+                    price_text += " (OWNED)"
+                elif not can_download:
+                    price_text += " (PURCHASE REQUIRED)"
+            
+            # Rating display
+            if rating_count > 0:
+                rating_text = f"⭐ {rating:.1f} ({rating_count})"
+            else:
+                rating_text = "No ratings"
+            
+            print_info(f"🆔 {module_id:<30} | {name} v{version}")
+            print_info(f"   Author: {author_name:<20} | Type: {module_type:<15} | Price: {price_text:<25}")
+            print_info(f"   Downloads: {downloads:<10} | {rating_text}")
+            print_info(f"   {description}")
+            print_empty()
+        
+        # Display pagination info if available
+        if pagination:
+            page = pagination.get('page', 1)
+            per_page = pagination.get('per_page', 20)
+            total = pagination.get('total', 0)
+            pages = pagination.get('pages', 1)
+            has_next = pagination.get('has_next', False)
+            has_prev = pagination.get('has_prev', False)
+            
+            print_info("=" * 60)
+            print_info(f"Page {page} of {pages} (Total: {total} modules)")
+            if has_prev:
+                print_info("Use --page to navigate to previous pages")
+            if has_next:
+                print_info("Use --page to navigate to next pages")
+            print_empty()
+    
+    def _display_module_details_new_format(self, module: Dict):
+        """Display detailed module information in the new API format"""
+        print_info("=" * 70)
+        print_info(f"📦 MODULE DETAILS")
+        print_info("=" * 70)
+        print_empty()
+        
+        # Basic info
+        print_info(f"🆔 ID: {module.get('id', 'N/A')}")
+        print_info(f"📝 Name: {module.get('name', 'Unknown')}")
+        version = self._get_module_version(module)
+        print_info(f"📦 Version: {version}")
+        
+        author = module.get('author', {})
+        if isinstance(author, dict):
+            author_name = author.get('username', 'Unknown')
+        else:
+            author_name = str(author) if author else 'Unknown'
+        print_info(f"👤 Author: {author_name}")
+        
+        price = module.get('price', 0)
+        can_download = module.get('can_download', False)
+        has_purchased = module.get('has_purchased', False)
+        is_author = module.get('is_author', False)
+        
+        if price == 0:
+            price_text = 'FREE'
+        else:
+            if has_purchased:
+                price_text = f"{price}€ (OWNED)"
+            elif is_author:
+                price_text = f"{price}€ (YOUR MODULE)"
+            elif can_download:
+                price_text = f"{price}€ (AVAILABLE)"
+            else:
+                price_text = f"{price}€ (PURCHASE REQUIRED)"
+        
+        print_info(f"💰 Price: {price_text}")
+        print_info(f"📁 Type: {module.get('type', 'Unknown')}")
+        print_info(f"🔧 Compatibility: {module.get('compatibility', 'N/A')}")
+        
+        # Ratings
+        rating = module.get('rating', 0)
+        rating_count = module.get('rating_count', 0)
+        if rating_count > 0:
+            print_info(f"⭐ Rating: {rating:.1f}/5.0 ({rating_count} reviews)")
+        else:
+            print_info(f"⭐ Rating: No ratings yet")
+        
+        print_info(f"📊 Downloads: {module.get('downloads', 0)}")
+        print_empty()
+        
+        # Description
+        print_info("📋 Description:")
+        description = module.get('description', 'No description available')
+        # Wrap long descriptions
+        words = description.split()
+        lines = []
+        current_line = ""
+        for word in words:
+            if len(current_line + word) > 60:
+                lines.append(current_line.strip())
+                current_line = word + " "
+            else:
+                current_line += word + " "
+        if current_line:
+            lines.append(current_line.strip())
+        
+        for line in lines:
+            print_info(f"   {line}")
+        print_empty()
+        
+        # Images if available
+        images = module.get('images', [])
+        if images:
+            print_info("🖼️  Images:")
+            for img in images:
+                img_url = img.get('url', '')
+                if img_url:
+                    print_info(f"   {self.registry_url}{img_url}")
+            print_empty()
+        
+        # Installation/Purchase instructions
+        if can_download or has_purchased or is_author or price == 0:
+            print_info("💾 Installation:")
+            print_info(f"   market install {module.get('id', 'N/A')}")
+        else:
+            print_info("💳 Purchase Required:")
+            print_info(f"   This module costs {price}€")
+            print_info(f"   Use 'market buy {module.get('id', 'N/A')}' to purchase")
+        
+        # Dates
+        created_at = module.get('created_at', '')
+        updated_at = module.get('updated_at', '')
+        if created_at:
+            print_info(f"📅 Created: {created_at}")
+        if updated_at:
+            print_info(f"📅 Updated: {updated_at}")
+        
+        print_info("=" * 70)
+    
     def _display_extensions(self, extensions: List[Dict], title: str):
         """Display a list of extensions"""
         if not extensions:
@@ -1247,8 +2000,16 @@ Examples:
                 publisher_name = str(publisher) if publisher else 'Unknown'
             
             price = ext.get('price', 0)
-            currency = ext.get('currency', 'USD')
-            is_free = ext.get('is_free', True)
+            currency = ext.get('currency', 'EUR')  # Default to EUR for new API
+            # Determine if free: check is_free first, then price
+            is_free = ext.get('is_free')
+            if is_free is None:
+                # If is_free is not provided, determine from price
+                is_free = (price == 0 or price is None)
+            else:
+                # If is_free is provided, use it but also check price as fallback
+                if not is_free and (price == 0 or price is None):
+                    is_free = True  # Override if price is 0
             ext_type = ext.get('type', 'Unknown')
             
             # Get latest version and total downloads
@@ -1270,8 +2031,14 @@ Examples:
             
             version_text = f"v{latest_version}" if latest_version else "vN/A"
             
-            # Price display
-            price_text = "FREE" if is_free else f"{price} {currency}"
+            # Price display - use price if available, otherwise check is_free
+            if price and price > 0:
+                price_text = f"{price} {currency}"
+            elif is_free:
+                price_text = "FREE"
+            else:
+                # Fallback: if neither price nor is_free is clear, show as FREE to be safe
+                price_text = "FREE"
             
             print_info(f"🆔 {ext_id:<30} | {name} {version_text}")
             print_info(f"   Publisher: {publisher_name:<20} | Type: {ext_type:<15} | Price: {price_text:<10}")
@@ -1298,9 +2065,25 @@ Examples:
         print_info(f"👤 Publisher: {publisher_name}")
         
         price = extension.get('price', 0)
-        currency = extension.get('currency', 'USD')
-        is_free = extension.get('is_free', True)
-        price_text = 'FREE' if is_free else f"{price} {currency}"
+        currency = extension.get('currency', 'EUR')  # Default to EUR for new API
+        # Determine if free: check is_free first, then price
+        is_free = extension.get('is_free')
+        if is_free is None:
+            # If is_free is not provided, determine from price
+            is_free = (price == 0 or price is None)
+        else:
+            # If is_free is provided, use it but also check price as fallback
+            if not is_free and (price == 0 or price is None):
+                is_free = True  # Override if price is 0
+        
+        # Price display - use price if available, otherwise check is_free
+        if price and price > 0:
+            price_text = f"{price} {currency}"
+        elif is_free:
+            price_text = 'FREE'
+        else:
+            # Fallback: if neither price nor is_free is clear, show as FREE to be safe
+            price_text = 'FREE'
         print_info(f"💰 Price: {price_text}")
         print_info(f"📁 Type: {extension.get('type', 'Unknown')}")
         print_info(f"📄 License: {extension.get('license_type', 'N/A')}")
@@ -1414,11 +2197,65 @@ Examples:
             
             print_info(f"📥 Downloading module '{module_name}'...")
             
-            # Download extension bundle
-            url = f"{self.registry_url}/api/registry/extensions/{extension_id}/download"
-            headers = {'X-API-Key': self.api_key} if self.api_key else {}
+            # Download extension bundle - use correct endpoint
+            url = f"{self.registry_url}/api/cli/market/download/{extension_id}"
+            headers = {}
+            if self.token:
+                headers['Authorization'] = f'Bearer {self.token}'
+            elif self.api_key:
+                headers['X-API-Key'] = self.api_key
             
             response = requests.get(url, headers=headers, stream=True, timeout=self.timeout)
+            
+            # Check if response is JSON (payment required or error)
+            content_type = response.headers.get('content-type', '')
+            if 'application/json' in content_type:
+                try:
+                    error_data = response.json()
+                    # Check if it's a payment required response with Stripe checkout URL
+                    if error_data.get('requires_payment') or error_data.get('checkout_url'):
+                        checkout_url = error_data.get('checkout_url') or error_data.get('purchase_url')
+                        price = error_data.get('price', extension_data.get('price', 0))
+                        module_name = error_data.get('module_name', extension_data.get('name', 'Unknown'))
+                        print_error(f"Module '{module_name}' requires purchase ({price}€)")
+                        if checkout_url:
+                            print_info(f"Checkout URL: {checkout_url}")
+                        else:
+                            purchase_url = f"{self.registry_url}/market/modules/{extension_id}/purchase"
+                            print_info(f"Purchase URL: {purchase_url}")
+                        print_info(f"Or use: market buy {extension_id}")
+                        return False
+                    else:
+                        error_msg = error_data.get('error', 'Download failed')
+                        print_error(f"Download failed: {error_msg}")
+                        return False
+                except:
+                    print_error("Download failed: Invalid response from server")
+                    return False
+            
+            # Check if response is HTML (error page)
+            if 'text/html' in content_type:
+                # Likely an error page, check if module is paid
+                price = extension_data.get('price', 0)
+                can_download = extension_data.get('can_download', False)
+                has_purchased = extension_data.get('has_purchased', False)
+                is_author = extension_data.get('is_author', False)
+                
+                if price > 0 and not can_download and not has_purchased and not is_author:
+                    print_error(f"Module '{extension_data.get('name', 'Unknown')}' requires purchase ({price}€)")
+                    purchase_url = f"{self.registry_url}/market/modules/{extension_id}/purchase"
+                    print_info(f"Purchase URL: {purchase_url}")
+                    print_info(f"Or use: market buy {extension_id}")
+                    return False
+                else:
+                    print_error("Download failed: Invalid response from server")
+                    return False
+            
+            # If 404, try alternative endpoint
+            if response.status_code == 404:
+                url = f"{self.registry_url}/market/download/{extension_id}"
+                response = requests.get(url, headers=headers, stream=True, timeout=self.timeout)
+            
             response.raise_for_status()
             
             # Get extensions directory from config
@@ -1441,6 +2278,45 @@ Examples:
             
             print_info(f"📦 Extracting module bundle...")
             
+            # Sanity-check the downloaded bundle before attempting extraction.
+            # Some registry deployments may return an empty ZIP placeholder (e.g. 22-byte EOCD record)
+            # when the module bundle is missing server-side.
+            try:
+                bundle_size = os.path.getsize(tmp_path)
+            except Exception:
+                bundle_size = None
+            
+            try:
+                # Quick magic-byte check
+                with open(tmp_path, 'rb') as f:
+                    first_bytes = f.read(8)
+            except Exception:
+                first_bytes = b''
+            
+            if bundle_size is not None and bundle_size <= 32:
+                print_error("❌ Downloaded bundle is unexpectedly small.")
+                print_info(f"   Size: {bundle_size} bytes")
+                print_info("   This usually means the registry returned an empty placeholder instead of the real module bundle.")
+                print_info("   Server-side action: verify the module has a valid uploaded .kext/.zip artifact and the download endpoint serves it.")
+                os.remove(tmp_path)
+                return False
+            
+            # If it's a ZIP, ensure it contains files (manifest + code) before continuing
+            try:
+                if zipfile.is_zipfile(tmp_path):
+                    with zipfile.ZipFile(tmp_path, 'r') as zf:
+                        names = zf.namelist()
+                        if not names:
+                            print_error("❌ Downloaded bundle is an empty ZIP archive (no files).")
+                            if bundle_size is not None:
+                                print_info(f"   Size: {bundle_size} bytes")
+                            print_info("   Server-side action: the registry must return the actual module bundle, not an empty ZIP placeholder.")
+                            os.remove(tmp_path)
+                            return False
+            except Exception:
+                # If this fails, extraction below will handle it.
+                pass
+            
             # Determine module type from manifest (will be read after extraction)
             # For now, extract to a temp location to read manifest first
             temp_extract_dir = tempfile.mkdtemp()
@@ -1450,7 +2326,32 @@ Examples:
                 with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
             except zipfile.BadZipFile:
-                print_error("❌ Invalid bundle format (not a valid ZIP file)")
+                # Check if this might be a paid module issue
+                price = extension_data.get('price', 0)
+                can_download = extension_data.get('can_download', False)
+                has_purchased = extension_data.get('has_purchased', False)
+                is_author = extension_data.get('is_author', False)
+                
+                if price > 0 and not can_download and not has_purchased and not is_author:
+                    print_error(f"Module '{extension_data.get('name', 'Unknown')}' requires purchase ({price}€)")
+                    purchase_url = f"{self.registry_url}/market/modules/{extension_id}/purchase"
+                    print_info(f"Purchase URL: {purchase_url}")
+                    print_info(f"Or use: market buy {extension_id}")
+                else:
+                    # Provide better diagnostics (common: HTML/text error pages or empty placeholders)
+                    size_hint = ""
+                    try:
+                        size_hint = f" (size: {os.path.getsize(tmp_path)} bytes)"
+                    except Exception:
+                        pass
+                    print_error(f"❌ Invalid bundle format (not a valid ZIP file){size_hint}")
+                    if first_bytes:
+                        try:
+                            import binascii
+                            print_info(f"   First bytes: {binascii.hexlify(first_bytes).decode()}")
+                        except Exception:
+                            pass
+                
                 os.remove(tmp_path)
                 shutil.rmtree(temp_extract_dir, ignore_errors=True)
                 return False
@@ -1459,6 +2360,10 @@ Examples:
             manifest_path = os.path.join(temp_extract_dir, "extension.toml")
             module_type = "auxiliary"  # default
             install_path = None
+            install_mode = None
+            stub_specs = []
+            stub_version_dir = "latest"
+            on_conflict = "fail"
             
             if os.path.exists(manifest_path):
                 try:
@@ -1472,6 +2377,12 @@ Examples:
                     import toml
                     with open(manifest_path, 'r') as f:
                         manifest = toml.load(f)
+                        install_cfg = manifest.get('install', {}) if isinstance(manifest, dict) else {}
+                        if isinstance(install_cfg, dict):
+                            install_mode = install_cfg.get('mode')
+                            stub_version_dir = install_cfg.get('version_dir', stub_version_dir) or stub_version_dir
+                            on_conflict = install_cfg.get('on_conflict', on_conflict) or on_conflict
+                            stub_specs = install_cfg.get('stubs', []) or []
                         # Get module type from manifest
                         # For modules from marketplace, we need to determine the actual module type
                         # by loading the main.py and checking the class
@@ -1494,8 +2405,18 @@ Examples:
                 except Exception as e:
                     logging.debug(f"Could not determine module type: {e}")
             
+            stubs_requested = isinstance(stub_specs, list) and len(stub_specs) > 0
+            
             # Determine extract directory
-            if install_path:
+            if stubs_requested or (isinstance(install_mode, str) and install_mode.strip().lower() == "isolated"):
+                # Install into extensions directory (isolated), then generate stubs into modules/plugins.
+                safe_ver = str(stub_version_dir or "latest").replace("\\", "/").strip().strip("/")
+                if not safe_ver or ".." in safe_ver or os.path.isabs(safe_ver):
+                    safe_ver = "latest"
+                
+                extract_dir = os.path.join(extensions_dir, extension_id, safe_ver)
+                print_info(f"📁 Installing to: {extract_dir} (isolated extension)")
+            elif install_path:
                 # Validate install_path security
                 normalized_path = install_path.replace("\\", "/").strip()
                 
@@ -1613,6 +2534,73 @@ Examples:
                     os.remove(tmp_path)
                     return False
                 
+                first_use_hint = None
+                # Generate stub modules if requested
+                if stubs_requested:
+                    try:
+                        from core.registry.packaging import generate_python_stub_module
+                    except Exception as e:
+                        print_error(f"❌ Stub generation unavailable: {e}")
+                        os.remove(tmp_path)
+                        return False
+                    
+                    if on_conflict not in ("fail", "overwrite", "skip"):
+                        on_conflict = "fail"
+                    
+                    created = 0
+                    for spec in stub_specs:
+                        if not isinstance(spec, dict):
+                            continue
+                        target = spec.get("to") or spec.get("target")
+                        entry = spec.get("entry") or spec.get("from")
+                        export_symbol = spec.get("export", "Module")
+                        if not target or not entry:
+                            continue
+                        
+                        # Security: only allow writing stubs into modules/ or plugins/
+                        target_norm = str(target).replace("\\", "/").strip()
+                        if ".." in target_norm or os.path.isabs(target_norm):
+                            print_error(f"❌ Security: invalid stub target path: {target}")
+                            continue
+                        if not (target_norm.startswith("modules/") or target_norm.startswith("plugins/")):
+                            print_error(f"❌ Security: stub target must be under modules/ or plugins/: {target}")
+                            continue
+                        
+                        entry_rel = str(entry).replace("\\", "/").lstrip("/")
+                        stub_code = generate_python_stub_module(
+                            extension_id=str(extension_id),
+                            entry_rel_path=entry_rel,
+                            export_symbol=str(export_symbol or "Module"),
+                            version_dir=str(stub_version_dir or "latest"),
+                        )
+                        
+                        target_abs = os.path.join(target_norm)
+                        os.makedirs(os.path.dirname(target_abs) or ".", exist_ok=True)
+                        
+                        if os.path.exists(target_abs):
+                            if on_conflict == "skip":
+                                continue
+                            if on_conflict == "fail":
+                                print_error(f"❌ Stub target already exists: {target_norm}")
+                                print_info("   Set install.on_conflict = \"overwrite\" or \"skip\" in extension.toml")
+                                continue
+                        
+                        with open(target_abs, "w", encoding="utf-8") as f:
+                            f.write(stub_code)
+                        
+                        created += 1
+                        
+                        if not first_use_hint and target_norm.startswith("modules/"):
+                            rel = target_norm[len("modules/"):]
+                            if rel.endswith(".py"):
+                                rel = rel[:-3]
+                            first_use_hint = rel
+                    
+                    if created > 0:
+                        print_success(f"✅ Generated {created} stub module(s)")
+                    else:
+                        print_warning("⚠️  install.stubs was present but no stubs were generated (check your extension.toml).")
+                
                 print_success(f"✅ Module '{module_name}' installed successfully!")
                 print_info(f"   Installed to: {extract_dir}")
                 print_info(f"   Type: {extension_type}")
@@ -1620,7 +2608,9 @@ Examples:
                 print_info(f"   Use 'market installed' to see installed modules")
                 
                 # Determine the correct use path
-                if install_path:
+                if first_use_hint:
+                    use_path = first_use_hint
+                elif install_path:
                     # Use the install_path from manifest (convert to use path format)
                     use_path = install_path.replace("\\", "/")
                     if use_path.startswith("modules/"):

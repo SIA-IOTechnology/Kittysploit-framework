@@ -42,3 +42,4 @@ bs4
 uvicorn
 mitmproxy
 boto3
+pure-python-adb

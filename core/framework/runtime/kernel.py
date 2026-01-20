@@ -280,6 +280,42 @@ class RuntimeKernel:
                         context.error = f"Resource limits violated: {violations}"
                         return
                 
+                # Vérifier la blacklist du Guardian avant l'exécution
+                framework = getattr(module_instance, 'framework', None)
+                if framework and hasattr(framework, 'guardian_manager') and framework.guardian_manager and framework.guardian_manager.enabled:
+                    target_ip = framework._extract_target_ip_from_module()
+                    if target_ip:
+                        # Vérifier si l'IP est dans la blacklist
+                        if target_ip in framework.guardian_manager.blacklist:
+                            blacklist_entry = framework.guardian_manager.blacklist[target_ip]
+                            reason = blacklist_entry.get('reason', 'Unknown reason')
+                            timestamp = blacklist_entry.get('timestamp', 'Unknown')
+                            
+                            context.status = "failed"
+                            context.error = f"[GUARDIAN] Module execution BLOCKED: Target IP {target_ip} is blacklisted. Reason: {reason} (added: {timestamp})"
+                            
+                            # Créer une alerte Guardian via _create_alert pour mettre à jour les statistiques
+                            alert = framework.guardian_manager._create_alert(
+                                target=target_ip,
+                                severity="CRITICAL",
+                                issue=f"Module execution blocked: IP {target_ip} is blacklisted",
+                                confidence=100.0,
+                                recommendations=[
+                                    "Remove IP from blacklist if this is intentional",
+                                    "Verify target before removing from blacklist"
+                                ],
+                                evidence=[f"IP {target_ip} found in blacklist"]
+                            )
+                            # Marquer l'action comme prise
+                            alert.auto_action_taken = True
+                            alert.action_description = "Module execution blocked"
+                            
+                            # Afficher l'erreur via output_handler si disponible
+                            if hasattr(framework, 'output_handler') and framework.output_handler:
+                                framework.output_handler.print_error(context.error)
+                            
+                            return
+                
                 # Exécuter le module
                 result = module_instance.run()
                 context.result = result

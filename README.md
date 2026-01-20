@@ -4,7 +4,7 @@
 
 # KittySploit Framework
 
-Modular penetration testing framework with CLI interface, REST API and RPC server.
+Modular penetration testing framework with CLI interface, REST API and RPC server - featuring an integrated HTTP(S) interception proxy for traffic capture, inspection, modification, replay, collaboration, AI-assisted analysis,...
 
 ## Requirements
 

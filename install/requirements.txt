@@ -19,6 +19,7 @@ fastapi
 paramiko>=2.9.0
 scapy>=2.4.5
 netaddr>=0.8.0
+xmltodict>=0.13.0
 
 # System utilities
 psutil>=5.8.0
@@ -32,6 +33,9 @@ six
 docker
 sqlalchemy
 pymysql
+pysnmp
+ftplib
+pysmb
 paramiko
 toml
 bcrypt==4.0.1

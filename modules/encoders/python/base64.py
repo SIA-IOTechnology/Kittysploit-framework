@@ -5,8 +5,8 @@ from kittysploit import *
 import base64
 
 class Module(Encoder):
-    
-    __info__ = {
+	
+	__info__ = {
 		"name": "Python Base64 Encoder",
 		"description": "Encodes Python code in base64",
 		"author": "KittySploit Team",

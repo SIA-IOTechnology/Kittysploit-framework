@@ -3,6 +3,7 @@ from typing import Optional, Any
 from core.framework.option.option_string import OptString
 from core.framework.option.option_port import OptPort
 from core.framework.option.option_integer import OptInteger
+from core.framework.base_module import BaseModule
 
 class FTPOptions:
     """
@@ -168,3 +169,80 @@ class FTPClientMixin:
         """Change current directory"""
         conn = self.get_ftp_connection()
         conn.cwd(path)
+    
+    def open_ftp(self):
+        """Alias for get_ftp_connection for compatibility"""
+        return self.get_ftp_connection()
+    
+    def get_ftp_connection_info(self) -> dict:
+        """Get FTP connection information from session or options"""
+        info = {}
+        
+        # If using session
+        if hasattr(self, 'session') and self.session:
+            if hasattr(self.session, 'session_info'):
+                session_info = self.session.session_info
+                info['host'] = session_info.get('host', 'unknown')
+                info['port'] = session_info.get('port', 21)
+                info['username'] = session_info.get('username', 'unknown')
+            elif hasattr(self.session, 'connection_info'):
+                info = self.session.connection_info
+            else:
+                info['host'] = getattr(self.session, 'host', 'unknown')
+                info['port'] = getattr(self.session, 'port', 21)
+                info['username'] = getattr(self.session, 'username', 'unknown')
+        else:
+            # Direct mode
+            def get_val(name, default=None):
+                attr = getattr(self, name, default)
+                return attr.value if hasattr(attr, 'value') else attr
+            
+            info['host'] = get_val('rhost', get_val('target', 'unknown'))
+            info['port'] = get_val('rport', get_val('port', 21))
+            info['username'] = get_val('ftp_user', get_val('username', 'unknown'))
+        
+        return info
+    
+    def get_current_directory(self) -> str:
+        """Get current working directory"""
+        conn = self.get_ftp_connection()
+        return conn.pwd()
+    
+    def upload_file(self, local_path: str, remote_path: str):
+        """Upload a file"""
+        conn = self.get_ftp_connection()
+        
+        if hasattr(conn, 'upload'):
+            return conn.upload(local_path, remote_path)
+        
+        with open(local_path, 'rb') as f:
+            conn.storbinary(f'STOR {remote_path}', f)
+    
+    def get_file_size(self, remote_path: str) -> int:
+        """Get file size"""
+        conn = self.get_ftp_connection()
+        
+        if hasattr(conn, 'size'):
+            return conn.size(remote_path)
+        
+        try:
+            return conn.size(remote_path)
+        except:
+            return 0
+
+class Ftp_client(BaseModule):
+    ftp_host = OptString("", "Target IP or hostname", True)
+    ftp_port = OptPort(21, "Target port", True)
+    ftp_user = OptString("anonymous", "FTP username", True)
+    ftp_password = OptString("anonymous", "FTP password", True)
+    ftp_timeout = OptPort(10, "FTP timeout", True, advanced=True)
+
+    def __init__(self, framework=None):
+        super().__init__(framework)
+
+    def open_ftp(self):
+        """Open FTP connection"""
+        ftp = ftplib.FTP()
+        ftp.connect(self.ftp_host.value, int(self.ftp_port.value), timeout=int(self.ftp_timeout.value))
+        ftp.login(self.ftp_user.value, self.ftp_password.value)
+        return ftp

@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
-from lib.protocols.ftp.ftp_client import FTPClient
-from ftplib import FTP, error_perm, error_temp
+from lib.protocols.ftp.ftp_client import FTPClientMixin
+from ftplib import FTP, error_perm
 import socket
 import time
 
-class Module(Post, FTPClient):
+class Module(Post, FTPClientMixin):
     """FTP User Enumeration Module"""
     
     __info__ = {
@@ -39,7 +39,7 @@ class Module(Post, FTPClient):
         
         # Try to get FTP connection to verify it works
         try:
-            self.get_ftp_connection()
+            self.open_ftp()
             return True
         except Exception as e:
             print_error(f"FTP connection error: {e}")
@@ -116,7 +116,7 @@ class Module(Post, FTPClient):
         info = {}
         
         try:
-            connection = self.get_ftp_connection()
+            connection = self.open_ftp()
             if connection:
                 # Get current directory
                 try:
@@ -174,12 +174,10 @@ class Module(Post, FTPClient):
     def run(self):
         """Run the user enumeration"""
         try:
-            import time
-            
             print_status("FTP User Enumeration")
 
             # Get connection info
-            conn_info = self.get_connection_info()
+            conn_info = self.get_ftp_connection_info()
             host = conn_info.get('host', 'localhost')
             port = conn_info.get('port', 21)
             current_user = conn_info.get('username', 'unknown')

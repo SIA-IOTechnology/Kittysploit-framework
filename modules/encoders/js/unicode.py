@@ -4,7 +4,7 @@ class Module(Encoder):
     
     __info__ = {
         "name": "JavaScript Unicode Encoder",
-        "description": "Encodes JavaScript code into Unicode escape sequences (\uXXXX)",
+        "description": "Encodes JavaScript code into Unicode escape sequences (\\uXXXX)",
         "author": "KittySploit Team",
         "platform": Platform.JAVASCRIPT,
     }
@@ -13,7 +13,7 @@ class Module(Encoder):
     wrap_eval = OptBool(True, "Wrap encoded code in eval() for auto-execution", False)
     compact = OptBool(False, "Use compact format without spaces", False)
     
-    def encode(self, payload)
+    def encode(self, payload):
 
         # Convert bytes to string if needed
         if isinstance(payload, bytes):

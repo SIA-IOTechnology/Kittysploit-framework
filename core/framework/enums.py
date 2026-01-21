@@ -68,7 +68,9 @@ class Platform(Enum):
     IOS = "ios"
     JAVASCRIPT = "javascript"
     PHP = "php"
+    PYTHON = "python"
     OTHER = "other"
+    MULTI = "multi"
     ALL = "all"
 
 class Browser(Enum):

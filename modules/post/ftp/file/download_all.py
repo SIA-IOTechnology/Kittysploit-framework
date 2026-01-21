@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-FTP Download All Module
-Downloads entire directory structure from FTP server
-"""
-
 from kittysploit import *
-from core.framework.failure import ProcedureError, FailureType
-from lib.protocols.ftp.ftp_client import FTPClient
+from lib.protocols.ftp.ftp_client import FTPClientMixin
 import os
 import time
 
-class Module(Post, FTPClient):
+class Module(Post, FTPClientMixin):
     """FTP Download All Module"""
     
     __info__ = {
@@ -45,7 +39,7 @@ class Module(Post, FTPClient):
         
         # Try to get FTP connection to verify it works
         try:
-            self.get_ftp_connection()
+            self.open_ftp()
             return True
         except Exception as e:
             print_error(f"FTP connection error: {e}")
@@ -147,7 +141,7 @@ class Module(Post, FTPClient):
             print_info("=" * 70)
             
             # Get connection info
-            conn_info = self.get_connection_info()
+            conn_info = self.get_ftp_connection_info()
             print_info(f"FTP Server: {conn_info.get('host', 'unknown')}:{conn_info.get('port', 21)}")
             print_info(f"Username: {conn_info.get('username', 'unknown')}")
             print_info(f"Remote Path: {self.remote_path}")

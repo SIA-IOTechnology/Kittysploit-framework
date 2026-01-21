@@ -39,7 +39,7 @@ class Module(Post, FTPClientMixin):
         
         # Try to get FTP connection to verify it works
         try:
-            self.get_ftp_connection()
+            self.open_ftp()
             return True
         except Exception as e:
             print_error(f"FTP connection error: {e}")
@@ -117,8 +117,8 @@ class Module(Post, FTPClientMixin):
                 return (True, category)
         return (False, None)
     
-    def _search_config_files(self, path: str, depth: int = 0, found_files: list = None) -> list:        Recursively search for configuration files
-
+    def _search_config_files(self, path: str, depth: int = 0, found_files: list = None) -> list:
+        """Recursively search for configuration files"""
         if found_files is None:
             found_files = []
         
@@ -182,7 +182,7 @@ class Module(Post, FTPClientMixin):
         """Run the configuration file enumeration"""
         try:            
             # Get connection info
-            conn_info = self.get_connection_info()
+            conn_info = self.get_ftp_connection_info()
             print_info(f"FTP Server: {conn_info.get('host', 'unknown')}:{conn_info.get('port', 21)}")
             print_info(f"Username: {conn_info.get('username', 'unknown')}")
             print_info(f"Search Path: {self.remote_path}")

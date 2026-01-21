@@ -20,7 +20,7 @@ class Module(Listener):
 			self.sock.bind((self.lhost, self.lport))
 			self.sock.listen(5)
 			client, address = self.sock.accept()
-			return (client, address[0], address[1], additional_data={'connection_type': 'reverse', 'protocol': 'udp'})
+			return (client, address[0], address[1], {'connection_type': 'reverse', 'protocol': 'udp'})
 		except KeyboardInterrupt:
 			return False
 		except OSError:

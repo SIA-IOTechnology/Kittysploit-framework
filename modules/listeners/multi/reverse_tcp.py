@@ -40,7 +40,7 @@ class Module(Listener):
                     print_success(f"Connection received from {address[0]}:{address[1]}")
                     
                     # Return connection data - framework extracts info from __info__
-                    return (client_socket, address[0], address[1], additional_data={'connection_type': 'reverse', 'protocol': 'tcp'})
+                    return (client_socket, address[0], address[1], {'connection_type': 'reverse', 'protocol': 'tcp'})
                     
                 except socket.timeout:
                     # Timeout occurred, continue listening

@@ -643,7 +643,8 @@ class CollabWebServer:
                 print_error(f"Error proxying room leave request: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 502
         
-        # Route proxy pour /api/rooms/{room_id}/delete
+        # Route proxy pour supprimer une room.
+        # Note: le SaaS expose la suppression via DELETE /api/rooms/<room_id>
         @self.app.route('/api/rooms/<room_id>/delete', methods=['DELETE', 'POST'])
         def proxy_room_delete(room_id):
             """Proxy pour supprimer une room vers le serveur SaaS"""
@@ -653,7 +654,11 @@ class CollabWebServer:
                 return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
-                url = f"{self.saas_url}/api/rooms/{room_id}/delete"
+                # SaaS endpoint (REST): DELETE /api/rooms/<room_id>
+                url = f"{self.saas_url}/api/rooms/{room_id}"
+                # Forward query params (e.g. ?username=...) if provided by the client
+                if request.query_string:
+                    url += '?' + request.query_string.decode('utf-8')
                 headers = {
                     'X-API-Key': self.api_key,
                     'User-Agent': 'Kittysploit-Framework/2.0'
@@ -675,6 +680,12 @@ class CollabWebServer:
             except requests.RequestException as e:
                 print_error(f"Error proxying room delete request: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 502
+
+        # Backward-compatible route: some clients call DELETE /api/rooms/<room_id>
+        @self.app.route('/api/rooms/<room_id>', methods=['DELETE'])
+        def proxy_room_delete_legacy(room_id):
+            """Compat: redirect deletion to /api/rooms/<room_id>/delete"""
+            return proxy_room_delete(room_id)
         
         # Route proxy pour /api/rooms/{room_id}/share_module
         @self.app.route('/api/rooms/<room_id>/share_module', methods=['POST'])

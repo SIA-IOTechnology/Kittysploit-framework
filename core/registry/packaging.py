@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Outil de packaging pour créer des bundles d'extensions (.kext)
+Packaging tool for creating extension bundles (.kext)
 """
 
 import os
@@ -18,147 +18,27 @@ from core.output_handler import print_error, print_warning, print_success, print
 
 
 class ExtensionPackager:
-    """Outil pour créer des bundles d'extensions"""
+    """Tool to extract and verify extension bundles (read-only)"""
     
     def __init__(self, signature_manager: Optional[RegistrySignatureManager] = None):
         """
-        Initialise le packager
+        Initialize the packager
         
         Args:
-            signature_manager: Gestionnaire de signatures
+            signature_manager: Signature manager for verification
         """
         self.signature_manager = signature_manager or RegistrySignatureManager()
     
-    def create_bundle(
-        self,
-        source_dir: str,
-        manifest_path: str,
-        output_path: str,
-        publisher_name: Optional[str] = None,
-        sign: bool = True
-    ) -> bool:
-        """
-        Crée un bundle d'extension
-        
-        Args:
-            source_dir: Répertoire source contenant les fichiers de l'extension
-            manifest_path: Chemin vers extension.toml
-            output_path: Chemin de sortie pour le bundle (.kext)
-            publisher_name: Nom de l'éditeur (pour signer)
-            sign: Signer le bundle
-            
-        Returns:
-            True si le bundle a été créé avec succès
-        """
-        try:
-            print_info(f"Creating bundle from {source_dir}...")
-            
-            # Parser le manifest
-            manifest = ManifestParser.parse(manifest_path)
-            if not manifest:
-                print_error("Error parsing manifest")
-                return False
-            
-            # Valider le manifest
-            is_valid, errors = ManifestParser.validate(manifest)
-            if not is_valid:
-                print_error(f"Invalid manifest: {', '.join(errors)}")
-                return False
-            
-            # Calculer les hashes des fichiers
-            print_info("Calculating file hashes...")
-            payload_hashes = {}
-            for root, dirs, files in os.walk(source_dir):
-                # Ignorer les fichiers de build
-                dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache']]
-                
-                for file in files:
-                    if file.startswith('.') or file.endswith('.pyc'):
-                        continue
-                    
-                    file_path = os.path.join(root, file)
-                    rel_path = os.path.relpath(file_path, source_dir)
-                    file_hash = ManifestParser.compute_file_hash(file_path)
-                    payload_hashes[rel_path] = file_hash
-            
-            manifest.payload_hashes = payload_hashes
-            
-            # Signer le manifest si demandé
-            if sign and publisher_name:
-                print_info(f"Signing manifest by {publisher_name}...")
-                manifest_toml = manifest.to_toml()
-                signature = self.signature_manager.sign_manifest(manifest_toml, publisher_name)
-                if signature:
-                    manifest.signature = signature
-                    # Récupérer la clé publique
-                    public_key = self.signature_manager.get_trusted_public_key(publisher_name)
-                    if not public_key:
-                        # Essayer de charger depuis le fichier
-                        keys_dir = os.path.join(self.signature_manager.keys_dir)
-                        public_key_path = os.path.join(keys_dir, f"{publisher_name}_public.pem")
-                        if os.path.exists(public_key_path):
-                            with open(public_key_path, 'rb') as f:
-                                public_key = f.read().decode('utf-8')
-                    
-                    if public_key:
-                        manifest.public_key = public_key
-                else:
-                    print_warning("Signature failed - bundle created without signature")
-            
-            # Créer le bundle
-            print_info(f"Creating bundle {output_path}...")
-            os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-            
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # Ajouter tous les fichiers du répertoire source
-                for root, dirs, files in os.walk(source_dir):
-                    # Ignorer les fichiers de build
-                    dirs[:] = [d for d in dirs if d not in ['__pycache__', '.git', '.pytest_cache']]
-                    
-                    for file in files:
-                        if file.startswith('.') or file.endswith('.pyc'):
-                            continue
-                        
-                        # Exclure extension.toml du répertoire source car on l'ajoute manuellement après
-                        if file == 'extension.toml':
-                            continue
-                        
-                        # Exclure les anciens bundles .kext pour éviter qu'ils soient inclus dans le nouveau bundle
-                        if file.endswith('.kext') or file.endswith('.zip'):
-                            continue
-                        
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, source_dir)
-                        zipf.write(file_path, arcname)
-                
-                # Ajouter le manifest mis à jour (écrase celui du répertoire source s'il existe)
-                manifest_toml = manifest.to_toml()
-                zipf.writestr("extension.toml", manifest_toml)
-            
-            # Vérifier le bundle
-            bundle_hash = ManifestParser.compute_bundle_hash(output_path)
-            bundle_size = os.path.getsize(output_path)
-            
-            print_success(f"Bundle created: {output_path}")
-            print_status(f"Hash SHA256: {bundle_hash}")
-            print_status(f"Size: {bundle_size} bytes")
-            
-            return True
-            
-        except Exception as e:
-            print_error(f"Error creating bundle: {e}")
-            return False
-    
     def extract_bundle(self, bundle_path: str, extract_dir: str) -> bool:
         """
-        Extrait un bundle
+        Extract a bundle
         
         Args:
-            bundle_path: Chemin vers le bundle
-            extract_dir: Répertoire de destination
+            bundle_path: Path to bundle
+            extract_dir: Destination directory
             
         Returns:
-            True si l'extraction a réussi
+            True if extraction succeeded
         """
         try:
             os.makedirs(extract_dir, exist_ok=True)
@@ -174,39 +54,39 @@ class ExtensionPackager:
     
     def verify_bundle(self, bundle_path: str) -> tuple[bool, Optional[ExtensionManifest]]:
         """
-        Vérifie l'intégrité d'un bundle
+        Verify bundle integrity
         
         Args:
-            bundle_path: Chemin vers le bundle
+            bundle_path: Path to bundle
             
         Returns:
             (is_valid, manifest)
         """
         try:
-            # Extraire temporairement
+            # Extract temporarily
             with tempfile.TemporaryDirectory() as tmpdir:
                 with zipfile.ZipFile(bundle_path, 'r') as zipf:
                     zipf.extractall(tmpdir)
                 
-                # Chercher le manifest
+                # Look for manifest
                 manifest_path = os.path.join(tmpdir, "extension.toml")
                 if not os.path.exists(manifest_path):
                     print_error("Manifest not found in bundle")
                     return False, None
                 
-                # Parser le manifest
+                # Parse manifest
                 manifest = ManifestParser.parse(manifest_path)
                 if not manifest:
                     print_error("Error parsing manifest")
                     return False, None
                 
-                # Valider le manifest
+                # Validate manifest
                 is_valid, errors = ManifestParser.validate(manifest)
                 if not is_valid:
                     print_error(f"Invalid manifest: {', '.join(errors)}")
                     return False, None
                 
-                # Vérifier les hashes des fichiers
+                # Verify file hashes
                 for rel_path, expected_hash in manifest.payload_hashes.items():
                     file_path = os.path.join(tmpdir, rel_path)
                     if not os.path.exists(file_path):
@@ -218,7 +98,7 @@ class ExtensionPackager:
                         print_error(f"Invalid hash for {rel_path}")
                         return False, None
                 
-                # Vérifier la signature si présente
+                # Verify signature if present
                 if manifest.signature and manifest.public_key:
                     manifest_content = open(manifest_path, 'r', encoding='utf-8').read()
                     if not self.signature_manager.verify_signature(
@@ -242,6 +122,7 @@ def generate_python_stub_module(
     entry_rel_path: str,
     export_symbol: str = "Module",
     version_dir: str = "latest",
+    marketplace_id: Optional[str] = None,
 ) -> str:
     """
     Generate a small "stub" module that dynamically loads the real module code
@@ -257,12 +138,30 @@ def generate_python_stub_module(
                         (e.g. "src/modules/auxiliary/test_impl.py")
         export_symbol: Name of the symbol/class to re-export (default: "Module")
         version_dir: "latest" or a concrete version directory
+        marketplace_id: Optional marketplace ID for new structure: extensions/{marketplace_id}/{extension_id}/...
     """
     # Normalize to forward slashes for embedding in python source.
     entry_rel_path = (entry_rel_path or "").replace("\\", "/").lstrip("/")
     version_dir = (version_dir or "latest").replace("\\", "/").strip().strip("/")
     if not version_dir:
         version_dir = "latest"
+    
+    # Generate marketplace ID code for path resolution
+    if marketplace_id:
+        marketplace_id_str = str(marketplace_id).strip()
+        marketplace_code = f'''    # Try new structure first: extensions/{marketplace_id_str}/{extension_id}/{version_dir}/
+    for parent in (here.parent, *here.parents):
+        candidate = parent / "extensions" / {marketplace_id_str!r} / __extension_id__ / __extension_version_dir__
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+    # Also try from current working directory
+    candidate = Path.cwd() / "extensions" / {marketplace_id_str!r} / __extension_id__ / __extension_version_dir__
+    if candidate.exists() and candidate.is_dir():
+        return candidate
+    
+    # Fallback to old structure: extensions/{extension_id}/{version_dir}/'''
+    else:
+        marketplace_code = f'''    # Try old structure: extensions/{extension_id}/{version_dir}/'''
     
     # Keep this code dependency-free (std lib only).
     return f'''# Auto-generated stub module (marketplace extension)
@@ -289,6 +188,7 @@ __extension_entry_rel_path__ = {entry_rel_path!r}
 
 def _find_extension_base() -> Path:
     here = Path(__file__).resolve()
+{marketplace_code}
     # Walk upward until we find an `extensions/<id>/<version_dir>/` directory.
     for parent in (here.parent, *here.parents):
         candidate = parent / "extensions" / __extension_id__ / __extension_version_dir__
@@ -328,6 +228,18 @@ _impl, _impl_path = _load_impl()
 # Expose source path for tooling (e.g. edit command can follow this).
 __source_path__ = str(_impl_path)
 
-# Re-export the expected entry symbol/class for the framework loader.
-{export_symbol} = getattr(_impl, {export_symbol!r})
+# Get the original Module class from the loaded implementation
+_OriginalModule = getattr(_impl, {export_symbol!r})
+
+# Define a wrapper class that inherits from the original Module
+# This is required for AST validation which checks for class definitions
+class {export_symbol}(_OriginalModule):
+    """
+    Wrapper class for marketplace extension module.
+    This class inherits from the extension's Module class to satisfy
+    AST validation while maintaining full functionality.
+    """
+    def run(self):
+        """Delegate to parent class run() method"""
+        return super().run()
 '''

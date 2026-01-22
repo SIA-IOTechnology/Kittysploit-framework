@@ -1644,9 +1644,11 @@ async function deleteCurrentRoom() {
     }
     
     try {
-        const res = await fetch(SERVER_URL + '/api/rooms/' + currentRoomId + '?username=' + encodeURIComponent(currentUsername), {
-            method: 'DELETE'
-        });
+        // Delete/close the room. Keep username as a query param (SaaS may enforce host ownership).
+        const res = await fetch(
+            SERVER_URL + '/api/rooms/' + currentRoomId + '?username=' + encodeURIComponent(currentUsername),
+            { method: 'DELETE' }
+        );
         
         const data = await res.json();
         

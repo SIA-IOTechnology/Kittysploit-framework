@@ -30,11 +30,11 @@ class MarketCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "market [list|search|install|update|uninstall|info|installed|publish|register|login|buy]"
+        return "market [list|search|install|update|uninstall|info|installed|register|login|buy]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
-        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'publish', 'register', 'login', 'buy']
+        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'register', 'login', 'buy']
     
     @property
     def help_text(self) -> str:
@@ -53,7 +53,6 @@ Subcommands:
     installed     List installed modules
     update [id]   Update installed modules (all or specific module)
     uninstall [id] Uninstall a module (all if --all flag, or specific module)
-    publish <dir> Package and publish a module to the marketplace
     register      Register a new account
     login         Login to your account
     buy <id>      Purchase a module from the marketplace
@@ -69,7 +68,6 @@ Examples:
     market update test-module        # Update specific module
     market uninstall test-module    # Uninstall specific module
     market uninstall --all          # Uninstall all modules
-    market publish examples/test_module  # Package and publish a module
         """
     
     def __init__(self, framework, session, output_handler):
@@ -126,12 +124,6 @@ Examples:
         # Installed command
         subparsers.add_parser('installed', help='List installed extensions')
         
-        # Publish command
-        publish_parser = subparsers.add_parser('publish', help='Package and publish a module')
-        publish_parser.add_argument('module_dir', help='Directory containing the module (with extension.toml)')
-        publish_parser.add_argument('--package-only', action='store_true', help='Only package, do not upload')
-        publish_parser.add_argument('--no-sign', action='store_true', help='Skip signing the bundle (not recommended)')
-        
         # Register command
         subparsers.add_parser('register', help='Register a new account')
         
@@ -148,7 +140,7 @@ Examples:
         """Execute the market command"""
         try:
             if not args:
-                # Si pas d'arguments et pas de compte, proposer l'inscription/connexion
+                # If no arguments and no account, prompt for registration/login
                 if not self.api_key:
                     self._prompt_account_setup()
                 self.parser.print_help()
@@ -160,10 +152,10 @@ Examples:
                 self.parser.print_help()
                 return True
             
-            # Vérifier l'authentification pour les actions qui en nécessitent
+            # Check authentication for actions that require it
             requires_auth = parsed_args.action in ['install', 'update', 'publish', 'buy']
             if requires_auth and not self.token and not self.api_key:
-                print_warning("⚠️  This action requires an account")
+                print_warning("This action requires an account")
                 if self._prompt_account_setup():
                     self._load_account_config()
                 else:
@@ -184,8 +176,6 @@ Examples:
                 return self._show_module_info(parsed_args)
             elif parsed_args.action == 'installed':
                 return self._list_installed_extensions()
-            elif parsed_args.action == 'publish':
-                return self._publish_module(parsed_args)
             elif parsed_args.action == 'register':
                 return self._register_account()
             elif parsed_args.action == 'login':
@@ -717,7 +707,7 @@ Examples:
         """Install all free modules from the marketplace"""
         try:
             print_info("=" * 70)
-            print_info("📦 Installing All Free Modules")
+            print_info("Installing All Free Modules")
             print_info("=" * 70)
             print_empty()
             
@@ -797,22 +787,22 @@ Examples:
                 module_id = ext.get('id')
                 module_name = ext.get('name', 'Unknown')
                 
-                print_info(f"📦 Installing {module_name} ({module_id})...")
+                print_info(f"Installing {module_name} ({module_id})...")
                 
                 if self._download_and_install_extension(module_id, ext):
                     success_count += 1
-                    print_success(f"✅ {module_name} installed successfully!")
+                    print_success(f"{module_name} installed successfully!")
                 else:
                     failed_count += 1
-                    print_error(f"❌ Failed to install {module_name}")
+                    print_error(f"Failed to install {module_name}")
                 
                 print_empty()
             
             print_info("=" * 70)
             if failed_count == 0:
-                print_success(f"✅ All installations completed successfully! ({success_count}/{len(modules_to_install)})")
+                print_success(f"All installations completed successfully! ({success_count}/{len(modules_to_install)})")
             else:
-                print_warning(f"⚠️  Installation completed with errors ({success_count}/{len(modules_to_install)} successful, {failed_count} failed)")
+                print_warning(f"Installation completed with errors ({success_count}/{len(modules_to_install)} successful, {failed_count} failed)")
             print_info("=" * 70)
             
             return failed_count == 0
@@ -822,6 +812,161 @@ Examples:
             import traceback
             traceback.print_exc()
             return False
+    
+    def _compare_versions(self, v1: str, v2: str) -> int:
+        """
+        Compare two semver version strings
+        Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2
+        """
+        try:
+            # Remove any non-numeric prefixes/suffixes and split by '.'
+            def parse_version(v):
+                # Remove common prefixes/suffixes
+                v_clean = v.strip().lstrip('vV')
+                # Split by '.' and convert to integers
+                parts = []
+                for part in v_clean.split('.'):
+                    # Take only the numeric part before any non-numeric suffix
+                    numeric_part = ''
+                    for char in part:
+                        if char.isdigit():
+                            numeric_part += char
+                        else:
+                            break
+                    parts.append(int(numeric_part) if numeric_part else 0)
+                return parts
+            
+            v1_parts = parse_version(v1)
+            v2_parts = parse_version(v2)
+            
+            # Pad with zeros to make same length
+            max_len = max(len(v1_parts), len(v2_parts))
+            v1_parts.extend([0] * (max_len - len(v1_parts)))
+            v2_parts.extend([0] * (max_len - len(v2_parts)))
+            
+            for i in range(max_len):
+                if v1_parts[i] < v2_parts[i]:
+                    return -1
+                elif v1_parts[i] > v2_parts[i]:
+                    return 1
+            return 0
+        except Exception:
+            # Fallback to string comparison
+            if v1 < v2:
+                return -1
+            elif v1 > v2:
+                return 1
+            return 0
+    
+    def _find_local_versions(self, module: Dict) -> List[Dict]:
+        """
+        Find all versions of an extension installed locally
+        Returns list of dicts with 'version', 'path', and 'manifest_path'
+        """
+        local_versions = []
+        
+        try:
+            # Get the base path for this extension
+            # Module path might be extensions/{marketplace_id}/{manifest_id}/latest/
+            # or extensions/{manifest_id}/latest/
+            module_path = module.get('path', '')
+            if not module_path or not os.path.exists(module_path):
+                return local_versions
+            
+            # Get the parent directory (extensions/{marketplace_id}/{manifest_id}/ or extensions/{manifest_id}/)
+            if module_path.endswith('latest') or module_path.endswith('latest/'):
+                parent_dir = os.path.dirname(module_path)
+            else:
+                parent_dir = module_path
+            
+            if not os.path.exists(parent_dir):
+                return local_versions
+            
+            # Get extensions directory root
+            extensions_root = None
+            for part in parent_dir.split(os.sep):
+                if part == 'extensions':
+                    idx = parent_dir.find('extensions')
+                    extensions_root = parent_dir[:idx + len('extensions')]
+                    break
+            
+            if not extensions_root:
+                return local_versions
+            
+            # Find all version directories
+            # Structure: extensions/{marketplace_id}/{manifest_id}/{version}/
+            # or: extensions/{manifest_id}/{version}/
+            for marketplace_id in os.listdir(extensions_root):
+                marketplace_path = os.path.join(extensions_root, marketplace_id)
+                if not os.path.isdir(marketplace_path):
+                    continue
+                
+                for item in os.listdir(marketplace_path):
+                    item_path = os.path.join(marketplace_path, item)
+                    if not os.path.isdir(item_path):
+                        continue
+                    
+                    # Check if this is the same extension by looking for manifest
+                    manifest_path = os.path.join(item_path, "extension.toml")
+                    if not os.path.exists(manifest_path):
+                        # Check in subdirectories (version directories)
+                        for version_dir_name in os.listdir(item_path):
+                            version_dir_path = os.path.join(item_path, version_dir_name)
+                            if not os.path.isdir(version_dir_path):
+                                continue
+                            version_manifest = os.path.join(version_dir_path, "extension.toml")
+                            if os.path.exists(version_manifest):
+                                try:
+                                    from core.registry.manifest import ManifestParser
+                                    manifest = ManifestParser.parse(version_manifest)
+                                    if manifest and manifest.id == module['id']:
+                                        local_versions.append({
+                                            'version': manifest.version,
+                                            'path': version_dir_path,
+                                            'manifest_path': version_manifest,
+                                            'version_dir': version_dir_name
+                                        })
+                                except Exception:
+                                    continue
+                    else:
+                        # Manifest in root, check if it's the same extension
+                        try:
+                            from core.registry.manifest import ManifestParser
+                            manifest = ManifestParser.parse(manifest_path)
+                            if manifest and manifest.id == module['id']:
+                                local_versions.append({
+                                    'version': manifest.version,
+                                    'path': item_path,
+                                    'manifest_path': manifest_path,
+                                    'version_dir': item
+                                })
+                        except Exception:
+                            continue
+            
+            # Remove duplicates and sort by version
+            seen = set()
+            unique_versions = []
+            for v in local_versions:
+                key = (v['version'], v['path'])
+                if key not in seen:
+                    seen.add(key)
+                    unique_versions.append(v)
+            
+            # Sort by version using compare_versions (newest first)
+            def version_sort_key(v):
+                try:
+                    # Parse version for proper sorting
+                    parts = v['version'].split('.')
+                    return tuple(int(p) if p.isdigit() else 0 for p in parts) + (v['version'],)
+                except:
+                    return (0, 0, 0, v['version'])
+            
+            unique_versions.sort(key=version_sort_key, reverse=True)
+            
+        except Exception as e:
+            logging.debug(f"Error finding local versions: {e}")
+        
+        return local_versions
     
     def _update_module(self, args) -> bool:
         """Update installed modules"""
@@ -840,20 +985,69 @@ Examples:
                     return False
             
             print_info("=" * 70)
-            print_info("🔄 Checking for Updates")
+            print_info("Checking for Updates")
             print_info("=" * 70)
             print_empty()
             
             updates_available = []
+            checked_modules = []  # Modules successfully checked
+            unchecked_modules = []  # Modules that couldn't be checked
             
             for module in installed:
                 module_id = module['id']
                 installed_version = module['version']
                 
+                # Use marketplace_id if available (for new structure), otherwise use manifest id
+                marketplace_id = module.get('marketplace_id') or module.get('directory_id')
+                search_id = marketplace_id if marketplace_id else module_id
+                
+                # First, check for local versions that might be newer
+                local_versions = self._find_local_versions(module)
+                local_update_available = None
+                
+                if local_versions:
+                    # Find the newest local version
+                    for local_v in local_versions:
+                        if self._compare_versions(local_v['version'], installed_version) > 0:
+                            local_update_available = local_v
+                            break
+                
                 # Get latest version from marketplace
-                extension_data = self._make_request(f'extensions/{module_id}', requires_auth=False)
+                # Try marketplace ID first, then manifest ID as fallback
+                extension_data = None
+                module_lookup_id = marketplace_id or module_id
+
+                # Try the new marketplace API first so numeric IDs work
+                if module_lookup_id:
+                    extension_data = self._make_request(
+                        f'market/modules/{module_lookup_id}',
+                        requires_auth=True,
+                        use_new_api=True
+                    )
+                    if isinstance(extension_data, dict) and isinstance(extension_data.get('module'), dict):
+                        extension_data = extension_data['module']
+
+                # Fallback to old API using marketplace ID first, then manifest ID
+                if not extension_data and marketplace_id:
+                    extension_data = self._make_request(f'extensions/{marketplace_id}', requires_auth=False)
                 if not extension_data:
-                    print_warning(f"⚠️  Could not check updates for {module_id} - not found in marketplace")
+                    extension_data = self._make_request(f'extensions/{module_id}', requires_auth=False)
+                if not extension_data:
+                    # If not in marketplace, check local versions
+                    if local_update_available:
+                        updates_available.append({
+                            'module': module,
+                            'installed_version': installed_version,
+                            'latest_version': local_update_available['version'],
+                            'extension_data': None,  # No marketplace data
+                            'local_path': local_update_available['path'],
+                            'is_local': True
+                        })
+                        print_info(f"{module['name']}")
+                        print_info(f"   Installed: v{installed_version} -> Local: v{local_update_available['version']} (available locally)")
+                    else:
+                        print_warning(f"Could not check updates for {module['name']} ({module_id}) - not found in marketplace")
+                        unchecked_modules.append(module)
                     continue
                 
                 latest_version = extension_data.get('latest_version')
@@ -864,32 +1058,92 @@ Examples:
                         if v.get('is_latest', False):
                             latest_version = v.get('version')
                             break
-                
+
                 if not latest_version:
-                    print_warning(f"⚠️  Could not determine latest version for {module_id}")
+                    detected_version = self._get_module_version(extension_data)
+                    if detected_version and detected_version != "N/A":
+                        latest_version = detected_version
+
+                if not latest_version:
+                    # Marketplace doesn't have version info, but check local versions
+                    if local_update_available:
+                        updates_available.append({
+                            'module': module,
+                            'installed_version': installed_version,
+                            'latest_version': local_update_available['version'],
+                            'extension_data': extension_data,
+                            'local_path': local_update_available['path'],
+                            'is_local': True
+                        })
+                        print_info(f"{module['name']}")
+                        print_info(f"   Installed: v{installed_version} -> Local: v{local_update_available['version']} (available locally)")
+                        checked_modules.append(module)
+                    else:
+                        print_warning(f"Could not determine latest version for {module['name']} ({module_id})")
+                        unchecked_modules.append(module)
                     continue
                 
-                # Compare versions (simple string comparison for now)
-                if installed_version != latest_version:
-                    updates_available.append({
+                # Mark as successfully checked
+                checked_modules.append(module)
+                
+                # Compare marketplace version with local version and choose the newest
+                best_version = latest_version
+                best_source = "marketplace"
+                best_local_path = None
+                
+                if local_update_available:
+                    # Compare local version with marketplace version
+                    if self._compare_versions(local_update_available['version'], latest_version) > 0:
+                        best_version = local_update_available['version']
+                        best_source = "local"
+                        best_local_path = local_update_available['path']
+                
+                # Check if update is needed
+                if self._compare_versions(installed_version, best_version) < 0:
+                    update_info = {
                         'module': module,
                         'installed_version': installed_version,
-                        'latest_version': latest_version,
-                        'extension_data': extension_data
-                    })
-                    print_info(f"📦 {module['name']}")
-                    print_info(f"   Installed: v{installed_version} → Available: v{latest_version}")
+                        'latest_version': best_version,
+                        'extension_data': extension_data if best_source == "marketplace" else None,
+                        'is_local': best_source == "local"
+                    }
+                    if best_local_path:
+                        update_info['local_path'] = best_local_path
+                    
+                    updates_available.append(update_info)
+                    source_text = "locally" if best_source == "local" else "marketplace"
+                    print_info(f"{module['name']}")
+                    print_info(f"   Installed: v{installed_version} -> Available: v{best_version} (from {source_text})")
                 else:
-                    print_info(f"✅ {module['name']} is up to date (v{installed_version})")
+                    print_info(f"{module['name']} is up to date (v{installed_version})")
             
             print_empty()
             
-            if not updates_available:
+            # Provide a better summary
+            if unchecked_modules and not checked_modules:
+                # All modules couldn't be checked
+                print_warning(f"Could not check updates for {len(unchecked_modules)} module(s) - not found in marketplace")
+                print_info("These modules may be locally installed and not published in the marketplace.")
+                return True
+            elif unchecked_modules and checked_modules:
+                # Some checked, some couldn't be checked
+                if not updates_available:
+                    print_success(f"All checked modules are up to date! ({len(checked_modules)} checked)")
+                    print_warning(f"Could not check {len(unchecked_modules)} module(s) - not found in marketplace")
+                    return True
+                else:
+                    print_info(f"Found {len(updates_available)} update(s) available")
+                    print_warning(f"Could not check {len(unchecked_modules)} module(s) - not found in marketplace")
+            elif not updates_available:
+                # All modules checked and up to date
                 print_success("All modules are up to date!")
                 return True
             
-            # Ask for confirmation
-            print_info(f"Found {len(updates_available)} update(s) available")
+            # If we reach here, there are updates available (and we haven't printed the message yet)
+            if updates_available and not (unchecked_modules and checked_modules):
+                # Only print if we haven't already printed it in the elif block above
+                print_info(f"Found {len(updates_available)} update(s) available")
+            
             print_info("Updating modules...")
             print_empty()
             
@@ -898,17 +1152,36 @@ Examples:
             for update in updates_available:
                 module = update['module']
                 module_id = module['id']
-                print_info(f"🔄 Updating {module['name']} from v{update['installed_version']} to v{update['latest_version']}...")
+                # Use marketplace_id for download if available, otherwise use manifest id
+                marketplace_id = module.get('marketplace_id') or module.get('directory_id')
+                download_id = marketplace_id if marketplace_id else module_id
                 
-                # Remove old installation
+                print_info(f"Updating {module['name']} from v{update['installed_version']} to v{update['latest_version']}...")
+                
+                # Move the existing installation aside until the new version installs successfully
+                backup_path = None
+                parent_dir = os.path.dirname(module.get('path', '') or '')
                 try:
                     import shutil
-                    if os.path.exists(module['path']):
-                        # Remove the entire directory
-                        shutil.rmtree(module['path'])
-                        # Also clean up any .kext files in the parent directory
-                        parent_dir = os.path.dirname(module['path'])
-                        if os.path.exists(parent_dir):
+                    module_path = module.get('path')
+                    if module_path and os.path.exists(module_path):
+                        backup_path = f"{module_path}.backup"
+                        if os.path.exists(backup_path):
+                            shutil.rmtree(backup_path)
+                        shutil.move(module_path, backup_path)
+                except Exception as e:
+                    print_warning(f"Could not create backup of existing installation: {e}")
+                    backup_path = None
+
+                # Install new version
+                if update.get('is_local') and update.get('local_path'):
+                    # Install from local path
+                    if self._install_from_local_path(module, update['local_path'], update['latest_version']):
+                        success_count += 1
+                        print_success(f"{module['name']} updated successfully!")
+                        if backup_path and os.path.exists(backup_path):
+                            shutil.rmtree(backup_path, ignore_errors=True)
+                        if parent_dir and os.path.exists(parent_dir):
                             for item in os.listdir(parent_dir):
                                 if item.endswith('.kext'):
                                     kext_path = os.path.join(parent_dir, item)
@@ -916,22 +1189,61 @@ Examples:
                                         os.remove(kext_path)
                                     except Exception:
                                         pass
-                except Exception as e:
-                    print_warning(f"⚠️  Could not remove old version: {e}")
-                
-                # Install new version
-                if self._download_and_install_extension(module_id, update['extension_data']):
-                    success_count += 1
-                    print_success(f"✅ {module['name']} updated successfully!")
+                    else:
+                        print_error(f"Failed to update {module['name']}")
+                        if backup_path:
+                            try:
+                                if not os.path.exists(module.get('path', '')):
+                                    shutil.move(backup_path, module.get('path'))
+                                    print_warning(f"Restored previous version of {module['name']} due to installation failure")
+                                else:
+                                    shutil.rmtree(backup_path, ignore_errors=True)
+                            except Exception as e:
+                                print_warning(f"Could not restore previous version of {module['name']}: {e}")
+                elif update.get('extension_data'):
+                    # Install from marketplace - use marketplace ID for download
+                    if self._download_and_install_extension(download_id, update['extension_data']):
+                        success_count += 1
+                        print_success(f"{module['name']} updated successfully!")
+                        if backup_path and os.path.exists(backup_path):
+                            shutil.rmtree(backup_path, ignore_errors=True)
+                        if parent_dir and os.path.exists(parent_dir):
+                            for item in os.listdir(parent_dir):
+                                if item.endswith('.kext'):
+                                    kext_path = os.path.join(parent_dir, item)
+                                    try:
+                                        os.remove(kext_path)
+                                    except Exception:
+                                        pass
+                    else:
+                        print_error(f"Failed to update {module['name']}")
+                        if backup_path:
+                            try:
+                                if not os.path.exists(module.get('path', '')):
+                                    shutil.move(backup_path, module.get('path'))
+                                    print_warning(f"Restored previous version of {module['name']} due to installation failure")
+                                else:
+                                    shutil.rmtree(backup_path, ignore_errors=True)
+                            except Exception as e:
+                                print_warning(f"Could not restore previous version of {module['name']}: {e}")
                 else:
-                    print_error(f"❌ Failed to update {module['name']}")
+                    print_error(f"Unable to update {module['name']} - no source available")
+                    if backup_path:
+                        try:
+                            if not os.path.exists(module.get('path', '')):
+                                shutil.move(backup_path, module.get('path'))
+                                print_warning(f"Restored previous version of {module['name']} due to missing update source")
+                            else:
+                                shutil.rmtree(backup_path, ignore_errors=True)
+                        except Exception as e:
+                            print_warning(f"Could not restore previous version of {module['name']}: {e}")
                 print_empty()
             
             print_info("=" * 70)
             if success_count == len(updates_available):
-                print_success(f"✅ All updates completed successfully! ({success_count}/{len(updates_available)})")
+                print_success(f"All updates completed successfully! ({success_count}/{len(updates_available)})")
             else:
-                print_warning(f"⚠️  Updates completed with errors ({success_count}/{len(updates_available)} successful)")
+                print_warning(f"Updates completed with errors ({success_count}/{len(updates_available)} successful)")
             print_info("=" * 70)
             
             return success_count == len(updates_available)
@@ -958,17 +1270,26 @@ Examples:
                 # Uninstall all modules
                 modules_to_uninstall = installed
                 print_info("=" * 70)
-                print_info("🗑️  Uninstalling All Modules")
+                print_info("Uninstalling All Modules")
                 print_info("=" * 70)
                 print_empty()
             elif args.module_id:
-                # Uninstall specific module
-                modules_to_uninstall = [m for m in installed if m['id'] == args.module_id]
+                # Uninstall specific module - can match by manifest ID or directory name
+                modules_to_uninstall = []
+                for m in installed:
+                    # Match by manifest ID
+                    if m['id'] == args.module_id:
+                        modules_to_uninstall.append(m)
+                    # Also match by directory name (marketplace ID might differ)
+                    elif m.get('directory_id') == args.module_id or os.path.basename(m.get('path', '')) == args.module_id:
+                        modules_to_uninstall.append(m)
+                
                 if not modules_to_uninstall:
                     print_error(f"Module '{args.module_id}' is not installed")
+                    print_info("Tip: Use 'market installed' to see installed extension IDs")
                     return False
                 print_info("=" * 70)
-                print_info("🗑️  Uninstalling Module")
+                print_info("Uninstalling Module")
                 print_info("=" * 70)
                 print_empty()
             else:
@@ -988,21 +1309,36 @@ Examples:
                     print_info("Uninstallation cancelled")
                     return True
             
-            # Uninstall each module
+            # Uninstall each module using ExtensionClient if available
             success_count = 0
             for module in modules_to_uninstall:
                 module_id = module['id']
                 module_name = module['name']
                 module_path = module['path']
                 
-                print_info(f"🗑️  Uninstalling {module_name} (v{module['version']})...")
+                print_info(f"Uninstalling {module_id} ({module_name}, v{module['version']})...")
                 
                 try:
+                    # Try using ExtensionClient for proper cleanup (removes launchers, stubs, etc.)
+                    try:
+                        from core.registry.client import ExtensionClient
+                        client = ExtensionClient(registry_url=self.registry_url)
+                        if client.remove_extension(module_id):
+                            print_success(f"{module_id} uninstalled successfully")
+                            success_count += 1
+                            print_empty()
+                            continue
+                    except ImportError:
+                        pass  # Fallback to manual removal
+                    except Exception as e:
+                        print_warning(f"ExtensionClient removal failed: {e}, trying manual removal...")
+                    
+                    # Manual fallback
                     import shutil
                     # Remove the module directory
                     if os.path.exists(module_path):
                         shutil.rmtree(module_path)
-                        print_success(f"✅ {module_name} uninstalled successfully")
+                        print_success(f"{module_id} uninstalled successfully")
                         success_count += 1
                         
                         # Also clean up parent directory if it's empty (for marketplace modules)
@@ -1023,20 +1359,20 @@ Examples:
                             except Exception:
                                 pass
                     else:
-                        print_warning(f"⚠️  Module directory not found: {module_path}")
+                        print_warning(f"Module directory not found: {module_path}")
                         # Still count as success since it's already gone
                         success_count += 1
                         
                 except Exception as e:
-                    print_error(f"❌ Failed to uninstall {module_name}: {e}")
+                    print_error(f"Failed to uninstall {module_name}: {e}")
                 
                 print_empty()
             
             print_info("=" * 70)
             if success_count == len(modules_to_uninstall):
-                print_success(f"✅ Uninstallation completed successfully! ({success_count}/{len(modules_to_uninstall)})")
+                print_success(f"Uninstallation completed successfully! ({success_count}/{len(modules_to_uninstall)})")
             else:
-                print_warning(f"⚠️  Uninstallation completed with errors ({success_count}/{len(modules_to_uninstall)} successful)")
+                print_warning(f"Uninstallation completed with errors ({success_count}/{len(modules_to_uninstall)} successful)")
             print_info("=" * 70)
             
             return success_count == len(modules_to_uninstall)
@@ -1057,92 +1393,37 @@ Examples:
         self._display_extension_details(extension_data, args.module_id)
         return True
     
-    def _list_categories(self) -> bool:
-        """List available categories (extension types)"""
-        # Les types d'extensions dans notre registry
-        categories = [
-            {'name': 'module', 'description': 'Framework modules'},
-            {'name': 'plugin', 'description': 'Framework plugins'},
-            {'name': 'UI', 'description': 'User interface components'},
-            {'name': 'middleware', 'description': 'Middleware components'}
-        ]
-        
-        print_info("Available Extension Types:")
-        print_info("=" * 50)
-        
-        for category in categories:
-            print_info(f"📁 {category['name']:<20}")
-            print_info(f"   {category['description']}")
-            print_empty()
-        
-        return True
-    
-    def _show_featured_modules(self, args) -> bool:
-        """Show featured modules (top downloads)"""
-        # Try new API first
-        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'rating'}, requires_auth=False, use_new_api=True)
-        
-        if not data:
-            # Fallback to old API
-            data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False, use_new_api=False)
-        
-        if not data:
-            return False
-        
-        if 'modules' in data:
-            modules = sorted(data.get('modules', []), key=lambda x: x.get('rating', 0), reverse=True)
-            pagination = data.get('pagination', {})
-            self._display_modules_new_format(modules[:args.limit], "Featured Modules", pagination)
-        else:
-            extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
-            self._display_extensions(extensions[:args.limit], "Featured Modules")
-        return True
-    
-    def _show_popular_modules(self, args) -> bool:
-        """Show popular modules (top downloads)"""
-        # Try new API first
-        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'downloads'}, requires_auth=False, use_new_api=True)
-        
-        if not data:
-            # Fallback to old API
-            data = self._make_request('extensions', {'per_page': args.limit, 'is_free': 'true'}, requires_auth=False, use_new_api=False)
-        
-        if not data:
-            return False
-        
-        if 'modules' in data:
-            modules = sorted(data.get('modules', []), key=lambda x: x.get('downloads', 0), reverse=True)
-            pagination = data.get('pagination', {})
-            self._display_modules_new_format(modules[:args.limit], "Popular Modules", pagination)
-        else:
-            extensions = sorted(data.get('extensions', []), key=lambda x: sum(v.get('download_count', 0) for v in x.get('versions', [])), reverse=True)
-            self._display_extensions(extensions[:args.limit], "Popular Modules")
-        return True
-    
-    def _show_recent_modules(self, args) -> bool:
-        """Show recently added modules"""
-        # Try new API first
-        data = self._make_request('market/modules', {'per_page': args.limit, 'sort': 'newest'}, requires_auth=False, use_new_api=True)
-        
-        if not data:
-            # Fallback to old API
-            data = self._make_request('extensions', {'per_page': args.limit}, requires_auth=False, use_new_api=False)
-        
-        if not data:
-            return False
-        
-        if 'modules' in data:
-            modules = sorted(data.get('modules', []), key=lambda x: x.get('created_at', ''), reverse=True)
-            pagination = data.get('pagination', {})
-            self._display_modules_new_format(modules[:args.limit], "Recently Added Modules", pagination)
-        else:
-            extensions = sorted(data.get('extensions', []), key=lambda x: x.get('created_at', ''), reverse=True)
-            self._display_extensions(extensions[:args.limit], "Recently Added Modules")
-        return True
-    
     def _get_installed_modules(self) -> List[Dict]:
-        """Get list of installed modules from modules/marketplace/ and custom paths"""
+        """Get list of installed modules from extensions/ directory using ExtensionClient"""
         installed = []
+        
+        # First, try using ExtensionClient to get extensions from extensions/ directory
+        try:
+            from core.registry.client import ExtensionClient
+            client = ExtensionClient(registry_url=self.registry_url)
+            extensions = client.list_installed_extensions()
+            
+            for ext in extensions:
+                installed.append({
+                    "id": ext.get("id", ""),
+                    "name": ext.get("name", ""),
+                    "version": ext.get("version", ""),
+                    "type": ext.get("type", ""),
+                    "path": ext.get("path", ""),
+                    "module_type": "",  # Will be determined from type
+                    "directory_id": ext.get("directory_id") or os.path.basename(ext.get("path", "")),  # Store directory name
+                    "marketplace_id": ext.get("marketplace_id")  # Store marketplace ID for API lookups
+                })
+            
+            # If we found extensions via ExtensionClient, return them (prioritize extensions/)
+            if installed:
+                return installed
+        except ImportError:
+            pass  # Fallback to manual search
+        except Exception as e:
+            logging.debug(f"Could not use ExtensionClient to list extensions: {e}")
+        
+        # Fallback: manual search in modules/marketplace/ and custom paths
         marketplace_dir = os.path.join("modules", "marketplace")
         
         # First, check modules/marketplace/ (default location)
@@ -1241,12 +1522,53 @@ Examples:
             print_info("=" * 70)
             print_empty()
             
+            # Try to get marketplace IDs by searching for extensions
+            marketplace_ids = {}
+            try:
+                from core.registry.client import ExtensionClient
+                client = ExtensionClient(registry_url=self.registry_url)
+                # Search for each installed extension to find marketplace ID
+                for ext in installed:
+                    # Try searching by name first
+                    results = client.list_extensions(search=ext['name'], per_page=50)
+                    if results and results.get('extensions'):
+                        for marketplace_ext in results['extensions']:
+                            # Match by manifest ID (extension_id field in marketplace might be the manifest ID)
+                            # or by name and version
+                            if (marketplace_ext.get('extension_id') == ext['id'] or 
+                                (marketplace_ext.get('name') == ext['name'] and 
+                                 marketplace_ext.get('version') == ext['version'])):
+                                # Get the marketplace ID (usually the 'id' field in the API response)
+                                marketplace_id = marketplace_ext.get('id') or marketplace_ext.get('extension_id')
+                                if marketplace_id and str(marketplace_id) != ext['id']:
+                                    marketplace_ids[ext['id']] = str(marketplace_id)
+                                    break
+            except Exception:
+                pass  # Silently fail if we can't get marketplace IDs
+            
             for ext in installed:
-                print_info(f"📦 {ext['name']}")
-                print_info(f"   ID: {ext['id']}")
+                print_info(f"{ext['id']} - {ext['name']}")
                 print_info(f"   Type: {ext['type']}")
                 print_info(f"   Version: {ext['version']}")
                 print_info(f"   Path: {ext['path']}")
+                
+                # Show IDs that can be used for uninstallation
+                uninstall_ids = [ext['id']]  # Always include manifest ID
+                
+                # Add marketplace ID if found
+                marketplace_id = marketplace_ids.get(ext['id'])
+                if marketplace_id and marketplace_id not in uninstall_ids:
+                    uninstall_ids.append(marketplace_id)
+                
+                # Add directory_id if different
+                if ext.get('directory_id') and ext.get('directory_id') != ext['id'] and ext.get('directory_id') not in uninstall_ids:
+                    uninstall_ids.append(ext['directory_id'])
+                
+                # Display uninstall command
+                if len(uninstall_ids) > 1:
+                    print_info(f"   Uninstall: market uninstall {' or '.join(uninstall_ids)}")
+                else:
+                    print_info(f"   Uninstall: market uninstall {ext['id']}")
                 print_empty()
             
             return True
@@ -1255,231 +1577,6 @@ Examples:
             print_error(f"Failed to list installed extensions: {str(e)}")
             import traceback
             traceback.print_exc()
-            return False
-    
-    def _publish_module(self, args) -> bool:
-        """Package and publish a module to the marketplace"""
-        import tempfile
-        import zipfile
-        import shutil
-        from core.registry.packaging import ExtensionPackager
-        from core.registry.manifest import ManifestParser
-        from core.registry.signature import RegistrySignatureManager
-        
-        try:
-            module_dir = os.path.abspath(args.module_dir)
-            if not os.path.isdir(module_dir):
-                print_error(f"❌ Module directory not found: {module_dir}")
-                return False
-            
-            manifest_path = os.path.join(module_dir, "extension.toml")
-            if not os.path.exists(manifest_path):
-                print_error(f"❌ Manifest not found: {manifest_path}")
-                print_info("💡 A module must have an extension.toml file")
-                return False
-            
-            # Parse manifest to get module info
-            manifest = ManifestParser.parse(manifest_path)
-            if not manifest:
-                print_error("❌ Failed to parse manifest")
-                return False
-            
-            # Validate manifest
-            is_valid, errors = ManifestParser.validate(manifest)
-            if not is_valid:
-                print_error(f"❌ Invalid manifest: {', '.join(errors)}")
-                return False
-            
-            print_info("=" * 70)
-            print_info("📦 Packaging Module")
-            print_info("=" * 70)
-            print_info(f"Module: {manifest.name}")
-            print_info(f"ID: {manifest.id}")
-            print_info(f"Version: {manifest.version}")
-            print_empty()
-            
-            # Create bundle
-            bundle_name = f"{manifest.id}_{manifest.version}.kext"
-            bundle_path = os.path.join(module_dir, bundle_name)
-            
-            packager = ExtensionPackager()
-            # Le serveur signera automatiquement avec la clé de l'utilisateur (basée sur l'API key)
-            # On peut créer le bundle sans signature côté client, le serveur ajoutera la signature
-            sign = not args.no_sign
-            
-            if sign:
-                print_info("💡 Bundle will be signed automatically by the server using your API key")
-            
-            success = packager.create_bundle(
-                source_dir=module_dir,
-                manifest_path=manifest_path,
-                output_path=bundle_path,
-                publisher_name=None,  # Plus besoin - le serveur gère la signature
-                sign=False  # Le serveur signera automatiquement
-            )
-            
-            if not success:
-                print_error("❌ Failed to create bundle")
-                return False
-            
-            if args.package_only:
-                print_success("✅ Module packaged successfully!")
-                print_info(f"   Bundle: {bundle_path}")
-                return True
-            
-            # Upload to registry
-            print_info("=" * 70)
-            print_info("📤 Publishing to Registry")
-            print_info("=" * 70)
-            
-            # Upload bundle - le serveur utilisera votre API key pour identifier l'utilisateur
-            # et signera automatiquement avec votre clé
-            print_info(f"📤 Uploading bundle: {bundle_name}")
-            print_info(f"   Your API key will be used for authentication and signing")
-            
-            success = self._upload_module(bundle_path)
-            
-            if success:
-                print_success("=" * 70)
-                print_success("✅ Module published successfully!")
-                print_success("=" * 70)
-                print_info(f"   Module ID: {manifest.id}")
-                print_info(f"   Version: {manifest.version}")
-                print_info(f"   Use 'market info {manifest.id}' to view details")
-                print_info(f"   Use 'market install {manifest.id}' to install")
-                return True
-            else:
-                return False
-                
-        except ImportError as e:
-            print_error(f"❌ Registry packaging not available: {e}")
-            return False
-        except Exception as e:
-            print_error(f"❌ Error publishing module: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def _register_publisher(self, name: str, email: str) -> int:
-        """Register a publisher and return its ID"""
-        try:
-            from core.registry.signature import RegistrySignatureManager
-            
-            # Generate key pair
-            signature_manager = RegistrySignatureManager()
-            success, public_key, private_key_path = signature_manager.generate_key_pair(name)
-            
-            if not success:
-                print_error("❌ Failed to generate keys for publisher")
-                return None
-            
-            print_info(f"🔑 Keys generated for {name}")
-            print_info(f"   Private key: {private_key_path}")
-            
-            # Register publisher via API
-            url = f"{self.registry_url}/api/registry/publishers"
-            headers = {
-                "X-API-Key": self.api_key,
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "name": name,
-                "email": email,
-                "public_key": public_key
-            }
-            
-            response = requests.post(url, json=data, headers=headers, timeout=self.timeout)
-            
-            if response.status_code == 200:
-                result = response.json()
-                publisher_id = result.get("publisher_id")
-                print_success(f"✅ Publisher registered with ID: {publisher_id}")
-                return publisher_id
-            elif response.status_code == 409:
-                print_warning(f"⚠️  Publisher '{name}' already exists")
-                print_info("💡 Use --publisher-id with the existing ID")
-                return None
-            else:
-                error = response.json().get('error', response.text) if response.headers.get('content-type', '').startswith('application/json') else response.text
-                print_error(f"❌ Failed to register publisher: {error}")
-                return None
-                
-        except Exception as e:
-            print_error(f"❌ Error registering publisher: {str(e)}")
-            return None
-    
-    def _get_publisher_from_account(self) -> int:
-        """Get publisher_id from user account (via API)"""
-        try:
-            # Récupérer les infos du compte depuis l'API
-            url = f"{self.registry_url}/api/auth/me"
-            headers = {
-                "X-API-Key": self.api_key
-            }
-            
-            response = requests.get(url, headers=headers, timeout=self.timeout)
-            if response.status_code == 200:
-                user_data = response.json()
-                user_email = user_data.get('email')
-                
-                if user_email:
-                    # Chercher le Publisher par email
-                    # On pourrait ajouter une route API pour ça, mais pour l'instant on utilise l'email
-                    # Le serveur le fera automatiquement
-                    return None  # Le serveur le fera
-            return None
-        except:
-            return None
-    
-    def _upload_module(self, bundle_path: str) -> bool:
-        """Upload a module bundle to the registry (signed automatically by server using API key)"""
-        try:
-            url = f"{self.registry_url}/api/registry/extensions/upload"
-            headers = {
-                "X-API-Key": self.api_key
-            }
-            
-            with open(bundle_path, 'rb') as f:
-                files = {
-                    'bundle': (os.path.basename(bundle_path), f, 'application/zip')
-                }
-                data = {}  # Plus besoin de publisher_id - le serveur utilise l'API key
-                
-                response = requests.post(url, files=files, data=data, headers=headers, timeout=60)
-                response.raise_for_status()
-                result = response.json()
-                
-                if result.get("success"):
-                    # Server returns extension_id, name, version directly
-                    extension_id = result.get('extension_id', 'N/A')
-                    name = result.get('name', 'N/A')
-                    version = result.get('version', 'N/A')
-                    print_success(f"✅ Module uploaded successfully!")
-                    print_info(f"   Extension ID: {extension_id}")
-                    print_info(f"   Version: {version}")
-                    return True
-                else:
-                    error = result.get('error', 'Unknown error')
-                    print_error(f"❌ Upload failed: {error}")
-                    return False
-                    
-        except requests.exceptions.HTTPError as e:
-            print_error(f"❌ HTTP Error: {e.response.status_code}")
-            try:
-                error_data = e.response.json()
-                error_msg = error_data.get('error', 'Unknown error')
-                message = error_data.get('message', '')
-                if message:
-                    print_error(f"   {error_msg}")
-                    print_error(f"   {message}")
-                else:
-                    print_error(f"   {error_msg}")
-            except:
-                print_error(f"   {e.response.text}")
-            return False
-        except Exception as e:
-            print_error(f"❌ Error uploading module: {str(e)}")
             return False
     
     def _buy_module(self, args) -> bool:
@@ -1559,13 +1656,13 @@ Examples:
                     price_value = self._normalize_price(check_price)
             
             if has_purchased or can_download or is_author:
-                print_info(f"✅ You already own this module: {module_name}")
+                print_info(f"You already own this module: {module_name}")
                 print_info("You can install it with: market install " + args.module_id)
                 return True
             
             is_free_determined = (is_free_flag is True) or (price_value is not None and price_value <= 0)
             if is_free_determined:
-                print_info(f"ℹ️  This module is free: {module_name}")
+                print_info(f"This module is free: {module_name}")
                 print_info("You can install it directly with: market install " + args.module_id)
                 return True
             
@@ -1577,7 +1674,7 @@ Examples:
             
             # Show purchase confirmation
             print_info("=" * 70)
-            print_info("🛒 PURCHASE MODULE")
+            print_info("PURCHASE MODULE")
             print_info("=" * 70)
             print_empty()
             print_info(f"Module: {module_name}")
@@ -1607,7 +1704,7 @@ Examples:
             # Stripe/checkout flow: prefer redirect URL when provided.
             checkout_url = purchase_data.get('checkout_url') or purchase_data.get('payment_url') or purchase_data.get('stripe_url')
             if checkout_url:
-                print_success("✅ Checkout created")
+                print_success("Checkout created")
                 print_info("Open this URL in your browser to pay:")
                 print_info(f"   {checkout_url}")
                 
@@ -1617,7 +1714,7 @@ Examples:
                 # Wait for the server to confirm payment (e.g. Stripe redirect to /purchase/success)
                 print_info("Waiting for payment confirmation...")
                 if self._wait_for_purchase_confirmation(str(args.module_id), timeout_seconds=15 * 60, poll_interval_seconds=3):
-                    print_success("✅ Payment confirmed!")
+                    print_success("Payment confirmed!")
                     print_info(f"You can now install the module with: market install {args.module_id}")
                     return True
                 
@@ -1629,7 +1726,7 @@ Examples:
             
             # If server confirms immediately (e.g. demo/test registry), accept success=true.
             if purchase_data.get('success'):
-                print_success("✅ Purchase successful!")
+                print_success("Purchase successful!")
                 print_info(f"You can now install the module with: market install {args.module_id}")
                 return True
             error = purchase_data.get('error', 'Unknown error')
@@ -1815,10 +1912,10 @@ Examples:
             return
         
         print_info(f"{title}")
-        print_info("=" * 60)
+        print_info("=" * 80)
         print_empty()
         
-        for module in modules:
+        for idx, module in enumerate(modules, 1):
             module_id = module.get('id', 'N/A')
             name = module.get('name', 'Unknown')
             description = module.get('description', 'No description')
@@ -1851,14 +1948,38 @@ Examples:
             
             # Rating display
             if rating_count > 0:
-                rating_text = f"⭐ {rating:.1f} ({rating_count})"
+                rating_text = f"{rating:.1f}/5.0 ({rating_count} reviews)"
             else:
                 rating_text = "No ratings"
             
-            print_info(f"🆔 {module_id:<30} | {name} v{version}")
-            print_info(f"   Author: {author_name:<20} | Type: {module_type:<15} | Price: {price_text:<25}")
-            print_info(f"   Downloads: {downloads:<10} | {rating_text}")
-            print_info(f"   {description}")
+            # Wrap description to fit terminal width (80 chars)
+            desc_lines = []
+            words = description.split()
+            current_line = ""
+            for word in words:
+                if len(current_line + word) > 72:  # Leave margin for indentation
+                    if current_line:
+                        desc_lines.append(current_line.strip())
+                    current_line = word + " "
+                else:
+                    current_line += word + " "
+            if current_line:
+                desc_lines.append(current_line.strip())
+            if not desc_lines:
+                desc_lines = ["No description available"]
+            
+            # Display module in a card-like format
+            print_info(f"[{idx}] {name} v{version}")
+            print_info("-" * 80)
+            print_info(f"  ID:          {module_id}")
+            print_info(f"  Author:      {author_name}")
+            print_info(f"  Type:        {module_type}")
+            print_info(f"  Price:       {price_text}")
+            print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")
+            print_info(f"  Rating:      {rating_text}")
+            print_info(f"  Description: {desc_lines[0]}")
+            for line in desc_lines[1:]:
+                print_info(f"               {line}")
             print_empty()
         
         # Display pagination info if available
@@ -1870,7 +1991,7 @@ Examples:
             has_next = pagination.get('has_next', False)
             has_prev = pagination.get('has_prev', False)
             
-            print_info("=" * 60)
+            print_info("=" * 80)
             print_info(f"Page {page} of {pages} (Total: {total} modules)")
             if has_prev:
                 print_info("Use --page to navigate to previous pages")
@@ -1881,22 +2002,22 @@ Examples:
     def _display_module_details_new_format(self, module: Dict):
         """Display detailed module information in the new API format"""
         print_info("=" * 70)
-        print_info(f"📦 MODULE DETAILS")
+        print_info(f"MODULE DETAILS")
         print_info("=" * 70)
         print_empty()
         
         # Basic info
-        print_info(f"🆔 ID: {module.get('id', 'N/A')}")
-        print_info(f"📝 Name: {module.get('name', 'Unknown')}")
+        print_info(f"ID: {module.get('id', 'N/A')}")
+        print_info(f"Name: {module.get('name', 'Unknown')}")
         version = self._get_module_version(module)
-        print_info(f"📦 Version: {version}")
+        print_info(f"Version: {version}")
         
         author = module.get('author', {})
         if isinstance(author, dict):
             author_name = author.get('username', 'Unknown')
         else:
             author_name = str(author) if author else 'Unknown'
-        print_info(f"👤 Author: {author_name}")
+        print_info(f"Author: {author_name}")
         
         price = module.get('price', 0)
         can_download = module.get('can_download', False)
@@ -1915,23 +2036,23 @@ Examples:
             else:
                 price_text = f"{price}€ (PURCHASE REQUIRED)"
         
-        print_info(f"💰 Price: {price_text}")
-        print_info(f"📁 Type: {module.get('type', 'Unknown')}")
-        print_info(f"🔧 Compatibility: {module.get('compatibility', 'N/A')}")
+        print_info(f"Price: {price_text}")
+        print_info(f"Type: {module.get('type', 'Unknown')}")
+        print_info(f"Compatibility: {module.get('compatibility', 'N/A')}")
         
         # Ratings
         rating = module.get('rating', 0)
         rating_count = module.get('rating_count', 0)
         if rating_count > 0:
-            print_info(f"⭐ Rating: {rating:.1f}/5.0 ({rating_count} reviews)")
+            print_info(f"Rating: {rating:.1f}/5.0 ({rating_count} reviews)")
         else:
-            print_info(f"⭐ Rating: No ratings yet")
+            print_info(f"Rating: No ratings yet")
         
-        print_info(f"📊 Downloads: {module.get('downloads', 0)}")
+        print_info(f"Downloads: {module.get('downloads', 0)}")
         print_empty()
         
         # Description
-        print_info("📋 Description:")
+        print_info("Description:")
         description = module.get('description', 'No description available')
         # Wrap long descriptions
         words = description.split()
@@ -1953,7 +2074,7 @@ Examples:
         # Images if available
         images = module.get('images', [])
         if images:
-            print_info("🖼️  Images:")
+            print_info("Images:")
             for img in images:
                 img_url = img.get('url', '')
                 if img_url:
@@ -1962,10 +2083,10 @@ Examples:
         
         # Installation/Purchase instructions
         if can_download or has_purchased or is_author or price == 0:
-            print_info("💾 Installation:")
+            print_info("Installation:")
             print_info(f"   market install {module.get('id', 'N/A')}")
         else:
-            print_info("💳 Purchase Required:")
+            print_info("Purchase Required:")
             print_info(f"   This module costs {price}€")
             print_info(f"   Use 'market buy {module.get('id', 'N/A')}' to purchase")
         
@@ -1973,9 +2094,9 @@ Examples:
         created_at = module.get('created_at', '')
         updated_at = module.get('updated_at', '')
         if created_at:
-            print_info(f"📅 Created: {created_at}")
+            print_info(f"Created: {created_at}")
         if updated_at:
-            print_info(f"📅 Updated: {updated_at}")
+            print_info(f"Updated: {updated_at}")
         
         print_info("=" * 70)
     
@@ -1986,10 +2107,10 @@ Examples:
             return
         
         print_info(f"{title}")
-        print_info("=" * 60)
+        print_info("=" * 80)
         print_empty()
         
-        for ext in extensions:
+        for idx, ext in enumerate(extensions, 1):
             ext_id = ext.get('id', 'N/A')
             name = ext.get('name', 'Unknown')
             description = ext.get('description', 'No description')
@@ -2040,29 +2161,52 @@ Examples:
                 # Fallback: if neither price nor is_free is clear, show as FREE to be safe
                 price_text = "FREE"
             
-            print_info(f"🆔 {ext_id:<30} | {name} {version_text}")
-            print_info(f"   Publisher: {publisher_name:<20} | Type: {ext_type:<15} | Price: {price_text:<10}")
-            print_info(f"   Downloads: {total_downloads}")
-            print_info(f"   {description}")
+            # Wrap description to fit terminal width (80 chars)
+            desc_lines = []
+            words = description.split()
+            current_line = ""
+            for word in words:
+                if len(current_line + word) > 72:  # Leave margin for indentation
+                    if current_line:
+                        desc_lines.append(current_line.strip())
+                    current_line = word + " "
+                else:
+                    current_line += word + " "
+            if current_line:
+                desc_lines.append(current_line.strip())
+            if not desc_lines:
+                desc_lines = ["No description available"]
+            
+            # Display extension in a card-like format
+            print_info(f"[{idx}] {name} {version_text}")
+            print_info("-" * 80)
+            print_info(f"  ID:          {ext_id}")
+            print_info(f"  Publisher:   {publisher_name}")
+            print_info(f"  Type:        {ext_type}")
+            print_info(f"  Price:       {price_text}")
+            print_info(f"  Downloads:   {total_downloads:,}" if total_downloads > 0 else f"  Downloads:   {total_downloads}")
+            print_info(f"  Description: {desc_lines[0]}")
+            for line in desc_lines[1:]:
+                print_info(f"               {line}")
             print_empty()
     
     def _display_extension_details(self, extension: Dict, extension_id: str = None):
         """Display detailed extension information"""
         print_info("=" * 70)
-        print_info(f"📦 EXTENSION DETAILS")
+        print_info(f"EXTENSION DETAILS")
         print_info("=" * 70)
         print_empty()
         
         # Basic info
-        print_info(f"🆔 ID: {extension.get('id', 'N/A')}")
-        print_info(f"📝 Name: {extension.get('name', 'Unknown')}")
+        print_info(f"ID: {extension.get('id', 'N/A')}")
+        print_info(f"Name: {extension.get('name', 'Unknown')}")
         
         publisher = extension.get('publisher', {})
         if isinstance(publisher, dict):
             publisher_name = publisher.get('name', 'Unknown')
         else:
             publisher_name = str(publisher) if publisher else 'Unknown'
-        print_info(f"👤 Publisher: {publisher_name}")
+        print_info(f"Publisher: {publisher_name}")
         
         price = extension.get('price', 0)
         currency = extension.get('currency', 'EUR')  # Default to EUR for new API
@@ -2084,18 +2228,18 @@ Examples:
         else:
             # Fallback: if neither price nor is_free is clear, show as FREE to be safe
             price_text = 'FREE'
-        print_info(f"💰 Price: {price_text}")
-        print_info(f"📁 Type: {extension.get('type', 'Unknown')}")
-        print_info(f"📄 License: {extension.get('license_type', 'N/A')}")
+        print_info(f"Price: {price_text}")
+        print_info(f"Type: {extension.get('type', 'Unknown')}")
+        print_info(f"License: {extension.get('license_type', 'N/A')}")
         
         # Calculate total downloads
         versions = extension.get('versions', [])
         total_downloads = sum(v.get('download_count', 0) for v in versions)
-        print_info(f"📊 Total Downloads: {total_downloads}")
+        print_info(f"Total Downloads: {total_downloads}")
         print_empty()
         
         # Description
-        print_info("📋 Description:")
+        print_info("Description:")
         description = extension.get('description', 'No description available')
         # Wrap long descriptions
         words = description.split()
@@ -2116,7 +2260,7 @@ Examples:
         
         # Versions
         if versions:
-            print_info("🔧 Available Versions:")
+            print_info("Available Versions:")
             for v in versions:
                 latest = " (latest)" if v.get('is_latest') else ""
                 print_info(f"   • {v.get('version')}{latest} - Downloads: {v.get('download_count', 0)}")
@@ -2125,10 +2269,10 @@ Examples:
         
         # Installation instructions
         if is_free:
-            print_info("💾 Installation:")
+            print_info("Installation:")
             print_info(f"   market install {extension.get('id', 'N/A')}")
         else:
-            print_info("💳 Purchase Required:")
+            print_info("Purchase Required:")
             print_info(f"   This extension costs {price} {currency} and cannot be installed via the market command")
         
         # Try to load and display doc.md if available
@@ -2186,8 +2330,152 @@ Examples:
             logging.debug(f"Could not load extension doc.md: {e}")
             return None
     
+    def _install_from_local_path(self, module: Dict, local_path: str, version: str) -> bool:
+        """Install extension from a local path (for local updates)"""
+        try:
+            import shutil
+            from core.registry.client import ExtensionClient
+            from core.registry.manifest import ManifestParser
+            
+            # Read manifest from local path
+            manifest_path = os.path.join(local_path, "extension.toml")
+            if not os.path.exists(manifest_path):
+                print_error(f"Manifest not found at {manifest_path}")
+                return False
+            
+            manifest = ManifestParser.parse(manifest_path)
+            if not manifest:
+                print_error("Failed to parse manifest")
+                return False
+            
+            # Get extensions directory
+            try:
+                import toml
+                config_path = os.path.join("config", "kittysploit.toml")
+                extensions_dir = "extensions"
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = toml.load(f)
+                        extensions_dir = config.get('registry', {}).get('extensions_dir', 'extensions')
+            except:
+                extensions_dir = "extensions"
+            
+            # Determine target path structure
+            # Try to preserve marketplace_id if available
+            module_path = module.get('path', '')
+            marketplace_id = None
+            
+            # Extract marketplace_id from current path if possible
+            if module_path:
+                parts = module_path.split(os.sep)
+                if 'extensions' in parts:
+                    ext_idx = parts.index('extensions')
+                    if ext_idx + 1 < len(parts):
+                        potential_marketplace_id = parts[ext_idx + 1]
+                        # Check if it's numeric (marketplace ID) or the extension ID
+                        if potential_marketplace_id.isdigit() or potential_marketplace_id != manifest.id:
+                            marketplace_id = potential_marketplace_id
+            
+            # If no marketplace_id found, use a default or the extension ID
+            if not marketplace_id:
+                # Try to find existing marketplace_id by scanning extensions directory
+                if os.path.exists(extensions_dir):
+                    for item in os.listdir(extensions_dir):
+                        item_path = os.path.join(extensions_dir, item)
+                        if os.path.isdir(item_path):
+                            # Check if this directory contains our extension
+                            for subitem in os.listdir(item_path):
+                                subitem_path = os.path.join(item_path, subitem)
+                                if os.path.isdir(subitem_path):
+                                    check_manifest = os.path.join(subitem_path, "extension.toml")
+                                    if not os.path.exists(check_manifest):
+                                        # Check in latest/ subdirectory
+                                        check_manifest = os.path.join(subitem_path, "latest", "extension.toml")
+                                    if os.path.exists(check_manifest):
+                                        check_manifest_obj = ManifestParser.parse(check_manifest)
+                                        if check_manifest_obj and check_manifest_obj.id == manifest.id:
+                                            marketplace_id = item
+                                            break
+                            if marketplace_id:
+                                break
+            
+            # If still no marketplace_id, use extension ID as fallback
+            if not marketplace_id:
+                marketplace_id = manifest.id
+            
+            # Create target directory: extensions/{marketplace_id}/{manifest_id}/latest/
+            target_dir = os.path.join(extensions_dir, marketplace_id, manifest.id, "latest")
+            os.makedirs(target_dir, exist_ok=True)
+            
+            # Copy all files from local_path to target_dir
+            print_info(f"Copying extension files to {target_dir}...")
+            for item in os.listdir(local_path):
+                src = os.path.join(local_path, item)
+                dst = os.path.join(target_dir, item)
+                
+                if os.path.isdir(src):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+            
+            # Use ExtensionClient to create stubs/launchers
+            client = ExtensionClient(registry_url=self.registry_url)
+            stub_created = client._create_stub_files(manifest, target_dir, "latest", marketplace_id=marketplace_id)
+            
+            if stub_created:
+                print_success(f"Extension '{manifest.name}' v{version} installed from local path")
+                return True
+            else:
+                print_warning("Stubs/launchers may not have been created correctly")
+                return True  # Still consider it successful if files were copied
+                
+        except Exception as e:
+            print_error(f"Failed to install from local path: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def _download_and_install_extension(self, extension_id: str, extension_data: Dict) -> bool:
-        """Download and install an extension"""
+        """Download and install an extension using ExtensionClient"""
+        try:
+            from core.registry.client import ExtensionClient
+            
+            module_name = extension_data.get('name', 'Unknown')
+            
+            print_info(f"Installing extension '{module_name}' (ID: {extension_id})...")
+            
+            # Use ExtensionClient for proper installation (handles UI, modules, plugins correctly)
+            client = ExtensionClient(registry_url=self.registry_url)
+            
+            # Install using ExtensionClient (handles extensions/ directory and launchers)
+            success = client.install_extension(
+                extension_id=extension_id,
+                version=None,  # Use latest
+                user_id=None,
+                verify_signature=True
+            )
+            
+            if success:
+                print_success(f"Extension '{module_name}' (ID: {extension_id}) installed successfully!")
+                return True
+            else:
+                print_error(f"Failed to install extension '{module_name}' (ID: {extension_id})")
+                return False
+                
+        except ImportError:
+            # Fallback to manual installation if ExtensionClient not available
+            print_warning("ExtensionClient not available, using manual installation")
+            return self._download_and_install_extension_manual(extension_id, extension_data)
+        except Exception as e:
+            print_error(f"Error installing extension: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _download_and_install_extension_manual(self, extension_id: str, extension_data: Dict) -> bool:
+        """Manual installation fallback (old method)"""
         import tempfile
         import zipfile
         import shutil
@@ -2195,7 +2483,7 @@ Examples:
         try:
             module_name = extension_data.get('name', 'Unknown')
             
-            print_info(f"📥 Downloading module '{module_name}'...")
+            print_info(f"Downloading module '{module_name}'...")
             
             # Download extension bundle - use correct endpoint
             url = f"{self.registry_url}/api/cli/market/download/{extension_id}"
@@ -2276,7 +2564,7 @@ Examples:
                 for chunk in response.iter_content(chunk_size=8192):
                     tmp_file.write(chunk)
             
-            print_info(f"📦 Extracting module bundle...")
+            print_info(f"Extracting module bundle...")
             
             # Sanity-check the downloaded bundle before attempting extraction.
             # Some registry deployments may return an empty ZIP placeholder (e.g. 22-byte EOCD record)
@@ -2294,7 +2582,7 @@ Examples:
                 first_bytes = b''
             
             if bundle_size is not None and bundle_size <= 32:
-                print_error("❌ Downloaded bundle is unexpectedly small.")
+                print_error("Downloaded bundle is unexpectedly small.")
                 print_info(f"   Size: {bundle_size} bytes")
                 print_info("   This usually means the registry returned an empty placeholder instead of the real module bundle.")
                 print_info("   Server-side action: verify the module has a valid uploaded .kext/.zip artifact and the download endpoint serves it.")
@@ -2307,7 +2595,7 @@ Examples:
                     with zipfile.ZipFile(tmp_path, 'r') as zf:
                         names = zf.namelist()
                         if not names:
-                            print_error("❌ Downloaded bundle is an empty ZIP archive (no files).")
+                            print_error("Downloaded bundle is an empty ZIP archive (no files).")
                             if bundle_size is not None:
                                 print_info(f"   Size: {bundle_size} bytes")
                             print_info("   Server-side action: the registry must return the actual module bundle, not an empty ZIP placeholder.")
@@ -2344,7 +2632,7 @@ Examples:
                         size_hint = f" (size: {os.path.getsize(tmp_path)} bytes)"
                     except Exception:
                         pass
-                    print_error(f"❌ Invalid bundle format (not a valid ZIP file){size_hint}")
+                    print_error(f"Invalid bundle format (not a valid ZIP file){size_hint}")
                     if first_bytes:
                         try:
                             import binascii
@@ -2415,28 +2703,28 @@ Examples:
                     safe_ver = "latest"
                 
                 extract_dir = os.path.join(extensions_dir, extension_id, safe_ver)
-                print_info(f"📁 Installing to: {extract_dir} (isolated extension)")
+                print_info(f"Installing to: {extract_dir} (isolated extension)")
             elif install_path:
                 # Validate install_path security
                 normalized_path = install_path.replace("\\", "/").strip()
                 
                 # Security checks
                 if not (normalized_path.startswith("modules/") or normalized_path.startswith("plugins/")):
-                    print_error(f"❌ Security: install_path must start with 'modules/' or 'plugins/'")
+                    print_error(f"Security: install_path must start with 'modules/' or 'plugins/'")
                     print_error(f"   Received: {install_path}")
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
                     return False
                 
                 if ".." in normalized_path:
-                    print_error(f"❌ Security: install_path cannot contain '..' (path traversal attempt)")
+                    print_error(f"Security: install_path cannot contain '..' (path traversal attempt)")
                     print_error(f"   Received: {install_path}")
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
                     return False
                 
                 if os.path.isabs(normalized_path):
-                    print_error(f"❌ Security: install_path must be a relative path")
+                    print_error(f"Security: install_path must be a relative path")
                     print_error(f"   Received: {install_path}")
                     shutil.rmtree(temp_extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
@@ -2444,7 +2732,7 @@ Examples:
                 
                 # Use install_path from manifest (relative to framework root)
                 extract_dir = normalized_path
-                print_info(f"📁 Installing to: {extract_dir} (from manifest)")
+                print_info(f"Installing to: {extract_dir} (from manifest)")
             else:
                 # Check for default_install_path in config
                 try:
@@ -2472,7 +2760,7 @@ Examples:
                     # Fallback: install directly to modules/<type>/<module_id>
                     extract_dir = os.path.join("modules", module_type, extension_id)
                 
-                print_info(f"📁 Installing to: {extract_dir} (default location)")
+                print_info(f"Installing to: {extract_dir} (default location)")
             
             os.makedirs(extract_dir, exist_ok=True)
             
@@ -2501,7 +2789,7 @@ Examples:
             # Check for manifest (already extracted to extract_dir)
             manifest_path = os.path.join(extract_dir, "extension.toml")
             if not os.path.exists(manifest_path):
-                print_error("❌ Manifest extension.toml not found in bundle")
+                print_error("Manifest extension.toml not found in bundle")
                 shutil.rmtree(extract_dir, ignore_errors=True)
                 os.remove(tmp_path)
                 return False
@@ -2511,7 +2799,7 @@ Examples:
                 from core.registry.manifest import ManifestParser
                 manifest = ManifestParser.parse(manifest_path)
                 if not manifest:
-                    print_error("❌ Failed to parse manifest")
+                    print_error("Failed to parse manifest")
                     shutil.rmtree(extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
                     return False
@@ -2519,7 +2807,7 @@ Examples:
                 # Validate manifest
                 is_valid, errors = ManifestParser.validate(manifest)
                 if not is_valid:
-                    print_error(f"❌ Invalid manifest: {', '.join(errors)}")
+                    print_error(f"Invalid manifest: {', '.join(errors)}")
                     shutil.rmtree(extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
                     return False
@@ -2528,7 +2816,7 @@ Examples:
                 valid_types = ['module', 'plugin', 'UI', 'middleware']
                 extension_type = manifest.extension_type.value if hasattr(manifest.extension_type, 'value') else str(manifest.extension_type)
                 if extension_type not in valid_types:
-                    print_error(f"❌ Invalid extension type: {extension_type}")
+                    print_error(f"Invalid extension type: {extension_type}")
                     print_error(f"   Valid types are: {', '.join(valid_types)}")
                     shutil.rmtree(extract_dir, ignore_errors=True)
                     os.remove(tmp_path)
@@ -2540,7 +2828,7 @@ Examples:
                     try:
                         from core.registry.packaging import generate_python_stub_module
                     except Exception as e:
-                        print_error(f"❌ Stub generation unavailable: {e}")
+                        print_error(f"Stub generation unavailable: {e}")
                         os.remove(tmp_path)
                         return False
                     
@@ -2560,10 +2848,10 @@ Examples:
                         # Security: only allow writing stubs into modules/ or plugins/
                         target_norm = str(target).replace("\\", "/").strip()
                         if ".." in target_norm or os.path.isabs(target_norm):
-                            print_error(f"❌ Security: invalid stub target path: {target}")
+                            print_error(f"Security: invalid stub target path: {target}")
                             continue
                         if not (target_norm.startswith("modules/") or target_norm.startswith("plugins/")):
-                            print_error(f"❌ Security: stub target must be under modules/ or plugins/: {target}")
+                            print_error(f"Security: stub target must be under modules/ or plugins/: {target}")
                             continue
                         
                         entry_rel = str(entry).replace("\\", "/").lstrip("/")
@@ -2581,7 +2869,7 @@ Examples:
                             if on_conflict == "skip":
                                 continue
                             if on_conflict == "fail":
-                                print_error(f"❌ Stub target already exists: {target_norm}")
+                                print_error(f"Stub target already exists: {target_norm}")
                                 print_info("   Set install.on_conflict = \"overwrite\" or \"skip\" in extension.toml")
                                 continue
                         
@@ -2597,11 +2885,11 @@ Examples:
                             first_use_hint = rel
                     
                     if created > 0:
-                        print_success(f"✅ Generated {created} stub module(s)")
+                        print_success(f"Generated {created} stub module(s)")
                     else:
-                        print_warning("⚠️  install.stubs was present but no stubs were generated (check your extension.toml).")
+                        print_warning("install.stubs was present but no stubs were generated (check your extension.toml).")
                 
-                print_success(f"✅ Module '{module_name}' installed successfully!")
+                print_success(f"Module '{module_name}' installed successfully!")
                 print_info(f"   Installed to: {extract_dir}")
                 print_info(f"   Type: {extension_type}")
                 print_info(f"   Version: {manifest.version}")
@@ -2628,11 +2916,11 @@ Examples:
                 print_info(f"   Use 'use {use_path}' to load the module")
                 
             except ImportError:
-                print_warning("⚠️  Could not validate manifest (registry module not available)")
-                print_success(f"✅ Module '{module_name}' extracted to: {extract_dir}")
+                print_warning("Could not validate manifest (registry module not available)")
+                print_success(f"Module '{module_name}' extracted to: {extract_dir}")
             except Exception as e:
-                print_warning(f"⚠️  Could not fully validate module: {e}")
-                print_success(f"✅ Module '{module_name}' extracted to: {extract_dir}")
+                print_warning(f"Could not fully validate module: {e}")
+                print_success(f"Module '{module_name}' extracted to: {extract_dir}")
             
             # Clean up temporary bundle file
             try:
@@ -2644,12 +2932,12 @@ Examples:
             
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                print_error("❌ Unauthorized - please login or register")
+                print_error("Unauthorized - please login or register")
             else:
-                print_error(f"❌ Failed to download extension: {e.response.status_code}")
+                print_error(f"Failed to download extension: {e.response.status_code}")
             return False
         except Exception as e:
-            print_error(f"❌ Failed to install extension: {str(e)}")
+            print_error(f"Failed to install extension: {str(e)}")
             import traceback
             traceback.print_exc()
             return False

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Parser et gestionnaire de manifestes d'extensions (extension.toml)
+Parser and manager for extension manifests (extension.toml)
 """
 
 import os
@@ -14,7 +14,7 @@ from enum import Enum
 
 
 class ExtensionType(Enum):
-    """Types d'extensions"""
+    """Extension types"""
     MODULE = "module"
     PLUGIN = "plugin"
     UI = "UI"
@@ -23,14 +23,14 @@ class ExtensionType(Enum):
 
 @dataclass
 class Compatibility:
-    """Compatibilité avec KittySploit"""
+    """Compatibility with KittySploit"""
     kittysploit_min: str
     kittysploit_max: Optional[str] = None
 
 
 @dataclass
 class Permissions:
-    """Permissions requises par l'extension"""
+    """Permissions required by the extension"""
     network_access: bool = False
     database_access: bool = False
     sandbox_level: str = "standard"  # permissive, standard, strict, paranoid
@@ -43,38 +43,38 @@ class Permissions:
 
 @dataclass
 class ExtensionManifest:
-    """Manifeste d'extension"""
-    # Identité
+    """Extension manifest"""
+    # Identity
     id: str
     name: str
     version: str
     description: Optional[str] = None
     author: str = ""
     
-    # Type et compatibilité
+    # Type and compatibility
     extension_type: ExtensionType = ExtensionType.MODULE
     compatibility: Optional[Compatibility] = None
     
     # Permissions
     permissions: Permissions = field(default_factory=Permissions)
     
-    # Sécurité
-    payload_hashes: Dict[str, str] = field(default_factory=dict)  # SHA256 des fichiers
-    signature: Optional[str] = None  # Signature du manifest
-    public_key: Optional[str] = None  # Clé publique du signataire
+    # Security
+    payload_hashes: Dict[str, str] = field(default_factory=dict)  # SHA256 of files
+    signature: Optional[str] = None  # Manifest signature
+    public_key: Optional[str] = None  # Signer's public key
     
-    # Métadonnées
+    # Metadata
     price: float = 0.0
     currency: str = "USD"
     license: str = "MIT"
     
-    # Assets et fichiers
-    entry_point: Optional[str] = None  # Point d'entrée principal
-    assets: List[str] = field(default_factory=list)  # Fichiers/assets inclus
-    install_path: Optional[str] = None  # Chemin d'installation relatif à la racine du framework (ex: modules/auxiliary/test_module)
+    # Assets and files
+    entry_point: Optional[str] = None  # Main entry point
+    assets: List[str] = field(default_factory=list)  # Included files/assets
+    install_path: Optional[str] = None  # Installation path relative to framework root (e.g: modules/auxiliary/test_module)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convertit le manifest en dictionnaire"""
+        """Convert manifest to dictionary"""
         return {
             "id": self.id,
             "name": self.name,
@@ -108,7 +108,7 @@ class ExtensionManifest:
         }
     
     def to_toml(self) -> str:
-        """Convertit le manifest en TOML"""
+        """Convert manifest to TOML"""
         data = self.to_dict()
         # Nettoyer les valeurs None
         cleaned = {}
@@ -123,18 +123,18 @@ class ExtensionManifest:
 
 
 class ManifestParser:
-    """Parseur de manifestes TOML"""
+    """TOML manifest parser"""
     
     @staticmethod
     def parse(manifest_path: str) -> Optional[ExtensionManifest]:
         """
-        Parse un fichier manifest TOML
+        Parse a TOML manifest file
         
         Args:
-            manifest_path: Chemin vers extension.toml
+            manifest_path: Path to extension.toml
             
         Returns:
-            ExtensionManifest ou None en cas d'erreur
+            ExtensionManifest or None on error
         """
         try:
             if not os.path.exists(manifest_path):
@@ -145,31 +145,31 @@ class ManifestParser:
             
             return ManifestParser._parse_dict(data)
         except Exception as e:
-            print(f"Erreur lors du parsing du manifest: {e}")
+            print(f"Error parsing manifest: {e}")
             return None
     
     @staticmethod
     def parse_string(manifest_content: str) -> Optional[ExtensionManifest]:
         """
-        Parse un manifest depuis une chaîne TOML
+        Parse a manifest from a TOML string
         
         Args:
-            manifest_content: Contenu TOML du manifest
+            manifest_content: TOML content of the manifest
             
         Returns:
-            ExtensionManifest ou None en cas d'erreur
+            ExtensionManifest or None on error
         """
         try:
             data = toml.loads(manifest_content)
             return ManifestParser._parse_dict(data)
         except Exception as e:
-            print(f"Erreur lors du parsing du manifest: {e}")
+            print(f"Error parsing manifest: {e}")
             return None
     
     @staticmethod
     def _parse_dict(data: Dict[str, Any]) -> ExtensionManifest:
-        """Parse un dictionnaire en ExtensionManifest"""
-        # Compatibilité
+        """Parse a dictionary into ExtensionManifest"""
+        # Compatibility
         compatibility = None
         if "compatibility" in data:
             comp_data = data["compatibility"]
@@ -191,7 +191,7 @@ class ManifestParser:
             blocked_imports=permissions_data.get("blocked_imports", []),
         )
         
-        # Type d'extension
+        # Extension type
         ext_type_str = data.get("extension_type", "module")
         try:
             ext_type = ExtensionType(ext_type_str)
@@ -232,57 +232,65 @@ class ManifestParser:
     @staticmethod
     def validate(manifest: ExtensionManifest) -> tuple[bool, List[str]]:
         """
-        Valide un manifest
+        Validate a manifest
         
         Returns:
             (is_valid, list_of_errors)
         """
         errors = []
         
-        # Vérifier les champs requis
+        # Check required fields
         if not manifest.id:
-            errors.append("Le champ 'id' est requis")
+            errors.append("Field 'id' is required")
         if not manifest.name:
-            errors.append("Le champ 'name' est requis")
+            errors.append("Field 'name' is required")
         if not manifest.version:
-            errors.append("Le champ 'version' est requis")
+            errors.append("Field 'version' is required")
         
-        # Valider le format de version (semver)
+        # Validate version format (semver)
         if manifest.version and not ManifestParser._is_semver(manifest.version):
-            errors.append(f"Version invalide (format semver attendu): {manifest.version}")
+            errors.append(f"Invalid version (semver format expected): {manifest.version}")
         
-        # Valider la compatibilité
+        # Validate compatibility
         if manifest.compatibility:
             if not manifest.compatibility.kittysploit_min:
-                errors.append("kittysploit_min est requis dans compatibility")
+                errors.append("kittysploit_min is required in compatibility")
         
-        # Valider le niveau de sandbox
+        # Validate sandbox level
         valid_sandbox_levels = ["permissive", "standard", "strict", "paranoid"]
         if manifest.permissions.sandbox_level not in valid_sandbox_levels:
-            errors.append(f"sandbox_level invalide: {manifest.permissions.sandbox_level}")
+            errors.append(f"Invalid sandbox_level: {manifest.permissions.sandbox_level}")
         
-        # Valider install_path si présent
-        if manifest.install_path:
-            # Normaliser le chemin (utiliser des slashes)
+        # Validate install_path according to extension type
+        if manifest.extension_type.value.lower() in ['ui', 'interface']:
+            # UI interfaces must NOT have install_path
+            if manifest.install_path:
+                errors.append(f"install_path must not be defined for UI interfaces (received: {manifest.install_path})")
+        elif manifest.install_path:
+            # For modules/plugins, install_path is required and must be valid
+            # Normalize path (use slashes)
             normalized_path = manifest.install_path.replace("\\", "/").strip()
             
-            # Vérifier que le chemin commence par modules/ ou plugins/
+            # Check that path starts with modules/ or plugins/
             if not (normalized_path.startswith("modules/") or normalized_path.startswith("plugins/")):
-                errors.append(f"install_path invalide: doit commencer par 'modules/' ou 'plugins/' (reçu: {manifest.install_path})")
+                errors.append(f"Invalid install_path: must start with 'modules/' or 'plugins/' (received: {manifest.install_path})")
             
-            # Vérifier qu'il n'y a pas de tentatives de path traversal
+            # Check for path traversal attempts
             if ".." in normalized_path:
-                errors.append(f"install_path invalide: ne peut pas contenir '..' (reçu: {manifest.install_path})")
+                errors.append(f"Invalid install_path: cannot contain '..' (received: {manifest.install_path})")
             
-            # Vérifier qu'il n'y a pas de chemins absolus
+            # Check for absolute paths
             if os.path.isabs(normalized_path):
-                errors.append(f"install_path invalide: doit être un chemin relatif (reçu: {manifest.install_path})")
+                errors.append(f"Invalid install_path: must be a relative path (received: {manifest.install_path})")
+        elif manifest.extension_type.value.lower() in ['module', 'plugin']:
+            # Modules and plugins MUST have an install_path
+            errors.append("install_path is required for modules and plugins")
         
         return len(errors) == 0, errors
     
     @staticmethod
     def _is_semver(version: str) -> bool:
-        """Vérifie si une version suit le format semver"""
+        """Check if a version follows semver format"""
         import re
         semver_pattern = r'^\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?(\+[a-zA-Z0-9]+)?$'
         return bool(re.match(semver_pattern, version))
@@ -290,13 +298,13 @@ class ManifestParser:
     @staticmethod
     def compute_bundle_hash(bundle_path: str) -> str:
         """
-        Calcule le hash SHA256 d'un bundle
+        Calculate SHA256 hash of a bundle
         
         Args:
-            bundle_path: Chemin vers le bundle (.kext ou .zip)
+            bundle_path: Path to bundle (.kext or .zip)
             
         Returns:
-            Hash SHA256 en hexadécimal
+            SHA256 hash in hexadecimal
         """
         sha256 = hashlib.sha256()
         with open(bundle_path, 'rb') as f:
@@ -307,13 +315,13 @@ class ManifestParser:
     @staticmethod
     def compute_file_hash(file_path: str) -> str:
         """
-        Calcule le hash SHA256 d'un fichier
+        Calculate SHA256 hash of a file
         
         Args:
-            file_path: Chemin vers le fichier
+            file_path: Path to file
             
         Returns:
-            Hash SHA256 en hexadécimal
+            SHA256 hash in hexadecimal
         """
         sha256 = hashlib.sha256()
         with open(file_path, 'rb') as f:

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Modèles de données pour le Registry Marketplace
+Data models for the Registry Marketplace
 """
 
 from sqlalchemy import (
@@ -16,15 +16,15 @@ from core.models.encrypted_fields import EncryptedString, EncryptedText, Encrypt
 
 
 class Publisher(Base):
-    """Éditeur d'extensions"""
+    """Extension publisher"""
     __tablename__ = 'registry_publishers'
     
     id = Column(Integer, primary_key=True)
     name = Column(String(255), unique=True, nullable=False, index=True)
     email = Column(String(255), nullable=False)
-    public_key = Column(Text, nullable=False)  # Clé publique pour vérification signatures
+    public_key = Column(Text, nullable=False)  # Public key for signature verification
     kyc_status = Column(String(50), default='pending')  # pending, verified, rejected
-    kyc_data = Column(JSON)  # Données KYC (chiffrées si nécessaire)
+    kyc_data = Column(JSON)  # KYC data (encrypted if necessary)
     wallet_id = Column(Integer, ForeignKey('registry_wallets.id'))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -43,17 +43,17 @@ class Publisher(Base):
 
 
 class Extension(Base):
-    """Extension dans le registry"""
+    """Extension in the registry"""
     __tablename__ = 'registry_extensions'
     
     id = Column(Integer, primary_key=True)
-    extension_id = Column(String(255), unique=True, nullable=False, index=True)  # ID unique de l'extension
+    extension_id = Column(String(255), unique=True, nullable=False, index=True)  # Unique extension ID
     name = Column(String(255), nullable=False)
     description = Column(Text)
     extension_type = Column(String(50), nullable=False)  # module, plugin, UI, middleware
-    publisher_id = Column(Integer, ForeignKey('registry_publishers.id'), nullable=True)  # Optionnel - pour compatibilité
-    created_by_user_id = Column(Integer, ForeignKey('registry_users.id'), nullable=False, index=True)  # ID de l'utilisateur qui a créé l'extension (via API key) - REQUIS
-    price = Column(Float, default=0.0)  # Prix en devise par défaut
+    publisher_id = Column(Integer, ForeignKey('registry_publishers.id'), nullable=True)  # Optional - for compatibility
+    created_by_user_id = Column(Integer, ForeignKey('registry_users.id'), nullable=False, index=True)  # ID of user who created the extension (via API key) - REQUIRED
+    price = Column(Float, default=0.0)  # Price in default currency
     currency = Column(String(10), default='USD')
     license_type = Column(String(50), default='MIT')  # MIT, GPL, proprietary, etc.
     is_free = Column(Boolean, default=True)
@@ -62,7 +62,7 @@ class Extension(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships - définies après toutes les classes pour éviter les problèmes d'ordre
+    # Relationships - defined after all classes to avoid order issues
     publisher = relationship("Publisher", back_populates="extensions")
     versions = relationship("ExtensionVersion", back_populates="extension", cascade="all, delete-orphan")
     
@@ -77,19 +77,19 @@ class Extension(Base):
 
 
 class ExtensionVersion(Base):
-    """Version d'une extension"""
+    """Extension version"""
     __tablename__ = 'registry_extension_versions'
     
     id = Column(Integer, primary_key=True)
     extension_id = Column(Integer, ForeignKey('registry_extensions.id'), nullable=False)
     version = Column(String(50), nullable=False)  # Semver
-    bundle_hash = Column(String(64), nullable=False)  # SHA256 du bundle
-    bundle_path = Column(String(500))  # Chemin vers le bundle sur le serveur
-    bundle_size = Column(Integer)  # Taille en bytes
-    manifest_content = Column(Text)  # Contenu du manifest extension.toml
-    signature = Column(Text)  # Signature du manifest
-    kittysploit_min = Column(String(50))  # Version minimale requise
-    kittysploit_max = Column(String(50))  # Version maximale supportée
+    bundle_hash = Column(String(64), nullable=False)  # SHA256 of bundle
+    bundle_path = Column(String(500))  # Path to bundle on server
+    bundle_size = Column(Integer)  # Size in bytes
+    manifest_content = Column(Text)  # Content of extension.toml manifest
+    signature = Column(Text)  # Manifest signature
+    kittysploit_min = Column(String(50))  # Minimum required version
+    kittysploit_max = Column(String(50))  # Maximum supported version
     is_latest = Column(Boolean, default=False)
     download_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -107,11 +107,11 @@ class ExtensionVersion(Base):
 
 
 class Wallet(Base, EncryptedFieldMixin):
-    """Portefeuille pour monétisation"""
+    """Wallet for monetization"""
     __tablename__ = 'registry_wallets'
     
     id = Column(Integer, primary_key=True)
-    user_id = Column(String(255), nullable=False, index=True)  # ID utilisateur (peut être publisher_id ou autre)
+    user_id = Column(String(255), nullable=False, index=True)  # User ID (can be publisher_id or other)
     user_type = Column(String(50), nullable=False)  # publisher, user
     balance = Column(Float, default=0.0)
     currency = Column(String(10), default='USD')
@@ -133,7 +133,7 @@ class Wallet(Base, EncryptedFieldMixin):
 
 
 class Transaction(Base):
-    """Transaction financière"""
+    """Financial transaction"""
     __tablename__ = 'registry_transactions'
     
     id = Column(Integer, primary_key=True)
@@ -142,9 +142,9 @@ class Transaction(Base):
     amount = Column(Float, nullable=False)
     currency = Column(String(10), default='USD')
     status = Column(String(50), default='pending')  # pending, completed, failed, refunded
-    external_id = Column(String(255))  # ID transaction externe (Stripe, etc.)
-    extension_id = Column(Integer, ForeignKey('registry_extensions.id'))  # Pour purchase
-    transaction_metadata = Column(JSON)  # Données additionnelles (renommé car 'metadata' est réservé)
+    external_id = Column(String(255))  # External transaction ID (Stripe, etc.)
+    extension_id = Column(Integer, ForeignKey('registry_extensions.id'))  # For purchase
+    transaction_metadata = Column(JSON)  # Additional data (renamed because 'metadata' is reserved)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
     
@@ -163,19 +163,19 @@ class Transaction(Base):
 
 
 class License(Base):
-    """Licence d'utilisation d'une extension"""
+    """Extension usage license"""
     __tablename__ = 'registry_licenses'
     
     id = Column(Integer, primary_key=True)
     extension_id = Column(Integer, ForeignKey('registry_extensions.id'), nullable=False)
     user_id = Column(String(255), nullable=False, index=True)
-    version = Column(String(50))  # Version achetée
+    version = Column(String(50))  # Purchased version
     transaction_id = Column(Integer, ForeignKey('registry_transactions.id'))
     is_active = Column(Boolean, default=True)
-    expires_at = Column(DateTime)  # Pour licences temporaires
+    expires_at = Column(DateTime)  # For temporary licenses
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Relationships - back_populates sera configuré après la définition
+    # Relationships - back_populates will be configured after definition
     extension = relationship("Extension")
     transaction = relationship("Transaction")
     
@@ -189,17 +189,17 @@ class License(Base):
 
 
 class User(Base):
-    """Utilisateur du registry"""
+    """Registry user"""
     __tablename__ = 'registry_users'
     
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)  # Hash bcrypt du mot de passe
+    password_hash = Column(String(255), nullable=False)  # Bcrypt password hash
     username = Column(String(255), unique=True, nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
-    public_key = Column(Text, nullable=True)  # Clé publique pour vérification signatures (générée automatiquement)
-    private_key_path = Column(String(500), nullable=True)  # Chemin vers la clé privée (stockée localement)
+    public_key = Column(Text, nullable=True)  # Public key for signature verification (auto-generated)
+    private_key_path = Column(String(500), nullable=True)  # Path to private key (stored locally)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime)
@@ -212,17 +212,17 @@ class User(Base):
 
 
 class ApiKey(Base):
-    """Clé API pour authentification"""
+    """API key for authentication"""
     __tablename__ = 'registry_api_keys'
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('registry_users.id'), nullable=False, index=True)
-    key_hash = Column(String(255), nullable=False, unique=True, index=True)  # Hash de la clé API
-    key_prefix = Column(String(20), nullable=False)  # Préfixe pour affichage (ex: "ks_abc123...")
-    name = Column(String(255))  # Nom optionnel pour identifier la clé
+    key_hash = Column(String(255), nullable=False, unique=True, index=True)  # API key hash
+    key_prefix = Column(String(20), nullable=False)  # Prefix for display (e.g: "ks_abc123...")
+    name = Column(String(255))  # Optional name to identify the key
     is_active = Column(Boolean, default=True)
     last_used = Column(DateTime)
-    expires_at = Column(DateTime)  # Optionnel : expiration de la clé
+    expires_at = Column(DateTime)  # Optional: key expiration
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -238,7 +238,7 @@ class ApiKey(Base):
 
 
 class AuditLog(Base):
-    """Journal d'audit pour toutes les actions du marketplace"""
+    """Audit log for all marketplace actions"""
     __tablename__ = 'registry_audit_logs'
     
     id = Column(Integer, primary_key=True)
@@ -247,8 +247,8 @@ class AuditLog(Base):
     actor_type = Column(String(50), nullable=False)  # publisher, user, admin, system
     target_type = Column(String(50))  # extension, version, transaction, etc.
     target_id = Column(String(255))
-    details = Column(JSON)  # Détails de l'action
-    ip_address = Column(String(45))  # IPv4 ou IPv6
+    details = Column(JSON)  # Action details
+    ip_address = Column(String(45))  # IPv4 or IPv6
     user_agent = Column(String(500))
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     
@@ -261,8 +261,8 @@ class AuditLog(Base):
         return f"<AuditLog(action='{self.action}', actor='{self.actor_id}')>"
 
 
-# Configurer la relation licenses après que toutes les classes soient définies
-# Cela évite les problèmes d'ordre de définition avec SQLAlchemy
+# Configure licenses relationship after all classes are defined
+# This avoids SQLAlchemy definition order issues
 Extension.licenses = relationship("License", back_populates="extension", cascade="all, delete-orphan")
 License.extension = relationship("Extension", back_populates="licenses")
 

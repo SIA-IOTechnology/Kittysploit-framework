@@ -65,3 +65,5 @@ saved_sessions.json
 module_test_report.txt
 
 extensions/
+
+test/

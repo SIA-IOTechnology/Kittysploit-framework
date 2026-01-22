@@ -1,8 +1,7 @@
 from core.framework.base_module import BaseModule
 from core.framework.option import OptString, OptPort
 from core.framework.failure import fail
-from core.framework.jobs import Jobs
-from core.output_handler import print_status
+from core.output_handler import print_status, print_success
 
 import http.server
 import socketserver
@@ -42,7 +41,24 @@ class Http_server(BaseModule):
 				self.end_headers()
 				self.write_response("404 Not Found")
 
-		return self.listen_http({"GET": get}, forever=forever, background=background)
+		httpd = self.listen_http({"GET": get}, forever=forever, background=background)
+		# Return host, port, and httpd for compatibility with modules
+		return self.srvhost, self.srvport, httpd
+	
+	def web_shutdown(self, httpd):
+		"""Shutdown the HTTP server"""
+		try:
+			if httpd:
+				httpd.shutdown()
+				# Optionally update job status if registered
+				if hasattr(self, 'job_id'):
+					try:
+						from core.job_manager import global_job_manager
+						global_job_manager.update_job_status(self.job_id, 'completed', "Web delivery server stopped")
+					except ImportError:
+						pass
+		except Exception as e:
+			pass  # Ignore errors during shutdown
 
 	def _check_if_port_busy(self, lport):
 
@@ -64,16 +80,31 @@ class Http_server(BaseModule):
 			Handler.template_http = self.template_dir
 			httpd = socketserver.TCPServer((self.srvhost, self.srvport), Handler)
 			
-			if forever:
-				new_job = Jobs()
-				new_job.create_job("web delivery", f"http://{self.srvhost}:{self.srvport}", httpd.serve_forever, [])
+			if forever or background:
+				# Use threading for background jobs
+				import threading
+				server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+				server_thread.start()
+				
+				# Optionally register with job manager if available
+				try:
+					from core.job_manager import global_job_manager
+					job_id = global_job_manager.add_job(
+						name="web delivery",
+						description=f"HTTP server on http://{self.srvhost}:{self.srvport}",
+						target=f"http://{self.srvhost}:{self.srvport}"
+					)
+					if job_id:
+						self.job_id = job_id
+				except ImportError:
+					pass  # Job manager not available, continue anyway
+				
+				print_success(f"Server started at http://{self.srvhost}:{self.srvport}")
+				return httpd
 			else:
-				if background:
-					new_job = Jobs()
-					new_job.create_job("web delivery", f"http://{self.srvhost}:{self.srvport}", httpd.serve_forever, [])
-				else:
-					httpd.handle_request()
-					print_success(f"Server started at http://{self.srvhost}:{self.srvport}")
+				httpd.handle_request()
+				print_success(f"Server started at http://{self.srvhost}:{self.srvport}")
+				return httpd
 
 		except KeyboardInterrupt:
 			fail.KeyboardInterrupt

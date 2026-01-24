@@ -12,7 +12,7 @@
   
   *Modular • Extensible • Powerful*
   
-  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com) • [Discussions](https://github.com/SIA-IOTechnology/kittysploit-framework/discussions)
+  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com)
 </div>
 
 ---
@@ -354,7 +354,6 @@ See our [Contributing Guide](wiki/Contributing.md) for details.
 - **Website:** [app.kittysploit.com](https://kittysploit.com) - Official KittySploit web platform
 - **Documentation:** [Wiki](wiki/)
 - **Bug Reports:** [GitHub Issues](https://github.com/SIA-IOTechnology/kittysploit-framework/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/SIA-IOTechnology/kittysploit-framework/discussions)
 - **IRC:** [irc.libera.chat/#KittySploit](ircs://irc.libera.chat:6697/#KittySploit) - Join our IRC channel for real-time support
 
 ## ⚠️ Legal & Ethical Use
@@ -379,5 +378,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <div align="center">
   <strong>Made with ❤️ by the KittySploit Team</strong>
   
-  [⭐ Star us on GitHub](https://github.com/SIA-IOTechnology/Kittysploit-framework) • [🌐 Website](https://app.kittysploit.com) • [📖 Read the Docs](wiki/) • [💬 Join Discussions](https://github.com/SIA-IOTechnology/Kittysploit-framework/discussions)
+  [🌐 Website](https://kittysploit.com)
 </div>

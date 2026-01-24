@@ -12,7 +12,7 @@
   
   *Modular • Extensible • Powerful*
   
-  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com) • [Discussions](irc://irc.libera.chat:6697/#KittySploit)
+  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com) • [Discussions](https://github.com/SIA-IOTechnology/kittysploit-framework/discussions)
 </div>
 
 ---
@@ -353,8 +353,8 @@ See our [Contributing Guide](wiki/Contributing.md) for details.
 
 - **Website:** [app.kittysploit.com](https://kittysploit.com) - Official KittySploit web platform
 - **Documentation:** [Wiki](wiki/)
-- **Bug Reports:** [GitHub Issues](https://github.com/your-username/kittysploit-framework/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/your-username/kittysploit-framework/discussions)
+- **Bug Reports:** [GitHub Issues](https://github.com/SIA-IOTechnology/kittysploit-framework/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/SIA-IOTechnology/kittysploit-framework/discussions)
 - **IRC:** [irc.libera.chat/#KittySploit](ircs://irc.libera.chat:6697/#KittySploit) - Join our IRC channel for real-time support
 
 ## ⚠️ Legal & Ethical Use

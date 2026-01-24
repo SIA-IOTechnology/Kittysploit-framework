@@ -16,6 +16,7 @@ from core.session import Session
 from core.output_handler import OutputHandler, print_info, print_error, print_status
 from interfaces.command_system.command_registry import CommandRegistry
 from interfaces.command_system.advanced_completer import AdvancedCompleter
+from core.config import Config
 
 
 class CommandAutoSuggest(AutoSuggest):
@@ -93,6 +94,14 @@ class CLI:
     
     def get_prompt(self):
         """Generate the prompt based on the current context"""
+        # Get prompt name from config.toml, default to "kittysploit" if not found
+        try:
+            config_instance = Config.get_instance()
+            framework_config = config_instance.get_config_value('FRAMEWORK') or config_instance.get_config_value('framework') or {}
+            prompt_name = framework_config.get('prompt', 'kittysploit')
+        except Exception:
+            prompt_name = 'kittysploit'
+        
         # Get the number of active sessions (standard + browser)
         if hasattr(self.framework, 'session_manager') and self.framework.session_manager:
             all_sessions = self.framework.session_manager.get_all_sessions()
@@ -125,9 +134,9 @@ class CLI:
         
         # Build the prompt with the workspace, number of sessions and the current module
         if module_name:
-            return HTML(f"{workspace_display} KittySploit <sessions>[{session_count}]</sessions> (<module>{module_name}</module>)> ")
+            return HTML(f"{workspace_display} {prompt_name} <sessions>[{session_count}]</sessions> (<module>{module_name}</module>)> ")
         else:
-            return HTML(f"{workspace_display} KittySploit <sessions>[{session_count}]</sessions>> ")
+            return HTML(f"{workspace_display} {prompt_name} <sessions>[{session_count}]</sessions>> ")
     
     def start(self):
         # Check charter acceptance before starting

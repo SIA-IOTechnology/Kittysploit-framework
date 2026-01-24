@@ -1464,12 +1464,55 @@ Examples:
                             logging.debug(f"Could not parse manifest for {module_id}: {e}")
                             continue
         
+        # Also check extensions/ directory manually (in case ExtensionClient failed)
+        extensions_dir = "extensions"
+        if os.path.exists(extensions_dir):
+            for item1 in os.listdir(extensions_dir):
+                path1 = os.path.join(extensions_dir, item1)
+                if not os.path.isdir(path1): continue
+                
+                # Check subdirectories (could be marketplace IDs or module directories)
+                for item2 in os.listdir(path1):
+                    path2 = os.path.join(path1, item2)
+                    if not os.path.isdir(path2): continue
+                    
+                    # Try to find manifest in likely locations
+                    manifest_paths = [
+                        os.path.join(path2, "latest", "extension.toml"), # extensions/16/mcp-server/latest/extension.toml
+                        os.path.join(path2, "extension.toml"),           # extensions/16/mcp-server/extension.toml
+                        os.path.join(path1, "extension.toml")            # extensions/mcp-server/extension.toml (old structure)
+                    ]
+                    
+                    for manifest_path in manifest_paths:
+                        if os.path.exists(manifest_path):
+                            try:
+                                from core.registry.manifest import ManifestParser
+                                manifest = ManifestParser.parse(manifest_path)
+                                if manifest:
+                                    # Avoid duplicates
+                                    if any(m['id'] == manifest.id for m in installed): continue
+                                    
+                                    extension_type = manifest.extension_type.value if hasattr(manifest.extension_type, 'value') else str(manifest.extension_type)
+                                    installed.append({
+                                        "id": manifest.id,
+                                        "name": manifest.name,
+                                        "version": manifest.version,
+                                        "type": extension_type,
+                                        "path": os.path.dirname(manifest_path),
+                                        "module_type": "extension",
+                                        "directory_id": item2,
+                                        "marketplace_id": item1
+                                    })
+                                    break # Found manifest for this item
+                            except Exception as e:
+                                pass
+        
         # Also check standard module directories (modules/auxiliary, modules/exploits, etc.)
         # for modules installed with custom install_path
         modules_dir = "modules"
         if os.path.exists(modules_dir):
             # Standard module type directories
-            module_type_dirs = ["auxiliary", "exploits", "payloads", "listeners", "post", "encoders", "workflow", "backdoors", "remotescan"]
+            module_type_dirs = ["auxiliary", "exploits", "payloads", "listeners", "post", "encoders", "workflow", "backdoors", "scanner"]
             
             for module_type in module_type_dirs:
                 type_path = os.path.join(modules_dir, module_type)

@@ -41,7 +41,16 @@ class Config:
         'no_proxy': ''
     }
     
+    DEFAULT_TOR_CONFIG = {
+        'enabled': False,
+        'socks_host': '127.0.0.1',
+        'socks_port': 9050,
+        'control_host': '127.0.0.1',
+        'control_port': 9051
+    }
+    
     PROXY_CONFIG = DEFAULT_PROXY_CONFIG.copy()
+    TOR_CONFIG = DEFAULT_TOR_CONFIG.copy()
     
     # Valid module types
     VALID_MODULE_TYPES = [
@@ -113,7 +122,8 @@ class Config:
                 'workspaces_dir': self.DEFAULT_WORKSPACES_DIR,
                 'default_workspace': self.DEFAULT_WORKSPACE,
             },
-            'proxy': self.DEFAULT_PROXY_CONFIG.copy()
+            'proxy': self.DEFAULT_PROXY_CONFIG.copy(),
+            'tor': self.DEFAULT_TOR_CONFIG.copy()
         }
     
     def _update_class_attributes(self):

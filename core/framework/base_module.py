@@ -19,14 +19,18 @@ class ModuleOptionsAggregator(type):
 
     def __new__(cls, name, bases, attrs):
         # Aggregate the exploit attributes of base classes
-        try:
-            base_exploit_attributes = chain([base.exploit_attributes for base in bases])
-        except AttributeError:
-            attrs["exploit_attributes"] = {}
-        else:
+        # Only collect from bases that have exploit_attributes (skip mixins that don't)
+        base_exploit_attributes = []
+        for base in bases:
+            if hasattr(base, 'exploit_attributes'):
+                base_exploit_attributes.append(base.exploit_attributes)
+        
+        if base_exploit_attributes:
             attrs["exploit_attributes"] = {
                 k: v for d in base_exploit_attributes for k, v in iteritems(d)
             }
+        else:
+            attrs["exploit_attributes"] = {}
         
         # Process the current attributes
         for key, value in list(iteritems(attrs)):

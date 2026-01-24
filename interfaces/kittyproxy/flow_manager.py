@@ -32,6 +32,13 @@ class FlowManager:
         self.fast_mode = fast_mode
         self.fast_mode_threshold_kb = fast_mode_threshold_kb  # Skip analysis if response > X KB
         
+        # Scope configuration
+        self.scope_config = {
+            'enabled': False,
+            'mode': 'include',  # 'include' or 'exclude'
+            'patterns': []
+        }
+        
         # Worker thread for heavy analysis
         self.analysis_queue = queue.Queue()
         self.analysis_worker_running = True
@@ -43,8 +50,130 @@ class FlowManager:
         """Register a callback to be called when a new flow is added."""
         self.callbacks.append(callback)
 
+    def set_scope(self, scope_config: Dict):
+        """Set the scope configuration for filtering flows."""
+        with self._lock:
+            self.scope_config = scope_config.copy()
+            print(f"[FLOW MANAGER] Scope updated: enabled={scope_config.get('enabled', False)}, mode={scope_config.get('mode', 'include')}, patterns={len(scope_config.get('patterns', []))}")
+    
+    def _is_in_scope(self, flow) -> bool:
+        """Check if a flow matches the scope configuration."""
+        if not self.scope_config.get('enabled', False) or not self.scope_config.get('patterns'):
+            return True  # If scope is disabled, accept all flows
+        
+        try:
+            url = flow.request.url if hasattr(flow.request, 'url') else None
+            if not url:
+                return True  # If URL is not available, accept by default
+            
+            hostname = flow.request.host if hasattr(flow.request, 'host') else None
+            path = flow.request.path if hasattr(flow.request, 'path') else None
+            
+            import re
+            mode = self.scope_config.get('mode', 'include')
+            patterns = self.scope_config.get('patterns', [])
+            
+            # Check if any pattern matches
+            pattern_matched = False
+            for pattern in patterns:
+                if self._matches_pattern(pattern, url, hostname, path):
+                    pattern_matched = True
+                    break
+            
+            # In include mode: return True if pattern matched, False otherwise
+            # In exclude mode: return False if pattern matched, True otherwise
+            if mode == 'include':
+                return pattern_matched
+            else:  # exclude mode
+                return not pattern_matched
+        except Exception as e:
+            print(f"[FLOW MANAGER] Error checking scope: {e}")
+            import traceback
+            traceback.print_exc()
+            return True  # On error, accept the flow
+    
+    def _matches_pattern(self, pattern: str, url: str, hostname: Optional[str], path: Optional[str]) -> bool:
+        """Check if a pattern matches a URL."""
+        try:
+            import re
+            from urllib.parse import urlparse
+            
+            # Normalize pattern and URL for comparison
+            pattern_lower = pattern.lower()
+            url_lower = url.lower() if url else ''
+            hostname_lower = hostname.lower() if hostname else ''
+            path_lower = path.lower() if path else ''
+            
+            # Convert wildcard pattern to regex (escape dots, convert * to .*, ? to .)
+            regex_pattern = pattern.replace('.', r'\.').replace('*', '.*').replace('?', '.')
+            
+            # Test 1: Exact match on hostname (most common case for domain patterns)
+            if hostname:
+                if re.match(f'^{regex_pattern}$', hostname, re.IGNORECASE):
+                    return True
+                # For patterns like "example.com", also check if hostname ends with it
+                if '/' not in pattern and not pattern.startswith('*'):
+                    if hostname_lower == pattern_lower or hostname_lower.endswith('.' + pattern_lower):
+                        return True
+            
+            # Test 2: Wildcard subdomain pattern (e.g., *.example.com)
+            # This pattern should match:
+            # - example.com (exact domain)
+            # - www.example.com (any subdomain)
+            # - api.example.com (any subdomain)
+            if hostname and pattern.startswith('*.'):
+                domain = pattern[2:].lower()  # Remove "*." to get "kittysploit.com"
+                
+                # Match exact domain (kittysploit.com)
+                if hostname_lower == domain:
+                    return True
+                
+                # Match subdomains (www.kittysploit.com, api.kittysploit.com, etc.)
+                # The hostname must end with ".kittysploit.com"
+                if hostname_lower.endswith('.' + domain):
+                    return True
+                
+                # Also try regex matching: any subdomain + domain
+                # This matches: *.kittysploit.com -> ^.+\\.kittysploit\\.com$
+                regex_wildcard = r'^.+\.' + re.escape(domain) + r'$'
+                if re.match(regex_wildcard, hostname_lower):
+                    return True
+                
+                # Debug: log when pattern doesn't match
+                # print(f"[DEBUG] Pattern '{pattern}' (domain: '{domain}') did not match hostname '{hostname_lower}'")
+            
+            # Test 3: Match on path
+            if path:
+                if re.match(f'^{regex_pattern}$', path, re.IGNORECASE):
+                    return True
+                # Test if pattern matches path prefix
+                pattern_clean = pattern.replace('*', '').replace('?', '')
+                if pattern_clean and path_lower.startswith(pattern_clean.lower()):
+                    return True
+            
+            # Test 4: Match on full URL
+            if re.match(f'^{regex_pattern}$', url, re.IGNORECASE):
+                return True
+            
+            # Test 5: Pattern contained in URL (for partial matches like "api" matching "/api/v1/...")
+            pattern_clean = pattern.replace('*', '').replace('?', '')
+            if pattern_clean and pattern_clean.lower() in url_lower:
+                return True
+            
+            return False
+        except Exception as e:
+            print(f"[FLOW MANAGER] Error matching pattern '{pattern}' against URL '{url}': {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def add_flow(self, flow):
         """Adds a flow to the list with memory limit and pre-caching."""
+        # Check scope before adding
+        if not self._is_in_scope(flow):
+            print(f"[FLOW MANAGER] Flow {flow.id} excluded by scope: {flow.request.url}")
+            return
+        
         serialized_flow = None
         with self._lock:
             # Add or update flow
@@ -118,6 +247,41 @@ class FlowManager:
         """Returns a paginated slice of flows."""
         with self._lock:
             all_flows = list(reversed(list(self.flow_cache.values())))
+            
+            # Filter by scope if enabled
+            if self.scope_config.get('enabled', False) and self.scope_config.get('patterns'):
+                scope_filtered_flows = []
+                for flow_data in all_flows:
+                    try:
+                        url = flow_data.get('url', '')
+                        if not url:
+                            continue
+                        
+                        # Parse URL to get hostname
+                        from urllib.parse import urlparse
+                        parsed = urlparse(url)
+                        hostname = parsed.hostname
+                        path = parsed.path
+                        
+                        # Check if flow matches scope
+                        matches = False
+                        mode = self.scope_config.get('mode', 'include')
+                        patterns = self.scope_config.get('patterns', [])
+                        
+                        for pattern in patterns:
+                            if self._matches_pattern(pattern, url, hostname, path):
+                                matches = True
+                                break
+                        
+                        # In include mode: keep if matches, in exclude mode: keep if doesn't match
+                        if (mode == 'include' and matches) or (mode == 'exclude' and not matches):
+                            scope_filtered_flows.append(flow_data)
+                    except Exception as e:
+                        # On error, exclude the flow to be safe
+                        print(f"[FLOW MANAGER] Error filtering flow by scope: {e}")
+                        continue
+                
+                all_flows = scope_filtered_flows
             
             # Filter if search term provided
             if search:
@@ -595,6 +759,61 @@ class FlowManager:
             self.flow_analysis_cache.clear()
             self.pending_intercepts.clear()
             self.intercept_queue.clear()
+    
+    def remove_flows_out_of_scope(self) -> int:
+        """Remove all flows that don't match the current scope configuration."""
+        if not self.scope_config.get('enabled', False) or not self.scope_config.get('patterns'):
+            return 0  # Scope is disabled, nothing to remove
+        
+        removed_count = 0
+        flows_to_remove = []
+        mode = self.scope_config.get('mode', 'include')
+        patterns = self.scope_config.get('patterns', [])
+        
+        print(f"[FLOW MANAGER] Checking scope: mode={mode}, patterns={patterns}, total_flows={len(self.flows)}")
+        
+        with self._lock:
+            # Collect flows that are out of scope
+            matched_count = 0
+            for flow_id, flow in self.flows.items():
+                try:
+                    url = flow.request.url if hasattr(flow.request, 'url') else None
+                    hostname = flow.request.host if hasattr(flow.request, 'host') else None
+                    is_in_scope = self._is_in_scope(flow)
+                    
+                    if is_in_scope:
+                        matched_count += 1
+                    else:
+                        flows_to_remove.append(flow_id)
+                        if url and hostname:
+                            print(f"[FLOW MANAGER] Flow {flow_id[:8]}... OUT OF SCOPE: {hostname} - {url}")
+                except Exception as e:
+                    print(f"[FLOW MANAGER] Error checking flow {flow_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # On error, keep the flow (safer to keep than remove on error)
+            
+            print(f"[FLOW MANAGER] Scope check: {matched_count} flows IN scope, {len(flows_to_remove)} flows OUT of scope")
+            
+            # Remove flows
+            for flow_id in flows_to_remove:
+                if flow_id in self.flows:
+                    del self.flows[flow_id]
+                if flow_id in self.flow_cache:
+                    del self.flow_cache[flow_id]
+                if flow_id in self.flow_analysis_cache:
+                    del self.flow_analysis_cache[flow_id]
+                if flow_id in self.pending_intercepts:
+                    del self.pending_intercepts[flow_id]
+                removed_count += 1
+        
+        remaining = len(self.flows) if hasattr(self, 'flows') else 0
+        if removed_count > 0:
+            print(f"[FLOW MANAGER] Removed {removed_count} flow(s) that don't match the scope. Remaining: {remaining}")
+        else:
+            print(f"[FLOW MANAGER] No flows removed. All {remaining} flows match the scope.")
+        
+        return removed_count
     
     def shutdown(self):
         """Shutdown the analysis worker thread."""

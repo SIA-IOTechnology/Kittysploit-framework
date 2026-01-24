@@ -74,14 +74,22 @@ class Http_client(BaseModule):
         })
         
         # Set proxy if provided, otherwise check framework proxy config
+        # Priority: explicit proxy > Tor > regular proxy
         if proxy:
             self.session.proxies = {
                 'http': proxy,
                 'https': proxy
             }
         else:
-            # Check if framework has proxy configured
-            if self.framework and hasattr(self.framework, 'is_proxy_enabled'):
+            # Check if Tor is enabled first
+            if self.framework and hasattr(self.framework, 'is_tor_enabled') and self.framework.is_tor_enabled():
+                tor_proxies = self.framework.tor_manager.get_tor_proxy_dict()
+                if tor_proxies:
+                    self.session.proxies = tor_proxies
+                else:
+                    self.session.proxies = {}
+            # Fallback to regular proxy
+            elif self.framework and hasattr(self.framework, 'is_proxy_enabled'):
                 if self.framework.is_proxy_enabled():
                     proxy_url = self.framework.get_proxy_url()
                     if proxy_url:
@@ -221,8 +229,46 @@ class Http_client(BaseModule):
         if data:
             request_kwargs['data'] = data
         
+        # Check if this is a Scanner module and use cache if available
+        use_cache = False
+        cache = None
+        
+        # Vérifier si le module est un Scanner et si le cache est activé
+        try:
+            from core.framework.scanner import Scanner
+            from lib.scanner.cache import get_cache, is_cache_enabled
+            
+            if isinstance(self, Scanner) and is_cache_enabled():
+                use_cache = True
+                cache = get_cache()
+        except (ImportError, AttributeError):
+            pass
+        
+        # Essayer de récupérer depuis le cache si activé
+        if use_cache and cache:
+            cached_response = cache.get(method, url, headers, data)
+            if cached_response is not None:
+                # Retourner la réponse en cache
+                if session:
+                    # Créer un wrapper avec session si nécessaire
+                    class ResponseWithSession:
+                        def __init__(self, response_obj, session_obj):
+                            for attr in dir(response_obj):
+                                if not attr.startswith('_'):
+                                    try:
+                                        setattr(self, attr, getattr(response_obj, attr))
+                                    except:
+                                        pass
+                            self.session = session_obj
+                    return ResponseWithSession(cached_response, self.session)
+                return cached_response
+        
         # Make the request
         response = self._request(method, url, **request_kwargs)
+        
+        # Mettre en cache si c'est un Scanner
+        if use_cache and cache:
+            cache.set(method, url, response, headers, data)
         
         # If session=True, wrap the response to include the session
         if session:
@@ -288,9 +334,16 @@ class Http_client(BaseModule):
                         
             response = self.session.request(method, url, **kwargs)
             
-            # Log response status if not 200
+            # Log response status if not 200 (but not for Scanner modules to avoid spam)
+            # Scanner modules expect 404/301/etc. as normal responses during scanning
             if response.status_code != 200:
-                self.logger.warning(f"HTTP {method} {url} returned status {response.status_code}")
+                # Only log if not a Scanner module
+                from core.framework.scanner import Scanner
+                if not isinstance(self, Scanner):
+                    self.logger.warning(f"HTTP {method} {url} returned status {response.status_code}")
+                else:
+                    # For Scanner modules, only log at DEBUG level
+                    self.logger.debug(f"HTTP {method} {url} returned status {response.status_code}")
                         
             return response
             

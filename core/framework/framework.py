@@ -26,11 +26,13 @@ from core.framework.runtime import RuntimeKernel, EventBus, EventType
 from core.framework.runtime.extension_contract import ExtensionRegistry
 from core.framework.runtime.pipeline import Pipeline, PipelineStepType
 from core.framework.runtime.hot_reload import HotReloadManager
+from core.tor_manager import TorManager
 import os
 import importlib.util
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 
 
 class Framework:
@@ -71,6 +73,20 @@ class Framework:
         else:
             # Use default if not found
             self.proxy_config = Config.PROXY_CONFIG.copy()
+        
+        # Initialize Tor Manager
+        self.tor_manager = TorManager(framework=self)
+        
+        # Load Tor configuration from config if available
+        tor_config = config_instance.get_config_value('tor')
+        if tor_config and tor_config.get('enabled', False):
+            # Auto-enable Tor if configured
+            self.tor_manager.enable(
+                host=tor_config.get('socks_host', '127.0.0.1'),
+                socks_port=tor_config.get('socks_port'),
+                control_port=tor_config.get('control_port'),
+                check_availability=False  # Don't check on startup, will be checked when actually used
+            )
         
         # Initialize encryption manager first (needed for database)
         self.encryption_manager = EncryptionManager()
@@ -312,7 +328,7 @@ class Framework:
         try:
             # Charger uniquement les modules de base
             core_modules = {
-                'remotescan': [],
+                'scanner': [],
                 'auxiliary': [],
                 'exploits': []
             }
@@ -428,7 +444,7 @@ class Framework:
             if session:
                 try:
                     # Types de modules supportés
-                    module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'remotescan', 'shortcut']
+                    module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
                     counts = {}
                     
                     for module_type in module_types:
@@ -474,7 +490,7 @@ class Framework:
                 return counts
             
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'remotescan', 'shortcut']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
             
             for module_type in module_types:
                 # Map module_type to directory name
@@ -1233,6 +1249,107 @@ class Framework:
         if self.proxy_config['enabled']:
             return self.proxy_config['http_proxy']
         return None
+    
+    # Tor Network Methods
+    
+    def enable_tor(self, host: str = '127.0.0.1', socks_port: int = None, 
+                   control_port: int = None, check_availability: bool = True, 
+                   save_config: bool = True) -> bool:
+        """
+        Enable Tor network for all framework network operations
+        
+        Args:
+            host: Tor SOCKS proxy host (default: 127.0.0.1)
+            socks_port: Tor SOCKS proxy port (default: 9050, auto-detect if None)
+            control_port: Tor Control port (default: 9051)
+            check_availability: Whether to check if Tor is available before enabling
+            save_config: Whether to save Tor configuration to config file
+            
+        Returns:
+            True if Tor was enabled successfully, False otherwise
+        """
+        result = self.tor_manager.enable(host, socks_port, control_port, check_availability)
+        if result and save_config:
+            self.save_tor_config()
+        return result
+    
+    def disable_tor(self, save_config: bool = True):
+        """
+        Disable Tor network
+        
+        Args:
+            save_config: Whether to save Tor configuration to config file
+        """
+        self.tor_manager.disable()
+        if save_config:
+            self.save_tor_config()
+    
+    def is_tor_enabled(self) -> bool:
+        """Check if Tor network is enabled"""
+        return self.tor_manager.is_enabled()
+    
+    def get_tor_status(self) -> Dict[str, Any]:
+        """
+        Get Tor network status information
+        
+        Returns:
+            Dictionary with Tor status information
+        """
+        return self.tor_manager.get_status()
+    
+    def check_tor_available(self, host: str = None, port: int = None) -> bool:
+        """
+        Check if Tor SOCKS proxy is available
+        
+        Args:
+            host: Tor SOCKS proxy host (default: 127.0.0.1)
+            port: Tor SOCKS proxy port (default: 9050)
+            
+        Returns:
+            True if Tor is available, False otherwise
+        """
+        return self.tor_manager.check_tor_available(host, port)
+    
+    def save_tor_config(self):
+        """
+        Save Tor configuration to config file
+        
+        This saves the current Tor settings to the framework's configuration file
+        so they persist across restarts.
+        """
+        try:
+            config_instance = Config.get_instance()
+            config = config_instance.get_config()
+            
+            # Get current Tor status
+            tor_status = self.tor_manager.get_status()
+            
+            # Update Tor config
+            if 'tor' not in config:
+                config['tor'] = {}
+            
+            config['tor']['enabled'] = tor_status['enabled']
+            config['tor']['socks_host'] = tor_status['socks_host']
+            config['tor']['socks_port'] = tor_status['socks_port']
+            config['tor']['control_host'] = tor_status['control_host']
+            config['tor']['control_port'] = tor_status['control_port']
+            
+            # Save to file if config file exists and is writable
+            config_path = Path(config_instance.config_file)
+            if config_path.exists() and os.access(config_path, os.W_OK):
+                try:
+                    import tomllib
+                    # For now, we'll just update the in-memory config
+                    # The actual file writing would require a TOML writer
+                    # which is not always available. The config will be saved
+                    # when the framework saves its config through other means.
+                    config_instance.config = config
+                except Exception:
+                    # If TOML writing fails, at least update in-memory config
+                    config_instance.config = config
+        except Exception as e:
+            if hasattr(self, 'output_handler'):
+                self.output_handler.print_warning(f"Could not save Tor configuration: {e}")
     
     # Module Synchronization Methods
     

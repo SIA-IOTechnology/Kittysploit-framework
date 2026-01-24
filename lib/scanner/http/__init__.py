@@ -1,0 +1,1 @@
+# HTTP detectors for scanner

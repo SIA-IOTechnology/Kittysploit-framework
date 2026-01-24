@@ -47,3 +47,4 @@ uvicorn
 mitmproxy
 boto3
 pure-python-adb
+pyjwt

@@ -6,15 +6,10 @@ class Module(Post, Bind):
 	__info__ = {
 		"name": "Bind TCP shell",
 		"description": "Bind TCP shell in PHP using a bind handler",
+		"author": "KittySploit Team",
 		"arch": Arch.PHP,
 	}
-	
-	rhost = OptString("", "Remote host where PHP bind shell is running", required=True)
-	rport = OptPort(6666, "Remote port where PHP bind shell is listening", required=True)
-	
-	def check(self):
-		"""Check if target is vulnerable"""
-		return True
+
 		
 	def run(self):
 		# Use raw f-string to preserve PHP braces

@@ -148,12 +148,14 @@ class AdvancedCompleter(Completer):
             suggestions = self._collect_session_identifiers()
         elif option_lower in ("lhost", "rhost"):
             suggestions = self._local_ip_candidates()
+        elif option_lower == "payload":
+            suggestions = self._collect_payload_paths()
 
         if not suggestions:
             return
 
         for value in self._filter_items(suggestions, partial):
-            yield Completion(value, start_position=-len(partial), display_meta="Value")
+            yield Completion(value, start_position=-len(partial), display_meta="Payload")
 
     def _iter_proxy_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
         subcommands = ['start', 'stop', 'status', 'list', 'show', 'replay', 'export', 'clear', 'hexdump']
@@ -326,6 +328,26 @@ class AdvancedCompleter(Completer):
         except OSError:
             pass
         return sorted(set(filter(None, candidates)))
+
+    def _collect_payload_paths(self) -> List[str]:
+        """Collect all available payload module paths"""
+        payload_paths: List[str] = []
+        
+        try:
+            if not hasattr(self.framework, 'module_loader'):
+                return payload_paths
+            
+            # Discover all modules
+            discovered_modules = self.framework.module_loader.discover_modules()
+            
+            # Filter payload modules (they start with "payloads/")
+            for module_path in discovered_modules.keys():
+                if module_path.startswith("payloads/"):
+                    payload_paths.append(module_path)
+        except Exception:
+            pass
+        
+        return sorted(set(filter(None, payload_paths)))
 
 
 class ContextFilter(Filter):

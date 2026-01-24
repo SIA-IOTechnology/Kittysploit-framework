@@ -136,6 +136,56 @@ class FTPShell(BaseShell):
         """Get the current shell prompt"""
         return self.prompt_template
     
+    def _check_and_reconnect(self):
+        """Check if FTP connection is alive and reconnect if needed"""
+        if not self.ftp_client:
+            self._initialize_ftp_connection()
+            return self.ftp_client is not None
+        
+        try:
+            from ftplib import FTP
+            if isinstance(self.ftp_client, FTP):
+                # Try a simple command to check if connection is alive
+                try:
+                    self.ftp_client.voidcmd('NOOP')
+                    return True
+                except (OSError, ConnectionError, Exception):
+                    # Connection is dead, try to reconnect
+                    self.ftp_client = None
+                    self._initialize_ftp_connection()
+                    return self.ftp_client is not None
+        except:
+            self.ftp_client = None
+            self._initialize_ftp_connection()
+            return self.ftp_client is not None
+        
+        return True
+    
+    def _translate_error(self, error: Exception) -> str:
+        """Translate error messages to English"""
+        error_str = str(error)
+        
+        # Common Windows error translations
+        translations = {
+            'Une connexion établie a été abandonnée': 'An established connection was aborted',
+            'connexion établie': 'established connection',
+            'abandonnée': 'aborted',
+            'par un logiciel de votre ordinateur hôte': 'by software on your host computer',
+            'WinError 10053': 'Connection aborted (WinError 10053)',
+            '10053': 'Connection aborted',
+        }
+        
+        # Try to translate common French error messages
+        for french, english in translations.items():
+            if french.lower() in error_str.lower():
+                error_str = error_str.replace(french, english)
+        
+        # If it's a connection error, provide a clearer message
+        if '10053' in error_str or 'aborted' in error_str.lower() or 'abandonnée' in error_str.lower():
+            return f'FTP connection was closed. Please try again or reconnect.'
+        
+        return error_str
+    
     def execute_command(self, command: str) -> Dict[str, Any]:
         """Execute a command in the FTP shell"""
         if not command.strip():
@@ -151,10 +201,16 @@ class FTPShell(BaseShell):
         
         # Check for built-in commands
         if cmd in self.builtin_commands:
+            # Check and reconnect if needed (except for exit/quit commands)
+            if cmd not in ['exit', 'quit', 'disconnect']:
+                if not self._check_and_reconnect():
+                    return {'output': '', 'status': 1, 'error': 'FTP connection not available. Please reconnect.'}
+            
             try:
                 return self.builtin_commands[cmd](args)
             except Exception as e:
-                return {'output': '', 'status': 1, 'error': f'Built-in command error: {str(e)}'}
+                error_msg = self._translate_error(e)
+                return {'output': '', 'status': 1, 'error': f'Command error: {error_msg}'}
         
         # Unknown command
         return {'output': '', 'status': 1, 'error': f'Unknown command: {cmd}. Type "help" for available commands.'}
@@ -221,7 +277,8 @@ Examples:
                 # FTP handler from server
                 return {'output': self.current_directory, 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_cd(self, args: str) -> Dict[str, Any]:
         """Change directory"""
@@ -242,7 +299,8 @@ Examples:
                 self.current_directory = args
                 return {'output': f'Changed directory to {args}', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_ls(self, args: str) -> Dict[str, Any]:
         """List files"""
@@ -260,7 +318,8 @@ Examples:
                 # FTP handler from server
                 return {'output': 'Directory listing not available from server handler', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_get(self, args: str) -> Dict[str, Any]:
         """Download file"""
@@ -283,7 +342,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'File download not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_put(self, args: str) -> Dict[str, Any]:
         """Upload file"""
@@ -309,7 +369,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'File upload not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_mkdir(self, args: str) -> Dict[str, Any]:
         """Create directory"""
@@ -327,7 +388,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'Directory creation not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_rmdir(self, args: str) -> Dict[str, Any]:
         """Remove directory"""
@@ -345,7 +407,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'Directory removal not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_delete(self, args: str) -> Dict[str, Any]:
         """Delete file"""
@@ -363,7 +426,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'File deletion not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_rename(self, args: str) -> Dict[str, Any]:
         """Rename file"""
@@ -387,7 +451,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'File rename not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_size(self, args: str) -> Dict[str, Any]:
         """Get file size"""
@@ -405,7 +470,8 @@ Examples:
             else:
                 return {'output': '', 'status': 1, 'error': 'File size not available from server handler'}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_binary(self, args: str) -> Dict[str, Any]:
         """Set binary mode"""
@@ -420,7 +486,8 @@ Examples:
             else:
                 return {'output': 'Binary mode set', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_ascii(self, args: str) -> Dict[str, Any]:
         """Set ASCII mode"""
@@ -435,7 +502,8 @@ Examples:
             else:
                 return {'output': 'ASCII mode set', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_passive(self, args: str) -> Dict[str, Any]:
         """Set passive mode"""
@@ -450,7 +518,8 @@ Examples:
             else:
                 return {'output': 'Passive mode set', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_active(self, args: str) -> Dict[str, Any]:
         """Set active mode"""
@@ -465,7 +534,8 @@ Examples:
             else:
                 return {'output': 'Active mode set', 'status': 0, 'error': ''}
         except Exception as e:
-            return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
+            error_msg = self._translate_error(e)
+            return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
         """Clear screen"""

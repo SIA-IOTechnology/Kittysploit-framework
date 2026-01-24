@@ -52,7 +52,21 @@ Note: This command only works when an exploit module is selected.
                 return False
             
             # Check if current module is an exploit
-            if not hasattr(self.framework.current_module, 'type') or self.framework.current_module.type != 'exploit':
+            # Check type attribute first, then check if it's an instance of ExploitBase or BrowserExploit
+            is_exploit = False
+            if hasattr(self.framework.current_module, 'type'):
+                is_exploit = self.framework.current_module.type == 'exploit'
+            
+            # Also check if it's an instance of ExploitBase or BrowserExploit (for backward compatibility)
+            if not is_exploit:
+                from core.framework.exploit_base import ExploitBase
+                from core.framework.browser_exploit import BrowserExploit
+                if isinstance(self.framework.current_module, (ExploitBase, BrowserExploit)):
+                    is_exploit = True
+                    # Set type for future checks
+                    self.framework.current_module.type = 'exploit'
+            
+            if not is_exploit:
                 print_error("Current module is not an exploit. Please select an exploit module first.")
                 return False
             

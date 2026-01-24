@@ -304,9 +304,11 @@ def print_table(headers, rows, max_width=80, **kwargs):
         header_parts.append(str(header).ljust(col_widths[i]))
     header_line = " | ".join(header_parts)
     
-    # Print header
+    # Print header with compact separator
     print_info(header_line)
-    print_info("-" * len(header_line))
+    # Use a more subtle separator (single line, no extra spacing)
+    separator_char = "─" if _stream_isatty(sys.stdout) else "-"
+    print_info(separator_char * len(header_line))
     
     # Print rows with word wrapping for long descriptions
     # Find Description column index for special handling

@@ -1,0 +1,1 @@
+# FTP detectors for scanner

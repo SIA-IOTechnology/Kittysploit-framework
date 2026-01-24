@@ -1,6 +1,7 @@
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
 import argparse
+import threading
 
 class SyncCommand(BaseCommand):
     """Command to synchronize modules between filesystem and database"""
@@ -38,6 +39,8 @@ class SyncCommand(BaseCommand):
         now_parser = subparsers.add_parser('now', help='Perform immediate synchronization')
         now_parser.add_argument('--force', action='store_true', 
                               help='Force synchronization even if already running')
+        now_parser.add_argument('--background', '-b', action='store_true',
+                              help='Run synchronization in background (returns control immediately)')
         
         # Status subcommand
         status_parser = subparsers.add_parser('status', help='Show synchronization status')
@@ -96,13 +99,41 @@ class SyncCommand(BaseCommand):
     def _handle_now(self, args):
         """Handle now subcommand"""
         try:
-            print_info("Starting immediate module synchronization...")
-            stats = self.framework.sync_modules_now()
-            
-            print_success("Module synchronization completed")
-            print_info(f"Added: {stats.get('added', 0)}")
-            print_info(f"Updated: {stats.get('updated', 0)}")
-            print_info(f"Removed: {stats.get('removed', 0)}")
+            if args.background:
+                # Run in background thread
+                def sync_background():
+                    try:
+                        # Use module_sync_manager directly to pass force parameter
+                        if hasattr(self.framework, 'module_sync_manager') and self.framework.module_sync_manager:
+                            stats = self.framework.module_sync_manager.sync_modules(force=args.force)
+                            print_success("Module synchronization completed")
+                            print_info(f"Added: {stats.get('added', 0)}")
+                            print_info(f"Updated: {stats.get('updated', 0)}")
+                            print_info(f"Removed: {stats.get('removed', 0)}")
+                        else:
+                            print_error("Module sync manager not available")
+                    except Exception as e:
+                        print_error(f"Failed to synchronize modules: {e}")
+                
+                # Check if already syncing
+                if hasattr(self.framework, 'module_sync_manager') and self.framework.module_sync_manager:
+                    if self.framework.module_sync_manager.is_syncing and not args.force:
+                        print_warning("Synchronization already in progress. Use --force to override.")
+                        return
+                
+                thread = threading.Thread(target=sync_background, daemon=True)
+                thread.start()
+                print_info("Module synchronization started in background...")
+                print_info("Use 'sync status' to check progress")
+            else:
+                # Run synchronously (original behavior)
+                print_info("Starting immediate module synchronization...")
+                stats = self.framework.sync_modules_now()
+                
+                print_success("Module synchronization completed")
+                print_info(f"Added: {stats.get('added', 0)}")
+                print_info(f"Updated: {stats.get('updated', 0)}")
+                print_info(f"Removed: {stats.get('removed', 0)}")
             
         except Exception as e:
             print_error(f"Failed to synchronize modules: {e}")
@@ -119,9 +150,34 @@ class SyncCommand(BaseCommand):
             
             last_sync = status.get('last_sync')
             if last_sync:
-                print_info(f"  Last Sync: {last_sync}")
+                from datetime import datetime
+                try:
+                    # Try to parse and format the datetime nicely
+                    if isinstance(last_sync, str):
+                        dt = datetime.fromisoformat(last_sync.replace('Z', '+00:00'))
+                    else:
+                        dt = last_sync
+                    # Format as relative time if recent, otherwise absolute
+                    now = datetime.utcnow()
+                    if isinstance(dt, datetime):
+                        diff = (now - dt.replace(tzinfo=None)).total_seconds()
+                        if diff < 60:
+                            print_info(f"  Last Sync: {int(diff)} seconds ago")
+                        elif diff < 3600:
+                            print_info(f"  Last Sync: {int(diff/60)} minutes ago")
+                        else:
+                            print_info(f"  Last Sync: {dt.strftime('%Y-%m-%d %H:%M:%S')} UTC")
+                    else:
+                        print_info(f"  Last Sync: {last_sync}")
+                except Exception:
+                    print_info(f"  Last Sync: {last_sync}")
             else:
                 print_info("  Last Sync: Never")
+            
+            # Show helpful message if currently syncing
+            if status.get('is_syncing', False):
+                print_info("")
+                print_warning("Synchronization is currently in progress. Please wait...")
                 
         except Exception as e:
             print_error(f"Failed to get sync status: {e}")

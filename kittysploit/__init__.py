@@ -28,7 +28,9 @@ from core.framework import (
     Plugin,
     ModuleArgumentParser,
     BrowserExploit,
-    Workflow, 
+    Workflow,
+    Scanner,
+    Shortcut,
     fail)
 
 from core.framework.encoder import Encoder
@@ -54,6 +56,7 @@ from core.framework.framework import Framework
 # Import utility classes
 from core.output_handler import (
     print_info,
+    print_empty,
     print_success,
     print_error,
     print_warning,
@@ -75,7 +78,8 @@ from core.framework.enums import (
     Platform,
     ServiceType,
     PayloadCategory,
-    Browser
+    Browser,
+    Type
 )
 
 # Import remote connection function
@@ -101,6 +105,8 @@ __all__ = [
     'ModuleArgumentParser',
     'BrowserExploit',
     'Workflow',
+    'Scanner',
+    'Shortcut',
     'fail',
     'Fail',
     'ProcedureError',
@@ -116,6 +122,7 @@ __all__ = [
     'OptFloat',
     # Output functions
     'print_info',
+    'print_empty',
     'print_success',
     'print_error',
     'print_warning',
@@ -135,6 +142,7 @@ __all__ = [
     'ServiceType',
     'PayloadCategory',
     'Browser',
+    'Type',
     
     # Connection functions
     'remote'

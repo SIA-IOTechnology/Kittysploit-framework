@@ -101,9 +101,17 @@ class HistoryManager:
                 args_list = []
                 if entry.args:
                     try:
-                        args_list = json.loads(entry.args)
-                    except (json.JSONDecodeError, ValueError):
-                        # If JSON is invalid, use empty list
+                        # Check if args is already a list or dict (already deserialized)
+                        if isinstance(entry.args, (list, dict)):
+                            args_list = entry.args
+                        elif isinstance(entry.args, str):
+                            # Try to parse as JSON string
+                            args_list = json.loads(entry.args)
+                        else:
+                            # If it's another type, convert to list
+                            args_list = [entry.args] if entry.args else []
+                    except (json.JSONDecodeError, ValueError, TypeError):
+                        # If JSON is invalid or type error, use empty list
                         args_list = []
                 
                 history.append({

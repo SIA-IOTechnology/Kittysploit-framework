@@ -19,7 +19,7 @@ def validate_module_type(module_type: str) -> bool:
                                 'browser_exploits', 
                                 'browser_auxiliary', 
                                 'environments', 
-                                'remotescan', 
+                                'scanner', 
                                 'shortcut']
     if module_type and module_type.lower() not in SUPPORTED_MODULE_TYPES:
         return False

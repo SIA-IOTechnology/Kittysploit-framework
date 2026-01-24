@@ -449,6 +449,39 @@ def set_fast_mode(data: Dict):
         "threshold_kb": flow_manager.fast_mode_threshold_kb
     }
 
+@app.post("/api/scope")
+def set_scope(data: Dict):
+    """Set scope configuration for filtering flows."""
+    try:
+        scope_config = {
+            "enabled": data.get("enabled", False),
+            "mode": data.get("mode", "include"),
+            "patterns": data.get("patterns", [])
+        }
+        flow_manager.set_scope(scope_config)
+        
+        # Remove flows that don't match the new scope
+        removed_count = flow_manager.remove_flows_out_of_scope()
+        
+        return {
+            "status": "ok",
+            "scope": scope_config,
+            "removed_flows": removed_count
+        }
+    except Exception as e:
+        print(f"[API] Error setting scope: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error setting scope: {str(e)}")
+
+@app.get("/api/scope")
+def get_scope():
+    """Get current scope configuration."""
+    return {
+        "status": "ok",
+        "scope": flow_manager.scope_config
+    }
+
 @app.get("/api/intercept/pending")
 def get_pending_intercepts():
     pending = []

@@ -97,7 +97,9 @@ class CommandRegistry:
             'environments',
             'irc',
             'reload',
-            'portal'
+            'portal',
+            'scanner',
+            'tor'
         ]
         
         for command_name in builtin_commands:

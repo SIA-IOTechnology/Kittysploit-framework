@@ -59,7 +59,7 @@ class BannerCommand(BaseCommand):
                     module_order = [
                         'exploits', 'auxiliary', 'browser_exploits', 'browser_auxiliary', 
                         'payloads', 'encoders', 'listeners', 'workflow', 'backdoors', 'docker_environment', 'post', 
-                        'remotescan', 'shortcut', 'plugins'
+                        'scanner', 'shortcut', 'plugins'
                     ]
                     
                     # Mapping for display names

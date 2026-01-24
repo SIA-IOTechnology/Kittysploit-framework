@@ -121,7 +121,7 @@
             <div class="nav-item" data-view="encoder" data-label="Encoder" title="Encoder / Decoder">
                 <span class="material-symbols-outlined">code</span>
             </div>
-            <div class="nav-item" data-view="collaborate" data-label="Collaboration" title="Collaboration">
+            <div class="nav-item" data-view="collaborate" data-label="Collaboration & IA" title="Collaboration & IA">
                 <span class="material-symbols-outlined">group</span>
                 <span id="collab-live-indicator" class="nav-live-indicator material-symbols-outlined" title="Live Mirror actif" aria-hidden="true" style="display: none;">play_arrow</span>
             </div>
@@ -290,8 +290,12 @@
 
             <div class="split-pane">
                 <div class="flow-list-panel" id="flow-list-panel">
-                    <div class="flow-search-container">
-                        <input type="text" id="flow-search" placeholder="Filter flows..." class="flow-search-input">
+                    <div class="flow-search-container" style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="flow-search" placeholder="Filter flows..." class="flow-search-input" style="flex: 1;">
+                        <button id="scope-btn" class="btn btn-secondary" onclick="openModal('modal-scope')" title="Manage scope" style="padding: 8px 12px; white-space: nowrap;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">filter_list</span>
+                            Scope
+                        </button>
                     </div>
                     <div class="flow-table-header">
                         <div class="sortable-header" data-sort="method">
@@ -311,7 +315,7 @@
                             Time
                             <span class="sort-indicator"></span>
                         </div>
-                        <div class="flow-share-header">
+                        <div class="flow-share-header" title="Add request to collaboration & IA">
                             <span class="material-symbols-outlined" style="font-size: 18px;">group</span>
                         </div>
                     </div>
@@ -1033,7 +1037,7 @@
         <!-- Collaboration View -->
         <div id="collaborate-view" class="view-section" style="display: none;">
             <div class="top-bar">
-                <h2>Collaboration</h2>
+                <h2>Collaboration & IA</h2>
             </div>
             <div id="collaboration-content" style="flex: 1; overflow: auto; padding: 20px; background: #fafafa;">
                 <div style="text-align: center; padding: 50px; color: #888;">
@@ -1677,6 +1681,53 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('modal-delete-workspace')">Cancel</button>
                 <button class="btn btn-danger" onclick="confirmDeleteWorkspace()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modale pour gérer le scope -->
+    <div id="modal-scope" class="modal-overlay" style="display: none;">
+        <div class="modal-container" style="max-width: 700px; width: 90%;">
+            <div class="modal-header">
+                <h3>Manage Scope</h3>
+                <button class="modal-close" onclick="closeModal('modal-scope')">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 20px;">
+                    <p style="color: #666; font-size: 14px; margin: 0 0 16px 0;">
+                        Configure which requests should be recorded. Only requests matching the scope will be saved.
+                    </p>
+                    <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="radio" name="scope-mode" value="include" id="scope-mode-include" checked>
+                            <span>Include (only these)</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="radio" name="scope-mode" value="exclude" id="scope-mode-exclude">
+                            <span>Exclude (all except these)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-form-group">
+                    <label for="scope-entries">Domain/URL patterns (one per line)</label>
+                    <textarea id="scope-entries" class="modal-input" rows="8" placeholder="example.com&#10;*.example.com&#10;https://target.com/api/*&#10;/api/v1/*"></textarea>
+                    <small class="modal-hint">
+                        Supports wildcards: <code>*</code> matches any characters, <code>?</code> matches a single character.<br>
+                        Examples: <code>example.com</code>, <code>*.example.com</code>, <code>https://target.com/api/*</code>
+                    </small>
+                </div>
+                <div id="scope-status" style="padding: 12px; background: #f5f5f5; border-radius: 4px; margin-top: 12px; display: none;">
+                    <div style="font-size: 13px; color: #666;">
+                        <strong>Status:</strong> <span id="scope-status-text">Scope disabled</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="clearScope()">Clear</button>
+                <button class="btn btn-secondary" onclick="closeModal('modal-scope')">Cancel</button>
+                <button class="btn btn-primary" onclick="saveScope()">Save</button>
             </div>
         </div>
     </div>

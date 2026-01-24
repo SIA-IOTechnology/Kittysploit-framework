@@ -146,17 +146,29 @@ class Listener(BaseModule):
             if hasattr(self, '__info__') and 'session_type' in self.__info__:
                 session_type_info = self.__info__['session_type']
                 # Extract value from enum or use directly if string
-                if hasattr(session_type_info, 'value'):
+                # For Python enums, check if it's an Enum instance
+                from core.framework.enums import SessionType as SessionTypeEnum
+                if isinstance(session_type_info, SessionTypeEnum):
+                    # It's an enum, get its value
+                    session_type = session_type_info.value
+                elif hasattr(session_type_info, 'value'):
                     session_type = session_type_info.value
                 elif hasattr(session_type_info, 'name'):
                     session_type = session_type_info.name.lower()
+                elif isinstance(session_type_info, str):
+                    session_type = session_type_info.lower()
                 else:
                     session_type = str(session_type_info).lower()
             elif hasattr(self, 'session_type'):
-                if hasattr(self.session_type, 'value'):
+                from core.framework.enums import SessionType as SessionTypeEnum
+                if isinstance(self.session_type, SessionTypeEnum):
                     session_type = self.session_type.value
+                elif hasattr(self.session_type, 'value'):
+                    session_type = self.session_type.value
+                elif isinstance(self.session_type, str):
+                    session_type = self.session_type.lower()
                 else:
-                    session_type = str(self.session_type)
+                    session_type = str(self.session_type).lower()
             else:
                 # Default to shell if not specified
                 session_type = 'shell'
@@ -221,14 +233,67 @@ class Listener(BaseModule):
                 print_warning("Listener is already running")
                 return True
             
-            print_info(f"Starting {self.name} listener...")
-            print_info(f"Handler: {self.handler}")
-            print_info(f"Session type: {self.session_type}")
+            # Get handler and session_type from __info__ if available, otherwise from instance attributes
+            handler = None
+            if hasattr(self, '__info__') and 'handler' in self.__info__:
+                handler_info = self.__info__['handler']
+                # Extract value from enum or use directly if string
+                if hasattr(handler_info, 'value'):
+                    handler = handler_info.value
+                elif hasattr(handler_info, 'name'):
+                    handler = handler_info.name.lower()
+                else:
+                    handler = str(handler_info).lower()
+            elif hasattr(self, 'handler'):
+                if hasattr(self.handler, 'value'):
+                    handler = self.handler.value
+                elif hasattr(self.handler, 'name'):
+                    handler = self.handler.name.lower()
+                else:
+                    handler = str(self.handler).lower()
+            else:
+                handler = 'bind'  # Default
             
-            if self.handler == "reverse":
-                print_info(f"Listening on {self.lhost}:{self.lport}")
-            elif self.handler == "bind":
-                print_info(f"Connecting to {self.rhost}:{self.rport}")
+            session_type = None
+            if hasattr(self, '__info__') and 'session_type' in self.__info__:
+                session_type_info = self.__info__['session_type']
+                # Extract value from enum or use directly if string
+                if hasattr(session_type_info, 'value'):
+                    session_type = session_type_info.value
+                elif hasattr(session_type_info, 'name'):
+                    session_type = session_type_info.name.lower()
+                else:
+                    session_type = str(session_type_info).lower()
+            elif hasattr(self, 'session_type'):
+                if hasattr(self.session_type, 'value'):
+                    session_type = self.session_type.value
+                elif hasattr(self.session_type, 'name'):
+                    session_type = self.session_type.name.lower()
+                else:
+                    session_type = str(self.session_type).lower()
+            else:
+                session_type = 'shell'  # Default
+            
+            print_info(f"Starting {self.name} listener...")
+            print_info(f"Handler: {handler}")
+            print_info(f"Session type: {session_type}")
+            
+            if handler == "reverse":
+                lhost = getattr(self, 'lhost', '0.0.0.0')
+                lport = getattr(self, 'lport', 4444)
+                if hasattr(lhost, 'value'):
+                    lhost = lhost.value
+                if hasattr(lport, 'value'):
+                    lport = lport.value
+                print_info(f"Listening on {lhost}:{lport}")
+            elif handler == "bind":
+                rhost = getattr(self, 'rhost', None) or getattr(self, 'host', '127.0.0.1')
+                rport = getattr(self, 'rport', None) or getattr(self, 'port', 21)
+                if hasattr(rhost, 'value'):
+                    rhost = rhost.value
+                if hasattr(rport, 'value'):
+                    rport = rport.value
+                print_info(f"Connecting to {rhost}:{rport}")
             
             # Start listener in background thread
             self.listener_thread = threading.Thread(target=self._run_listener, daemon=True)
@@ -293,12 +358,37 @@ class Listener(BaseModule):
     def _handle_listener_result(self, result):
         """Handle the result from listener implementation"""
         try:
-            if isinstance(result, tuple) and len(result) >= 2:
-                # Result format: (handler, target, port, session_data)
-                handler, target, port = result[0], result[1], result[2]
-                session_data = result[3] if len(result) > 3 else {}
-                
-                # Create session automatically
+            if isinstance(result, tuple) and len(result) >= 3:
+                # Supported tuple formats:
+                # - (connection_obj, target_host, target_port, additional_data)  <-- FTP/SSH client/etc.
+                # - (handler, target, port, session_data)                       <-- legacy listeners
+                first, target, port = result[0], result[1], result[2]
+
+                # Detect "handler-like" first element
+                first_str = None
+                if isinstance(first, str):
+                    first_str = first.lower()
+                elif hasattr(first, "value") and isinstance(getattr(first, "value", None), str):
+                    # Handler enum (Handler.BIND / Handler.REVERSE)
+                    first_str = first.value.lower()
+
+                is_handler = first_str in ("reverse", "bind")
+
+                # If it's NOT a handler, treat it as a connection object and use __info__ for handler/session_type
+                if (not is_handler) and isinstance(target, str):
+                    try:
+                        port_int = int(port)
+                    except Exception:
+                        port_int = None
+
+                    if port_int is not None:
+                        additional_data = result[3] if (len(result) > 3 and isinstance(result[3], dict)) else {}
+                        self._create_session_from_connection_data(first, target, port_int, additional_data)
+                        return
+
+                # Legacy fallback: (handler, target, port, session_data)
+                handler = first
+                session_data = result[3] if (len(result) > 3 and isinstance(result[3], dict)) else {}
                 self._create_session(handler, target, port, session_data)
             elif isinstance(result, dict):
                 # Result format: dict with session information
@@ -328,15 +418,26 @@ class Listener(BaseModule):
             session_data['created_at'] = time.time()
             
             # Get session_type from session_data if available, otherwise use default
-            session_type_str = session_data.get('session_type', 'ssh')
-            if isinstance(session_type_str, SessionType):
-                # Extract value from enum
+            session_type_str = session_data.get('session_type', 'shell')
+            # Check if it's a SessionType enum
+            from core.framework.enums import SessionType as SessionTypeEnum
+            if isinstance(session_type_str, SessionTypeEnum):
+                # It's an enum, get its value
+                session_type_str = session_type_str.value
+            elif isinstance(session_type_str, SessionType):
+                # Legacy check (shouldn't happen but just in case)
                 if hasattr(session_type_str, 'value'):
                     session_type_str = session_type_str.value
                 elif hasattr(session_type_str, 'name'):
                     session_type_str = session_type_str.name.lower()
                 else:
                     session_type_str = str(session_type_str).lower()
+            elif isinstance(session_type_str, str):
+                # Already a string, just normalize to lowercase
+                session_type_str = session_type_str.lower()
+            else:
+                # Fallback: convert to string and lowercase
+                session_type_str = str(session_type_str).lower()
             
             # Register this listener in framework's active listeners
             if self.framework and hasattr(self.framework, 'active_listeners'):
@@ -853,11 +954,53 @@ class Listener(BaseModule):
 
     def is_reverse_handler(self):
         """Check if handler is reverse"""
-        return self.handler == "reverse" or self.handler == Handler.REVERSE
+        handler = self._get_handler()
+        return handler == "reverse" or handler == Handler.REVERSE or (hasattr(Handler, 'REVERSE') and handler == Handler.REVERSE.name.lower())
     
     def is_bind_handler(self):
         """Check if handler is bind"""
-        return self.handler == "bind" or self.handler == Handler.BIND
+        handler = self._get_handler()
+        return handler == "bind" or handler == Handler.BIND or (hasattr(Handler, 'BIND') and handler == Handler.BIND.name.lower())
+    
+    def _get_handler(self):
+        """Helper method to get handler value from __info__ or instance attribute"""
+        if hasattr(self, '__info__') and 'handler' in self.__info__:
+            handler_info = self.__info__['handler']
+            if hasattr(handler_info, 'value'):
+                return handler_info.value
+            elif hasattr(handler_info, 'name'):
+                return handler_info.name.lower()
+            else:
+                return str(handler_info).lower()
+        elif hasattr(self, 'handler'):
+            if hasattr(self.handler, 'value'):
+                return self.handler.value
+            elif hasattr(self.handler, 'name'):
+                return self.handler.name.lower()
+            else:
+                return str(self.handler).lower()
+        else:
+            return 'bind'  # Default
+    
+    def _get_session_type(self):
+        """Helper method to get session_type value from __info__ or instance attribute"""
+        if hasattr(self, '__info__') and 'session_type' in self.__info__:
+            session_type_info = self.__info__['session_type']
+            if hasattr(session_type_info, 'value'):
+                return session_type_info.value
+            elif hasattr(session_type_info, 'name'):
+                return session_type_info.name.lower()
+            else:
+                return str(session_type_info).lower()
+        elif hasattr(self, 'session_type'):
+            if hasattr(self.session_type, 'value'):
+                return self.session_type.value
+            elif hasattr(self.session_type, 'name'):
+                return self.session_type.name.lower()
+            else:
+                return str(self.session_type).lower()
+        else:
+            return 'shell'  # Default
     
     def is_shell_session(self):
         """Check if session type is shell"""

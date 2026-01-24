@@ -10,6 +10,83 @@ from core.output_handler import print_error
 from core.models.models import Session as DBSession
 from datetime import datetime
 
+def _make_json_serializable(obj):
+    """
+    Recursively filter out non-JSON-serializable objects from a data structure.
+    Replaces them with string representations or removes them.
+    """
+    if obj is None:
+        return None
+    elif isinstance(obj, (str, int, float, bool)):
+        return obj
+    elif isinstance(obj, dict):
+        result = {}
+        for key, value in obj.items():
+            try:
+                # Try to serialize the value to check if it's serializable
+                json.dumps(value)
+                result[key] = _make_json_serializable(value)
+            except (TypeError, ValueError):
+                # If not serializable, replace with string representation or skip
+                # Skip connection objects and other non-serializable objects
+                if hasattr(value, '__class__'):
+                    class_name = value.__class__.__name__
+                    # For connection objects, store metadata instead
+                    if class_name in ['FTP', 'socket', 'SSHClient', 'paramiko.SSHClient']:
+                        # Store connection metadata instead of the object
+                        result[key] = {
+                            '_type': 'connection',
+                            '_class': class_name,
+                            '_repr': str(value)
+                        }
+                    else:
+                        # For other non-serializable objects, try to store a string representation
+                        try:
+                            result[key] = str(value)
+                        except:
+                            # If even str() fails, skip it
+                            pass
+                else:
+                    # For other types, try string representation
+                    try:
+                        result[key] = str(value)
+                    except:
+                        pass
+        return result
+    elif isinstance(obj, (list, tuple)):
+        result = []
+        for item in obj:
+            try:
+                json.dumps(item)
+                result.append(_make_json_serializable(item))
+            except (TypeError, ValueError):
+                # Skip non-serializable items in lists
+                if hasattr(item, '__class__'):
+                    class_name = item.__class__.__name__
+                    if class_name in ['FTP', 'socket', 'SSHClient', 'paramiko.SSHClient']:
+                        result.append({
+                            '_type': 'connection',
+                            '_class': class_name,
+                            '_repr': str(item)
+                        })
+                    else:
+                        try:
+                            result.append(str(item))
+                        except:
+                            pass
+                else:
+                    try:
+                        result.append(str(item))
+                    except:
+                        pass
+        return result
+    else:
+        # For other types, try to convert to string
+        try:
+            return str(obj)
+        except:
+            return None
+
 class SessionManager:
     
     def __init__(self, sessions_dir: Optional[str] = None, clean_startup: bool = True, db_manager=None, framework=None):
@@ -47,12 +124,15 @@ class SessionManager:
             # Check if session already exists in DB
             existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
             
+            # Filter out non-serializable objects from session data
+            serializable_data = _make_json_serializable(session_data.data)
+            
             if existing_db_session:
                 # Update existing session
                 existing_db_session.session_type = session_data.session_type
                 existing_db_session.target_host = session_data.host
                 existing_db_session.target_port = session_data.port
-                existing_db_session.session_data = json.dumps(session_data.data)
+                existing_db_session.session_data = json.dumps(serializable_data)
                 existing_db_session.last_seen = datetime.utcnow()
                 existing_db_session.is_active = True
             else:
@@ -62,7 +142,7 @@ class SessionManager:
                     session_type=session_data.session_type,
                     target_host=session_data.host,
                     target_port=session_data.port,
-                    session_data=json.dumps(session_data.data),
+                    session_data=json.dumps(serializable_data),
                     created_at=datetime.utcnow(),
                     last_seen=datetime.utcnow(),
                     is_active=True

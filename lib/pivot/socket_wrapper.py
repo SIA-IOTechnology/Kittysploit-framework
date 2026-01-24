@@ -85,14 +85,15 @@ def install_socket_wrapper(framework=None):
                 return False
         
         # Configure proxy from framework if available
-        if framework and hasattr(framework, 'is_proxy_enabled'):
-            if framework.is_proxy_enabled():
-                proxy_url = framework.get_proxy_url()
-                
-                if proxy_url and proxy_url.startswith('socks'):
-                    # Parse proxy URL
+        # Check Tor first, then regular proxy
+        if framework:
+            # Check if Tor is enabled
+            if hasattr(framework, 'is_tor_enabled') and framework.is_tor_enabled():
+                tor_proxy_url = framework.tor_manager.get_tor_proxy_url()
+                if tor_proxy_url:
+                    # Parse Tor SOCKS proxy URL
                     import re
-                    match = re.match(r'socks(\d)://([^:]+):(\d+)', proxy_url)
+                    match = re.match(r'socks(\d)://([^:]+):(\d+)', tor_proxy_url)
                     if match:
                         proxy_type = int(match.group(1))
                         proxy_host = match.group(2)
@@ -100,6 +101,25 @@ def install_socket_wrapper(framework=None):
                         
                         proxy_type_enum = socks.SOCKS5 if proxy_type == 5 else socks.SOCKS4
                         ProxiedSocket.configure_proxy(True, proxy_host, proxy_port, proxy_type_enum)
+                        return True
+            
+            # Fallback to regular proxy
+            if hasattr(framework, 'is_proxy_enabled'):
+                if framework.is_proxy_enabled():
+                    proxy_url = framework.get_proxy_url()
+                    
+                    if proxy_url and proxy_url.startswith('socks'):
+                        # Parse proxy URL
+                        import re
+                        match = re.match(r'socks(\d)://([^:]+):(\d+)', proxy_url)
+                        if match:
+                            proxy_type = int(match.group(1))
+                            proxy_host = match.group(2)
+                            proxy_port = int(match.group(3))
+                            
+                            proxy_type_enum = socks.SOCKS5 if proxy_type == 5 else socks.SOCKS4
+                            ProxiedSocket.configure_proxy(True, proxy_host, proxy_port, proxy_type_enum)
+                            return True
         
         # Create a wrapper class that extends socket.socket
         class ProxiedSocketClass(_original_socket):

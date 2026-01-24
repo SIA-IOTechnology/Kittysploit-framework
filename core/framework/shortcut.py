@@ -5,9 +5,8 @@ class Shortcut(BaseModule):
 
     TYPE_MODULE = "shortcut"
 
-    def __init__(self):
-        super(Shortcut, self).__init__()
-        self.framework = framework
+    def __init__(self, framework=None):
+        super(Shortcut, self).__init__(framework)
         self.current_module = None
 
     def run(self):

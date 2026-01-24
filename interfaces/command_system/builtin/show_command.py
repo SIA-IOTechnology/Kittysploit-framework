@@ -6,11 +6,12 @@ Show command implementation
 """
 
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_table, print_empty
+from core.output_handler import print_info, print_success, print_error, print_table, print_empty, print_status, print_warning
 from core.framework.option.base_option import Option as BaseOption
 import os
 import logging
-from typing import Optional, List
+import ast
+from typing import Optional, List, Dict, Any
 
 class ShowCommand(BaseCommand):
     """Command to show module information"""
@@ -474,24 +475,123 @@ Examples:
         """Retrieve modules from DB or filesystem with optional type filtering"""
         normalized_type = self._normalize_module_type(module_type)
         modules = []
+        
+        # Try database first (much faster)
         try:
-            modules = self.framework.search_modules_db(
-                module_type=normalized_type or "",
-                limit=1000
-            )
+            if hasattr(self.framework, 'module_sync_manager') and self.framework.module_sync_manager:
+                # Use sync_manager directly for better control
+                modules = self.framework.module_sync_manager.search_modules(
+                    query="",
+                    module_type=normalized_type or "",
+                    limit=10000  # Large limit to get all modules
+                )
+                
+                # Convert DB format to expected format
+                if modules:
+                    formatted_modules = []
+                    for module in modules:
+                        formatted_modules.append({
+                            'path': module.get('path', ''),
+                            'name': module.get('name', module.get('path', '')),
+                            'description': module.get('description', 'No description'),
+                            'type': module.get('type', ''),
+                            'author': module.get('author', 'Unknown')
+                        })
+                    return formatted_modules
         except Exception as e:
-            print_info(f"Database search failed: {e}")
+            # Database search failed, fall back to filesystem
+            logging.debug(f"Database search failed: {e}")
             modules = []
         
+        # Fallback to filesystem if DB is empty or failed
         if not modules:
+            # Check if we should suggest syncing
+            try:
+                if hasattr(self.framework, 'module_sync_manager') and self.framework.module_sync_manager:
+                    stats = self.framework.module_sync_manager.get_module_stats()
+                    if stats.get('total', 0) == 0:
+                        print_warning("No modules found in database. Run 'sync now' to synchronize modules from filesystem to database for faster searches.")
+            except Exception:
+                pass
+            
             modules = self._search_modules_filesystem(normalized_type)
-        elif normalized_type:
-            modules = [m for m in modules if self._module_matches_type(m, normalized_type)]
         
         return modules or []
     
+    def _extract_module_metadata_from_source(self, file_path: str) -> Dict[str, Any]:
+        """Extract basic module metadata from source file without loading the module (fast)"""
+        metadata = {
+            'name': '',
+            'description': 'No description',
+            'author': 'Unknown'
+        }
+        
+        if not os.path.exists(file_path):
+            return metadata
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                source = f.read()
+            
+            # Parse the AST
+            tree = ast.parse(source, filename=file_path)
+            
+            # Helper to extract string value from AST node
+            def get_string_value(node):
+                if isinstance(node, ast.Str):
+                    return node.s
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    return node.value
+                return None
+            
+            # Look for __info__ dictionary in the module
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id == '__info__':
+                            # Found __info__ assignment
+                            if isinstance(node.value, ast.Dict):
+                                # Extract values from dictionary
+                                for k, v in zip(node.value.keys, node.value.values):
+                                    key = get_string_value(k)
+                                    if key:
+                                        value = get_string_value(v)
+                                        if value is not None:
+                                            key_lower = key.lower()
+                                            if key_lower == 'name':
+                                                metadata['name'] = value
+                                            elif key_lower == 'description':
+                                                metadata['description'] = value
+                                            elif key_lower == 'author':
+                                                metadata['author'] = value
+                            break
+                
+                # Also check for class attributes (name, description, author) in Module class
+                if isinstance(node, ast.ClassDef) and node.name == 'Module':
+                    for item in node.body:
+                        if isinstance(item, ast.Assign):
+                            for target in item.targets:
+                                if isinstance(target, ast.Name):
+                                    if target.id in ('name', 'description', 'author'):
+                                        value = get_string_value(item.value)
+                                        if value is not None:
+                                            if target.id == 'name':
+                                                metadata['name'] = value
+                                            elif target.id == 'description':
+                                                metadata['description'] = value
+                                            elif target.id == 'author':
+                                                metadata['author'] = value
+        except (SyntaxError, ValueError, AttributeError):
+            # If parsing fails, return default metadata
+            pass
+        except Exception:
+            # Other exceptions - return default
+            pass
+        
+        return metadata
+    
     def _search_modules_filesystem(self, module_type_filter: str = None):
-        """Search modules from filesystem as fallback"""
+        """Search modules from filesystem as fallback (optimized - no module loading)"""
         modules = []
         try:
             discovered_modules = self.framework.module_loader.discover_modules()
@@ -501,29 +601,18 @@ Examples:
                 if module_type_filter and not self._type_matches(module_type, module_type_filter):
                     continue
                 
-                # Try to get module info (silently to avoid error spam during discovery)
+                # Extract metadata directly from source file (fast, no module loading)
                 try:
-                    module_info = self.framework.module_loader.get_module_info(module_path, silent=True)
-                    if module_info:
-                        modules.append({
-                            'path': module_path,
-                            'name': module_info.get('name', module_path),
-                            'description': module_info.get('description', 'No description'),
-                            'type': module_type,
-                            'author': module_info.get('author', 'Unknown')
-                        })
-                    else:
-                        # Module exists but couldn't be loaded (likely missing dependencies)
-                        # Add it to the list anyway but mark it
-                        modules.append({
-                            'path': module_path,
-                            'name': module_path,
-                            'description': 'No description (missing dependencies)',
-                            'type': module_type,
-                            'author': 'Unknown'
-                        })
+                    metadata = self._extract_module_metadata_from_source(file_path)
+                    modules.append({
+                        'path': module_path,
+                        'name': metadata.get('name') or module_path,
+                        'description': metadata.get('description', 'No description'),
+                        'type': module_type,
+                        'author': metadata.get('author', 'Unknown')
+                    })
                 except Exception:
-                    # If we can't load the module, just add basic info
+                    # If extraction fails, just add basic info
                     modules.append({
                         'path': module_path,
                         'name': module_path,
@@ -554,9 +643,13 @@ Examples:
                 categories[subcategory] = []
             categories[subcategory].append(listener)
         
+        first = True
         for category in sorted(categories.keys()):
-            heading = f"[LISTENER:{category.upper()}] ({len(categories[category])})"
+            if not first:
+                print_empty()  # Small spacing between categories
+            heading = f"LISTENER:{category.upper()} ({len(categories[category])})"
             self._print_module_table(categories[category], heading, include_type=False)
+            first = False
     
     def _show_nops(self):
         """Show available NOP types"""
@@ -606,8 +699,8 @@ Examples:
                 rows.append([path, description])
         
         # Use print_table which handles terminal width and description truncation
-        print_info("")
-        print_info(heading)
+        # Compact display: heading with status color, minimal spacing
+        print_status(heading)
         print_table(headers, rows, max_width=120)
     
     def _normalize_module_type(self, module_type: str):

@@ -10,6 +10,7 @@ import json
 import hashlib
 import threading
 import time
+import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Set
 from pathlib import Path
@@ -43,6 +44,27 @@ class ModuleSyncManager:
             from core.module_loader import ModuleLoader
             self.module_loader = ModuleLoader()
         return self.module_loader
+    
+    def _normalize_to_string(self, value, default='', separator=', '):
+        """Normalize a value to string, handling both list and string types
+        
+        Args:
+            value: Value to normalize (can be list, string, None, etc.)
+            default: Default value if value is None or empty
+            separator: Separator to use when joining lists
+        
+        Returns:
+            str: Normalized string value
+        """
+        if value is None:
+            return default
+        elif isinstance(value, list):
+            return separator.join(str(v) for v in value if v) if value else default
+        elif isinstance(value, (dict, tuple)):
+            # Convert complex types to JSON string
+            return json.dumps(value) if value else default
+        else:
+            return str(value) if value else default
         
     def start_background_sync(self, interval: int = 300):
         """Start background synchronization thread"""
@@ -95,6 +117,14 @@ class ModuleSyncManager:
             self.is_syncing = True
             start_time = time.time()
             
+            # Temporarily suppress logging errors during sync to avoid cluttering the prompt
+            root_logger = logging.getLogger()
+            original_level = root_logger.level
+            original_handlers_levels = {}
+            for handler in root_logger.handlers:
+                original_handlers_levels[handler] = handler.level
+                handler.setLevel(logging.CRITICAL)  # Only show critical errors
+            
             try:
                 print_info("Starting module synchronization...")
                 
@@ -127,6 +157,10 @@ class ModuleSyncManager:
                 print_error(f"Error during module sync: {e}")
                 raise
             finally:
+                # Restore original logging levels
+                root_logger.setLevel(original_level)
+                for handler, level in original_handlers_levels.items():
+                    handler.setLevel(level)
                 self.is_syncing = False
     
     def _get_filesystem_modules(self) -> Dict[str, Dict]:
@@ -139,32 +173,44 @@ class ModuleSyncManager:
             
             for module_path, file_path in discovered_modules.items():
                 try:
-                    # Debug: print paths
-                    print_info(f"Processing module: {module_path} -> {file_path}")
+                    # Get detailed module information (silent mode to avoid error spam during sync)
+                    detailed_info = self._get_module_loader().get_module_info(module_path, silent=True)
                     
-                    # Get detailed module information
-                    detailed_info = self._get_module_loader().get_module_info(module_path)
+                    # Skip if module couldn't be loaded
+                    if not detailed_info:
+                        continue
                     
                     # Calculate file hash for change detection
                     file_hash = self._calculate_file_hash(file_path)
                     
+                    # Convert file modification time to datetime
+                    file_mtime_timestamp = os.path.getmtime(file_path)
+                    file_mtime = datetime.fromtimestamp(file_mtime_timestamp)
+                    
+                    # Detect module type from path if not provided
+                    module_type = detailed_info.get('type', '')
+                    if not module_type:
+                        module_type = self._detect_module_type_from_path(module_path)
+                    
+                    # Normalize fields that can be either list or string
                     modules[module_path] = {
                         'path': module_path,
-                        'name': detailed_info.get('name', ''),
-                        'description': detailed_info.get('description', ''),
-                        'type': detailed_info.get('type', ''),
-                        'author': detailed_info.get('author', ''),
-                        'version': detailed_info.get('version', ''),
-                        'cve': detailed_info.get('cve', ''),
+                        'name': self._normalize_to_string(detailed_info.get('name', '')),
+                        'description': self._normalize_to_string(detailed_info.get('description', '')),
+                        'type': module_type,
+                        'author': self._normalize_to_string(detailed_info.get('author', '')),
+                        'version': self._normalize_to_string(detailed_info.get('version', '')),
+                        'cve': self._normalize_to_string(detailed_info.get('cve', '')),
                         'tags': json.dumps(detailed_info.get('tags', [])),
                         'references': json.dumps(detailed_info.get('references', [])),
                         'options': json.dumps(detailed_info.get('options', {})),
                         'file_hash': file_hash,
-                        'file_mtime': os.path.getmtime(file_path)
+                        'file_mtime': file_mtime
                     }
                     
                 except Exception as e:
-                    print_warning(f"Error processing module {module_path}: {e}")
+                    # Silently skip modules that can't be processed (errors are logged but not displayed)
+                    logging.debug(f"Error processing module {module_path} during sync: {e}")
                     continue
                     
         except Exception as e:
@@ -220,8 +266,24 @@ class ModuleSyncManager:
             db_module = db_modules[path]
             
             # Check if module needs update
+            # Compare file_mtime properly (both should be datetime objects)
+            fs_mtime = fs_module['file_mtime']
+            db_mtime = db_module.get('file_mtime')
+            
+            # Convert db_mtime to datetime if it's a string or other type
+            if db_mtime and not isinstance(db_mtime, datetime):
+                if isinstance(db_mtime, str):
+                    try:
+                        db_mtime = datetime.fromisoformat(db_mtime.replace('Z', '+00:00'))
+                    except:
+                        db_mtime = None
+                elif isinstance(db_mtime, (int, float)):
+                    db_mtime = datetime.fromtimestamp(db_mtime)
+            
             if (fs_module['file_hash'] != db_module.get('file_hash') or
-                fs_module['file_mtime'] != db_module.get('file_mtime')):
+                (fs_mtime and db_mtime and fs_mtime != db_mtime) or
+                (fs_mtime and not db_mtime) or
+                (not fs_mtime and db_mtime)):
                 to_update.add(path)
         
         return {
@@ -247,8 +309,24 @@ class ModuleSyncManager:
                     fs_module = fs_modules[path]
                     db_module = db_modules[path]
                     
+                    # Compare file_mtime properly (both should be datetime objects)
+                    fs_mtime = fs_module['file_mtime']
+                    db_mtime = db_module.get('file_mtime')
+                    
+                    # Convert db_mtime to datetime if it's a string or other type
+                    if db_mtime and not isinstance(db_mtime, datetime):
+                        if isinstance(db_mtime, str):
+                            try:
+                                db_mtime = datetime.fromisoformat(db_mtime.replace('Z', '+00:00'))
+                            except:
+                                db_mtime = None
+                        elif isinstance(db_mtime, (int, float)):
+                            db_mtime = datetime.fromtimestamp(db_mtime)
+                    
                     if (fs_module['file_hash'] != db_module.get('file_hash') or
-                        fs_module['file_mtime'] != db_module.get('file_mtime')):
+                        (fs_mtime and db_mtime and fs_mtime != db_mtime) or
+                        (fs_mtime and not db_mtime) or
+                        (not fs_mtime and db_mtime)):
                         self._update_module_in_db(session, db_module['id'], fs_module)
                         stats['updated'] += 1
                 
@@ -282,7 +360,7 @@ class ModuleSyncManager:
             )
             
             session.add(module)
-            print_info(f"Added module: {module_data['name']} ({module_data['type']})")
+            # Removed verbose logging - summary is shown at the end
             
         except Exception as e:
             print_error(f"Error adding module {module_data['name']}: {e}")
@@ -305,8 +383,7 @@ class ModuleSyncManager:
                 module.file_hash = module_data['file_hash']
                 module.file_mtime = module_data['file_mtime']
                 module.updated_at = datetime.utcnow()
-                
-                print_info(f"Updated module: {module_data['name']} ({module_data['type']})")
+                # Removed verbose logging - summary is shown at the end
                 
         except Exception as e:
             print_error(f"Error updating module {module_data['name']}: {e}")
@@ -317,12 +394,69 @@ class ModuleSyncManager:
         try:
             module = session.query(Module).filter(Module.id == module_id).first()
             if module:
-                print_info(f"Removed module: {module.name} ({module.type})")
+                # Removed verbose logging - summary is shown at the end
                 session.delete(module)
                 
         except Exception as e:
             print_error(f"Error removing module {module_id}: {e}")
             raise
+    
+    def _detect_module_type_from_path(self, module_path: str) -> str:
+        """Detect module type from module path
+        Returns a type that matches the CHECK constraint: 'exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow'
+        """
+        path = (module_path or "").lower()
+        
+        # Valid types according to CHECK constraint in models.py
+        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow']
+        
+        # Module path prefixes mapping (must match valid types in CHECK constraint)
+        type_mapping = {
+            'exploits/': 'exploits',
+            'auxiliary/': 'auxiliary',
+            'scanner/': 'scanner',  # Some scanners are in auxiliary/scanner/ but standalone scanner/ exists
+            'post/': 'post',
+            'payloads/': 'payloads',
+            'workflow/': 'workflow',
+            'scanner/': 'scanner',
+            'browser_exploits/': 'exploits',  # Map to exploits
+            'browser_auxiliary/': 'auxiliary',  # Map to auxiliary
+        }
+        
+        # Check for type in path
+        for prefix, module_type in type_mapping.items():
+            if path.startswith(prefix):
+                # Special case: auxiliary/scanner/ should be 'auxiliary' not 'scanner'
+                if prefix == 'scanner/' and path.startswith('auxiliary/scanner/'):
+                    return 'auxiliary'
+                return module_type
+        
+        # Special case: auxiliary/scanner/ should be 'auxiliary' not 'scanner'
+        if path.startswith('auxiliary/'):
+            return 'auxiliary'
+        
+        # Default fallback - try to extract from first part of path
+        parts = path.split('/')
+        if len(parts) > 0:
+            first_part = parts[0]
+            # Normalize to match CHECK constraint values
+            if first_part in valid_types:
+                return first_part
+            elif first_part == 'exploit':
+                return 'exploits'
+            elif first_part == 'payload':
+                return 'payloads'
+            elif first_part == 'scanner':
+                return 'scanner'
+            elif first_part == 'listener':
+                # Listeners not in CHECK constraint, map to auxiliary
+                return 'auxiliary'
+            elif first_part == 'encoder':
+                # Encoders not in CHECK constraint, map to auxiliary
+                return 'auxiliary'
+        
+        # Default to 'auxiliary' if we can't determine (safest fallback)
+        return 'auxiliary'
     
     def _calculate_file_hash(self, file_path: str) -> str:
         """Calculate SHA256 hash of a file"""
@@ -410,5 +544,6 @@ class ModuleSyncManager:
             'is_syncing': self.is_syncing,
             'last_sync': self.last_sync.isoformat() if self.last_sync else None,
             'sync_interval': self.sync_interval,
-            'background_sync_active': self.background_sync_active and (self.sync_thread and self.sync_thread.is_alive())
+            'background_sync_active': self.background_sync_active and (self.sync_thread and self.sync_thread.is_alive()),
+            'last_sync_datetime': self.last_sync  # Keep datetime object for formatting
         }

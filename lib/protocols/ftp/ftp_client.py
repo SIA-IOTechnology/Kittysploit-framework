@@ -30,9 +30,21 @@ class FTPClientMixin:
         Auto-detects context (Session vs Direct).
         """
         # 1. Mode Post-Exploitation (Session)
+        # If session is not set but we have session_id, try to get it from session_manager
+        if not (hasattr(self, 'session') and self.session):
+            # Try to get session from session_id if available (for Post modules)
+            if hasattr(self, 'session_id'):
+                session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+                if session_id_value and hasattr(self, 'framework') and self.framework:
+                    if hasattr(self.framework, 'session_manager'):
+                        session = self.framework.session_manager.get_session(session_id_value)
+                        if session:
+                            self.session = session
+        
         if hasattr(self, 'session') and self.session:
             if hasattr(self, 'print_status'):
-                self.print_status(f"Using session {self.session.session_id} for FTP operations...")
+                session_id = getattr(self.session, 'session_id', getattr(self.session, 'id', 'unknown'))
+                self.print_status(f"Using session {session_id} for FTP operations...")
             return self._get_session_client()
             
         # 2. Mode Direct (Auxiliary/Scanner)
@@ -103,10 +115,37 @@ class FTPClientMixin:
 
     def _get_session_client(self):
         """Retrieve client from session."""
+        # Try direct connection attribute
         if hasattr(self.session, 'connection') and self.session.connection:
             return self.session.connection
         if hasattr(self.session, 'client') and self.session.client:
             return self.session.client
+        
+        # Try to get connection from session.data (for FTP listener sessions)
+        if hasattr(self.session, 'data') and self.session.data:
+            if isinstance(self.session.data, dict):
+                # Check for connection in data dict
+                if 'connection' in self.session.data and self.session.data['connection']:
+                    return self.session.data['connection']
+                # Also check if data itself is the connection (for some session types)
+                from ftplib import FTP
+                if isinstance(self.session.data, FTP):
+                    return self.session.data
+        
+        # Try to get connection from listener (for FTP listener sessions)
+        if hasattr(self, 'framework') and self.framework:
+            if hasattr(self.session, 'data') and self.session.data:
+                listener_id = self.session.data.get('listener_id') if isinstance(self.session.data, dict) else None
+                if listener_id and hasattr(self.framework, 'active_listeners'):
+                    listener = self.framework.active_listeners.get(listener_id)
+                    if listener and hasattr(listener, '_session_connections'):
+                        session_id = getattr(self.session, 'session_id', getattr(self.session, 'id', None))
+                        if session_id:
+                            connection = listener._session_connections.get(session_id)
+                            if connection:
+                                return connection
+        
+        # Last resort: return session itself (might be the connection)
         return self.session
 
     # --- Common FTP Operations (Wrappers) ---
@@ -178,9 +217,30 @@ class FTPClientMixin:
         """Get FTP connection information from session or options"""
         info = {}
         
+        # Try to load session if not already loaded (for Post modules)
+        if not (hasattr(self, 'session') and self.session):
+            if hasattr(self, 'session_id'):
+                session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+                if session_id_value and hasattr(self, 'framework') and self.framework:
+                    if hasattr(self.framework, 'session_manager'):
+                        session = self.framework.session_manager.get_session(session_id_value)
+                        if session:
+                            self.session = session
+        
         # If using session
         if hasattr(self, 'session') and self.session:
-            if hasattr(self.session, 'session_info'):
+            # Try to get info from session.data (for FTP listener sessions)
+            if hasattr(self.session, 'data') and self.session.data:
+                if isinstance(self.session.data, dict):
+                    info['host'] = self.session.data.get('host', 'unknown')
+                    info['port'] = self.session.data.get('port', 21)
+                    info['username'] = self.session.data.get('username', 'unknown')
+                else:
+                    # If data is not a dict, try other attributes
+                    info['host'] = getattr(self.session, 'host', 'unknown')
+                    info['port'] = getattr(self.session, 'port', 21)
+                    info['username'] = getattr(self.session, 'username', 'unknown')
+            elif hasattr(self.session, 'session_info'):
                 session_info = self.session.session_info
                 info['host'] = session_info.get('host', 'unknown')
                 info['port'] = session_info.get('port', 21)

@@ -107,3 +107,14 @@ class Arch(Enum):
     SPARC = {"name": "SPARC", "value": "sparc"}
     RISC_V = {"name": "RISC-V", "value": "risc-v"}
     OTHER = {"name": "Other", "value": "other"}
+
+class Type(Enum):
+
+    CMD = "cmd"
+    PHP = "php"
+    PYTHON = "python"
+    LINUX = "linux"
+    WINDOWS = "windows"
+    MACOS = "macos"
+    ANDROID = "android"
+    IOS = "ios"

@@ -12,7 +12,7 @@
   
   *Modular • Extensible • Powerful*
   
-  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com) • [Discussions](ircs://irc.libera.chat:6697/#KittySploit)
+  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com) • [Discussions](irc://irc.libera.chat:6697/#KittySploit)
 </div>
 
 ---

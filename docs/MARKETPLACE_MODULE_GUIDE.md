@@ -53,7 +53,7 @@ middlewares = []
 # Marketplace metadata
 [metadata]
 price = 0.0  # 0.0 = free
-currency = "USD"
+currency = "EUR"
 license = "MIT"
 ```
 

@@ -3,7 +3,7 @@
 
 import os
 from contextlib import contextmanager
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker, scoped_session
 from core.models.models import Base
 from typing import Dict, Optional
@@ -51,6 +51,12 @@ class DatabaseManager:
             # Create all tables
             Base.metadata.create_all(engine)
             
+            # Store engine temporarily for migration
+            self.engines[workspace] = engine
+            
+            # Migrate modules table constraint if needed (to include 'workflow')
+            self.migrate_modules_table_constraint(workspace)
+            
             # Set encryption manager for encrypted fields
             if self.encryption_manager:
                 self._setup_encryption_for_models()
@@ -59,8 +65,7 @@ class DatabaseManager:
             session_factory = sessionmaker(bind=engine, expire_on_commit=False)
             session = scoped_session(session_factory)
             
-            # Store engine and session
-            self.engines[workspace] = engine
+            # Store session
             self.sessions[workspace] = session
             
             return True
@@ -163,4 +168,110 @@ class DatabaseManager:
     def close_all(self):
         """Close all database connections"""
         for workspace in list(self.sessions.keys()):
-            self.close_workspace_db(workspace) 
+            self.close_workspace_db(workspace)
+    
+    def migrate_modules_table_constraint(self, workspace: str = "default") -> bool:
+        """Migrate the modules table to update the CHECK constraint to include 'workflow'
+        
+        This is needed because SQLite doesn't support modifying CHECK constraints.
+        We recreate the table with the correct constraint.
+        
+        Args:
+            workspace: Name of the workspace
+            
+        Returns:
+            bool: True if migration was successful, False otherwise
+        """
+        try:
+            engine = self.engines.get(workspace)
+            if not engine:
+                # Initialize workspace if not already done
+                if not self.init_workspace_db(workspace):
+                    return False
+                engine = self.engines[workspace]
+            
+            # Check if modules table exists
+            inspector = inspect(engine)
+            if 'modules' not in inspector.get_table_names():
+                # Table doesn't exist, create it with correct constraint
+                Base.metadata.create_all(engine)
+                return True
+            
+            # Check if constraint already includes 'workflow'
+            with engine.connect() as conn:
+                # Get the CREATE TABLE statement
+                result = conn.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='modules'"))
+                create_sql = result.fetchone()
+                if create_sql and create_sql[0]:
+                    sql_str = create_sql[0]
+                    # Check if workflow is already in the constraint
+                    if "'workflow'" in sql_str or '"workflow"' in sql_str:
+                        # Constraint already updated
+                        return True
+            
+            # Need to migrate: recreate table with correct constraint
+            with engine.begin() as conn:
+                # Get column names from the existing table
+                result = conn.execute(text("PRAGMA table_info(modules)"))
+                columns_info = result.fetchall()
+                column_names = [col[1] for col in columns_info]  # Column name is at index 1
+                
+                # Get all indexes associated with modules table BEFORE renaming
+                result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='modules'"))
+                module_indexes = [row[0] for row in result.fetchall() if row[0] and not row[0].startswith('sqlite_')]
+                
+                # Create backup table
+                conn.execute(text("DROP TABLE IF EXISTS modules_backup"))
+                conn.execute(text("ALTER TABLE modules RENAME TO modules_backup"))
+                
+                # Drop all indexes that were associated with modules table
+                # These indexes still exist globally and will conflict when we create the new table
+                for idx_name in module_indexes:
+                    try:
+                        conn.execute(text(f'DROP INDEX IF EXISTS "{idx_name}"'))
+                    except:
+                        pass  # Ignore errors - index might not exist
+                
+                # Also check for any indexes that might have been created with specific names
+                # SQLAlchemy creates indexes like: ix_modules_cve, ix_modules_name, idx_module_type_active
+                result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='index'"))
+                all_indexes = [row[0] for row in result.fetchall() if row[0] and not row[0].startswith('sqlite_')]
+                for idx_name in all_indexes:
+                    # Drop indexes that match SQLAlchemy naming patterns for modules table
+                    if any(pattern in idx_name for pattern in ['ix_modules_', 'idx_module_']):
+                        try:
+                            conn.execute(text(f'DROP INDEX IF EXISTS "{idx_name}"'))
+                        except:
+                            pass
+                
+                # Create new table with correct constraint
+                from core.models.models import Module
+                Module.__table__.create(engine)
+                
+                # Copy data back using INSERT INTO ... SELECT FROM
+                if column_names:
+                    col_names = ', '.join(f'"{col}"' for col in column_names)
+                    copy_sql = f'INSERT INTO modules ({col_names}) SELECT {col_names} FROM modules_backup'
+                    conn.execute(text(copy_sql))
+                
+                # Drop backup table (this will also drop any remaining indexes associated with it)
+                conn.execute(text("DROP TABLE modules_backup"))
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error migrating modules table constraint: {str(e)}")
+            # Try to restore from backup if migration failed
+            try:
+                engine = self.engines.get(workspace)
+                if engine:
+                    with engine.begin() as conn:
+                        # Check if backup exists
+                        inspector = inspect(engine)
+                        if 'modules_backup' in inspector.get_table_names():
+                            # Restore from backup
+                            conn.execute(text("DROP TABLE IF EXISTS modules"))
+                            conn.execute(text("ALTER TABLE modules_backup RENAME TO modules"))
+            except:
+                pass
+            return False 

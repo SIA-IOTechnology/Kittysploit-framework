@@ -117,6 +117,12 @@ class ModuleSyncManager:
             self.is_syncing = True
             start_time = time.time()
             
+            # Ensure database constraint is up to date (includes 'workflow' type)
+            try:
+                self.db_manager.migrate_modules_table_constraint(self.workspace)
+            except Exception as e:
+                print_warning(f"Could not migrate database constraint: {e}")
+            
             # Temporarily suppress logging errors during sync to avoid cluttering the prompt
             root_logger = logging.getLogger()
             original_level = root_logger.level

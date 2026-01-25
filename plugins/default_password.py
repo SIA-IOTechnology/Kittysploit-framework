@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Default Password Plugin for KittySploit
-Search for default credentials in routers and devices
-"""
-
 from kittysploit import *
 import shlex
 import re

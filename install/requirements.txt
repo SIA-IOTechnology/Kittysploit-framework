@@ -14,12 +14,14 @@ flask>=2.0.0
 flask-cors>=3.0.10
 flask-socketio>=5.3.0
 fastapi
+python-multipart
 
 # Network and security
 paramiko>=2.9.0
 scapy>=2.4.5
 netaddr>=0.8.0
 xmltodict>=0.13.0
+websocket-client
 
 # System utilities
 psutil>=5.8.0

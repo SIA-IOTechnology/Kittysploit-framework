@@ -292,6 +292,11 @@
                 <div class="flow-list-panel" id="flow-list-panel">
                     <div class="flow-search-container" style="display: flex; gap: 8px; align-items: center;">
                         <input type="text" id="flow-search" placeholder="Filter flows..." class="flow-search-input" style="flex: 1;">
+                        <input type="file" id="pcap-upload-input" accept=".pcap,.pcapng" style="display: none;">
+                        <button id="pcap-upload-btn" class="btn btn-secondary" title="Import HTTP/HTTPS flows from PCAP" style="padding: 8px 12px; white-space: nowrap;">
+                            <span class="material-symbols-outlined" style="font-size: 18px;">upload_file</span>
+                            PCAP
+                        </button>
                         <button id="scope-btn" class="btn btn-secondary" onclick="openModal('modal-scope')" title="Manage scope" style="padding: 8px 12px; white-space: nowrap;">
                             <span class="material-symbols-outlined" style="font-size: 18px;">filter_list</span>
                             Scope

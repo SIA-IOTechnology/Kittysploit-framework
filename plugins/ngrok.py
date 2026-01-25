@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Ngrok Plugin for KittySploit
-"""
-
 from kittysploit import *
-from core.framework.plugin import Plugin
 import shlex
 
 class NgrokPlugin(Plugin):

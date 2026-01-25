@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -481,6 +481,39 @@ def get_scope():
         "status": "ok",
         "scope": flow_manager.scope_config
     }
+
+
+@app.post("/api/flows/import-pcap")
+async def import_pcap(file: UploadFile = File(...)):
+    """Import HTTP/HTTPS flows from an uploaded PCAP file."""
+    if not file.filename or not (file.filename.lower().endswith(".pcap") or file.filename.lower().endswith(".pcapng")):
+        raise HTTPException(status_code=400, detail="File must be .pcap or .pcapng")
+    tmp = None
+    try:
+        from pcap_importer import extract_flows_from_pcap
+        contents = await file.read()
+        suffix = ".pcapng" if file.filename.lower().endswith(".pcapng") else ".pcap"
+        fd, tmp = tempfile.mkstemp(suffix=suffix)
+        try:
+            os.write(fd, contents)
+        finally:
+            os.close(fd)
+        flows = extract_flows_from_pcap(tmp)
+        n = flow_manager.add_imported_pcap_flows(flows)
+        return {"status": "ok", "imported": n, "total": len(flows)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if tmp and os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
 
 @app.get("/api/intercept/pending")
 def get_pending_intercepts():

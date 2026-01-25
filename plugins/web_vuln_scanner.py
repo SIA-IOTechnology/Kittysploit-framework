@@ -23,6 +23,7 @@ import string
 from typing import Dict, List, Set, Tuple, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from itertools import chain
 
 try:
     import requests
@@ -361,7 +362,7 @@ class WebVulnScannerPlugin(Plugin):
         except Exception as e:
             print_error(f"An error occurred: {e}")
             import traceback
-            if pargs.verbose:
+            if 'pargs' in locals() and pargs.verbose:
                 traceback.print_exc()
             return False
     
@@ -372,6 +373,13 @@ class WebVulnScannerPlugin(Plugin):
                       max_modules: int = 3, aggressive: bool = False) -> bool:
         """Main scanning function"""
         try:
+            # Silence SSL warnings
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except:
+                pass
+
             print_success("Starting Web Vulnerability Scanner")
             print_info(f"Target: {url}")
             print_info(f"Depth: {depth} | Threads: {threads}")
@@ -396,6 +404,7 @@ class WebVulnScannerPlugin(Plugin):
             self.page_cache = {}
             self.html_cache = {}
             self.technologies = defaultdict(list)
+            self.tech_tokens = set()
             self.min_confidence = max(0, min(100, min_confidence))
             self.max_modules = max(1, max_modules)
             self.aggressive = aggressive
@@ -417,6 +426,9 @@ class WebVulnScannerPlugin(Plugin):
             if not no_crawl:
                 print_status("Step 1: Crawling website...")
                 self._crawl_website(url, depth)
+                # Discovery fallback
+                print_status("Step 1b: Running discovery for common sensitive files...")
+                self._discover_common_files()
             else:
                 print_status("Step 1: Skipping crawl (--no-crawl)")
                 self.crawled_urls.add(url)
@@ -435,7 +447,7 @@ class WebVulnScannerPlugin(Plugin):
             self._detect_technologies()
             
             if self.technologies:
-                print_success("Detected technologies:")
+                print_success("Detected stack components:")
                 for tech, urls in self.technologies.items():
                     print_info(f"  - {tech}: {len(urls)} URLs")
             
@@ -453,14 +465,15 @@ class WebVulnScannerPlugin(Plugin):
             modules = self._find_modules(module_patterns, url_data)
             
             if not modules:
-                print_warning("No suitable modules found for the detected stack.")
+                print_warning("No specific exploit modules matched the detected stack.")
+                print_info("Consider running generic scanner modules manually.")
             else:
-                print_success(f"Found {len(modules)} relevant modules to test")
+                print_success(f"Found {len(modules)} potential exploit modules")
                 top_modules = modules[:10]
                 for mod in top_modules:
                     path = mod['path']
                     score = mod['score']
-                    print_info(f"  - {path} (score: {score})")
+                    print_info(f"  - {path} (match score: {score})")
             
             # Step 6: Test vulnerabilities
             if modules:
@@ -492,6 +505,7 @@ class WebVulnScannerPlugin(Plugin):
         self.session = requests.Session()
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
+        self.session.verify = False # Disable SSL verification for speed/internal targets
         self.session.headers.update({
             'User-Agent': user_agent,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -721,12 +735,43 @@ class WebVulnScannerPlugin(Plugin):
         except:
             return []
 
+    def _discover_common_files(self):
+        """Active discovery of common sensitive files if not found by crawler"""
+        common_paths = [
+            'robots.txt', 'sitemap.xml', '.git/config', '.env', 'phpinfo.php', 
+            'config.php', 'wp-config.php', '.htaccess', 'backup.zip', 'backup.sql',
+            'admin/', 'login/', 'api/v1/', 'assets/', 'uploads/'
+        ]
+        
+        # We target the base URL
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(self._get_page, urljoin(self.base_url, path)): path for path in common_paths}
+            for future in as_completed(futures):
+                path = futures[future]
+                try:
+                    resp = future.result()
+                    # 200 is a hit, 403 is also interesting (indicates existence)
+                    if resp and resp['status_code'] in [200, 403]:
+                        full_url = urljoin(self.base_url, path)
+                        if full_url not in self.crawled_urls:
+                            if self.verbose: print_info(f"  [+] Discovered: {path} ({resp['status_code']})")
+                            self.crawled_urls.add(full_url)
+                except:
+                    pass
+
     def _detect_technologies(self):
-        """Detect technologies using headers and content"""
+        """Detect technologies using headers and content with tokenization"""
         # We only check a subset of URLs to save time
         check_urls = list(self.crawled_urls)[:15]
         if not check_urls: return
         
+        # Common tech keywords to look for
+        known_keywords = {
+            'nginx', 'apache', 'php', 'wordpress', 'drupal', 'joomla', 'laravel', 
+            'django', 'tomcat', 'iis', 'express', 'node', 'fastapi', 'flask', 
+            'ubuntu', 'debian', 'centos', 'redhat', 'windows', 'asp.net', 'jsp'
+        }
+
         for url in check_urls:
             page = self._get_page(url)
             if not page: continue
@@ -734,18 +779,40 @@ class WebVulnScannerPlugin(Plugin):
             headers = page['headers']
             text = (page['text'] or "").lower()
             
-            # Header Analysis
-            if 'Server' in headers: self.technologies[headers['Server']].append(url)
-            if 'X-Powered-By' in headers: self.technologies[headers['X-Powered-By']].append(url)
-            
-            # Content Analysis
-            if 'wp-content' in text: self.technologies['WordPress'].append(url)
-            if 'drupal' in text: self.technologies['Drupal'].append(url)
-            if 'joomla' in text: self.technologies['Joomla'].append(url)
-            if 'laravel' in text: self.technologies['Laravel'].append(url)
-            if 'django' in text: self.technologies['Django'].append(url)
-            if 'php' in text or '.php' in url: self.technologies['PHP'].append(url)
-            if 'tomcat' in text: self.technologies['Tomcat'].append(url)
+            # 1. Header Analysis (Tokenize Server and X-Powered-By)
+            for header in ['Server', 'X-Powered-By', 'Via', 'X-AspNet-Version']:
+                if header in headers:
+                    val = headers[header]
+                    self.technologies[val].append(url)
+                    # Tokenize
+                    tokens = re.split(r'[^a-zA-Z0-9.-]', val.lower())
+                    for token in tokens:
+                        if len(token) > 1:
+                            if token in known_keywords or any(k in token for k in known_keywords):
+                                self.tech_tokens.add(token)
+
+            # 2. Content Analysis (Heuristics)
+            heuristics = {
+                'WordPress': ['wp-content', 'wp-includes', 'wp-json'],
+                'Drupal': ['drupal.js', 'sites/all', 'drupal settings'],
+                'Joomla': ['joomla!', 'option=com_', '/media/system/js/'],
+                'Laravel': ['laravel_session', 'x-csrf-token'],
+                'Django': ['csrftoken', '__admin__', 'django'],
+                'PHP': ['phpinfo', '.php', 'powered by php'],
+                'Tomcat': ['jsessionid', 'apache tomcat'],
+                'Express': ['x-powered-by: express'],
+                'FastAPI': ['fastapi', 'openapi.json'],
+                'React': ['react-root', '__react'],
+            }
+
+            for tech, sigs in heuristics.items():
+                if any(sig in text for sig in sigs):
+                    self.technologies[tech].append(url)
+                    self.tech_tokens.add(tech.lower())
+                    
+        # Add basic OS tokens if found in server string
+        if 'ubuntu' in self.tech_tokens: self.tech_tokens.add('linux')
+        if 'win' in self.tech_tokens: self.tech_tokens.add('windows')
 
     def _active_exploit(self, url_data: List[Dict]) -> int:
         """Active verification of parameters"""
@@ -812,101 +879,127 @@ class WebVulnScannerPlugin(Plugin):
         if any(x in p for x in ['url', 'uri', 'site', 'host', 'dest']): return 'ssrf'
         return 'unknown'
 
-    def _test_sqli(self, url, base_params, param, method, entry) -> int:
-        """Check SQL Injection"""
-        # Error based
-        for payload in SQLI_PAYLOADS['error_based'][:4]:
-            p = base_params.copy()
-            p[param] = payload
-            resp = self._request(url, method, p)
-            if resp and any(e in resp.text.lower() for e in SQLI_ERROR_SIGNATURES):
-                self._record_result(url=url, attack="SQLi (Error)", parameter=param, evidence="SQL Error detected", payload=payload, method=method)
-                entry['signals'].add('sqli')
-                return 1
+    def _test_url_entry(self, entry: Dict) -> int:
+        """Test a single URL using appropriate KittySploit modules"""
+        url = self._clean_url(entry['url'])
+        params = self._flatten_params(entry.get('query_params', {}))
+        form_data = dict(entry.get('form_data', {}))
+        
+        count = 0
+        parsed = urlparse(url)
+        base_target = f"{parsed.scheme}://{parsed.netloc}"
+        
+        # Determine likely vulnerabilities based on parameters
+        for param in chain(params.keys(), form_data.keys()):
+            ptype = self._infer_param_type(param)
+            method = 'GET' if param in params else 'POST'
+            
+            # Map vulnerability types to KittySploit scanner modules
+            # We use the auxiliary/scanner/http modules instead of redundant code
+            vuln_modules = {
+                'sqli': 'auxiliary/scanner/http/sql_injection',
+                'xss': 'auxiliary/scanner/http/xss_scanner',
+                'lfi': 'auxiliary/scanner/http/lfi_fuzzer',
+                'ssrf': 'auxiliary/scanner/http/ssrf_scanner',
+                'xxe': 'auxiliary/scanner/http/xxe_scanner'
+            }
+            
+            # If we identified a likely type, prioritze that module
+            module_path = vuln_modules.get(ptype)
+            
+            # Otherwise, if we are in aggressive mode or it's 'unknown', 
+            # we might want to test everything (handled by the loop)
+            types_to_test = [ptype] if ptype != 'unknown' else vuln_modules.keys()
+            
+            for t in types_to_test:
+                mod_path = vuln_modules.get(t)
+                if not mod_path: continue
+                
+                # Run the module
+                if self._run_generic_scanner(mod_path, base_target, parsed.path, param, method, entry):
+                    count += 1
+                    entry['signals'].add(t)
+                    # If we found a hit, maybe stop testing other types for this param?
+                    if not self.aggressive: break
+                    
+        return count
+
+    def _run_generic_scanner(self, mod_path, target, path, parameter, method, entry):
+        """Helper to run a generic KittySploit scanner module with specific parameters"""
+        try:
+            module = self.framework.module_loader.load_module(mod_path, framework=self.framework)
+            if not module: return False
+            
+            # Universal configuration
+            self._set_vals(module, 'RHOSTS', urlparse(target).hostname)
+            self._set_vals(module, 'TARGET', target)
+            self._set_vals(module, 'PATH', path)
+            self._set_vals(module, 'PARAMETER', parameter)
+            self._set_vals(module, 'METHOD', method)
+            
+            # Specific options for some modules
+            if 'lfi_fuzzer' in mod_path:
+                # lfi_fuzzer uses 'target' as full URL with parameter
+                full_url = f"{target}{path}?{parameter}=" if method == 'GET' else f"{target}{path}"
+                self._set_vals(module, 'target', full_url)
+                self._set_vals(module, 'parameter', parameter)
+
+            # Execute check or run
+            if hasattr(module, 'check'):
+                res = module.check()
+                if self._check_is_vuln(res):
+                    vuln_name = mod_path.split('/')[-1].replace('_', ' ').title()
+                    self._record_result(
+                        url=f"{target}{path}", 
+                        attack=vuln_name, 
+                        parameter=parameter, 
+                        evidence=f"Confirmed by {mod_path}", 
+                        method=method
+                    )
+                    return True
+            
+            # Some modules only have run()
+            if hasattr(module, 'run'):
+                # Redirect output? No, let it print or capture results if module supports it
+                # For now, we assume if run() completes and we can verify state...
+                # Ideally scanners return a boolean or a list of found vulns.
+                # auxiliary/scanner/http/sql_injection returns True if vulnerable.
+                res = module.run()
+                if res:
+                    vuln_name = mod_path.split('/')[-1].replace('_', ' ').title()
+                    self._record_result(
+                        url=f"{target}{path}", 
+                        attack=vuln_name, 
+                        parameter=parameter, 
+                        evidence=f"Detected by module execution: {mod_path}", 
+                        method=method
+                    )
+                    return True
+            
+            return False
+        except Exception as e:
+            if self.verbose: 
+                print_debug(f"Error running generic scanner {mod_path}: {e}")
+            return False
+
+    def _test_sqli(self, *args, **kwargs):
+        # Deprecated: usage moved to _run_generic_scanner
         return 0
 
-    def _test_xss(self, url, base_params, param, method, entry) -> int:
-        """Check Reflected XSS"""
-        token = f"KSP{random.randint(1000,9999)}"
-        # Simple probe
-        payload = f"<ksp>{token}</ksp>"
-        p = base_params.copy()
-        p[param] = payload
-        resp = self._request(url, method, p)
-        if resp and payload in resp.text:
-            # If reflected by simple probe, try actual XSS
-            real_payload = f"<script>alert('{token}')</script>"
-            p[param] = real_payload
-            resp2 = self._request(url, method, p)
-            if resp2 and real_payload in resp2.text:
-                 self._record_result(url=url, attack="Reflected XSS", parameter=param, evidence=f"Payload reflected: {real_payload}", payload=real_payload, method=method)
-                 entry['signals'].add('xss')
-                 return 1
+    def _test_xss(self, *args, **kwargs):
+        # Deprecated: usage moved to _run_generic_scanner
         return 0
 
-    def _test_rce(self, url, base_params, param, method, entry) -> int:
-        """Check RCE (Math and Echo based to avoid false positives)"""
-        
-        # 1. Math-based (Higher confidence, immune to reflection)
-        # Unix: expr or $(( ))
-        a = random.randint(1000, 9999)
-        b = random.randint(1000, 9999)
-        target_sum = str(a + b)
-        
-        math_payloads = [
-            (f"; expr {a} + {b}", target_sum),
-            (f"| expr {a} + {b}", target_sum),
-            (f"&& expr {a} + {b}", target_sum),
-            (f"$(expr {a} + {b})", target_sum),
-            (f"; echo $(({a}+{b}))", target_sum),
-            (f"| echo $(({a}+{b}))", target_sum)
-        ]
-        
-        for payload, expected in math_payloads:
-            p = base_params.copy()
-            p[param] = payload
-            resp = self._request(url, method, p)
-            if resp and expected in resp.text:
-                 # Check that the payload literal is NOT in the response (avoid simple reflection of "echo $((...))")
-                 if payload not in resp.text:
-                     self._record_result(url=url, attack="Command Injection (RCE-Math)", parameter=param, evidence=f"Math evaluated: {a}+{b}={expected}", payload=payload, method=method)
-                     entry['signals'].add('rce')
-                     return 1
-
-        # 2. Echo-based (Fallback, with anti-reflection check)
-        token = f"RCE{random.randint(1000,9999)}"
-        echo_payloads = [f";echo {token}", f"|echo {token}", f"||echo {token}", f"`echo {token}`"]
-        
-        for payload in echo_payloads:
-            p = base_params.copy()
-            p[param] = payload
-            resp = self._request(url, method, p)
-            if resp:
-                # CRITICAL: Check if the payload itself is reflected. 
-                # If the full payload is present, it's likely just XSS/Reflection, not RCE.
-                if token in resp.text and payload not in resp.text:
-                    self._record_result(url=url, attack="Command Injection (RCE-Echo)", parameter=param, evidence=f"Command output: {token}", payload=payload, method=method)
-                    entry['signals'].add('rce')
-                    return 1
+    def _test_rce(self, *args, **kwargs):
+        # Deprecated: usage moved to _run_generic_scanner
         return 0
 
-    def _test_lfi(self, url, base_params, param, method, entry) -> int:
-        """Check LFI"""
-        for payload in ["../../../../etc/passwd", "C:\\windows\\win.ini"]:
-            p = base_params.copy()
-            p[param] = payload
-            resp = self._request(url, method, p)
-            if resp:
-                if "root:x:" in resp.text or "[fonts]" in resp.text:
-                    self._record_result(url=url, attack="Local File Inclusion", parameter=param, evidence="File content leaked", payload=payload, method=method)
-                    entry['signals'].add('lfi')
-                    return 1
+    def _test_lfi(self, *args, **kwargs):
+        # Deprecated: usage moved to _run_generic_scanner
         return 0
 
-    def _test_ssrf(self, url, base_params, param, method, entry) -> int:
-        # Difficult to verify without external callback. 
-        # Check for error differences or time delay when accessing blocked ports?
-        # For now, simplistic.
+    def _test_ssrf(self, *args, **kwargs):
+        # Deprecated: usage moved to _run_generic_scanner
         return 0
 
     def _request(self, url, method, params, timeout=None) -> Optional[requests.Response]:
@@ -919,50 +1012,49 @@ class WebVulnScannerPlugin(Plugin):
             return None
 
     def _find_modules(self, patterns: List[str], url_data: List[Dict]) -> List[Dict]:
-        """Smart Module Selection Strategy"""
+        """Smart Module Selection Strategy using tokenized strings"""
         if not self.framework: return []
         
         candidates = []
         
-        # 1. Identify keywords from technologies
-        tech_keywords = set()
-        for tech in self.technologies.keys():
-            tech_keywords.add(tech.lower())
-            
-        # 2. Identify signals from passive/active analysis
+        # 1. Identify signals from passive/active analysis
         vuln_signals = set()
         for u in url_data:
             vuln_signals.update(u.get('signals', []))
         
-        # 3. Scan all modules
+        # 2. Scan all modules
         all_modules = self._list_all_exploit_modules()
         
         for mod_path in all_modules:
             score = 0
+            mod_parts = re.split(r'[^a-zA-Z0-9]', mod_path.lower())
+            mod_parts = [p for p in mod_parts if len(p) > 2]
             mod_lower = mod_path.lower()
             
             # Base score if matches user pattern
             if 'all' in patterns:
                 score += 1
             elif any(pat in mod_lower for pat in patterns):
-                score += 10
+                score += 20
             
             if score == 0: continue
             
-            # Technology Boost
-            for tech in tech_keywords:
-                if tech in mod_lower:
-                    score += 20 # Strong signal
+            # Technology Boost (using tokens)
+            # e.g. if mod_path is 'exploits/linux/http/apache_rce' and tech_tokens has 'apache'
+            for tech in self.tech_tokens:
+                if tech in mod_parts or tech in mod_lower:
+                    score += 30 # Significant match
             
             # Vulnerability Type Boost
             for signal in vuln_signals:
-                if signal in mod_lower:
-                    score += 15
+                if signal in mod_parts or signal in mod_lower:
+                    score += 25
             
-            # Path heuristics (e.g. if URL contains /wp-admin and module is wp_admin_shell)
-            # This requires checking module metadata which is expensive, so rely on name
-            
-            if score > 5:
+            # Context boost (HTTP modules have priority for web scan)
+            if 'http' in mod_lower:
+                score += 10
+
+            if score > 10:
                 candidates.append({'path': mod_path, 'score': score})
                 
         # Sort
@@ -972,71 +1064,75 @@ class WebVulnScannerPlugin(Plugin):
     def _list_all_exploit_modules(self) -> List[str]:
         """Traverse filesystem to find modules"""
         modules = []
-        base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules', 'exploits')
-        for root, _, files in os.walk(base_dir):
-            for file in files:
-                if file.endswith('.py') and not file.startswith('__'):
-                    rel = os.path.relpath(os.path.join(root, file), os.path.dirname(os.path.dirname(__file__)))
-                    mod_name = rel.replace('\\', '/').replace('.py', '').replace('modules/', '')
-                    modules.append(mod_name)
+        # Support both 'exploits' and 'auxiliary'
+        module_types = ['exploits', 'auxiliary']
+        
+        for m_type in module_types:
+            base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules', m_type)
+            if not os.path.exists(base_dir): continue
+            
+            for root, _, files in os.walk(base_dir):
+                for file in files:
+                    if file.endswith('.py') and not file.startswith('__'):
+                        # Calculate relative path from 'modules/'
+                        full_path = os.path.join(root, file)
+                        modules_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules')
+                        rel = os.path.relpath(full_path, modules_root)
+                        mod_name = rel.replace('\\', '/').replace('.py', '')
+                        modules.append(mod_name)
         return modules
 
     def _test_vulnerabilities(self, url_data, modules, threads):
         """Run selected modules against targets"""
         # Group modules by relevance to avoid spamming every URL with every module
-        # Simple strategy: Test top scoring modules against generic targets, 
-        # and checking if module-specific keywords match URL components.
-        
         tasks = []
         
-        # Strategy:
-        # 1. Logic: If module mentions 'wordpress' only test on URLs with 'wp' triggers or if Tech=Wordpress
-        # 2. If module is generic 'apache', test on root URL
+        # Limit to top scoring modules to keep it efficient
+        top_modules = modules[:20]
         
-        # For simplicity in this improved version, we limit cartesian product:
-        # Test top 5 modules on ALL URLs.
-        # Test remaining modules only on URLs that match hints.
-        
-        for i, mod in enumerate(modules):
+        for mod in top_modules:
             mod_path = mod['path']
-            is_generic = i < 3 # Top 3 are always checked everywhere
+            # Only test modules that aren't the ones we already used in _test_url_entry
+            if 'scanner/http/' in mod_path: continue
             
             for url_entry in url_data:
-                url = url_entry['url']
-                
-                # Check relevance
-                if not is_generic:
-                    # quick heuristic
-                    if not self._is_module_relevant(mod_path, url_entry):
-                        continue
+                # check relevance
+                if not self._is_module_relevant(mod_path, url_entry):
+                    continue
                 
                 tasks.append((mod_path, url_entry))
         
-        # Execute
-        print_info(f"Generated {len(tasks)} exploit tasks.")
+        if not tasks:
+            return
+
+        print_info(f"Generated {len(tasks)} exploit/auxiliary tasks.")
         
-        # Parallel execution logic (simplified from original)
-        # We process tasks in chunks
-        chunk_size = threads
-        for i in range(0, len(tasks), chunk_size):
-            chunk = tasks[i:i+chunk_size]
-            threads_list = []
-            for mod_path, url_entry in chunk:
-                t = threading.Thread(target=self._run_single_module, args=(mod_path, url_entry))
-                threads_list.append(t)
-                t.start()
-            for t in threads_list:
-                t.join()
+        # Parallel execution logic
+        with ThreadPoolExecutor(max_workers=threads) as executor:
+            futures = [executor.submit(self._run_single_module, mod_path, url_entry) for mod_path, url_entry in tasks]
+            for future in as_completed(futures):
+                pass
 
     def _is_module_relevant(self, mod_path: str, url_entry: Dict) -> bool:
         """Check if module is relevant for URL"""
         mp = mod_path.lower()
         u = url_entry['url'].lower()
         
-        # Common patterns
+        # Tech heuristics
+        techs = [t.lower() for t in self.technologies.keys()]
+        
+        # If tech is known, filter modules by tech
+        if techs:
+            # If module name contains a tech that is NOT in the target's techs, return False
+            known_tech_keywords = ['wordpress', 'joomla', 'drupal', 'laravel', 'django', 'php', 'tomcat', 'nginx', 'apache', 'iis']
+            for tech in known_tech_keywords:
+                if tech in mp and tech not in techs:
+                    return False
+
+        # Pattern heuristics
         if 'wordpress' in mp and 'wp-' not in u: return False
         if 'joomla' in mp and 'com_content' not in u: return False
-        # Add more heuristics...
+        
         return True
 
     def _run_single_module(self, mod_path, url_entry):
@@ -1047,11 +1143,15 @@ class WebVulnScannerPlugin(Plugin):
             
             parsed = urlparse(url_entry['url'])
             # Configure
-            self._set_vals(module, 'RHOST', parsed.hostname)
+            self._set_vals(module, 'RHOSTS', parsed.hostname)
             self._set_vals(module, 'RPORT', parsed.port or (443 if parsed.scheme=='https' else 80))
             self._set_vals(module, 'SSL', parsed.scheme=='https')
             self._set_vals(module, 'TARGETURI', parsed.path or '/')
             
+            # Some modules use 'TARGET' or 'RHOST'
+            self._set_vals(module, 'TARGET', f"{parsed.scheme}://{parsed.netloc}")
+            self._set_vals(module, 'RHOST', parsed.hostname)
+
             # Check
             if hasattr(module, 'check'):
                 res = module.check()
@@ -1060,19 +1160,33 @@ class WebVulnScannerPlugin(Plugin):
                     # Exploit?
                     if self.aggressive and hasattr(module, 'run'):
                         module.run()
+            elif hasattr(module, 'run'):
+                # Modules with only run() are more dangerous to run blindly
+                # only run if aggressive or if score was very high
+                if self.aggressive:
+                    module.run()
         except:
             pass
 
     def _set_vals(self, mod, opt, val):
+        """Safely set option values on a module"""
         if hasattr(mod, opt):
             try:
-                getattr(mod, opt).value = val
+                # Try setting the .value property (for OptString, etc.)
+                opt_obj = getattr(mod, opt)
+                if hasattr(opt_obj, 'value'):
+                    opt_obj.value = val
+                else:
+                    # Fallback for descriptors or simple attributes
+                    setattr(mod, opt, val)
             except:
+                # Final fallback
                 setattr(mod, opt, val)
 
     def _check_is_vuln(self, res):
         if isinstance(res, bool): return res
         if isinstance(res, dict): return res.get('vulnerable', False)
+        if hasattr(res, 'vulnerable'): return res.vulnerable
         return False
 
     def _flatten_params(self, params):
@@ -1089,7 +1203,7 @@ class WebVulnScannerPlugin(Plugin):
         with self.cache_lock:
             if url in self.page_cache: return self.page_cache[url]
         try:
-            r = self.session.get(url, timeout=self.timeout)
+            r = self.session.get(url, timeout=self.timeout, verify=False)
             ret = {'status_code': r.status_code, 'text': r.text, 'headers': r.headers}
             with self.cache_lock: self.page_cache[url] = ret
             return ret
@@ -1119,7 +1233,8 @@ class WebVulnScannerPlugin(Plugin):
             if 'module' in res:
                 print_info(f"Module: {res['module']}")
                 print_info(f"Target: {res['url']}")
-                print_info(f"Status: {res['status']}")
+                print_info(f"Status: {res.get('status', 'Detected')}")
+                if 'message' in res: print_info(f"Details: {res['message']}")
             else:
                 print_info(f"Type: {res['attack']}")
                 print_info(f"URL: {res['url']}")
@@ -1136,4 +1251,6 @@ class WebVulnScannerPlugin(Plugin):
                         cmd += f" \"{res['url']}{sep}{res['parameter']}={urllib.parse.quote(res['payload'])}\""
                     print_info(f"Reproduction: {cmd}")
             print_info("-" * 30)
+
+from itertools import chain
 

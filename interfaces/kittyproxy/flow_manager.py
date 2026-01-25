@@ -38,6 +38,9 @@ class FlowManager:
             'mode': 'include',  # 'include' or 'exclude'
             'patterns': []
         }
+
+        # Flows imported from PCAP (id -> full flow dict)
+        self.imported_pcap_flows: Dict[str, Dict] = {}
         
         # Worker thread for heavy analysis
         self.analysis_queue = queue.Queue()
@@ -243,10 +246,30 @@ class FlowManager:
             # Return flows in reverse order (newest first)
             return list(reversed(list(self.flow_cache.values())))
 
+    def add_imported_pcap_flows(self, flows: List[Dict]) -> int:
+        """Add flows imported from a PCAP file. Returns count added."""
+        with self._lock:
+            n = 0
+            for f in flows:
+                fid = f.get("id")
+                if not fid:
+                    continue
+                self.imported_pcap_flows[fid] = f
+                n += 1
+            if n:
+                print(f"[FLOW MANAGER] Added {n} flow(s) from PCAP import")
+            return n
+
     def get_flows_paginated(self, page: int = 1, size: int = 50, search: str = None) -> Dict:
         """Returns a paginated slice of flows."""
         with self._lock:
             all_flows = list(reversed(list(self.flow_cache.values())))
+            # Merge imported PCAP flows (minimal view for list: no request/response bodies)
+            for fid, f in self.imported_pcap_flows.items():
+                minimal = {k: v for k, v in f.items() if k not in ("request", "response")}
+                all_flows.append(minimal)
+            # Keep newest first (imported are appended last; we could sort by timestamp)
+            all_flows.sort(key=lambda x: x.get("timestamp_start") or 0, reverse=True)
             
             # Filter by scope if enabled
             if self.scope_config.get('enabled', False) and self.scope_config.get('patterns'):
@@ -312,6 +335,9 @@ class FlowManager:
     def get_flow(self, flow_id: str) -> Optional[Dict]:
         """Returns full details of a specific flow."""
         with self._lock:
+            imported = self.imported_pcap_flows.get(flow_id)
+            if imported is not None:
+                return imported
             flow = self.flows.get(flow_id)
             if not flow:
                 return None
@@ -757,6 +783,7 @@ class FlowManager:
             self.flows.clear()
             self.flow_cache.clear()
             self.flow_analysis_cache.clear()
+            self.imported_pcap_flows.clear()
             self.pending_intercepts.clear()
             self.intercept_queue.clear()
     

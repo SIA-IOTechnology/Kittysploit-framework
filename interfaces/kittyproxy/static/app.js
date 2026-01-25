@@ -3109,7 +3109,12 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
     }
 
     // Show loading state (only if not silent)
-    const btn = event?.target?.closest('button');
+    let btn = null;
+    try {
+        btn = (typeof event !== 'undefined' && event?.target) ? event.target.closest('button') : null;
+    } catch (e) {
+        // Ignore if event is not defined or other issues
+    }
     const originalText = btn ? btn.innerHTML : '';
     if (btn && !silent) {
         btn.disabled = true;
@@ -4262,6 +4267,40 @@ if (clearBtn) {
 
         // Clear all tab histories
         clearAllTabHistories();
+    });
+}
+
+// === PCAP import (next to Scope) ===
+const pcapUploadBtn = document.getElementById('pcap-upload-btn');
+const pcapUploadInput = document.getElementById('pcap-upload-input');
+if (pcapUploadBtn && pcapUploadInput) {
+    pcapUploadBtn.addEventListener('click', () => pcapUploadInput.click());
+    pcapUploadInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        pcapUploadInput.value = '';
+        pcapUploadBtn.disabled = true;
+        const origHtml = pcapUploadBtn.innerHTML;
+        pcapUploadBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px; animation: spin 1s linear infinite;">sync</span> Import...';
+        try {
+            const res = await fetch(`${API_BASE}/flows/import-pcap`, { method: 'POST', body: form });
+            const data = await res.json();
+            if (res.ok && data.imported != null) {
+                await fetchFlows();
+                renderFlowList();
+                showToast(`PCAP importé: ${data.imported} flux HTTP/HTTPS affichés`, 'success');
+            } else {
+                showToast(data.detail || 'Import PCAP échoué', 'error');
+            }
+        } catch (err) {
+            console.error('PCAP import error', err);
+            showToast('Erreur lors de l\'import PCAP', 'error');
+        } finally {
+            pcapUploadBtn.disabled = false;
+            pcapUploadBtn.innerHTML = origHtml;
+        }
     });
 }
 
@@ -5920,13 +5959,16 @@ function renderFlowList() {
         urlEl.style.alignItems = 'center';
         urlEl.style.gap = '6px';
 
-        // Add API indicator if flow is from API Tester
-        const apiIndicator = flow.source === 'api_tester'
-            ? '<span class="material-symbols-outlined" style="font-size: 16px; color: #6200ea; flex-shrink: 0;" title="Sent from API Tester">api</span>'
-            : '';
+        // Add source indicators (API Tester, PCAP import)
+        let sourceIndicator = '';
+        if (flow.source === 'api_tester')
+            sourceIndicator = '<span class="material-symbols-outlined" style="font-size: 16px; color: #6200ea; flex-shrink: 0;" title="Sent from API Tester">api</span>';
+        else if (flow.source === 'pcap')
+            sourceIndicator = '<span class="material-symbols-outlined" style="font-size: 16px; color: #ff9800; flex-shrink: 0;" title="Imported from PCAP">upload_file</span>';
 
-        urlEl.innerHTML = `${apiIndicator}<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${flow.url || '-'}</span>${techBadges}`;
-        urlEl.title = flow.url + (allTechs.length > 0 ? `\nTechnologies: ${allTechs.join(', ')}` : '') + (flow.source === 'api_tester' ? '\nSource: API Tester' : '');
+        urlEl.innerHTML = `${sourceIndicator}<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${flow.url || '-'}</span>${techBadges}`;
+        const sourceNote = flow.source === 'api_tester' ? '\nSource: API Tester' : (flow.source === 'pcap' ? '\nSource: PCAP import' : '');
+        urlEl.title = flow.url + (allTechs.length > 0 ? `\nTechnologies: ${allTechs.join(', ')}` : '') + sourceNote;
 
         // Size - calculate from response_size (always available) or response.content_length (detail view)
         let sizeText = '-';
@@ -8223,6 +8265,19 @@ async function showTechDetection() {
     const allFingerprints = [];
     const allSuggestions = [];
     const vulnerabilities = [];
+    const configs = new Set();
+    const suggestionFlowMap = new Map();
+
+    const findFlowForModule = (moduleName) => {
+        if (!moduleName) return null;
+        const normalized = moduleName.toLowerCase();
+        return flowsData.find(flow => {
+            const techs = flow.technologies || {};
+            return Object.values(techs).some(arr =>
+                (arr || []).some(tech => normalized.includes(String(tech).toLowerCase()))
+            );
+        }) || null;
+    };
 
     flowsData.forEach(flow => {
         const techs = flow.technologies || {};
@@ -8238,18 +8293,38 @@ async function showTechDetection() {
             if (flow.fingerprint.vulnerabilities) {
                 vulnerabilities.push(...flow.fingerprint.vulnerabilities);
             }
+            (flow.fingerprint.configurations || []).forEach(cfg => {
+                if (!cfg) return;
+                const description = typeof cfg === 'string' ? cfg : (cfg.description || '');
+                if (description) {
+                    configs.add(description);
+                }
+            });
         }
 
         // Collecter les suggestions
         if (flow.module_suggestions) {
-            allSuggestions.push(...flow.module_suggestions);
+            flow.module_suggestions.forEach(sugg => {
+                allSuggestions.push(sugg);
+                if (sugg?.module && flow.id && !suggestionFlowMap.has(sugg.module)) {
+                    suggestionFlowMap.set(sugg.module, flow.id);
+                }
+            });
         }
     });
 
     // Récupérer des suggestions dynamiques côté backend
     const backendSuggestions = await fetchModuleSuggestions(techCounts, configs);
     if (Array.isArray(backendSuggestions)) {
-        allSuggestions.push(...backendSuggestions);
+        backendSuggestions.forEach(sugg => {
+            allSuggestions.push(sugg);
+            if (sugg?.module && !suggestionFlowMap.has(sugg.module)) {
+                const mappedFlow = findFlowForModule(sugg.module) || (currentFlowId ? flowsData.find(f => f.id === currentFlowId) : flowsData[0]);
+                if (mappedFlow?.id) {
+                    suggestionFlowMap.set(sugg.module, mappedFlow.id);
+                }
+            }
+        });
     }
 
     // Créer le HTML
@@ -8300,14 +8375,6 @@ async function showTechDetection() {
         });
         html += '</div></div>';
     }
-
-    // Configurations détectées
-    const configs = new Set();
-    allFingerprints.forEach(fp => {
-        (fp.configurations || []).forEach(cfg => {
-            configs.add(cfg.description);
-        });
-    });
 
     if (configs.size > 0) {
         html += '<div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">';
@@ -8392,10 +8459,13 @@ async function showTechDetection() {
 
         sortedSuggestions.forEach((sugg, index) => {
             const priorityColor = sugg.priority === 'high' ? '#f44336' : sugg.priority === 'medium' ? '#ff9800' : '#4caf50';
-            html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${priorityColor}; cursor: pointer;" 
-                onmouseover="this.style.background='#f0f0f0'" 
+            const suggestionFlowId = suggestionFlowMap.get(sugg.module) || currentFlowId || (flowsData[0]?.id || '');
+            const safeModuleAttr = (sugg.module || '').replace(/'/g, "\\'");
+            const safeFlowAttr = suggestionFlowId ? suggestionFlowId.replace(/'/g, "\\'") : '';
+            html += `<div style="background: #f8f9fa; padding: 16px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${priorityColor}; cursor: pointer;"
+                onmouseover="this.style.background='#f0f0f0'"
                 onmouseout="this.style.background='#f8f9fa'"
-                onclick="openModuleSuggestion('${sugg.module}', '${currentFlowId || ''}')">`;
+                onclick="openModuleSuggestion('${safeModuleAttr}', '${safeFlowAttr}')">`;
             html += `<div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">`;
             html += `<div style="flex: 1;">`;
             html += `<div style="font-weight: 600; color: #333; margin-bottom: 4px;">${sugg.module}</div>`;
@@ -8423,121 +8493,156 @@ async function showTechDetection() {
 }
 
 async function openModuleSuggestion(modulePath, flowId = null) {
+    // Helpers: load a module on-demand when it's not in the cached list
+    const encodeModulePathForApi = (p) => {
+        try {
+            return String(p || '')
+                .split('/')
+                .map(seg => encodeURIComponent(seg))
+                .join('/');
+        } catch (e) {
+            return String(p || '');
+        }
+    };
+
+    const ensureModuleInModulesData = async (p) => {
+        const wanted = String(p || '');
+        if (!wanted) return null;
+
+        // Already present in list
+        const existing = modulesData.find(m => m && m.name === wanted);
+        if (existing) return existing;
+
+        // Try to fetch full info from backend (works even if module not in "web" cache)
+        try {
+            const res = await fetch(`${API_BASE}/modules/${encodeModulePathForApi(wanted)}`);
+            if (!res.ok) return null;
+            const info = await res.json();
+
+            if (info && info.name) {
+                // Normalize shape + add minimal fields expected by the UI
+                const moduleObj = {
+                    name: info.name,
+                    description: info.description || 'No description available',
+                    author: info.author || 'Unknown',
+                    category: (String(info.name).split('/')[0] || 'misc'),
+                    options: Array.isArray(info.options) ? info.options : [],
+                    tags: info.tags || []
+                };
+                modulesData.push(moduleObj);
+                return moduleObj;
+            }
+        } catch (err) {
+            console.warn('[MODULE] Failed to fetch module info for suggestion:', err);
+        }
+
+        return null;
+    };
+
     // Utiliser le flowId fourni ou le currentFlowId
     const targetFlowId = flowId || currentFlowId;
-    const flow = targetFlowId ? flowsData.find(f => f.id === targetFlowId) : null;
-    
-    console.log('[MODULE] Opening module suggestion:', modulePath, 'for flow:', targetFlowId, flow?.url);
-    
-    // Basculer vers l'onglet Modules et sélectionner le module
-    const modulesTab = document.querySelector('[data-view="modules"]');
-    if (modulesTab) {
-        modulesTab.click();
-        
-        // Attendre que l'onglet soit chargé puis sélectionner le module
-        const waitForModule = async (retries = 20) => {
-            // S'assurer que les modules sont chargés
-            if (modulesData.length === 0 && typeof fetchModules === 'function') {
-                console.log('[MODULE] Loading modules...');
-                await fetchModules();
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-            
-            // S'assurer que la liste des modules est rendue
-            if (typeof renderModuleList === 'function') {
-                renderModuleList();
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-            
-            for (let i = 0; i < retries; i++) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                // Chercher les modules avec le bon sélecteur
-                const moduleItems = document.querySelectorAll('#module-list .flow-item[data-module-id]');
-                
-                for (const item of moduleItems) {
-                    const moduleId = item.getAttribute('data-module-id');
-                    if (moduleId === modulePath) {
-                        console.log('[MODULE] Found module item, clicking...', moduleId);
-                        // Déclencher le clic pour sélectionner le module
-                        item.click();
-                        
-                        // Attendre que renderModuleConfig soit complété
-                        await new Promise(resolve => setTimeout(resolve, 300));
-                        
-                        // Vérifier que le module est bien sélectionné
-                        if (selectedModuleId === modulePath) {
-                            console.log('[MODULE] Module selected, waiting for config panel...');
-                            
-                            // Attendre que le panneau de configuration soit rendu
-                            let configReady = false;
-                            for (let j = 0; j < 10; j++) {
-                                await new Promise(resolve => setTimeout(resolve, 100));
-                                const targetUrlInput = document.getElementById('module-target-url');
-                                if (targetUrlInput) {
-                                    configReady = true;
-                                    console.log('[MODULE] Config panel ready');
-                                    
-                                    if (flow && flow.url) {
-                                        // Configurer automatiquement le module avec l'URL du flow
-                                        targetUrlInput.value = flow.url;
-                                        console.log('[MODULE] URL set to:', flow.url);
-                                        
-                                        // Déclencher l'événement input pour s'assurer que la valeur est bien prise en compte
-                                        targetUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
-                                        
-                                        // Attendre un peu pour que l'input soit mis à jour
-                                        await new Promise(resolve => setTimeout(resolve, 200));
-                                        
-                                        // Auto-configurer les options depuis l'URL
-                                        try {
-                                            console.log('[MODULE] Auto-configuring module...');
-                                            await autoConfigureModuleFromUrl(modulePath, true);
-                                            
-                                            // Afficher un message dans le terminal
-                                            const moduleOutput = document.getElementById('module-output');
-                                            if (moduleOutput) {
-                                                moduleOutput.style.display = 'block';
-                                                moduleOutput.style.color = '#2196f3';
-                                                moduleOutput.style.background = '#e3f2fd';
-                                                moduleOutput.style.border = '1px solid #90caf9';
-                                                moduleOutput.style.borderRadius = '4px';
-                                                moduleOutput.style.padding = '12px';
-                                                moduleOutput.textContent = `✓ Module configured from current flow:\n  URL: ${flow.url}\n  Method: ${flow.method || 'N/A'}\n  Status: ${flow.status_code || 'N/A'}\n\nOptions have been auto-configured. Click "Run Module" to execute.`;
-                                                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-                                            }
-                                            console.log('[MODULE] Module configured successfully');
-                                        } catch (err) {
-                                            console.error('[MODULE] Error auto-configuring module:', err);
-                                        }
-                                    } else {
-                                        console.warn('[MODULE] No flow or URL available. Flow:', flow, 'FlowId:', targetFlowId);
-                                    }
-                                    return;
-                                }
-                            }
-                            
-                            if (!configReady) {
-                                console.warn('[MODULE] Config panel not ready after waiting');
-                            }
-                            return;
-                        } else {
-                            console.warn('[MODULE] Module not selected. Expected:', modulePath, 'Got:', selectedModuleId);
-                        }
-                    }
+    let flow = targetFlowId ? flowsData.find(f => f.id === targetFlowId) : null;
+
+    if (!flow && targetFlowId) {
+        try {
+            const res = await fetch(`${API_BASE}/flows/${targetFlowId}`);
+            if (res.ok) {
+                const fetchedFlow = await res.json();
+                flow = fetchedFlow;
+                const existingIndex = flowsData.findIndex(f => f.id === targetFlowId);
+                if (existingIndex !== -1) {
+                    flowsData[existingIndex] = { ...flowsData[existingIndex], ...fetchedFlow };
+                } else {
+                    flowsData.push(fetchedFlow);
                 }
-                
-                if (i === retries - 1) {
-                    console.warn('[MODULE] Module not found after', retries, 'retries. Module path:', modulePath);
-                    console.log('[MODULE] Available modules:', Array.from(document.querySelectorAll('#module-list .flow-item[data-module-id]')).map(el => el.getAttribute('data-module-id')));
-                }
+            } else {
+                console.warn(`[MODULE] Unable to fetch flow details (${res.status}) for ${targetFlowId}`);
             }
-        };
-        
-        // Démarrer la recherche du module
-        waitForModule();
-    } else {
-        console.error('[MODULE] Modules tab not found');
+        } catch (err) {
+            console.warn('[MODULE] Failed to fetch flow details for suggestion:', err);
+        }
     }
+
+    // Fallback: premier flow avec URL si le flow lié à la suggestion n'en a pas
+    const flowWithUrl = (flow && flow.url) ? flow : (flowsData.find(f => f && f.url) || null);
+    const urlToUse = flowWithUrl && (flowWithUrl.url || flowWithUrl.request?.url);
+
+    console.log('[MODULE] Opening module suggestion:', modulePath, 'for flow:', targetFlowId, urlToUse || '(no URL)');
+
+    const modulesTab = document.querySelector('[data-view="modules"]');
+    if (!modulesTab) {
+        console.error('[MODULE] Modules tab not found');
+        return;
+    }
+
+    modulesTab.click();
+
+    // Laisser l'onglet et le rendu se stabiliser (comme selectModuleFromFlow)
+    await new Promise(r => setTimeout(r, 100));
+
+    if (moduleSearchInput) {
+        moduleSearchInput.value = '';
+        moduleSearchTerm = '';
+    }
+
+    if (modulesData.length === 0 && typeof fetchModules === 'function') {
+        await fetchModules();
+    } else if (typeof renderModuleList === 'function') {
+        renderModuleList();
+    }
+
+    const ensured = await ensureModuleInModulesData(modulePath);
+    if (!ensured) {
+        showToast(`Module introuvable dans la liste: ${modulePath}`, 'error');
+        if (moduleConfigEl) {
+            moduleConfigEl.innerHTML = `
+                <div style="padding: 20px;">
+                    <h4 style="margin: 0 0 10px 0; color: #d32f2f;">Module not available</h4>
+                    <p style="margin: 0; color: #666;">
+                        Le module <code style="font-family:'Fira Code', monospace;">${escapeHtml(String(modulePath || ''))}</code>
+                        n'est pas disponible dans le cache actuel et n'a pas pu être chargé automatiquement.
+                    </p>
+                    <p style="margin: 10px 0 0 0; color: #888; font-size: 0.9em;">
+                        Astuce: vérifiez que le module existe côté framework et que Kittyproxy peut l'importer (voir <code>/api/modules/debug</code>).
+                    </p>
+                </div>
+            `;
+        }
+        return;
+    }
+
+    const resolvedModuleName = ensured?.name || modulePath;
+    selectedModuleId = resolvedModuleName;
+    if (typeof renderModuleList === 'function') renderModuleList();
+    if (typeof renderModuleConfig === 'function') renderModuleConfig(resolvedModuleName);
+
+    // Attendre que le panneau config soit rendu (comme selectModuleFromFlow)
+    await new Promise(r => setTimeout(r, 200));
+
+    const targetUrlInput = document.getElementById('module-target-url');
+    if (targetUrlInput && urlToUse) {
+        targetUrlInput.value = urlToUse;
+        targetUrlInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+        try {
+            await autoConfigureModuleFromUrl(resolvedModuleName, true);
+            const moduleOutput = document.getElementById('module-output');
+            if (moduleOutput) {
+                moduleOutput.style.display = 'block';
+                moduleOutput.style.color = '#2196f3';
+                moduleOutput.style.background = '#e3f2fd';
+                moduleOutput.style.border = '1px solid #90caf9';
+                moduleOutput.style.padding = '12px';
+                moduleOutput.textContent = `✓ Module préconfiguré pour: ${urlToUse}\nCliquez sur "Run Module" pour lancer.`;
+                moduleOutput.scrollTop = moduleOutput.scrollHeight;
+            }
+        } catch (err) {
+            console.error('[MODULE] Auto-config error:', err);
+        }
+    }
+
+    const item = document.querySelector(`#module-list .flow-item[data-module-id="${CSS.escape(resolvedModuleName)}"]`);
+    if (item) item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function showCompareDialog() {
@@ -13135,13 +13240,16 @@ function renderCollaborationFlows() {
         urlEl.style.alignItems = 'center';
         urlEl.style.gap = '6px';
 
-        // Add API indicator if flow is from API Tester
-        const apiIndicator = flow.source === 'api_tester'
-            ? '<span class="material-symbols-outlined" style="font-size: 16px; color: #6200ea; flex-shrink: 0;" title="Sent from API Tester">api</span>'
-            : '';
+        // Add source indicators (API Tester, PCAP import)
+        let sourceIndicator = '';
+        if (flow.source === 'api_tester')
+            sourceIndicator = '<span class="material-symbols-outlined" style="font-size: 16px; color: #6200ea; flex-shrink: 0;" title="Sent from API Tester">api</span>';
+        else if (flow.source === 'pcap')
+            sourceIndicator = '<span class="material-symbols-outlined" style="font-size: 16px; color: #ff9800; flex-shrink: 0;" title="Imported from PCAP">upload_file</span>';
 
-        urlEl.innerHTML = `${apiIndicator}<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${flow.url || '-'}</span>${techBadges}`;
-        urlEl.title = flow.url + (allTechs.length > 0 ? `\nTechnologies: ${allTechs.join(', ')}` : '') + (flow.source === 'api_tester' ? '\nSource: API Tester' : '');
+        urlEl.innerHTML = `${sourceIndicator}<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${flow.url || '-'}</span>${techBadges}`;
+        const sourceNote = flow.source === 'api_tester' ? '\nSource: API Tester' : (flow.source === 'pcap' ? '\nSource: PCAP import' : '');
+        urlEl.title = flow.url + (allTechs.length > 0 ? `\nTechnologies: ${allTechs.join(', ')}` : '') + sourceNote;
 
         // Size - calculate from response_size (always available) or response.content_length (detail view)
         let sizeText = '-';

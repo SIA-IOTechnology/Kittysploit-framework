@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Virtual Environment Helper
-Automatically detects and uses venv if it exists and we're not already in one.
-This module should be imported at the very beginning of entry point scripts.
-"""
-
 import os
 import sys
 import subprocess
@@ -57,7 +51,10 @@ def ensure_venv(script_path=None):
     if sys.platform == 'win32':
         venv_python = script_dir / 'venv' / 'Scripts' / 'python.exe'
     else:
-        venv_python = script_dir / 'venv' / 'bin' / 'python3'
+        try:
+            venv_python = script_dir / 'venv' / 'bin' / 'python3'
+        except:
+            venv_python = script_dir / 'venv' / 'bin' / 'python'
     
     # Check if venv exists
     venv_dir = script_dir / 'venv'
@@ -74,15 +71,16 @@ def ensure_venv(script_path=None):
             script_to_run = str(Path(script_path).absolute())
         else:
             script_to_run = script_path
-        
+
         # Relaunch with venv Python, preserving all arguments
         args = [str(venv_python), script_to_run] + sys.argv[1:]
         # Use subprocess.call which will execute the script with venv Python
         # This ensures we're using the venv's Python and all its packages
-        result = subprocess.call(args)
-        sys.exit(result)
+        try:
+            result = subprocess.call(args)
+            sys.exit(result)
+        except KeyboardInterrupt:
+            # User stopped the child (e.g. Ctrl+C). Exit cleanly without traceback.
+            sys.exit(0)
     except Exception as e:
-        # If relaunch fails, continue with current Python
-        # This can happen if there are permission issues or other problems
-        # Silently continue - the script will work but may use global packages
         return True

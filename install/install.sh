@@ -52,10 +52,73 @@ echo
 # Get project root directory
 PROJECT_DIR=$(pwd)
 
+# Check if we're in a virtual environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo -e "${YELLOW}[*]${NC} Not in a virtual environment, checking venv support..."
+    
+    # Check if python3-venv is available
+    if ! python3 -m venv --help &> /dev/null; then
+        echo -e "${YELLOW}[*]${NC} python3-venv module not found, attempting to install..."
+        
+        # Try to install python3-venv based on the distribution
+        if command -v apt-get &> /dev/null; then
+            echo -e "${YELLOW}[*]${NC} Detected Debian/Ubuntu, installing python3-venv..."
+            sudo apt-get update && sudo apt-get install -y python3-venv
+        elif command -v yum &> /dev/null; then
+            echo -e "${YELLOW}[*]${NC} Detected RHEL/CentOS, installing python3-venv..."
+            sudo yum install -y python3-venv
+        elif command -v dnf &> /dev/null; then
+            echo -e "${YELLOW}[*]${NC} Detected Fedora, installing python3-venv..."
+            sudo dnf install -y python3-venv
+        elif command -v pacman &> /dev/null; then
+            echo -e "${YELLOW}[*]${NC} Detected Arch Linux, installing python-venv..."
+            sudo pacman -S --noconfirm python-venv
+        elif command -v brew &> /dev/null; then
+            echo -e "${YELLOW}[*]${NC} Detected macOS with Homebrew, venv should be available..."
+        else
+            echo -e "${YELLOW}[!]${NC} Could not detect package manager. Please install python3-venv manually."
+            echo -e "${YELLOW}[!]${NC} Continuing without venv (packages will be installed globally)..."
+            VENV_PATH=""
+        fi
+    fi
+    
+    # Create venv if python3-venv is now available
+    if python3 -m venv --help &> /dev/null; then
+        echo -e "${YELLOW}[*]${NC} Creating virtual environment..."
+        python3 -m venv venv
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}[+]${NC} Virtual environment created: venv/"
+            VENV_PATH="$PROJECT_DIR/venv"
+            # Activate venv
+            source "$VENV_PATH/bin/activate"
+            echo -e "${GREEN}[+]${NC} Virtual environment activated"
+        else
+            echo -e "${RED}[!]${NC} Failed to create virtual environment"
+            echo -e "${YELLOW}[!]${NC} Continuing without venv (packages will be installed globally)..."
+            VENV_PATH=""
+        fi
+    else
+        VENV_PATH=""
+    fi
+else
+    echo -e "${GREEN}[+]${NC} Already in a virtual environment: $VIRTUAL_ENV"
+    VENV_PATH="$VIRTUAL_ENV"
+fi
+echo
+
+# Determine which pip/python to use
+if [ -n "$VENV_PATH" ] && [ -f "$VENV_PATH/bin/pip" ]; then
+    PIP_CMD="$VENV_PATH/bin/pip"
+    PYTHON_CMD="$VENV_PATH/bin/python"
+else
+    PIP_CMD="pip3"
+    PYTHON_CMD="python3"
+fi
+
 # Install requirements
 echo -e "${YELLOW}[*]${NC} Installing Python requirements..."
-pip3 install --upgrade pip
-pip3 install -r install/requirements.txt
+$PIP_CMD install --upgrade pip
+$PIP_CMD install -r install/requirements.txt
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}[!]${NC} Error: Failed to install requirements"
@@ -67,7 +130,7 @@ echo
 
 # Install Zig compiler
 echo -e "${YELLOW}[*]${NC} Installing Zig compiler..."
-python3 -c "
+$PYTHON_CMD -c "
 import sys
 from pathlib import Path
 sys.path.insert(0, r'$PROJECT_DIR')
@@ -86,11 +149,22 @@ echo
 
 # Create start script
 echo -e "${YELLOW}[*]${NC} Creating start script..."
-cat > start_kittysploit.sh << 'EOF'
+if [ -n "$VENV_PATH" ]; then
+    cat > start_kittysploit.sh << EOF
+#!/bin/bash
+cd "\$(dirname "\$0")"
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
+python3 kittyconsole.py
+EOF
+else
+    cat > start_kittysploit.sh << 'EOF'
 #!/bin/bash
 cd "$(dirname "$0")"
-python3 kittysploit.py
+python3 kittyconsole.py
 EOF
+fi
 
 chmod +x start_kittysploit.sh
 echo -e "${GREEN}[+]${NC} Start script created: start_kittysploit.sh"
@@ -98,7 +172,42 @@ echo
 
 # Create uninstall script
 echo -e "${YELLOW}[*]${NC} Creating uninstall script..."
-cat > uninstall.sh << 'EOF'
+if [ -n "$VENV_PATH" ]; then
+    cat > uninstall.sh << EOF
+#!/bin/bash
+echo "Uninstalling KittySploit Framework..."
+echo ""
+echo "This will remove:"
+if [ -d "venv" ]; then
+    echo "- Virtual environment (venv/)"
+fi
+echo "- Python packages installed for KittySploit"
+echo "- Start scripts"
+echo ""
+read -p "Are you sure? (y/N): " confirm
+if [[ \$confirm == [yY] ]]; then
+    echo ""
+    if [ -d "venv" ]; then
+        echo "Removing virtual environment..."
+        rm -rf venv
+    fi
+    echo "Removing Python packages..."
+    if [ -d "venv" ] && [ -f "venv/bin/pip" ]; then
+        venv/bin/pip uninstall -y -r install/requirements.txt
+    else
+        pip3 uninstall -y -r install/requirements.txt
+    fi
+    echo ""
+    echo "Removing start scripts..."
+    rm -f start_kittysploit.sh
+    echo ""
+    echo "KittySploit Framework uninstalled successfully!"
+else
+    echo "Uninstall cancelled."
+fi
+EOF
+else
+    cat > uninstall.sh << 'EOF'
 #!/bin/bash
 echo "Uninstalling KittySploit Framework..."
 echo ""
@@ -120,6 +229,7 @@ else
     echo "Uninstall cancelled."
 fi
 EOF
+fi
 
 chmod +x uninstall.sh
 echo -e "${GREEN}[+]${NC} Uninstall script created: uninstall.sh"
@@ -232,6 +342,9 @@ echo -e "${GREEN}   KittySploit Framework installed successfully!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo
 echo -e "${BLUE}📋 What was installed:${NC}"
+if [ -n "$VENV_PATH" ]; then
+    echo -e "  ✓ Virtual environment (venv/)"
+fi
 echo -e "  ✓ Python requirements"
 echo -e "  ✓ Zig compiler (in core/lib/compiler/zig_executable/)"
 echo -e "  ✓ Start script (start_kittysploit.sh)"
@@ -243,7 +356,7 @@ fi
 echo
 echo -e "${BLUE} How to start KittySploit:${NC}"
 echo -e "  • Run: ./start_kittysploit.sh"
-echo -e "  • Or run: python3 kittysploit.py"
+echo -e "  • Or run: python3 kittyconsole.py"
 echo
 echo -e "${BLUE}  To uninstall:${NC}"
 echo -e "  • Run: ./uninstall.sh"

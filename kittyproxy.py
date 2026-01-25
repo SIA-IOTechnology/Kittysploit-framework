@@ -8,10 +8,15 @@ This script starts the KittySploit Proxy Interface with integration to the frame
 
 import sys
 import os
-import argparse
 
-# Add parent directory to PYTHONPATH
+# Add parent directory to PYTHONPATH (before importing venv_helper)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Ensure we're using the project's venv if it exists
+from core.utils.venv_helper import ensure_venv
+ensure_venv(__file__)
+
+import argparse
 
 kittyproxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interfaces', 'kittyproxy')
 if kittyproxy_dir not in sys.path:

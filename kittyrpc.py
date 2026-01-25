@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import sys
+import os
+
+# Add project root to path (before importing venv_helper)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Ensure we're using the project's venv if it exists
+from core.utils.venv_helper import ensure_venv
+ensure_venv(__file__)
+
 import argparse
 import logging
 import signal
-import sys
 from core.framework.framework import Framework
 from interfaces.rpc_server import RpcServer
 from core.output_handler import print_info, print_success, print_error, print_warning, print_debug, print_status

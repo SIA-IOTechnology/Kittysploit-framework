@@ -3,6 +3,14 @@
 
 import os
 import sys
+
+# Add project root to path (before importing venv_helper)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Ensure we're using the project's venv if it exists
+from core.utils.venv_helper import ensure_venv
+ensure_venv(__file__)
+
 import subprocess
 from pathlib import Path
 from typing import List, Set

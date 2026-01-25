@@ -34,7 +34,6 @@ docker
 sqlalchemy
 pymysql
 pysnmp
-ftplib
 pysmb
 paramiko
 toml

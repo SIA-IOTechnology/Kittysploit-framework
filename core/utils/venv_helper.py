@@ -30,6 +30,18 @@ def ensure_venv(script_path=None):
     if os.environ.get('VIRTUAL_ENV'):
         return True
     
+    # Check if we are already running from the project's venv (even if not "activated")
+    if hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix:
+        # We are in some venv. Let's check if it's the project venv.
+        if script_path is None:
+            script_path = sys.argv[0]
+        if not os.path.isabs(script_path):
+            script_path = os.path.abspath(script_path)
+        script_dir = Path(script_path).parent.absolute()
+        venv_dir = script_dir / 'venv'
+        if Path(sys.prefix).resolve() == venv_dir.resolve():
+            return True
+    
     # Determine script directory
     if script_path is None:
         # Use sys.argv[0] which contains the script path

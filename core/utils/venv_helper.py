@@ -45,21 +45,32 @@ def ensure_venv(script_path=None):
     if sys.platform == 'win32':
         venv_python = script_dir / 'venv' / 'Scripts' / 'python.exe'
     else:
-        venv_python = script_dir / 'venv' / 'bin' / 'python'
+        venv_python = script_dir / 'venv' / 'bin' / 'python3'
     
     # Check if venv exists
+    venv_dir = script_dir / 'venv'
     if not venv_python.exists():
-        return True  # No venv, continue with current Python
+        # No venv found, continue with current Python
+        # This is normal if the user hasn't run the installer yet
+        # Optionally, we could create it here, but it's better to use the installer
+        return True
     
-    # Relaunch with venv Python
+    # Venv exists, relaunch with venv Python
     try:
-        # Use the script path
-        script_to_run = str(Path(script_path).absolute())
+        # Use the script path - make sure it's absolute
+        if not os.path.isabs(script_path):
+            script_to_run = str(Path(script_path).absolute())
+        else:
+            script_to_run = script_path
         
         # Relaunch with venv Python, preserving all arguments
         args = [str(venv_python), script_to_run] + sys.argv[1:]
-        sys.exit(subprocess.call(args))
-    except Exception:
+        # Use subprocess.call which will execute the script with venv Python
+        # This ensures we're using the venv's Python and all its packages
+        result = subprocess.call(args)
+        sys.exit(result)
+    except Exception as e:
         # If relaunch fails, continue with current Python
         # This can happen if there are permission issues or other problems
+        # Silently continue - the script will work but may use global packages
         return True

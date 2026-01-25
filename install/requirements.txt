@@ -25,6 +25,7 @@ xmltodict>=0.13.0
 psutil>=5.8.0
 pywin32>=301; sys_platform == "win32"
 winshell>=0.6; sys_platform == "win32"
+pyreadline3; sys_platform == "win32"
 
 pyngrok>=5.0.0
 bleak

@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 REM KittySploit Framework Windows Installer
 REM ========================================
 
@@ -29,15 +30,17 @@ echo [+] Python version check passed
 echo.
 
 REM Get the project root directory
-for %%I in ("%~dp0..") do set "PROJECT_ROOT=%%~fI"
-cd /d "%PROJECT_ROOT%"
+pushd "%~dp0.."
+set "PROJECT_ROOT=!CD!"
+popd
+cd /d "!PROJECT_ROOT!"
 
 REM Check if we're in a virtual environment
 set "HAS_VENV=0"
-if "%VIRTUAL_ENV%"=="" (
+if "!VIRTUAL_ENV!"=="" (
     echo [*] Not in a virtual environment, creating one...
     python -m venv venv
-    if %errorlevel% equ 0 (
+    if !errorlevel! equ 0 (
         if exist "venv\Scripts\activate.bat" (
             echo [+] Virtual environment created: venv\
             call "venv\Scripts\activate.bat"
@@ -45,27 +48,40 @@ if "%VIRTUAL_ENV%"=="" (
             set "HAS_VENV=1"
         )
     )
-    if %HAS_VENV%==0 (
+    if !HAS_VENV!==0 (
         echo [!] Warning: Failed to create virtual environment
-        echo [!] Continuing without venv (packages will be installed globally)...
+        echo [!] Continuing without venv ^(packages will be installed globally^)...
     )
 ) else (
-    echo [+] Already in a virtual environment: %VIRTUAL_ENV%
+    echo [+] Already in a virtual environment: !VIRTUAL_ENV!
 )
 
 REM Install requirements
 echo [*] Installing Python requirements...
-if %HAS_VENV%==1 (
-    "venv\Scripts\pip.exe" install --upgrade pip
-    "venv\Scripts\pip.exe" install -r install/requirements.txt
+if !HAS_VENV!==1 (
+    "venv\Scripts\python.exe" -m pip install --upgrade pip
+    if !errorlevel! neq 0 (
+        echo [!] Warning: Failed to upgrade pip, attempting to continue...
+    )
+    "venv\Scripts\python.exe" -m pip install -r install/requirements.txt
+    if !errorlevel! neq 0 (
+        echo [!] Error: Failed to install requirements
+        pause
+        exit /b 1
+    )
 ) else (
     python -m pip install --upgrade pip
+    if !errorlevel! neq 0 (
+        echo [!] Error: Failed to upgrade pip
+        pause
+        exit /b 1
+    )
     python -m pip install -r install/requirements.txt
-)
-if %errorlevel% neq 0 (
-    echo [!] Error: Failed to install requirements
-    pause
-    exit /b 1
+    if !errorlevel! neq 0 (
+        echo [!] Error: Failed to install requirements
+        pause
+        exit /b 1
+    )
 )
 
 echo [+] Requirements installed successfully
@@ -73,12 +89,12 @@ echo.
 
 REM Install Zig compiler
 echo [*] Installing Zig compiler...
-if %HAS_VENV%==1 (
-    "venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, r'%PROJECT_ROOT%'); from core.lib.compiler.zig_installer import install_zig_if_needed; install_zig_if_needed(ask_confirmation=False)"
+if !HAS_VENV!==1 (
+    "venv\Scripts\python.exe" -c "import sys; from pathlib import Path; sys.path.insert(0, r'!PROJECT_ROOT!'); from core.lib.compiler.zig_installer import install_zig_if_needed; install_zig_if_needed(ask_confirmation=False)"
 ) else (
-    python -c "import sys; from pathlib import Path; sys.path.insert(0, r'%PROJECT_ROOT%'); from core.lib.compiler.zig_installer import install_zig_if_needed; install_zig_if_needed(ask_confirmation=False)"
+    python -c "import sys; from pathlib import Path; sys.path.insert(0, r'!PROJECT_ROOT!'); from core.lib.compiler.zig_installer import install_zig_if_needed; install_zig_if_needed(ask_confirmation=False)"
 )
-if %errorlevel% neq 0 (
+if !errorlevel! neq 0 (
     echo [!] Warning: Zig compiler installation failed, but continuing...
     echo [!] You can install Zig manually later or it will be installed automatically when needed
 ) else (
@@ -88,7 +104,7 @@ echo.
 
 REM Create start script
 echo [*] Creating start script...
-if %HAS_VENV%==1 (
+if !HAS_VENV!==1 (
     (
     echo @echo off
     echo cd /d "%%~dp0"
@@ -97,14 +113,14 @@ if %HAS_VENV%==1 (
     echo ^)
     echo python kittyconsole.py
     echo pause
-    ) > "%PROJECT_ROOT%\start_kittysploit.bat"
+    ) > "!PROJECT_ROOT!\start_kittysploit.bat"
 ) else (
     (
     echo @echo off
     echo cd /d "%%~dp0"
     echo python kittyconsole.py
     echo pause
-    ) > "%PROJECT_ROOT%\start_kittysploit.bat"
+    ) > "!PROJECT_ROOT!\start_kittysploit.bat"
 )
 
 echo [+] Start script created: start_kittysploit.bat
@@ -116,7 +132,7 @@ echo [*] Creating shortcut for start script...
 echo import os, sys
 echo try:
 echo     from win32com.client import Dispatch
-echo     project_root = r'%PROJECT_ROOT%'
+echo     project_root = r'!PROJECT_ROOT!'
 echo     shortcut_path = os.path.join(project_root, 'KittySploit.lnk'^)
 echo     target = os.path.join(project_root, 'start_kittysploit.bat'^)
 echo     wDir = project_root
@@ -146,7 +162,7 @@ echo     print('[!] Warning: pywin32 not installed, skipping shortcut creation'^
 echo except Exception as e:
 echo     print(f'[!] Warning: Could not create shortcut: {e}'^)
 ) > "%TEMP%\create_shortcut.py"
-if %HAS_VENV%==1 (
+if !HAS_VENV!==1 (
     "venv\Scripts\python.exe" "%TEMP%\create_shortcut.py"
 ) else (
     python "%TEMP%\create_shortcut.py"
@@ -161,7 +177,7 @@ echo import os, sys
 echo try:
 echo     import winshell
 echo     from win32com.client import Dispatch
-echo     project_root = r'%PROJECT_ROOT%'
+echo     project_root = r'!PROJECT_ROOT!'
 echo     desktop = winshell.desktop(^)
 echo     shortcut_path = os.path.join(desktop, 'KittySploit.lnk'^)
 echo     target = os.path.join(project_root, 'start_kittysploit.bat'^)
@@ -192,7 +208,7 @@ echo     print('[!] Warning: winshell/pywin32 not installed, skipping desktop sh
 echo except Exception as e:
 echo     print(f'[!] Warning: Could not create desktop shortcut: {e}'^)
 ) > "%TEMP%\create_desktop_shortcut.py"
-if %HAS_VENV%==1 (
+if !HAS_VENV!==1 (
     "venv\Scripts\python.exe" "%TEMP%\create_desktop_shortcut.py"
 ) else (
     python "%TEMP%\create_desktop_shortcut.py"
@@ -222,10 +238,10 @@ echo         echo Removing virtual environment...
 echo         rmdir /s /q venv
 echo     ^)
 echo     echo Removing Python packages...
-echo     if exist "venv\Scripts\pip.exe" (
-echo         venv\Scripts\pip.exe uninstall -y -r install\requirements.txt
+echo     if exist "venv\Scripts\python.exe" (
+echo         venv\Scripts\python.exe -m pip uninstall -y -r install\requirements.txt
 echo     ^) else (
-echo         pip uninstall -y -r install\requirements.txt
+echo         python -m pip uninstall -y -r install\requirements.txt
 echo     ^)
 echo     echo.
 echo     echo Removing desktop shortcut...
@@ -276,7 +292,7 @@ echo     print("Environment setup complete!"^)
 echo.
 echo if __name__ == "__main__":
 echo     setup_environment(^)
-) > "%PROJECT_ROOT%\env_setup.py"
+) > "!PROJECT_ROOT!\env_setup.py"
 
 echo [+] Environment setup created: env_setup.py
 echo.
@@ -284,7 +300,7 @@ echo.
 
 echo  How to start KittySploit:
 echo  [*] Double-click 'start_kittysploit.bat'
-if %HAS_VENV%==1 (
+if !HAS_VENV!==1 (
     echo  [*] Or activate venv and run: python kittyconsole.py
     echo  [*]   Activate with: venv\Scripts\activate.bat
 ) else (

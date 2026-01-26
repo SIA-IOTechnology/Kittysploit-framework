@@ -451,10 +451,11 @@ class Module(Base):
     __tablename__ = 'modules'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(255), nullable=False, unique=True, index=True)
+    # Module names are not guaranteed unique across the filesystem; use `path` as the unique key.
+    name = Column(String(255), nullable=False, index=True)
     description = Column(Text)
     type = Column(String(50), nullable=False)  # exploits, auxiliary, scanner, post, etc.
-    path = Column(String(500), nullable=False)  # Path to the module file
+    path = Column(String(500), nullable=False, unique=True, index=True)  # Unique module path (stable identifier)
     author = Column(String(255))
     version = Column(String(50))
     cve = Column(String(50), index=True)  # For exploits

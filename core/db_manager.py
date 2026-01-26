@@ -174,7 +174,9 @@ class DatabaseManager:
         """Migrate the modules table to update the CHECK constraint to include 'workflow'
         
         This is needed because SQLite doesn't support modifying CHECK constraints.
-        We recreate the table with the correct constraint.
+        We recreate the table with the correct constraint. We also ensure the unique
+        key matches current expectations (modules are uniquely identified by `path`,
+        not `name`).
         
         Args:
             workspace: Name of the workspace
@@ -204,9 +206,13 @@ class DatabaseManager:
                 create_sql = result.fetchone()
                 if create_sql and create_sql[0]:
                     sql_str = create_sql[0]
-                    # Check if workflow is already in the constraint
-                    if "'workflow'" in sql_str or '"workflow"' in sql_str:
-                        # Constraint already updated
+                    has_workflow = ("'workflow'" in sql_str) or ('"workflow"' in sql_str)
+                    # Older schema used UNIQUE(name). Current schema uses UNIQUE(path).
+                    has_unique_name = ('UNIQUE ("name")' in sql_str) or ('UNIQUE(name)' in sql_str) or ('UNIQUE (name)' in sql_str)
+                    has_unique_path = ('UNIQUE ("path")' in sql_str) or ('UNIQUE(path)' in sql_str) or ('UNIQUE (path)' in sql_str)
+
+                    # If schema already matches expectations, no migration needed.
+                    if has_workflow and (not has_unique_name) and has_unique_path:
                         return True
             
             # Need to migrate: recreate table with correct constraint

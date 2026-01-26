@@ -118,3 +118,14 @@ class Type(Enum):
     MACOS = "macos"
     ANDROID = "android"
     IOS = "ios"
+
+class PayloadType(Enum):
+    """Payload types"""
+    CMD = "cmd"
+    PHP = "php"
+    PYTHON = "python"
+    LINUX = "linux"
+    WINDOWS = "windows"
+    MACOS = "macos"
+    ANDROID = "android"
+    IOS = "ios"

@@ -1,1 +1,0 @@
-# FTP scanner modules

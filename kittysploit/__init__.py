@@ -79,7 +79,8 @@ from core.framework.enums import (
     ServiceType,
     PayloadCategory,
     Browser,
-    Type
+    Type,
+    PayloadType
 )
 
 # Import remote connection function
@@ -143,7 +144,7 @@ __all__ = [
     'PayloadCategory',
     'Browser',
     'Type',
-    
+    'PayloadType',
     # Connection functions
     'remote'
 ]

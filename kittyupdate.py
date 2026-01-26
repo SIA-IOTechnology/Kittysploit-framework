@@ -13,7 +13,7 @@ ensure_venv(__file__)
 
 import subprocess
 from pathlib import Path
-from typing import List, Set, Dict
+from typing import Set
 from core.output_handler import print_info, print_success, print_error, print_warning, print_status
 
 
@@ -57,21 +57,16 @@ def get_custom_modules() -> Set[str]:
             
             # Convert to relative path for comparison
             try:
-                # Resolve both paths to absolute
                 py_file_resolved = py_file.resolve()
-                # Get relative path from cwd
                 rel_path = str(py_file_resolved.relative_to(cwd)).replace('\\', '/')
             except ValueError:
-                # If relative_to fails, try a different approach
-                # Get the path relative to modules_dir and prepend 'modules/'
                 try:
                     rel_to_modules = py_file.relative_to(modules_dir)
                     rel_path = f"modules/{rel_to_modules}".replace('\\', '/')
                 except ValueError:
-                    # Last resort: use the path as-is if it's already relative
                     rel_path = str(py_file).replace('\\', '/')
                     if not rel_path.startswith('modules/'):
-                        continue  # Skip if we can't determine the path
+                        continue
             
             # If file is not tracked by git, it's a custom module
             if rel_path not in tracked_files:
@@ -79,143 +74,45 @@ def get_custom_modules() -> Set[str]:
         
     except Exception as e:
         print_warning(f"Could not detect custom modules: {e}")
-        import traceback
-        print_warning(traceback.format_exc())
     
     return custom_modules
 
-def get_modified_tracked_files() -> Dict[str, str]:
-    """Get list of tracked files that have local modifications"""
-    modified_files = {}
-    
+def check_tracked_modifications() -> bool:
+    """Check if there are modifications to tracked files"""
     try:
-        # Get list of modified tracked files
         result = subprocess.run(['git', 'diff', '--name-only'], 
                               capture_output=True, 
                               text=True,
                               cwd=os.getcwd())
         
         if result.returncode == 0 and result.stdout.strip():
-            for file_path in result.stdout.strip().split('\n'):
-                if file_path:
-                    modified_files[file_path] = 'modified'
+            modified = result.stdout.strip().split('\n')
+            print_warning(f"Warning: {len(modified)} tracked file(s) have been modified:")
+            for file in modified[:5]:  # Show first 5
+                print_warning(f"  - {file}")
+            if len(modified) > 5:
+                print_warning(f"  ... and {len(modified) - 5} more")
+            return True
         
-        # Also check staged files
+        # Check staged files
         result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
                               capture_output=True, 
                               text=True,
                               cwd=os.getcwd())
         
         if result.returncode == 0 and result.stdout.strip():
-            for file_path in result.stdout.strip().split('\n'):
-                if file_path:
-                    modified_files[file_path] = 'staged'
+            return True
+        
+        return False
         
     except Exception as e:
-        print_warning(f"Could not detect modified files: {e}")
-    
-    return modified_files
-
-def backup_custom_modules(custom_modules: Set[str]) -> dict:
-    """Backup custom modules to temporary files"""
-    backups = {}
-    
-    if not custom_modules:
-        return backups
-    
-    print_info(f"Backing up {len(custom_modules)} custom module(s)...")
-    
-    import tempfile
-    import shutil
-    
-    backup_dir = Path(tempfile.mkdtemp(prefix="kittysploit_backup_"))
-    project_root = Path.cwd().resolve()
-    
-    for module_path in custom_modules:
-        source = Path(module_path)
-        if not source.is_absolute():
-            source = (project_root / source).resolve()
-        if source.exists():
-            # Create backup path preserving directory structure
-            try:
-                relative = source.relative_to(project_root)
-            except ValueError:
-                relative = Path(module_path)
-            backup_path = backup_dir / relative
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, backup_path)
-            backups[module_path] = str(backup_path)
-            print_info(f"  Backed up: {module_path}")
-    
-    return backups
-
-def backup_modified_files(modified_files: Dict[str, str]) -> dict:
-    """Backup modified tracked files to temporary location"""
-    backups = {}
-    
-    if not modified_files:
-        return backups
-    
-    print_info(f"Backing up {len(modified_files)} modified file(s)...")
-    
-    import tempfile
-    import shutil
-    
-    backup_dir = Path(tempfile.mkdtemp(prefix="kittysploit_modified_"))
-    project_root = Path.cwd().resolve()
-    
-    for file_path in modified_files.keys():
-        source = Path(file_path)
-        if not source.is_absolute():
-            source = (project_root / source).resolve()
-        if source.exists():
-            # Create backup path preserving directory structure
-            try:
-                relative = source.relative_to(project_root)
-            except ValueError:
-                relative = Path(file_path)
-            backup_path = backup_dir / relative
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, backup_path)
-            backups[file_path] = str(backup_path)
-            print_info(f"  Backed up: {file_path}")
-    
-    return backups
-
-def restore_files(backups: dict, file_type: str = "file"):
-    """Restore files from backups"""
-    if not backups:
-        return
-    
-    print_status(f"Restoring {len(backups)} {file_type}(s)...")
-    
-    import shutil
-    
-    for file_path, backup_path in backups.items():
-        source = Path(backup_path)
-        dest = Path(file_path)
-        
-        if source.exists():
-            # Ensure destination directory exists
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, dest)
-            print_success(f"  Restored: {file_path}")
-        else:
-            print_warning(f"  Backup not found: {backup_path}")
-    
-    # Clean up backup directory
-    try:
-        if backups:
-            backup_dir = Path(backups[list(backups.keys())[0]]).parent
-            import shutil
-            shutil.rmtree(backup_dir)
-    except Exception as e:
-        print_warning(f"Could not clean up backup directory: {e}")
+        print_warning(f"Could not check for modifications: {e}")
+        return False
 
 def git_update() -> bool:
-    """Update framework via git pull (read-only, no push/authentication)"""
+    """Update framework via git pull"""
     try:
-        # Check for uncommitted changes
+        # Check for uncommitted changes in tracked files
         result = subprocess.run(['git', 'status', '--porcelain'], 
                               capture_output=True, 
                               text=True,
@@ -224,31 +121,39 @@ def git_update() -> bool:
         has_changes = bool(result.stdout.strip())
         
         if has_changes:
-            print_warning("You have uncommitted changes!")
-            print_status("Stashing changes temporarily...")
+            # Check if changes are only untracked files
+            lines = result.stdout.strip().split('\n')
+            has_tracked_changes = any(not line.startswith('??') for line in lines if line)
             
-            # Stash ALL changes (tracked and untracked)
-            # This is purely local, no authentication needed
-            stash_result = subprocess.run(['git', 'stash', 'push', '--include-untracked', '-m', 'kittyupdate: temporary stash'], 
-                                         capture_output=True, 
-                                         text=True,
-                                         cwd=os.getcwd())
-            
-            if stash_result.returncode != 0:
-                print_error("Failed to stash changes")
-                if stash_result.stderr:
-                    print_error(stash_result.stderr.strip())
-                return False
-            
-            # Some git versions return 0 with "No local changes to save"
-            stash_out = (stash_result.stdout or "").strip()
-            if "No local changes to save" in stash_out:
-                print_info("No stash created (nothing to save). Continuing...")
-                has_changes = False
+            if has_tracked_changes:
+                print_warning("You have modifications to tracked files!")
+                print_status("These will be temporarily stashed during update...")
+                
+                # Stash only tracked files (leave untracked files alone)
+                stash_result = subprocess.run(['git', 'stash', 'push', '-m', 'kittyupdate: temporary stash'], 
+                                             capture_output=True, 
+                                             text=True,
+                                             cwd=os.getcwd())
+                
+                if stash_result.returncode != 0:
+                    print_error("Failed to stash changes")
+                    if stash_result.stderr:
+                        print_error(stash_result.stderr.strip())
+                    return False
+                
+                stash_out = (stash_result.stdout or "").strip()
+                if "No local changes to save" in stash_out:
+                    print_info("No tracked changes to stash. Continuing...")
+                    has_tracked_changes = False
+                else:
+                    print_success("Tracked changes stashed successfully")
             else:
-                print_success("Changes stashed successfully")
+                has_tracked_changes = False
+                print_info("Only untracked files detected (custom modules/venv) - these will be preserved")
+        else:
+            has_tracked_changes = False
         
-        # Pull latest changes from remote (read-only operation, no auth needed)
+        # Pull latest changes (untracked files are automatically ignored by git)
         print_status("Pulling latest changes from repository...")
         pull_result = subprocess.run(['git', 'pull'], 
                                     capture_output=True, 
@@ -257,14 +162,14 @@ def git_update() -> bool:
         
         if pull_result.returncode != 0:
             print_error(f"Git pull failed: {pull_result.stderr}")
-            if has_changes:
+            if has_tracked_changes:
                 print_status("Restoring stashed changes...")
                 subprocess.run(['git', 'stash', 'pop'], cwd=os.getcwd())
             return False
         
         print_success("Framework updated successfully!")
         
-        if has_changes:
+        if has_tracked_changes:
             print_status("Restoring stashed changes...")
             pop_result = subprocess.run(['git', 'stash', 'pop'], 
                                        capture_output=True, 
@@ -273,15 +178,18 @@ def git_update() -> bool:
             
             if pop_result.returncode != 0:
                 print_warning("Some conflicts occurred while restoring changes")
-                print_info("Your changes are safe in the stash. Use 'git stash list' to view them")
-                print_info("To restore manually: git stash pop")
-                print_info("To keep both versions: git stash apply")
+                print_info("Your changes are safe in the stash. To restore manually:")
+                print_info("  git stash pop    - to merge your changes")
+                print_info("  git stash list   - to view stashed changes")
+                print_info("  git stash drop   - to discard stashed changes")
             else:
                 print_success("Changes restored successfully")
         
-        if pull_result.stdout:
+        if pull_result.stdout and "Already up to date" not in pull_result.stdout:
             print_info("Update details:")
             print(pull_result.stdout)
+        elif "Already up to date" in pull_result.stdout:
+            print_info("Already up to date - no new changes from server")
         
         return True
         
@@ -330,9 +238,9 @@ def update_python_packages(verbose: bool = False) -> bool:
 
 def main():
     """Main update function"""
-    print_status("KittySploit Framework Update")
-    print_info("This script performs read-only operations (git pull)")
-    print_info("Your local changes will be preserved using git stash")
+    print_status("=== KittySploit Framework Update ===")
+    print_info("Fetching latest updates from GitHub...")
+    print_info("Your custom modules and venv will be preserved automatically\n")
     
     # Check if we're in a git repository
     if not check_git_repo():
@@ -340,89 +248,60 @@ def main():
         print_info("Please update manually or clone the repository first.")
         return False
     
-    # Get custom modules before update (untracked files)
+    # Detect custom modules (untracked files)
     custom_modules = get_custom_modules()
     
     if custom_modules:
-        print_info(f"Found {len(custom_modules)} custom module(s) (untracked files):")
-        for module in sorted(custom_modules):
+        print_success(f"Detected {len(custom_modules)} custom module(s) - these will be preserved:")
+        for module in sorted(custom_modules)[:5]:  # Show first 5
             print_info(f"  - {module}")
-        
-        # Backup custom modules
-        custom_backups = backup_custom_modules(custom_modules)
-    else:
-        custom_backups = {}
-        print_info("No custom modules detected")
+        if len(custom_modules) > 5:
+            print_info(f"  ... and {len(custom_modules) - 5} more")
+        print()
     
-    # Get modified tracked files before update
-    modified_files = get_modified_tracked_files()
-    
-    if modified_files:
-        print_warning(f"You have {len(modified_files)} modified tracked file(s):")
-        for file_path, status in modified_files.items():
-            print_info(f"  - {file_path} ({status})")
-        
-        # Backup modified files
-        modified_backups = backup_modified_files(modified_files)
-    else:
-        modified_backups = {}
+    # Check for modifications to tracked files (shouldn't happen in normal use)
+    has_modifications = check_tracked_modifications()
+    if has_modifications:
+        print_warning("Note: Tracked files have been modified - these will be stashed during update\n")
     
     success = True
     
-    # Update framework via git (read-only, no authentication)
+    # Update framework via git pull
     if not git_update():
         success = False
     
-    # Restore custom modules after update (untracked files always preserved)
-    if custom_backups:
-        restore_files(custom_backups, "custom module")
-    
-    # Restore modified files if git stash pop failed
-    # If stash pop succeeded, this won't be needed
-    # But if there were conflicts, we restore the user's version
-    if modified_backups and not success:
-        print_info("Restoring your modified files due to update failure...")
-        restore_files(modified_backups, "modified file")
-    elif modified_backups:
-        # Clean up backups if everything went well
-        try:
-            backup_dir = Path(modified_backups[list(modified_backups.keys())[0]]).parent
-            import shutil
-            shutil.rmtree(backup_dir)
-            print_info("Temporary backups cleaned up")
-        except Exception as e:
-            print_warning(f"Could not clean up backup directory: {e}")
+    print()
     
     # Update Python packages
-    print_status("Python Package Update")
+    print_status("=== Python Package Update ===")
     if not update_python_packages(verbose=False):
         success = False
     
+    print()
+    
     # Final summary
-    print_status("Update Summary")
+    print_status("=== Update Summary ===")
     if success:
-        print_success("Framework update completed successfully!")
+        print_success("✓ Framework updated successfully!")
         if custom_modules:
-            print_info(f"Your {len(custom_modules)} custom module(s) have been preserved")
-        if modified_files:
-            print_info(f"Your {len(modified_files)} modification(s) have been preserved")
-            print_info("If there were conflicts, use 'git status' to review them")
+            print_success(f"✓ {len(custom_modules)} custom module(s) preserved")
+        print_success("✓ Python packages updated")
+        print_info("\nYour installation is now up to date!")
     else:
-        print_error("Some errors occurred during the update process")
+        print_error("✗ Some errors occurred during the update")
         print_info("Please review the messages above and resolve any issues")
-        print_info("Your original files have been preserved in backups")
     
     return success
 
 if __name__ == "__main__":
     try:
         success = main()
-        sys.exit(0)
+        sys.exit(0 if success else 1)
     except KeyboardInterrupt:
-        print_error("Update cancelled by user")
+        print_error("\n\nUpdate cancelled by user")
         sys.exit(1)
     except Exception as e:
-        print_error(f"Unexpected error: {e}")
+        print_error(f"\nUnexpected error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

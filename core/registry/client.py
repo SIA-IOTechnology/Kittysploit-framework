@@ -327,8 +327,10 @@ class ExtensionClient:
                         os.remove(tmp_path)
                         return False
                     
-                    if max_version and pkg_version.parse(kittysploit_version) > pkg_version.parse(max_version):
-                        print_warning(f"KittySploit version {kittysploit_version} > {max_version} supported")
+                    # "*" means no maximum version limit
+                    if max_version and max_version != "*":
+                        if pkg_version.parse(kittysploit_version) > pkg_version.parse(max_version):
+                            print_warning(f"KittySploit version {kittysploit_version} > {max_version} supported")
             except Exception as e:
                 print_warning(f"Unable to verify compatibility: {e}")
             

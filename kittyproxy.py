@@ -45,7 +45,7 @@ Exemples:
   python kittyproxy.py
 
   # Démarrer sur des ports personnalisés
-  python kittyproxy.py --proxy-port 8080 --api-port 8000
+  python kittyproxy.py --proxy-port 8080 --api-port 8443
 
   # Démarrer avec une adresse IP spécifique
   python kittyproxy.py --api-host 0.0.0.0
@@ -70,8 +70,8 @@ Exemples:
     parser.add_argument(
         '--api-port',
         type=int,
-        default=8000,
-        help='Port du serveur API (défaut: 8000)'
+        default=8443,
+        help='Port du serveur API (défaut: 8443)'
     )
     parser.add_argument(
         '--api-host',

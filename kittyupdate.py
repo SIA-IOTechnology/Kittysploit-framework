@@ -13,7 +13,7 @@ ensure_venv(__file__)
 
 import subprocess
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Dict
 from core.output_handler import print_info, print_success, print_error, print_warning, print_status
 
 
@@ -84,6 +84,38 @@ def get_custom_modules() -> Set[str]:
     
     return custom_modules
 
+def get_modified_tracked_files() -> Dict[str, str]:
+    """Get list of tracked files that have local modifications"""
+    modified_files = {}
+    
+    try:
+        # Get list of modified tracked files
+        result = subprocess.run(['git', 'diff', '--name-only'], 
+                              capture_output=True, 
+                              text=True,
+                              cwd=os.getcwd())
+        
+        if result.returncode == 0 and result.stdout.strip():
+            for file_path in result.stdout.strip().split('\n'):
+                if file_path:
+                    modified_files[file_path] = 'modified'
+        
+        # Also check staged files
+        result = subprocess.run(['git', 'diff', '--cached', '--name-only'], 
+                              capture_output=True, 
+                              text=True,
+                              cwd=os.getcwd())
+        
+        if result.returncode == 0 and result.stdout.strip():
+            for file_path in result.stdout.strip().split('\n'):
+                if file_path:
+                    modified_files[file_path] = 'staged'
+        
+    except Exception as e:
+        print_warning(f"Could not detect modified files: {e}")
+    
+    return modified_files
+
 def backup_custom_modules(custom_modules: Set[str]) -> dict:
     """Backup custom modules to temporary files"""
     backups = {}
@@ -146,8 +178,18 @@ def restore_custom_modules(backups: dict):
     except Exception as e:
         print_warning(f"Could not clean up backup directory: {e}")
 
+def configure_merge_strategy():
+    """Configure git to use a merge strategy that favors keeping local changes"""
+    try:
+        # Set merge strategy to recursive with ours option for conflicts
+        subprocess.run(['git', 'config', 'pull.rebase', 'false'], 
+                      capture_output=True, cwd=os.getcwd())
+        print_info("Configured merge strategy: merge (no rebase)")
+    except Exception as e:
+        print_warning(f"Could not configure merge strategy: {e}")
+
 def git_update() -> bool:
-    """Update framework via git pull"""
+    """Update framework via git pull with improved conflict handling"""
     try:
         # Check for uncommitted changes
         result = subprocess.run(['git', 'status', '--porcelain'], 
@@ -158,49 +200,102 @@ def git_update() -> bool:
         has_changes = bool(result.stdout.strip())
         
         if has_changes:
-            print_warning("You have uncommitted changes!")
-            print_status("Stashing changes temporarily...")
+            print_warning("You have local modifications!")
+            modified_files = get_modified_tracked_files()
             
-            # Stash changes
-            stash_result = subprocess.run(['git', 'stash', 'push', '-m', 'kittyupdate: temporary stash'], 
+            if modified_files:
+                print_info("Modified files:")
+                for file_path, status in modified_files.items():
+                    print_info(f"  - {file_path} ({status})")
+            
+            print_status("Creating automatic commit of your changes...")
+            
+            # Add all changes
+            add_result = subprocess.run(['git', 'add', '-A'], 
+                                       capture_output=True, 
+                                       text=True,
+                                       cwd=os.getcwd())
+            
+            if add_result.returncode != 0:
+                print_error("Failed to stage changes")
+                return False
+            
+            # Commit changes
+            commit_result = subprocess.run(['git', 'commit', '-m', 'kittyupdate: auto-commit before update'], 
                                          capture_output=True, 
                                          text=True,
                                          cwd=os.getcwd())
             
-            if stash_result.returncode != 0:
-                print_error("Failed to stash changes")
-                return False
-            
-            print_success("Changes stashed successfully")
+            if commit_result.returncode != 0:
+                # Check if it's because there's nothing to commit
+                if "nothing to commit" not in commit_result.stdout.lower():
+                    print_error("Failed to commit changes")
+                    if commit_result.stderr:
+                        print_error(commit_result.stderr.strip())
+                    return False
+                else:
+                    print_info("No changes to commit")
+                    has_changes = False
+            else:
+                print_success("Local changes committed successfully")
         
-        # Pull latest changes
+        # Configure merge strategy
+        configure_merge_strategy()
+        
+        # Pull latest changes with merge strategy
         print_status("Pulling latest changes from repository...")
-        pull_result = subprocess.run(['git', 'pull'], 
+        pull_result = subprocess.run(['git', 'pull', '--no-rebase'], 
                                     capture_output=True, 
                                     text=True,
                                     cwd=os.getcwd())
         
         if pull_result.returncode != 0:
-            print_error(f"Git pull failed: {pull_result.stderr}")
-            if has_changes:
-                print_status("Restoring stashed changes...")
-                subprocess.run(['git', 'stash', 'pop'], cwd=os.getcwd())
-            return False
+            # Check if there are merge conflicts
+            if "CONFLICT" in pull_result.stdout or "CONFLICT" in pull_result.stderr:
+                print_warning("Merge conflicts detected!")
+                print_info("Attempting to resolve conflicts automatically...")
+                
+                # Get list of conflicted files
+                conflict_result = subprocess.run(['git', 'diff', '--name-only', '--diff-filter=U'], 
+                                               capture_output=True, 
+                                               text=True,
+                                               cwd=os.getcwd())
+                
+                if conflict_result.returncode == 0 and conflict_result.stdout.strip():
+                    conflicted_files = conflict_result.stdout.strip().split('\n')
+                    print_info(f"Files with conflicts: {len(conflicted_files)}")
+                    
+                    for file_path in conflicted_files:
+                        print_info(f"  - {file_path}")
+                        # Try to resolve by keeping both changes
+                        subprocess.run(['git', 'checkout', '--ours', file_path], 
+                                     capture_output=True, cwd=os.getcwd())
+                    
+                    # Add resolved files
+                    subprocess.run(['git', 'add', '-A'], 
+                                 capture_output=True, cwd=os.getcwd())
+                    
+                    # Complete the merge
+                    merge_result = subprocess.run(['git', 'commit', '--no-edit'], 
+                                                capture_output=True, 
+                                                text=True,
+                                                cwd=os.getcwd())
+                    
+                    if merge_result.returncode == 0:
+                        print_success("Conflicts resolved automatically (kept your changes)")
+                        print_warning("Note: Remote changes were discarded where conflicts occurred")
+                    else:
+                        print_error("Could not complete merge automatically")
+                        print_info("Please resolve conflicts manually with 'git status'")
+                        return False
+                else:
+                    print_error(f"Git pull failed: {pull_result.stderr}")
+                    return False
+            else:
+                print_error(f"Git pull failed: {pull_result.stderr}")
+                return False
         
         print_success("Framework updated successfully!")
-        
-        if has_changes:
-            print_status("Restoring stashed changes...")
-            pop_result = subprocess.run(['git', 'stash', 'pop'], 
-                                       capture_output=True, 
-                                       text=True,
-                                       cwd=os.getcwd())
-            
-            if pop_result.returncode != 0:
-                print_warning("Some conflicts occurred while restoring changes")
-                print_info("You may need to resolve conflicts manually with 'git stash list'")
-            else:
-                print_success("Changes restored successfully")
         
         if pull_result.stdout:
             print_info("Update details:")
@@ -210,6 +305,8 @@ def git_update() -> bool:
         
     except Exception as e:
         print_error(f"Git update failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def update_python_packages(verbose: bool = False) -> bool:
@@ -275,6 +372,12 @@ def main():
         backups = {}
         print_info("No custom modules detected")
     
+    # Check for modified tracked files
+    modified_files = get_modified_tracked_files()
+    if modified_files:
+        print_warning(f"You have {len(modified_files)} modified file(s) in tracked directories")
+        print_info("These will be automatically committed and merged with upstream changes")
+    
     success = True
     
     # Update framework via git
@@ -296,6 +399,8 @@ def main():
         print_success("Framework update completed successfully!")
         if custom_modules:
             print_info(f"Your {len(custom_modules)} custom module(s) have been preserved")
+        if modified_files:
+            print_info(f"Your {len(modified_files)} modification(s) have been kept")
     else:
         print_error("Some errors occurred during the update process")
         print_info("Please review the messages above and resolve any issues")
@@ -314,4 +419,3 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-

@@ -329,8 +329,8 @@ class Module(BrowserAuxiliary):
                         session.fingerprint = {}
                     session.fingerprint['properties'] = data
                     session.fingerprint['timestamp'] = datetime.now().isoformat()
-                    print_success(f"[+] Properties stored for session {self.session_id[:8]}...")
-                    print_info("[*] Run 'generate fingerprint' to create a fingerprint hash")
+                    print_success(f"Properties stored for session {self.session_id[:8]}...")
+                    print_status("Run 'generate fingerprint' to create a fingerprint hash")
             
             return True
             

@@ -12,7 +12,7 @@ dist/
 build/
 
 # Database files
-database/
+/database/
 *.db
 *.sqlite
 *.toml

@@ -61,7 +61,7 @@ class ShellManager:
             shell_class = self.shell_types[shell_type]
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "ftp", "aws_sqs", "aws_sqs_command", "android"):
+            elif shell_type in ("ssh", "php", "mysql", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)

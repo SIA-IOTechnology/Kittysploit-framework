@@ -1,6 +1,6 @@
 from core.framework.base_module import BaseModule
 from core.framework.enums import Handler, SessionType
-from core.output_handler import print_success, print_status, print_error, print_info, print_warning
+from core.output_handler import print_success, print_status, print_error, print_info, print_warning, print_debug
 from core.framework.option.option_integer import OptInteger
 from typing import Optional, Dict, Any, List
 import threading
@@ -55,55 +55,79 @@ class Listener(BaseModule):
     def run_with_auto_session(self):
         """Run the listener with automatic session management - calls run() and handles session creation"""
         try:
-            # Call the module's run method
-            result = self.run()
+            # For listeners that run continuously, loop until we get a connection or error
+            # This allows listeners to return None when waiting for connections
+            max_iterations = 1000000  # Large number to allow continuous listening
+            iteration = 0
             
-            # If result is a tuple with (connection, target, port), create session automatically
-            if isinstance(result, tuple) and len(result) >= 3:
-                connection, target, port = result[0], result[1], result[2]
-                additional_data = result[3] if len(result) > 3 else {}
+            while iteration < max_iterations and not self.stop_flag.is_set():
+                # Call the module's run method
+                result = self.run()
                 
-                # Create session automatically using __info__ data
-                session_id = self._create_session_from_connection_data(
-                    connection, target, port, additional_data
-                )
+                # If result is None, listener is waiting for connection - continue loop
+                if result is None:
+                    # Small delay to avoid tight loop
+                    time.sleep(0.1)
+                    iteration += 1
+                    continue
                 
-                if session_id:
-                    print_success(f"Session {session_id} created automatically")
-                    return session_id
-                else:
-                    print_error("Failed to create session automatically")
+                # If result is False, listener encountered an error or was stopped
+                if result is False:
                     return False
-            
-            # If result is a session ID (string), return it
-            elif isinstance(result, str):
-                return result
-            
-            # If result is boolean, return it
-            elif isinstance(result, bool):
-                return result
-            
-            # If result is a connection object, try to create session
-            elif hasattr(result, 'send') or hasattr(result, 'recv'):
-                # Try to determine target and port from connection
-                target = getattr(self, 'rhost', 'unknown')
-                port = getattr(self, 'rport', 0)
                 
-                session_id = self._create_session_from_connection_data(
-                    result, target, port, {}
-                )
+                # If result is a tuple with (connection, target, port), create session automatically
+                if isinstance(result, tuple) and len(result) >= 3:
+                    connection, target, port = result[0], result[1], result[2]
+                    additional_data = result[3] if len(result) > 3 else {}
+                    
+                    # Create session automatically using __info__ data
+                    session_id = self._create_session_from_connection_data(
+                        connection, target, port, additional_data
+                    )
+                    
+                    if session_id:
+                        print_success(f"Session {session_id} created automatically")
+                        return session_id
+                    else:
+                        print_error("Failed to create session automatically")
+                        return False
                 
-                if session_id:
-                    print_success(f"Session {session_id} created automatically")
-                    return session_id
+                # If result is a session ID (string), return it
+                elif isinstance(result, str):
+                    return result
+                
+                # If result is boolean, return it
+                elif isinstance(result, bool):
+                    return result
+                
+                # If result is a connection object, try to create session
+                elif hasattr(result, 'send') or hasattr(result, 'recv'):
+                    # Try to determine target and port from connection
+                    target = getattr(self, 'rhost', 'unknown')
+                    port = getattr(self, 'rport', 0)
+                    
+                    session_id = self._create_session_from_connection_data(
+                        result, target, port, {}
+                    )
+                    
+                    if session_id:
+                        print_success(f"Session {session_id} created automatically")
+                        return session_id
+                    else:
+                        return False
+                
+                # Unknown result type
                 else:
-                    return False
+                    print_warning(f"Unknown result type from run(): {type(result)}")
+                    return bool(result)
             
-            # Unknown result type
-            else:
-                print_warning(f"Unknown result type from run(): {type(result)}")
-                return bool(result)
+            # If we exit the loop without getting a connection, return True to indicate listener is running
+            # (This handles the case where listener is waiting but user interrupts or stops it)
+            return True
                 
+        except KeyboardInterrupt:
+            print_warning("\nInterrupted by user")
+            return True  # Return True to indicate graceful shutdown
         except Exception as e:
             print_error(f"Error in run_with_auto_session: {e}")
             return False
@@ -274,9 +298,9 @@ class Listener(BaseModule):
             else:
                 session_type = 'shell'  # Default
             
-            print_info(f"Starting {self.name} listener...")
-            print_info(f"Handler: {handler}")
-            print_info(f"Session type: {session_type}")
+            print_debug(f"Starting {self.name} listener...")
+            print_debug(f"Handler: {handler}")
+            print_debug(f"Session type: {session_type}")
             
             if handler == "reverse":
                 lhost = getattr(self, 'lhost', '0.0.0.0')
@@ -295,6 +319,11 @@ class Listener(BaseModule):
                     rport = rport.value
                 print_info(f"Connecting to {rhost}:{rport}")
             
+            # Reset control flags before launching the worker thread
+            self.stop_flag.clear()
+            self.running = True  # Must be set before the thread starts to avoid race conditions
+            self.start_time = time.time()
+            
             # Start listener in background thread
             self.listener_thread = threading.Thread(target=self._run_listener, daemon=True)
             self.listener_thread.start()
@@ -302,8 +331,6 @@ class Listener(BaseModule):
             # Wait a moment for listener to start
             time.sleep(1)
             
-            self.running = True
-            self.start_time = time.time()
             print_success(f"{self.name} listener started successfully")
             return True
             
@@ -341,17 +368,38 @@ class Listener(BaseModule):
     def _run_listener(self):
         """Run the listener in background thread"""
         try:
-            # Call the actual listener implementation
-            result = self.run()
-            
-            # Handle the result automatically
-            if result:
-                self._handle_listener_result(result)
-            else:
-                print_info("Listener completed without session")
+            # Keep running until stop_flag is set
+            while not self.stop_flag.is_set() and self.running:
+                try:
+                    # Call the actual listener implementation
+                    result = self.run()
+                    
+                    # Handle the result automatically
+                    if result:
+                        self._handle_listener_result(result)
+                        # After handling a connection, continue listening for more
+                        # Only break if run() explicitly returns False or None
+                        if result is False:
+                            break
+                    else:
+                        # If run() returns None/False, check if we should continue
+                        # For listeners that accept multiple connections, we should continue
+                        # Only break if stop_flag is set
+                        if self.stop_flag.is_set():
+                            break
+                        # Small delay before next iteration to avoid tight loop
+                        time.sleep(0.1)
+                        
+                except Exception as e:
+                    if not self.stop_flag.is_set():
+                        print_error(f"Listener error in run(): {e}")
+                        # Continue listening unless stop_flag is set
+                        time.sleep(1)
+                    else:
+                        break
             
         except Exception as e:
-            print_error(f"Listener error: {e}")
+            print_error(f"Listener thread error: {e}")
         finally:
             self.running = False
     
@@ -460,7 +508,6 @@ class Listener(BaseModule):
             self.session_count += 1
             
             print_success(f"Session created: {session_id}")
-            print_info(f"Handler: {handler}, Target: {target}:{port}")
             
             return session_id
             

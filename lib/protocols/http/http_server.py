@@ -9,8 +9,8 @@ import os
 
 class Http_server(BaseModule):
 	
-	srvhost = OptString("127.0.0.1", "Address of the HTTP server", True)
-	srvport = OptPort(11111, "Port of the HTTP server", True)
+	srvhost = OptString("0.0.0.0", "Address of the HTTP server", True)
+	srvport = OptPort(8888, "Port of the HTTP server", True)
 	
 	template_dir = OptString("/tmp/", "Directory for filename template", advanced=True)
 

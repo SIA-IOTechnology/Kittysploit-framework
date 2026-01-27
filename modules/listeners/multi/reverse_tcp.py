@@ -18,42 +18,45 @@ class Module(Listener):
     lport = OptPort(4444, "Local port", True)
     
     def run(self):
-        """Run the reverse TCP listener - ultra-simple implementation"""
+        """Run the reverse TCP listener - accepts multiple connections"""
         try:
-
-            print_status(f"Starting server on {self.lhost}:{self.lport}")
-            print_status("Waiting connection...")
-            print_status("Press Ctrl+C to stop the listener")
+            # Only initialize socket once if not already created
+            if not hasattr(self, 'sock') or self.sock is None:
+                print_status(f"Starting server on {self.lhost}:{self.lport}")
+                print_status("Waiting connection...")
+                print_status("Press Ctrl+C to stop the listener")
+                
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.sock.settimeout(1.0)  # Set timeout for non-blocking behavior
+                self.sock.bind((self.lhost, int(self.lport)))
+                self.sock.listen(5)
+                
+                print_success(f"Listening on {self.lhost}:{self.lport}")
             
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.sock.settimeout(1.0)  # Set timeout for non-blocking behavior
-            self.sock.bind((self.lhost, int(self.lport)))
-            self.sock.listen(5)
-            
-            print_success(f"Listening on {self.lhost}:{self.lport}")
-            
-            while not self.stop_flag.is_set():
-                try:
-                    # Accept connection
-                    client_socket, address = self.sock.accept()
-                    print_success(f"Connection received from {address[0]}:{address[1]}")
-                    
-                    # Return connection data - framework extracts info from __info__
-                    return (client_socket, address[0], address[1], {'connection_type': 'reverse', 'protocol': 'tcp'})
-                    
-                except socket.timeout:
-                    # Timeout occurred, continue listening
-                    continue
-                except KeyboardInterrupt:
-                    print_info("Interrupted by user")
-                    break
-                except Exception as e:
-                    if not self.stop_flag.is_set():
-                        print_error(f"Error accepting connection: {e}")
-                    break
-            
-            return False
+            # Accept one connection and return it
+            # The framework's _run_listener() will call this again for more connections
+            try:
+                # Accept connection
+                client_socket, address = self.sock.accept()
+                print_success(f"Connection received from {address[0]}:{address[1]}")
+                
+                # Return connection data - framework extracts info from __info__
+                return (client_socket, address[0], address[1], {'connection_type': 'reverse', 'protocol': 'tcp'})
+                
+            except socket.timeout:
+                # Timeout occurred, return None to continue listening
+                return None
+            except KeyboardInterrupt:
+                print_info("Interrupted by user")
+                return False
+            except Exception as e:
+                if not self.stop_flag.is_set():
+                    print_error(f"Error accepting connection: {e}")
+                    # Return None to continue listening on non-fatal errors
+                    return None
+                else:
+                    return False
                 
         except KeyboardInterrupt:
             print_info("Interrupted by user")

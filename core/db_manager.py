@@ -171,7 +171,7 @@ class DatabaseManager:
             self.close_workspace_db(workspace)
     
     def migrate_modules_table_constraint(self, workspace: str = "default") -> bool:
-        """Migrate the modules table to update the CHECK constraint to include 'workflow'
+        """Migrate the modules table to update the CHECK constraint to include all module types
         
         This is needed because SQLite doesn't support modifying CHECK constraints.
         We recreate the table with the correct constraint. We also ensure the unique
@@ -199,20 +199,31 @@ class DatabaseManager:
                 Base.metadata.create_all(engine)
                 return True
             
-            # Check if constraint already includes 'workflow'
+            # Liste complète des types de modules attendus
+            expected_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 
+                            'listeners', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 
+                            'encoders', 'backdoors', 'shortcut']
+            
+            # Check if constraint already includes all expected types
             with engine.connect() as conn:
                 # Get the CREATE TABLE statement
                 result = conn.execute(text("SELECT sql FROM sqlite_master WHERE type='table' AND name='modules'"))
                 create_sql = result.fetchone()
                 if create_sql and create_sql[0]:
                     sql_str = create_sql[0]
-                    has_workflow = ("'workflow'" in sql_str) or ('"workflow"' in sql_str)
+                    
+                    # Vérifier si tous les types attendus sont présents dans la contrainte
+                    has_all_types = all(
+                        (f"'{t}'" in sql_str) or (f'"{t}"' in sql_str) 
+                        for t in expected_types
+                    )
+                    
                     # Older schema used UNIQUE(name). Current schema uses UNIQUE(path).
                     has_unique_name = ('UNIQUE ("name")' in sql_str) or ('UNIQUE(name)' in sql_str) or ('UNIQUE (name)' in sql_str)
                     has_unique_path = ('UNIQUE ("path")' in sql_str) or ('UNIQUE(path)' in sql_str) or ('UNIQUE (path)' in sql_str)
 
                     # If schema already matches expectations, no migration needed.
-                    if has_workflow and (not has_unique_name) and has_unique_path:
+                    if has_all_types and (not has_unique_name) and has_unique_path:
                         return True
             
             # Need to migrate: recreate table with correct constraint

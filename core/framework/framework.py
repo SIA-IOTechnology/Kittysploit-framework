@@ -342,6 +342,14 @@ class Framework:
     def _init_modules_db(self) -> None:
         """Initialise la base de données des modules."""
         try:
+            # S'assurer que la contrainte de la table est à jour avant de charger les modules
+            workspace_name = self.get_current_workspace_name()
+            try:
+                self.db_manager.migrate_modules_table_constraint(workspace_name)
+            except Exception as migration_error:
+                # Si la migration échoue, continuer quand même (la table sera créée avec le bon schéma si elle n'existe pas)
+                self.output_handler.print_warning(f"Could not migrate database constraint: {migration_error}")
+            
             session = self.get_db_session()
             if not session:
                 return
@@ -356,9 +364,26 @@ class Framework:
     def _load_modules_from_files(self, session) -> None:
         """Charge les modules depuis les fichiers dans la base de données."""
         try:
-            # Parcourir les dossiers de modules
-            module_dirs = ['modules/exploits', 'modules/auxiliary', 'modules/scanners', 'modules/workflow']
-            for module_dir in module_dirs:
+            # Mapping des dossiers vers les types de modules
+            # Format: (dossier, type_module)
+            module_dir_mappings = [
+                ('modules/exploits', 'exploits'),
+                ('modules/auxiliary', 'auxiliary'),
+                ('modules/scanners', 'scanner'),
+                ('modules/scanner', 'scanner'),  # Variante possible
+                ('modules/workflow', 'workflow'),
+                ('modules/listeners', 'listeners'),
+                ('modules/browser_exploits', 'browser_exploits'),
+                ('modules/browser_auxiliary', 'browser_auxiliary'),
+                ('modules/docker_environments', 'docker_environment'),
+                ('modules/post', 'post'),
+                ('modules/payloads', 'payloads'),
+                ('modules/encoders', 'encoders'),
+                ('modules/backdoors', 'backdoors'),
+                ('modules/shortcut', 'shortcut'),
+            ]
+            
+            for module_dir, module_type in module_dir_mappings:
                 if not os.path.exists(module_dir):
                     continue
                     
@@ -370,10 +395,11 @@ class Framework:
                             
                             if module_info:
                                 # Créer une entrée dans la base de données
+                                # Utiliser le type mappé plutôt que le nom du dossier
                                 module = Module(
                                     name=module_info.get('name', ''),
                                     description=module_info.get('description', ''),
-                                    type=os.path.basename(os.path.dirname(module_path)),
+                                    type=module_type,  # Utiliser le type mappé
                                     path=module_path,
                                     author=module_info.get('author', ''),
                                     version=module_info.get('version', ''),
@@ -434,36 +460,38 @@ class Framework:
     def get_module_counts_by_type(self) -> Dict[str, int]:
         """
         Récupère le nombre de modules par type.
+        Fusionne les résultats de la base de données avec ceux du système de fichiers
+        pour garantir que tous les types de modules sont comptabilisés.
         
         Returns:
             Dict[str, int]: Dictionnaire avec le type de module comme clé et le nombre comme valeur
         """
         try:
-            # Essayer d'abord avec la base de données
+            # Types de modules supportés
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
+            counts = {}
+            
+            # Récupérer les comptages depuis la base de données
             session = self.get_db_session()
             if session:
                 try:
-                    # Types de modules supportés
-                    module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
-                    counts = {}
-                    
                     for module_type in module_types:
                         count = session.query(Module).filter_by(type=module_type, is_active=True).count()
                         if count > 0:
                             counts[module_type] = count
-                    
-                    # Si on a des résultats, les retourner
-                    if counts:
-                        return counts
                 except Exception as db_error:
-                    # Si erreur de base de données (schéma obsolète), utiliser le fallback
-                    # Fallback silencieux - pas besoin de logger
+                    # Si erreur de base de données (schéma obsolète), ignorer et continuer avec filesystem
                     pass
             
-            # Fallback: compter depuis les fichiers
-            counts = self._count_modules_from_files()
+            # Toujours compter depuis les fichiers pour compléter/remplacer les données DB
+            # Cela garantit que les types non enregistrés en DB sont quand même comptés
+            filesystem_counts = self._count_modules_from_files()
             
-            # Ajouter le nombre de plugins
+            # Fusionner les résultats : filesystem prend priorité car il est plus complet
+            for module_type, count in filesystem_counts.items():
+                counts[module_type] = count
+            
+            # Ajouter le nombre de plugins (toujours depuis le plugin_manager)
             if hasattr(self, 'plugin_manager') and self.plugin_manager:
                 plugin_count = len(self.plugin_manager.list_plugins())
                 if plugin_count > 0:

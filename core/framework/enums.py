@@ -106,6 +106,7 @@ class Arch(Enum):
     POWERPC = {"name": "PowerPC", "value": "powerpc"}
     SPARC = {"name": "SPARC", "value": "sparc"}
     RISC_V = {"name": "RISC-V", "value": "risc-v"}
+    WASM32 = {"name": "WASM32", "value": "wasm32"}
     OTHER = {"name": "Other", "value": "other"}
 
 class Type(Enum):

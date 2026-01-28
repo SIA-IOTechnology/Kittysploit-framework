@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Windows System Enumeration Module
-Gathers comprehensive system information from a Windows target
-"""
-
 from kittysploit import *
 import re
 
@@ -20,23 +15,74 @@ class Module(Post):
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
     }
     
-    def check(self):
-        """Check if the module can run"""
-        session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
-        if not session_id_value:
-            print_error("Session ID not set")
-            return False
+
+    def _get_session_id_value(self) -> str:
+        """Return the current session_id option value as a string."""
+        value = ""
+        try:
+            value = getattr(self, 'session_id', '') or ""
+        except Exception:
+            value = ""
+        if hasattr(value, 'value'):
+            value = value.value
+        return str(value or "").strip()
+    
+    def _ensure_cache_fields(self):
+        """Ensure per-instance cache attributes exist."""
+        if not hasattr(self, "_cached_session_id"):
+            self._cached_session_id = None
+        if not hasattr(self, "_cached_session"):
+            self._cached_session = None
+        if not hasattr(self, "_session_type_value"):
+            self._session_type_value = ""
+    
+    def _ensure_session_context(self):
+        """Load and cache the session metadata."""
+        self._ensure_cache_fields()
+        session_id_value = self._get_session_id_value()
+        if self._cached_session_id == session_id_value and self._cached_session is not None:
+            return
         
-        if not self.framework or not hasattr(self.framework, 'session_manager'):
-            print_error("Framework or session manager not available")
-            return False
+        self._cached_session_id = session_id_value
+        self._cached_session = None
+        self._session_type_value = ""
+        
+        if not session_id_value or not self.framework or not hasattr(self.framework, 'session_manager'):
+            return
         
         session = self.framework.session_manager.get_session(session_id_value)
-        if not session:
-            print_error(f"Session {session_id_value} not found")
-            return False
-        
-        return True
+        if session:
+            self._cached_session = session
+            session_type = getattr(session, 'session_type', '') or ''
+            self._session_type_value = session_type.lower()
+    
+    def _get_session(self):
+        """Return the cached session object."""
+        self._ensure_session_context()
+        return self._cached_session
+    
+    def _is_meterpreter_session(self) -> bool:
+        """Return True if the active session is a meterpreter session."""
+        self._ensure_session_context()
+        return self._session_type_value == SessionType.METERPRETER.value
+    
+    def _execute_meterpreter_cmd(self, command: str):
+        """Execute a meterpreter-only command if the session supports it."""
+        if not command or not self._is_meterpreter_session():
+            return ""
+        return self._execute_cmd(command)
+    
+    def _execute_windows_command(self, command: str):
+        """
+        Execute a standard Windows command across both meterpreter and classic shells.
+        Automatically prefixes with 'shell' when running from meterpreter.
+        """
+        if not command:
+            return ""
+        cmd = command
+        if self._is_meterpreter_session():
+            cmd = f"shell {command}"
+        return self._execute_cmd(cmd)
     
     def _format_bytes(self, bytes_value: int) -> str:
         """Format bytes to human-readable format"""
@@ -125,6 +171,8 @@ class Module(Post):
     
     def _execute_cmd(self, command: str, description: str = None) -> str:
         """Execute a command and return output"""
+        if not command:
+            return ""
         try:
             if description:
                 print_info(f"[*] {description}")
@@ -145,14 +193,15 @@ class Module(Post):
         print_info("=" * 70)
         
         # Get system info via Meterpreter sysinfo
-        sysinfo = self._execute_cmd("sysinfo", "Collecting system information...")
+        print_status("Collecting system information...")
+        sysinfo = self._execute_meterpreter_cmd("sysinfo")
         if sysinfo:
             print_info(sysinfo)
         else:
             # Fallback to individual commands
-            hostname = self._execute_cmd("shell hostname")
-            os_info = self._execute_cmd("shell ver")
-            arch = self._execute_cmd("shell wmic os get osarchitecture /value")
+            hostname = self._execute_windows_command("hostname")
+            os_info = self._execute_windows_command("ver")
+            arch = self._execute_windows_command("wmic os get osarchitecture /value")
             
             if hostname:
                 print_info(f"Hostname: {hostname}")
@@ -170,16 +219,18 @@ class Module(Post):
         print_info("=" * 70)
         
         # Current user
-        user = self._execute_cmd("getuid", "Getting current user...")
+        print_status("Getting current user...")
+        user = self._execute_meterpreter_cmd("getuid")
         if user:
             print_info(f"Current User: {user}")
         else:
-            user = self._execute_cmd("shell whoami")
+            user = self._execute_windows_command("whoami")
             if user:
                 print_info(f"Current User: {user}")
         
         # User groups
-        groups = self._execute_cmd("shell whoami /groups", "Enumerating user groups...")
+        print_status("Enumerating user groups...")
+        groups = self._execute_windows_command("whoami /groups")
         if groups:
             print_info("User Groups:")
             for line in groups.split('\n')[:10]:  # Show first 10 lines
@@ -187,7 +238,8 @@ class Module(Post):
                     print_info(f"  {line}")
         
         # Privileges
-        privs = self._execute_cmd("shell whoami /priv", "Enumerating privileges...")
+        print_status("Enumerating privileges...")
+        privs = self._execute_windows_command("whoami /priv")
         if privs:
             print_info("Privileges:")
             for line in privs.split('\n')[:15]:
@@ -203,12 +255,18 @@ class Module(Post):
         print_info("=" * 70)
         
         # Current process
-        pid = self._execute_cmd("getpid", "Getting current process ID...")
+        print_status("Getting current process ID...")
+        pid = self._execute_meterpreter_cmd("getpid")
         if pid:
             print_info(f"Current PID: {pid}")
+        else:
+            pid = self._execute_windows_command("powershell -NoLogo -NoProfile -Command \"$PID\"")
+            if pid:
+                print_info(f"Current PID: {pid}")
         
         # List processes
-        processes = self._execute_cmd("ps", "Enumerating running processes...")
+        print_status("Enumerating running processes...")
+        processes = self._execute_meterpreter_cmd("ps")
         if processes:
             # Show first 20 lines
             lines = processes.split('\n')[:20]
@@ -219,7 +277,7 @@ class Module(Post):
                 print_info(f"  ... ({len(processes.split('\n')) - 20} more processes)")
         else:
             # Fallback
-            ps_list = self._execute_cmd("shell tasklist", "Enumerating processes...")
+            ps_list = self._execute_windows_command("tasklist /v")
             if ps_list:
                 lines = ps_list.split('\n')[:15]
                 for line in lines:
@@ -235,7 +293,8 @@ class Module(Post):
         print_info("=" * 70)
         
         # IP configuration
-        ipconfig = self._execute_cmd("shell ipconfig /all", "Gathering network configuration...")
+        print_status("Gathering network configuration...")
+        ipconfig = self._execute_windows_command("ipconfig /all")
         if ipconfig:
             lines = ipconfig.split('\n')[:30]  # Show first 30 lines
             for line in lines:
@@ -243,7 +302,8 @@ class Module(Post):
                     print_info(f"  {line}")
         
         # Active connections
-        netstat = self._execute_cmd("shell netstat -ano", "Enumerating network connections...")
+        print_status("Enumerating network connections...")
+        netstat = self._execute_windows_command("netstat -ano")
         if netstat:
             lines = netstat.split('\n')[:20]
             for line in lines:
@@ -259,7 +319,8 @@ class Module(Post):
         print_info("=" * 70)
         
         # List services
-        services = self._execute_cmd("shell sc query state= all", "Enumerating Windows services...")
+        print_status("Enumerating Windows services...")
+        services = self._execute_windows_command("sc query state= all")
         if services:
             lines = services.split('\n')[:40]  # Show first 40 lines
             for line in lines:
@@ -275,7 +336,8 @@ class Module(Post):
         print_info("=" * 70)
         
         # UAC status
-        uac = self._execute_cmd("shell reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v EnableLUA", "Checking UAC status...")
+        print_status("Checking UAC status...")
+        uac = self._execute_windows_command("reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v EnableLUA")
         if uac:
             print_info("UAC Configuration:")
             for line in uac.split('\n'):
@@ -283,7 +345,8 @@ class Module(Post):
                     print_info(f"  {line}")
         
         # Password policy
-        pass_policy = self._execute_cmd("shell net accounts", "Checking password policy...")
+        print_status("Checking password policy...")
+        pass_policy = self._execute_windows_command("net accounts")
         if pass_policy:
             print_info("Password Policy:")
             for line in pass_policy.split('\n'):
@@ -291,7 +354,8 @@ class Module(Post):
                     print_info(f"  {line}")
         
         # Firewall status
-        firewall = self._execute_cmd("shell netsh advfirewall show allprofiles state", "Checking firewall status...")
+        print_status("Checking firewall status...")
+        firewall = self._execute_windows_command("netsh advfirewall show allprofiles state")
         if firewall:
             print_info("Firewall Status:")
             for line in firewall.split('\n'):
@@ -309,7 +373,8 @@ class Module(Post):
         print_info("Environment Variables")
         print_info("=" * 70)
         
-        env = self._execute_cmd("shell set", "Gathering environment variables...")
+        print_status("Gathering environment variables...")
+        env = self._execute_windows_command("set")
         if env:
             # Show important environment variables
             important_vars = ['PATH', 'USERNAME', 'USERPROFILE', 'COMPUTERNAME', 
@@ -328,7 +393,8 @@ class Module(Post):
         print_info("=" * 70)
         
         # Disk usage - use a better command that gives formatted output
-        disk = self._execute_cmd("shell wmic logicaldisk get size,freespace,caption,volumename", "Gathering disk information...")
+        print_status("Gathering disk information...")
+        disk = self._execute_windows_command("wmic logicaldisk get size,freespace,caption,volumename")
         if disk:
             lines = disk.split('\n')
             # Skip header line
@@ -392,18 +458,19 @@ class Module(Post):
                         print_info(f"  {line}")
         else:
             # Fallback to simpler command
-            disk_simple = self._execute_cmd("shell wmic logicaldisk get caption,freespace,size", "Gathering disk information...")
+            disk_simple = self._execute_windows_command("wmic logicaldisk get caption,freespace,size")
             if disk_simple:
                 for line in disk_simple.split('\n'):
                     if line.strip() and 'Caption' not in line:
                         print_info(f"  {line}")
         
         # Current directory
-        pwd = self._execute_cmd("pwd", "Getting current directory...")
+        print_status("Getting current directory...")
+        pwd = self._execute_meterpreter_cmd("pwd")
         if pwd:
             print_info(f"\nCurrent Directory: {pwd}")
         else:
-            pwd = self._execute_cmd("shell cd")
+            pwd = self._execute_windows_command("cd")
             if pwd:
                 print_info(f"\nCurrent Directory: {pwd}")
         
@@ -438,4 +505,3 @@ class Module(Post):
             raise e
         except Exception as e:
             raise ProcedureError(FailureType.Unknown, f"Enumeration error: {str(e)}")
-

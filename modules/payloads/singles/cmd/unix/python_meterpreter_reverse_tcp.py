@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Python Meterpreter Reverse TCP Payload
-Author: KittySploit Team
-Version: 1.0.0
-
-This payload creates a Meterpreter-like client that connects back to the listener
-and provides advanced post-exploitation capabilities.
-
-REQUIREMENT: Python must be installed on the target system
-"""
-
 from kittysploit import *
 import json
 import base64
@@ -23,9 +12,8 @@ class Module(Payload):
         'description': 'Meterpreter-like payload that connects back via TCP (requires Python on target)',
         'author': 'KittySploit Team',
         'version': '1.0.0',
-        'category': 'singles',
         'arch': Arch.PYTHON,
-        'listener': 'listeners/multi/meterpreter',
+        'listener': 'listeners/multi/meterpreter_reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.METERPRETER,
         'references': []

@@ -231,6 +231,15 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "mysql":
                 session_type = "mysql"
                 shell_type = "mysql"
+            elif session and session.session_type and session.session_type.lower() == "postgresql":
+                session_type = "postgresql"
+                shell_type = "postgresql"
+            elif session and session.session_type and session.session_type.lower() == "redis":
+                session_type = "redis"
+                shell_type = "redis"
+            elif session and session.session_type and session.session_type.lower() == "ldap":
+                session_type = "ldap"
+                shell_type = "ldap"
             elif session and session.session_type and session.session_type.lower() == "ftp":
                 session_type = "ftp"
                 shell_type = "ftp"

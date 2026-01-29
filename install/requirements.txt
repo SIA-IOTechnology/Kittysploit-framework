@@ -36,6 +36,9 @@ six
 docker
 sqlalchemy
 pymysql
+psycopg2-binary
+redis
+ldap3
 pysnmp
 pysmb
 paramiko

@@ -13,6 +13,9 @@ from .ssh_shell import SSHShell
 from .meterpreter_shell import MeterpreterShell
 from .php_shell import PHPShell
 from .mysql_shell import MySQLShell
+from .postgresql_shell import PostgreSQLShell
+from .redis_shell import RedisShell
+from .ldap_shell import LDAPShell
 from .ftp_shell import FTPShell
 from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
@@ -31,6 +34,9 @@ class ShellManager:
             'meterpreter': MeterpreterShell,
             'php': PHPShell,
             'mysql': MySQLShell,
+            'postgresql': PostgreSQLShell,
+            'redis': RedisShell,
+            'ldap': LDAPShell,
             'ftp': FTPShell,
             'aws_sqs': AWSSQSShell,
             'aws_sqs_command': AWSSQSCommandShell,
@@ -61,7 +67,7 @@ class ShellManager:
             shell_class = self.shell_types[shell_type]
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -142,6 +148,12 @@ class ShellManager:
                         shell_type = 'php'
                     elif session_type == 'mysql':
                         shell_type = 'mysql'
+                    elif session_type == 'postgresql':
+                        shell_type = 'postgresql'
+                    elif session_type == 'redis':
+                        shell_type = 'redis'
+                    elif session_type == 'ldap':
+                        shell_type = 'ldap'
                     elif session_type == 'ftp':
                         shell_type = 'ftp'
                     elif session_type == 'aws' or session_type == 'aws_sqs':

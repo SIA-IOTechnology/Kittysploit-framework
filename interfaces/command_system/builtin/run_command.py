@@ -386,6 +386,12 @@ Examples:
                 shell_type = "php"
             elif session_type == "mysql":
                 shell_type = "mysql"
+            elif session_type == "postgresql":
+                shell_type = "postgresql"
+            elif session_type == "redis":
+                shell_type = "redis"
+            elif session_type == "ldap":
+                shell_type = "ldap"
             elif session_type == "ftp":
                 shell_type = "ftp"
             elif session_type == "aws":

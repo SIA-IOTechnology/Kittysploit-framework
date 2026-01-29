@@ -150,12 +150,15 @@ class AdvancedCompleter(Completer):
             suggestions = self._local_ip_candidates()
         elif option_lower == "payload":
             suggestions = self._collect_payload_paths()
+        elif option_lower == "obfuscator":
+            suggestions = self._collect_obfuscator_paths()
 
         if not suggestions:
             return
 
+        display_meta = "Payload" if option_lower == "payload" else ("Obfuscator" if option_lower == "obfuscator" else None)
         for value in self._filter_items(suggestions, partial):
-            yield Completion(value, start_position=-len(partial), display_meta="Payload")
+            yield Completion(value, start_position=-len(partial), display_meta=display_meta or "Value")
 
     def _iter_proxy_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
         subcommands = ['start', 'stop', 'status', 'list', 'show', 'replay', 'export', 'clear', 'hexdump']
@@ -348,6 +351,24 @@ class AdvancedCompleter(Completer):
             pass
         
         return sorted(set(filter(None, payload_paths)))
+
+    def _collect_obfuscator_paths(self) -> List[str]:
+        """Collect all available obfuscator module paths"""
+        obfuscator_paths: List[str] = []
+        
+        try:
+            if not hasattr(self.framework, 'module_loader'):
+                return obfuscator_paths
+            
+            discovered_modules = self.framework.module_loader.discover_modules()
+            
+            for module_path in discovered_modules.keys():
+                if module_path.startswith("obfuscators/"):
+                    obfuscator_paths.append(module_path)
+        except Exception:
+            pass
+        
+        return sorted(set(filter(None, obfuscator_paths)))
 
 
 class ContextFilter(Filter):

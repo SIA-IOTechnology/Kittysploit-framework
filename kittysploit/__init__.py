@@ -34,6 +34,7 @@ from core.framework import (
     fail)
 
 from core.framework.encoder import Encoder
+from core.framework.obfuscator import Obfuscator
 
 # Import all option types
 from core.framework.option import (
@@ -100,6 +101,7 @@ __all__ = [
     'Post',
     'Backdoor',
     'Encoder',
+    'Obfuscator',
     'BaseModule',
     'Framework',
     'Plugin',

@@ -23,11 +23,16 @@ class SessionType(Enum):
     POSTGRESQL = "postgresql"
     REDIS = "redis"
     LDAP = "ldap"
+    MONGODB = "mongodb"
+    ELASTICSEARCH = "elasticsearch"
+    MSSQL = "mssql"
     FTP = "ftp"
     AWS = "aws"
     CANBUS = "canbus"
     BROWSER = "browser"
     ANDROID = "android"
+    MQTT = "mqtt"
+    DNS = "dns"
 
 class ServiceType(Enum):
     """Service types"""

@@ -240,6 +240,15 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "ldap":
                 session_type = "ldap"
                 shell_type = "ldap"
+            elif session and session.session_type and session.session_type.lower() == "mongodb":
+                session_type = "mongodb"
+                shell_type = "mongodb"
+            elif session and session.session_type and session.session_type.lower() == "elasticsearch":
+                session_type = "elasticsearch"
+                shell_type = "elasticsearch"
+            elif session and session.session_type and session.session_type.lower() == "mssql":
+                session_type = "mssql"
+                shell_type = "mssql"
             elif session and session.session_type and session.session_type.lower() == "ftp":
                 session_type = "ftp"
                 shell_type = "ftp"

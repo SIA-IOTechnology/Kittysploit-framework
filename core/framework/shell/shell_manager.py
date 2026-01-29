@@ -16,6 +16,11 @@ from .mysql_shell import MySQLShell
 from .postgresql_shell import PostgreSQLShell
 from .redis_shell import RedisShell
 from .ldap_shell import LDAPShell
+from .mongodb_shell import MongoDBShell
+from .elasticsearch_shell import ElasticsearchShell
+from .mssql_shell import MSSQLShell
+from .mqtt_shell import MQTTShell
+from .dns_shell import DNSShell
 from .ftp_shell import FTPShell
 from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
@@ -37,6 +42,11 @@ class ShellManager:
             'postgresql': PostgreSQLShell,
             'redis': RedisShell,
             'ldap': LDAPShell,
+            'mongodb': MongoDBShell,
+            'elasticsearch': ElasticsearchShell,
+            'mssql': MSSQLShell,
+            'mqtt': MQTTShell,
+            'dns': DNSShell,
             'ftp': FTPShell,
             'aws_sqs': AWSSQSShell,
             'aws_sqs_command': AWSSQSCommandShell,
@@ -67,7 +77,7 @@ class ShellManager:
             shell_class = self.shell_types[shell_type]
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -154,6 +164,16 @@ class ShellManager:
                         shell_type = 'redis'
                     elif session_type == 'ldap':
                         shell_type = 'ldap'
+                    elif session_type == 'mongodb':
+                        shell_type = 'mongodb'
+                    elif session_type == 'elasticsearch':
+                        shell_type = 'elasticsearch'
+                    elif session_type == 'mssql':
+                        shell_type = 'mssql'
+                    elif session_type == 'mqtt':
+                        shell_type = 'mqtt'
+                    elif session_type == 'dns':
+                        shell_type = 'dns'
                     elif session_type == 'ftp':
                         shell_type = 'ftp'
                     elif session_type == 'aws' or session_type == 'aws_sqs':

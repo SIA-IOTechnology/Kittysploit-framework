@@ -15,7 +15,7 @@ class HelpCommand(BaseCommand):
     # Command categories for better organization
     COMMAND_CATEGORIES = {
         'Core Commands': [
-            'help', 'clear', 'exit', 'banner', 'status', 'interpreter'
+            'help', 'clear', 'exit', 'banner', 'tuto', 'status', 'interpreter'
         ],
         'Module Management': [
             'use', 'search', 'show', 'set', 'run', 'back', 'check', 'reload'
@@ -284,6 +284,7 @@ class HelpCommand(BaseCommand):
         print_info("=" * 50)
         print_info("help                                       Print this help menu")
         print_info("banner                                     Print the banner")
+        print_info("tuto                                       Display usage tutorials for module types (English)")
         print_info("clear                                      Clean screen")
         print_info("exit                                       Exit kittysploit")
         print_info("status                                     Display framework status")

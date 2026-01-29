@@ -143,9 +143,11 @@ class ClassicShell(BaseShell):
         return ntpath.normpath(ntpath.join(base, s))
 
     def _normalize_windows_path_for_prompt(self, raw: str) -> str:
-        """Normalize and ensure we never end up with 'PS PS ...' in prompt."""
+        """Normalize and ensure we never end up with 'PS PS ...' in prompt. Use C:\\Users\\user when raw is Unix-style."""
+        if not raw or (str(raw).startswith('/') and ':\\' not in str(raw)):
+            return self._get_windows_drive() + "\\Users\\user"
         path = self._normalize_windows_path(raw)
-        if not path:
+        if not path or (path.startswith('/') and ':\\' not in path):
             return self._get_windows_drive() + "\\Users\\user"
         return path
 
@@ -155,6 +157,21 @@ class ClassicShell(BaseShell):
             self.current_directory = self._normalize_windows_path(raw)
         else:
             self.current_directory = str(raw).strip()
+
+    def _extract_windows_path_from_cd_result(self, raw: str) -> Optional[str]:
+        """From 'cd' command output (may contain C:\\path>cd or C:\\path>), extract the path only."""
+        if not raw or raw.strip().startswith('cd:'):
+            return None
+        for line in raw.split('\n'):
+            line = line.strip()
+            # CMD prompt line: "C:\path>" or "C:\path>command"
+            m = re.match(r'^([A-Za-z]:\\[^>]*)\s*>', line)
+            if m:
+                return m.group(1).strip().rstrip('\\') or m.group(1).strip()
+            # Plain path line: "C:\path"
+            if re.match(r'^[A-Za-z]:\\', line) and '>' not in line:
+                return line.rstrip('\\')
+        return None
 
     def _clean_path(self, raw: str) -> str:
         """Normalize raw path output coming from remote shells."""
@@ -274,10 +291,10 @@ class ClassicShell(BaseShell):
                 if ':\\' in result_clean or (len(result_clean) > 1 and result_clean[1] == ':'):
                     self.is_windows = True
                     self.platform_detected = True
-                    # Extract and set current directory from cd output
-                    # Windows 'cd' returns the current directory
-                    if result_clean and not result_clean.startswith('cd:'):
-                        self._set_current_directory(result_clean)
+                    # Extract path only: result may be "C:\path>cd" or "C:\path>" or banner+path; take first C:\... line
+                    path_for_cd = self._extract_windows_path_from_cd_result(result_clean)
+                    if path_for_cd:
+                        self._set_current_directory(path_for_cd)
                     else:
                         self._set_current_directory("C:\\Users\\user")
                     
@@ -330,8 +347,9 @@ class ClassicShell(BaseShell):
                     self.platform_detected = True
                     # Get current directory
                     cd_result = self._send_command_raw('cd', timeout=2)
-                    if cd_result and not cd_result.strip().startswith('cd:'):
-                        self._set_current_directory(cd_result.strip())
+                    path_for_cd = self._extract_windows_path_from_cd_result(cd_result.strip()) if cd_result else None
+                    if path_for_cd:
+                        self._set_current_directory(path_for_cd)
                     else:
                         self._set_current_directory("C:\\Users\\user")
                     
@@ -410,24 +428,31 @@ class ClassicShell(BaseShell):
                     # Skip empty lines
                     if not line_stripped:
                         continue
-                    
+                    line_lower = line_stripped.lower()
+                    # Skip Windows CMD banner lines (so they never appear in command output)
+                    if any(banner in line_lower for banner in [
+                        'microsoft windows [version',
+                        '(c) microsoft corporation',
+                        'tous droits', 'all rights reserved', 'tous droits rservs'
+                    ]):
+                        continue
+                    # Skip CMD-style prompt lines: "C:\path>" or "C:\path>command" (keep for 'cd' so we can extract path)
+                    if command.strip() != 'cd' and re.match(r'^[A-Za-z]:\\.*\s*>', line_stripped):
+                        continue
                     # Skip command echo
                     if line_stripped == command.strip():
                         continue
-                    
                     # Skip PowerShell prompt patterns (PS C:\path> / PS C:\path>> / repeated PS)
                     if self.is_windows and re.match(r'^\s*(?:PS\s+)+([A-Z]:\\.*)\s*>{1,2}\s*$', line_stripped, re.IGNORECASE):
                         continue
                     # Also skip prompt-like patterns missing drive (rare): "PS \Users\...>"
                     if self.is_windows and re.match(r'^\s*(?:PS\s+)+\\.*\s*>{1,2}\s*$', line_stripped, re.IGNORECASE):
                         continue
-                    
                     # Skip lines that are just the current path (PowerShell sometimes echoes it)
                     if self.is_windows and current_path_windows:
                         path_candidate = self._normalize_windows_path(line_stripped).rstrip("\\").lower()
                         if path_candidate == current_path_windows:
                             continue
-                    
                     filtered_lines.append(line)
                 
                 result = '\n'.join(filtered_lines).strip()

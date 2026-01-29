@@ -155,15 +155,14 @@ def print_table(headers, rows, max_width=80, **kwargs):
     if not headers or not rows:
         return
     
-    # Detect terminal width if available and max_width is default or reasonable
+    # Detect terminal width if available and max_width is default (80) only
+    # When max_width is explicitly set (e.g. 120), keep it so separators match caller's "=" lines
     try:
-        if max_width == 80 or (max_width <= 120 and _stream_isatty(sys.stdout)):
+        if max_width == 80 and _stream_isatty(sys.stdout):
             terminal_cols = _terminal_size().columns
-            # Use terminal width if it's larger than max_width, but cap at reasonable maximum
             if terminal_cols > max_width:
-                max_width = min(terminal_cols, 200)  # Cap at 200 to avoid overly wide tables
+                max_width = min(terminal_cols, 200)
     except (OSError, AttributeError):
-        # Terminal size not available, use provided max_width
         pass
     
     # Calculate optimal column widths
@@ -306,9 +305,10 @@ def print_table(headers, rows, max_width=80, **kwargs):
     
     # Print header with compact separator
     print_info(header_line)
-    # Use a more subtle separator (single line, no extra spacing)
+    # Separator same length as table width (or max_width) so "-" matches "=" lines from caller
     separator_char = "─" if _stream_isatty(sys.stdout) else "-"
-    print_info(separator_char * len(header_line))
+    separator_len = max(len(header_line), max_width)
+    print_info(separator_char * separator_len)
     
     # Print rows with word wrapping for long descriptions
     # Find Description column index for special handling

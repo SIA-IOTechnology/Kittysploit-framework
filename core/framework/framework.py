@@ -379,6 +379,7 @@ class Framework:
                 ('modules/post', 'post'),
                 ('modules/payloads', 'payloads'),
                 ('modules/encoders', 'encoders'),
+                ('modules/obfuscators', 'obfuscators'),
                 ('modules/backdoors', 'backdoors'),
                 ('modules/shortcut', 'shortcut'),
             ]
@@ -468,7 +469,7 @@ class Framework:
         """
         try:
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'obfuscators', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
             counts = {}
             
             # Récupérer les comptages depuis la base de données
@@ -518,7 +519,7 @@ class Framework:
                 return counts
             
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'obfuscators', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut']
             
             for module_type in module_types:
                 # Map module_type to directory name

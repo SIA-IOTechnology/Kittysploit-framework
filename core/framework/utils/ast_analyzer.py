@@ -194,7 +194,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
         if node.name == "Module":
             self.has_module_class = True
             # Classes de base qui ont déjà une méthode run()
-            base_classes_with_run = ["DockerEnvironment", "Exploit", "Auxiliary", "Listener", "Post", "Scanner", "Encoder"]
+            base_classes_with_run = ["DockerEnvironment", "Exploit", "Auxiliary", "Listener", "Post", "Scanner", "Encoder", "Obfuscator"]
             
             # Vérifier si la classe hérite de Payload ou d'autres classes de base
             for base in node.bases:

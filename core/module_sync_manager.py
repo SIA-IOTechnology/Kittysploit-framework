@@ -414,7 +414,7 @@ class ModuleSyncManager:
         path = (module_path or "").lower()
         
         # Valid types according to CHECK constraint in models.py
-        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow']
+        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 'listeners', 'encoders', 'obfuscator']
         
         # Module path prefixes mapping (must match valid types in CHECK constraint)
         type_mapping = {
@@ -427,6 +427,9 @@ class ModuleSyncManager:
             'scanner/': 'scanner',
             'browser_exploits/': 'exploits',  # Map to exploits
             'browser_auxiliary/': 'auxiliary',  # Map to auxiliary
+            'listeners/': 'listeners',
+            'encoders/': 'encoders',
+            'obfuscators/': 'obfuscator',
         }
         
         # Check for type in path
@@ -455,11 +458,11 @@ class ModuleSyncManager:
             elif first_part == 'scanner':
                 return 'scanner'
             elif first_part == 'listener':
-                # Listeners not in CHECK constraint, map to auxiliary
-                return 'auxiliary'
+                return 'listeners'
             elif first_part == 'encoder':
-                # Encoders not in CHECK constraint, map to auxiliary
-                return 'auxiliary'
+                return 'encoders'
+            elif first_part == 'obfuscator':
+                return 'obfuscator'
         
         # Default to 'auxiliary' if we can't determine (safest fallback)
         return 'auxiliary'
@@ -532,7 +535,7 @@ class ModuleSyncManager:
                 stats = {'total': total}
                 
                 # Count by type
-                for module_type in ['exploits', 'auxiliary', 'payloads', 'listeners', 'post', 'scanner', 'encoder']:
+                for module_type in ['exploits', 'auxiliary', 'payloads', 'listeners', 'post', 'scanner', 'encoder', 'obfuscator']:
                     count = session.query(Module).filter(
                         and_(Module.type == module_type, Module.is_active == True)
                     ).count()

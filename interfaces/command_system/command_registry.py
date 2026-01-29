@@ -51,6 +51,7 @@ class CommandRegistry:
         """Load built-in commands"""
         builtin_commands = [
             'banner',
+            'tuto',
             'help', 
             'clear',
             'exit',

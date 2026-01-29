@@ -1,17 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Python Reverse ICMP Shell
-Author: KittySploit Team
-Version: 1.0.0
-
-This payload creates a reverse shell over ICMP packets.
-It sends commands via ICMP Echo Request and receives output via ICMP Echo Reply.
-
-Note: Requires root/administrator privileges to send/receive raw ICMP packets.
-"""
-
 from kittysploit import *
 import subprocess
 import os

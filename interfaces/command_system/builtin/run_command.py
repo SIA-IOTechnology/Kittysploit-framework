@@ -392,6 +392,12 @@ Examples:
                 shell_type = "redis"
             elif session_type == "ldap":
                 shell_type = "ldap"
+            elif session_type == "mongodb":
+                shell_type = "mongodb"
+            elif session_type == "elasticsearch":
+                shell_type = "elasticsearch"
+            elif session_type == "mssql":
+                shell_type = "mssql"
             elif session_type == "ftp":
                 shell_type = "ftp"
             elif session_type == "aws":

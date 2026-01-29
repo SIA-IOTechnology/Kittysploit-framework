@@ -15,7 +15,10 @@ from typing import Optional, List, Dict, Any
 
 class ShowCommand(BaseCommand):
     """Command to show module information"""
-    
+
+    # Width for all separator lines ("=" and "-") so they match
+    SEP_WIDTH = 120
+
     MODULE_TYPE_ALIASES = {
         "module": None,
         "modules": None,
@@ -30,6 +33,8 @@ class ShowCommand(BaseCommand):
         "listeners": "listener",
         "encoder": "encoder",
         "encoders": "encoder",
+        "obfuscator": "obfuscator",
+        "obfuscators": "obfuscator",
         "workflow": "workflow",
         "workflows": "workflow",
         "docker": "docker_environment",
@@ -46,6 +51,7 @@ class ShowCommand(BaseCommand):
         ("post/", "post"),
         ("listeners/", "listener"),
         ("encoders/", "encoder"),
+        ("obfuscators/", "obfuscator"),
         ("workflow/", "workflow"),
         ("docker_environments/", "docker_environment"),
         ("browser_exploits/", "browser_exploit"),
@@ -63,7 +69,7 @@ class ShowCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|listeners|docker]"
+        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|listeners|encoders|obfuscators|docker]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
@@ -81,6 +87,8 @@ class ShowCommand(BaseCommand):
             "listener",  # alias
             "encoders",
             "encoder",  # alias
+            "obfuscators",
+            "obfuscator",  # alias
             "workflows",
             "workflow",  # alias
             "docker",
@@ -166,6 +174,8 @@ Examples:
                 self._show_listeners()
             elif show_type in ("encoder", "encoders"):
                 self._show_modules_by_category("Encoder", "encoder")
+            elif show_type in ("obfuscator", "obfuscators"):
+                self._show_modules_by_category("Obfuscator", "obfuscator")
             elif show_type in ("workflow", "workflows"):
                 self._show_modules_by_category("Workflow", "workflow")
             elif show_type in ("docker", "environment", "environments"):
@@ -176,7 +186,7 @@ Examples:
                 self._show_workspaces()
             else:
                 print_error(f"Unknown show type: {show_type}")
-                print_info("Use 'show options', 'show advanced', 'show info', 'show modules', 'show listeners', 'show nops', or 'show workspaces'")
+                print_info("Use 'show options', 'show advanced', 'show info', 'show modules', 'show listeners', 'show encoders', 'show obfuscators', 'show nops', or 'show workspaces'")
                 return False
             
             return True
@@ -202,15 +212,23 @@ Examples:
         if hasattr(module, 'cve') and module.cve:
             print_info(f"CVE: {module.cve}")
         
+        # For obfuscators: show compatible payload client languages
+        if getattr(module, 'type', None) == 'obfuscator' or (hasattr(module.__class__, 'TYPE_MODULE') and getattr(module.__class__, 'TYPE_MODULE') == 'obfuscator'):
+            supported = getattr(module, 'get_supported_client_languages', lambda: getattr(module.__class__, 'SUPPORTED_CLIENT_LANGUAGES', []))()
+            if supported:
+                print_info(f"Compatible with payloads (client language): {', '.join(supported)}")
+            else:
+                print_info("Compatible with payloads (client language): none (listener-only)")
+        
         # Try to load and display doc.md if available
         doc_content = self._load_module_doc(module)
         if doc_content:
             print_empty()
-            print_info("=" * 70)
+            print_info("=" * self.SEP_WIDTH)
             print_info("Documentation:")
-            print_info("=" * 70)
+            print_info("=" * self.SEP_WIDTH)
             print_info(doc_content)
-            print_info("=" * 70)
+            print_info("=" * self.SEP_WIDTH)
     
     def _load_module_doc(self, module) -> Optional[str]:
         """Load doc.md for a module"""
@@ -358,10 +376,9 @@ Examples:
         # Display table
         print_info()
         print_info("Module options:")
-        print_info("=" * 120)
-        # Use larger max_width to allow full descriptions to be displayed
-        print_table(headers, rows, max_width=120)
-        print_info("=" * 120)
+        print_info("=" * self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_info("=" * self.SEP_WIDTH)
         
         if advanced_count > 0 and not show_advanced:
             print_info()
@@ -433,10 +450,9 @@ Examples:
         # Display table
         print_info("")
         print_info("Advanced module options:")
-        print_info("=" * 120)
-        # Use larger max_width to allow full descriptions to be displayed
-        print_table(headers, rows, max_width=120)
-        print_info("=" * 120)
+        print_info("=" * self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_info("=" * self.SEP_WIDTH)
         print_info("")
         print_info("Use 'set <option> <value>' to set option values")
     
@@ -626,37 +642,33 @@ Examples:
         return modules
     
     def _show_listeners(self):
-        """Show all available listeners"""
+        """Show all available listeners in a single compact table."""
         listeners = self._get_modules("listener")
         
         if not listeners:
             print_info("No listeners found")
             return
         
-        # Organize by subcategory
-        categories = {}
+        # Build rows: path and description only
+        rows = []
         for listener in listeners:
-            parts = (listener.get('path') or "").split('/')
-            subcategory = parts[2] if len(parts) >= 3 else 'other'
-            
-            if subcategory not in categories:
-                categories[subcategory] = []
-            categories[subcategory].append(listener)
-        
-        first = True
-        for category in sorted(categories.keys()):
-            if not first:
-                print_empty()  # Small spacing between categories
-            heading = f"LISTENER:{category.upper()} ({len(categories[category])})"
-            self._print_module_table(categories[category], heading, include_type=False)
-            first = False
+            path_str = str(listener.get('path', '-')).replace("\n", " ").strip()
+            desc_str = str(listener.get('description', 'No description')).replace("\n", " ").strip()
+            rows.append([path_str, desc_str])
+        rows.sort(key=lambda r: r[0].lower())
+        headers = ["Path", "Description"]
+        total = len(rows)
+        print_status(f"Available listeners ({total})")
+        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_empty()
+        print_info(f"  Use 'use <path>' to select a listener.")
     
     def _show_nops(self):
         """Show available NOP types"""
         available = self.framework.nops.list_available()
         
         print_info("Available NOP types:")
-        print_info("=" * 40)
+        print_info("=" * self.SEP_WIDTH)
         
         for arch, types in available.items():
             print_info(f"\n[{arch.upper()}]")
@@ -673,7 +685,7 @@ Examples:
             return
         
         print_info("Available workspaces:")
-        print_info("=" * 50)
+        print_info("=" * self.SEP_WIDTH)
         
         current_workspace = self.framework.workspace_manager.get_current_workspace()
         
@@ -701,7 +713,7 @@ Examples:
         # Use print_table which handles terminal width and description truncation
         # Compact display: heading with status color, minimal spacing
         print_status(heading)
-        print_table(headers, rows, max_width=120)
+        print_table(headers, rows, max_width=self.SEP_WIDTH)
     
     def _normalize_module_type(self, module_type: str):
         if not module_type:

@@ -115,8 +115,8 @@ class OptPayload(Option):
                 
                 # Determine which options to copy based on handler type
                 if handler_type == 'reverse':
-                    # For reverse shells, copy lhost and lport
-                    reverse_options = ['lhost', 'lport']
+                    # For reverse shells, copy lhost, lport, and obfuscator (path + options when set on exploit)
+                    reverse_options = ['lhost', 'lport', 'obfuscator']
                     for option_name in reverse_options:
                         if hasattr(instance, option_name) and option_name in payload_options:
                             instance_value = getattr(instance, option_name)
@@ -131,6 +131,25 @@ class OptPayload(Option):
                                         payload_opt.value = value_to_set
                                     else:
                                         setattr(payload_module, option_name, value_to_set)
+                    # Copy obfuscator options (e.g. key) from exploit to payload if both have them
+                    if hasattr(instance, 'obfuscator') and get_option_value(getattr(instance, 'obfuscator', None)):
+                        payload_opts_after = getattr(payload_module, 'get_options', lambda: {})()
+                        for option_name in payload_opts_after:
+                            if option_name not in reverse_options and hasattr(instance, option_name):
+                                try:
+                                    instance_value = getattr(instance, option_name)
+                                    if instance_value is not None and hasattr(payload_module, option_name):
+                                        payload_opt = getattr(payload_module, option_name, None)
+                                        value_to_set = get_option_value(instance_value) if hasattr(instance_value, 'value') else instance_value
+                                        if value_to_set is not None and payload_opt is not None:
+                                            if hasattr(payload_opt, '__set__'):
+                                                payload_opt.__set__(payload_module, value_to_set)
+                                            elif hasattr(payload_opt, 'value'):
+                                                payload_opt.value = value_to_set
+                                            else:
+                                                setattr(payload_module, option_name, value_to_set)
+                                except Exception:
+                                    pass
                 elif handler_type == 'bind':
                     # For bind shells, copy rhost and rport
                     bind_options = ['rhost', 'rport']

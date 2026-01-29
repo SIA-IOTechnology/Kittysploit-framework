@@ -196,6 +196,7 @@ class SyncCommand(BaseCommand):
             print_info(f"  Post: {stats.get('post', 0)}")
             print_info(f"  Scanner: {stats.get('scanner', 0)}")
             print_info(f"  Encoder: {stats.get('encoder', 0)}")
+            print_info(f"  Obfuscator: {stats.get('obfuscator', 0)}")
             
         except Exception as e:
             print_error(f"Failed to get module stats: {e}")

@@ -6,6 +6,8 @@ cryptography>=3.4.8
 websockets>=10.0
 aiohttp>=3.8.0
 asyncio-mqtt>=0.11.0
+paho-mqtt>=1.6.0
+dnslib>=0.9.0
 prompt_toolkit>=3.0.0
 
 
@@ -39,6 +41,9 @@ pymysql
 psycopg2-binary
 redis
 ldap3
+pymongo
+elasticsearch
+pymssql
 pysnmp
 pysmb
 paramiko

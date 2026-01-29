@@ -2,18 +2,74 @@ from core.framework.base_module import BaseModule
 from core.framework.enums import Handler, SessionType
 from core.output_handler import print_success, print_status, print_error, print_info, print_warning, print_debug
 from core.framework.option.option_integer import OptInteger
+from core.framework.option.option_string import OptString
 from typing import Optional, Dict, Any, List
 import threading
 import time
 import socket
 import uuid
+import importlib
+
+
+class ObfuscatedSocketWrapper:
+    """Wraps a socket and applies encode/decode on send/recv using an obfuscator module. Tracks stream offset so multi-chunk traffic stays in sync."""
+
+    def __init__(self, sock, obfuscator):
+        self._sock = sock
+        self._obf = obfuscator
+        self._encode_offset = 0
+        self._decode_offset = 0
+
+    def send(self, data):
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="replace")
+        data = bytes(data)
+        try:
+            encoded = self._obf.encode(data, self._encode_offset)
+        except TypeError:
+            encoded = self._obf.encode(data)
+        else:
+            self._encode_offset += len(data)
+        return self._sock.send(encoded)
+
+    def sendall(self, data):
+        if isinstance(data, str):
+            data = data.encode("utf-8", errors="replace")
+        data = bytes(data)
+        try:
+            encoded = self._obf.encode(data, self._encode_offset)
+        except TypeError:
+            encoded = self._obf.encode(data)
+        else:
+            self._encode_offset += len(data)
+        return self._sock.sendall(encoded)
+
+    def recv(self, bufsize):
+        data = self._sock.recv(bufsize)
+        if not data:
+            return data
+        try:
+            decoded = self._obf.decode(data, self._decode_offset)
+        except TypeError:
+            decoded = self._obf.decode(data)
+        else:
+            self._decode_offset += len(data)
+        return decoded
+
+    def close(self):
+        return self._sock.close()
+
+    def __getattr__(self, name):
+        return getattr(self._sock, name)
+
 
 class Listener(BaseModule):
     """Base class for listener modules with enhanced session management"""
 
     TYPE_MODULE = "listener"
-    
+
     timeout = OptInteger(30, "Connection timeout in seconds", False, advanced=True)
+    obfuscator = OptString("", "Obfuscator module - encodes C2 flux", False, advanced=True)
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -37,6 +93,10 @@ class Listener(BaseModule):
 #        self.timeout = OptPort(30, "Connection timeout in seconds", False)
 #        self.auto_start = OptBool(True, "Automatically start listener", False)
         
+        # Obfuscator: keep a loaded instance when obfuscator path is set (for options display/set)
+        self._obfuscator_instance = None
+        self._obfuscator_path = ""
+
         # Listener configuration
         self.listener_id = str(uuid.uuid4())
         self.start_time = None
@@ -47,6 +107,75 @@ class Listener(BaseModule):
             'bytes_received': 0,
             'uptime': 0
         }
+
+    def _get_obfuscator_path(self) -> str:
+        """Return current obfuscator option value (module path)."""
+        obf = getattr(self, "obfuscator", None)
+        if obf is None:
+            return ""
+        path = getattr(obf, "value", obf) if hasattr(obf, "value") else obf
+        return (path or "").strip()
+
+    def _ensure_obfuscator_loaded(self) -> None:
+        """Load or reload obfuscator instance when obfuscator option is set."""
+        path_str = self._get_obfuscator_path()
+        if not path_str:
+            self._obfuscator_instance = None
+            self._obfuscator_path = ""
+            return
+        if self._obfuscator_instance is not None and self._obfuscator_path == path_str:
+            return
+        try:
+            mod_path = "modules." + path_str.replace("/", ".")
+            mod = importlib.import_module(mod_path)
+            obf_cls = getattr(mod, "Module", None)
+            if not obf_cls or not (hasattr(obf_cls, "encode") or hasattr(obf_cls, "decode")):
+                self._obfuscator_instance = None
+                self._obfuscator_path = ""
+                return
+            self._obfuscator_instance = obf_cls(framework=getattr(self, "framework", None))
+            self._obfuscator_path = path_str
+        except Exception:
+            self._obfuscator_instance = None
+            self._obfuscator_path = ""
+
+    def get_options(self) -> dict:
+        """Return listener options merged with obfuscator options when obfuscator is set."""
+        opts = super().get_options()
+        path_str = self._get_obfuscator_path()
+        if not path_str:
+            return opts
+        self._ensure_obfuscator_loaded()
+        if self._obfuscator_instance is None:
+            return opts
+        obf_opts = self._obfuscator_instance.get_options()
+        if obf_opts:
+            merged = dict(opts)
+            for name, data in obf_opts.items():
+                merged[name] = data
+            return merged
+        return opts
+
+    def set_option(self, name: str, value: Any) -> bool:
+        """Set option on listener or on obfuscator instance when applicable."""
+        own_opts = getattr(self, "exploit_attributes", {})
+        if name in own_opts:
+            return super().set_option(name, value)
+        self._ensure_obfuscator_loaded()
+        if self._obfuscator_instance is not None:
+            obf_opts = self._obfuscator_instance.get_options()
+            if name in obf_opts:
+                return self._obfuscator_instance.set_option(name, value)
+        return False
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to obfuscator instance for obfuscator option names (e.g. show options)."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        self._ensure_obfuscator_loaded()
+        if self._obfuscator_instance is not None and name in self._obfuscator_instance.get_options():
+            return getattr(self._obfuscator_instance, name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def run(self):
         """Run the listener - must be implemented by derived classes"""
@@ -228,20 +357,23 @@ class Listener(BaseModule):
                     except (TypeError, ValueError):
                         # Skip non-serializable objects
                         pass
-            
+
+            # Apply obfuscator if set (wrap connection so send/recv are encoded/decoded)
+            connection = self._wrap_connection_with_obfuscator(connection)
+
             # Create session
             session_id = self._create_session(handler, target, port, session_data)
-            
+
             if session_id:
                 # Store connection object separately in memory (not in database)
                 conn_id = f"{target}:{port}"
                 self.connections[conn_id] = connection
-                
+
                 # Also store mapping from session_id to connection for easy lookup
                 self._session_connections[session_id] = connection
-                
+
                 self.stats['connections_received'] += 1
-                
+
                 return session_id
             else:
                 return None
@@ -249,6 +381,37 @@ class Listener(BaseModule):
         except Exception as e:
             print_error(f"Error creating session from connection data: {e}")
             return None
+
+    def _wrap_connection_with_obfuscator(self, connection):
+        """If obfuscator option is set, wrap the connection with encode/decode using the loaded obfuscator instance."""
+        path_str = self._get_obfuscator_path()
+        if not path_str:
+            return connection
+        self._ensure_obfuscator_loaded()
+        if self._obfuscator_instance is not None:
+            if not (hasattr(self._obfuscator_instance, "encode") and hasattr(self._obfuscator_instance, "decode")):
+                print_warning(f"Obfuscator module {path_str} has no encode/decode, skipping obfuscation")
+                return connection
+            print_success(f"Obfuscation enabled: {path_str}")
+            obf = getattr(self._obfuscator_instance, "connection_copy", lambda: self._obfuscator_instance)()
+            return ObfuscatedSocketWrapper(connection, obf)
+        try:
+            # Fallback: load on the fly if instance was never created (e.g. show options never called)
+            mod_path = "modules." + path_str.replace("/", ".")
+            mod = importlib.import_module(mod_path)
+            obf_cls = getattr(mod, "Module", None)
+            if not obf_cls:
+                print_warning(f"Obfuscator module {path_str} has no Module class, skipping obfuscation")
+                return connection
+            obf_instance = obf_cls(framework=getattr(self, "framework", None))
+            if not (hasattr(obf_instance, "encode") and hasattr(obf_instance, "decode")):
+                print_warning(f"Obfuscator module {path_str} has no encode/decode, skipping obfuscation")
+                return connection
+            print_success(f"Obfuscation enabled: {path_str}")
+            return ObfuscatedSocketWrapper(connection, obf_instance)
+        except Exception as e:
+            print_warning(f"Could not load obfuscator {path_str}: {e}. Using raw connection.")
+            return connection
 
     def start(self):
         """Start the listener in a background thread"""

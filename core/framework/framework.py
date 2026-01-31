@@ -614,6 +614,17 @@ class Framework:
             if self.hook_manager.has_hook(HookPoint.AFTER_MODULE_LOAD):
                 self.hook_manager.execute(HookPoint.AFTER_MODULE_LOAD, module_path, module, framework=self)
             if module:
+                # When switching to a listener after a payload that uses this listener, propagate platform so shell shows correct prompt
+                prev = self.current_module
+                if prev and getattr(prev, 'type', None) == 'payload':
+                    prev_info = getattr(prev, '__info__', None) or {}
+                    listener_path = prev_info.get('listener') or ''
+                    if listener_path and module_path == listener_path and getattr(module, 'type', None) == 'listener':
+                        pl = prev_info.get('platform')
+                        if pl is not None:
+                            platform_str = getattr(pl, 'value', None) or str(pl).lower()
+                            if platform_str:
+                                setattr(module, 'session_platform', platform_str)
                 self.current_module = module
                 
                 # Enregistrer pour hot reload

@@ -135,7 +135,8 @@ class Payload(BaseModule):
                     target_arch: str = 'x86_64',
                     optimization: str = 'ReleaseSmall',
                     strip: bool = True,
-                    static: bool = True) -> bool:
+                    static: bool = True,
+                    windows_subsystem: Optional[str] = None) -> bool:
         """
         Compile Zig source code to executable using the framework's Zig compiler
         
@@ -147,6 +148,7 @@ class Payload(BaseModule):
             optimization: Optimization level (Debug, ReleaseFast, ReleaseSafe, ReleaseSmall)
             strip: Strip debug symbols
             static: Create static binary
+            windows_subsystem: On Windows, use 'windows' to hide console (no window)
             
         Returns:
             True if compilation successful, False otherwise
@@ -169,7 +171,8 @@ class Payload(BaseModule):
             target_arch=target_arch,
             optimization=optimization,
             strip=strip,
-            static=static
+            static=static,
+            windows_subsystem=windows_subsystem
         )
     
     def shellcode_ip(self, ip: str) -> bytes:

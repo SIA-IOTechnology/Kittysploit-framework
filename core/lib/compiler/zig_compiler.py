@@ -174,10 +174,11 @@ class ZigCompiler:
                 target_arch: str = 'x64',
                 optimization: str = 'ReleaseSmall',
                 strip: bool = True,
-                static: bool = True) -> bool:
+                static: bool = True,
+                windows_subsystem: Optional[str] = None) -> bool:
         """
         Compile Zig source code to executable
-        
+
         Args:
             source_code: Zig source code as string
             output_path: Path where to save the compiled binary
@@ -186,6 +187,7 @@ class ZigCompiler:
             optimization: Optimization level (Debug, ReleaseFast, ReleaseSafe, ReleaseSmall)
             strip: Strip debug symbols
             static: Create static binary
+            windows_subsystem: On Windows, use 'windows' to hide console (no window), 'console' for default
             
         Returns:
             True if compilation successful, False otherwise
@@ -254,7 +256,11 @@ class ZigCompiler:
                 cmd.append('-fsingle-threaded')  # Disable threading support for smaller binary
                 # Note: Zig handles optimization through -O flag
                 # Additional GCC/Clang-style flags are not supported by Zig
-            
+
+            # Windows: hide console window (no black window when exe runs)
+            if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
+                cmd.extend(['--subsystem', 'windows'])
+
             # Execute compilation
             print_info(f"Compiling with Zig...")
             result = subprocess.run(

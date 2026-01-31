@@ -179,6 +179,12 @@ class ClassicShell(BaseShell):
             return ""
 
         if self.is_windows:
+            # Reject lines that look like CMD/PowerShell error messages (e.g. ".Path était inattendu")
+            error_terms = [
+                "cannot find path", "error", "denied", "not found",
+                "inattendu", "unexpected", "is not recognized", "n'est pas reconnu",
+                "était", "was unexpected", ".path", "path tait",
+            ]
             lines = [line.strip() for line in str(raw).splitlines() if line.strip()]
             candidates: List[str] = []
             for line in lines:
@@ -190,7 +196,10 @@ class ClassicShell(BaseShell):
                     lower = line.lower()
                 if re.match(r"^-+$", line):
                     continue
-                if any(term in lower for term in ["cannot find path", "error", "denied", "not found"]):
+                if any(term in lower for term in error_terms):
+                    continue
+                # Must look like a Windows path (e.g. C:\ or D:\)
+                if not re.match(r"^[A-Za-z]:\\", line):
                     continue
                 candidates.append(line)
 
@@ -212,13 +221,14 @@ class ClassicShell(BaseShell):
 
         commands: List[str]
         if self.is_windows:
+            # Try "cd" first: works in CMD and PowerShell; our Zig/CMD payload only has cmd.exe
             base_cmds = [
+                'cd',
                 '(Get-Location -ErrorAction SilentlyContinue).Path',
                 '(Get-Location).Path',
                 'Get-Location | Select-Object -ExpandProperty Path',
                 'Get-Location',
                 'pwd',
-                'cd'
             ]
             preferred = [self._windows_cwd_strategy] if self._windows_cwd_strategy else []
             commands = [cmd for cmd in preferred if cmd] + [cmd for cmd in base_cmds if cmd not in preferred]
@@ -269,8 +279,31 @@ class ClassicShell(BaseShell):
                         # (though it's usually filtered out for serialization)
                         pass
                     
-                    # Detect platform if we have a connection
-                    if self.connection:
+                    # Use platform from session (set by listener from payload) to avoid sending detection commands
+                    if self.connection and hasattr(session, 'data') and session.data.get('platform'):
+                        pl = session.data['platform']
+                        if isinstance(pl, str) and pl.lower() == 'windows':
+                            self.is_windows = True
+                            self.platform_detected = True
+                            self._set_current_directory("C:\\Users\\user")
+                            self.environment_vars = {
+                                'PATH': 'C:\\Windows\\System32;C:\\Windows',
+                                'USERPROFILE': self.current_directory.replace('/', '\\'),
+                                'USERNAME': 'user',
+                                'PWD': self.current_directory.replace('/', '\\'),
+                                'COMSPEC': 'C:\\Windows\\System32\\cmd.exe'
+                            }
+                            self.hostname = "localhost"
+                            # Fetch actual remote cwd so prompt shows correct path
+                            remote_cwd = self._fetch_remote_cwd()
+                            if remote_cwd:
+                                self._set_current_directory(remote_cwd)
+                        elif isinstance(pl, str) and pl.lower() == 'linux':
+                            self.is_windows = False
+                            self.platform_detected = True
+                            self.hostname = "localhost"
+                    # Detect platform only if not already set (sends cd / echo %OS% etc.)
+                    if self.connection and not self.platform_detected:
                         self._detect_platform()
         except Exception as e:
             print_error(f"Error initializing connection: {e}")
@@ -457,6 +490,17 @@ class ClassicShell(BaseShell):
                 
                 result = '\n'.join(filtered_lines).strip()
                 return result if result else None
+            return None
+        except (ConnectionResetError, BrokenPipeError) as e:
+            print_error(f"Connection closed by target: {e}")
+            self.connection = None
+            return None
+        except OSError as e:
+            if getattr(e, 'winerror', None) == 10054 or getattr(e, 'errno', None) == 10054:
+                print_error("Connection closed by target (WinError 10054). The payload process may have exited.")
+                self.connection = None
+                return None
+            print_error(f"Error sending command: {e}")
             return None
         except Exception as e:
             print_error(f"Error sending command: {e}")

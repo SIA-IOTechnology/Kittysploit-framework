@@ -167,9 +167,9 @@ Examples:
                     try:
                         # For background mode, use direct run() but still create session if result is a tuple
                         if accepts_background:
-                            result = module._exploit(background=True)
+                            result = module.run(background=True)
                         else:
-                            result = module._exploit()
+                            result = module.run()
                         
                         # If result is a tuple with (connection, target, port), create session automatically
                         if isinstance(result, tuple) and len(result) >= 3:
@@ -238,9 +238,9 @@ Examples:
                         else:
                             # Fallback to direct run() if run_with_auto_session is not available
                             if accepts_background:
-                                result = module._exploit(background=False)
+                                result = module.run(background=False)
                             else:
-                                result = module._exploit()
+                                result = module.run()
                             # Convert result to boolean for command history
                             success = bool(result) if result is not None else False
                             if success:
@@ -293,9 +293,9 @@ Examples:
                             accepts_background = False
                         
                         if accepts_background:
-                            result = module._exploit(background=True)
+                            result = module.run(background=True)
                         else:
-                            result = module._exploit()
+                            result = module.run()
                         # Convert result to boolean for command history
                         success = bool(result) if result is not None else False
                         if success:

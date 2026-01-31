@@ -341,6 +341,10 @@ class Listener(BaseModule):
             connection_type = str(type(connection).__name__)
             session_data['connection_type'] = connection_type
             
+            # Add platform from listener (set by exploit from payload __info__) so shell can show correct prompt
+            if hasattr(self, 'session_platform') and self.session_platform:
+                session_data['platform'] = self.session_platform if isinstance(self.session_platform, str) else str(getattr(self.session_platform, 'value', self.session_platform)).lower()
+            
             # Add username if available from listener
             if hasattr(self, 'username'):
                 username_value = self.username.value if hasattr(self.username, 'value') else str(self.username)

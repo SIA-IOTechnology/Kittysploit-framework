@@ -1,6 +1,4 @@
-<div align="center">
-  <img src="docs/screenshots/banner.png" alt="KittySploit Framework Banner" width="100%">
-</div>
+
 
 <div align="center">
   <img src="static/logo.jpg" alt="KittySploit Logo" width="120" height="120">
@@ -17,6 +15,10 @@
   *Modular • Extensible • Powerful*
   
   [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com)
+
+<div align="center">
+  <img src="docs/screenshots/banner.png" alt="KittySploit Framework Banner" width="100%">
+</div>
 
   **Install (Linux / macOS):**
   ```bash

@@ -38,15 +38,20 @@ fi
 echo -e "${GREEN}[+]${NC} Python version: $python_version - OK"
 echo
 
-# Check if pip is installed
+# Check if pip is available (pip3 binary or python3 -m pip)
 echo -e "${YELLOW}[*]${NC} Checking pip installation..."
-if ! command -v pip3 &> /dev/null; then
-    echo -e "${RED}[!]${NC} Error: pip3 is not installed"
-    echo -e "${RED}[!]${NC} Please install pip3 from your package manager"
+USE_PIP_MODULE=0
+if command -v pip3 &> /dev/null; then
+    echo -e "${GREEN}[+]${NC} pip3 found"
+elif python3 -m pip --version &> /dev/null; then
+    echo -e "${GREEN}[+]${NC} pip available via python3 -m pip"
+    USE_PIP_MODULE=1
+else
+    echo -e "${RED}[!]${NC} Error: pip is not available"
+    echo -e "${YELLOW}[*]${NC} Try: sudo apt-get install python3-pip  (Debian/Ubuntu)"
+    echo -e "${YELLOW}[*]${NC} Or:  python3 -m ensurepip --upgrade"
     exit 1
 fi
-
-echo -e "${GREEN}[+]${NC} pip3 found"
 echo
 
 # Get project root directory
@@ -111,8 +116,13 @@ if [ -n "$VENV_PATH" ] && [ -f "$VENV_PATH/bin/pip" ]; then
     PIP_CMD="$VENV_PATH/bin/pip"
     PYTHON_CMD="$VENV_PATH/bin/python"
 else
-    PIP_CMD="pip3"
-    PYTHON_CMD="python3"
+    if [ "$USE_PIP_MODULE" = "1" ]; then
+        PIP_CMD="python3 -m pip"
+        PYTHON_CMD="python3"
+    else
+        PIP_CMD="pip3"
+        PYTHON_CMD="python3"
+    fi
 fi
 
 # Install requirements

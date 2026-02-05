@@ -380,13 +380,52 @@ async function loadUiExtensions() {
             `;
             contentWrapper.appendChild(section);
         });
-        if (typeof applyTabsVisibility === 'function') applyTabsVisibility();
+        applyTabsVisibility();
     } catch (e) {
         console.warn('[UI Extensions] Failed to load:', e);
     }
 }
 function escapeHtml(s) { const div = document.createElement('div'); div.textContent = s; return div.innerHTML; }
 function escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// Tab visibility (global so loadUiExtensions can call applyTabsVisibility after async load)
+const TABS_VISIBLE_KEY = 'kittyproxy-tabs-visible';
+function getTabsVisible() {
+    try {
+        const s = localStorage.getItem(TABS_VISIBLE_KEY);
+        return s ? JSON.parse(s) : {};
+    } catch (e) { return {}; }
+}
+function setTabsVisible(obj) {
+    try {
+        localStorage.setItem(TABS_VISIBLE_KEY, JSON.stringify(obj));
+    } catch (e) {}
+}
+function applyTabsVisibility() {
+    const visible = getTabsVisible();
+    const mainNav = document.querySelector('.main-nav');
+    if (!mainNav) return;
+    const activeViewId = document.querySelector('.nav-item.active[data-view]')?.dataset?.view || currentViewId;
+    mainNav.querySelectorAll('.nav-item[data-view]').forEach(item => {
+        const viewId = item.dataset.view;
+        const show = visible[viewId] !== false;
+        item.style.display = show ? '' : 'none';
+    });
+    document.querySelectorAll('.view-section').forEach(section => {
+        const id = section.id;
+        if (!id || !id.endsWith('-view')) return;
+        const viewId = id.slice(0, -5);
+        if (visible[viewId] === false) {
+            section.style.display = 'none';
+        } else {
+            section.style.display = (activeViewId === viewId) ? 'flex' : 'none';
+        }
+    });
+    if (activeViewId && visible[activeViewId] === false) {
+        const firstVisible = Array.from(mainNav.querySelectorAll('.nav-item[data-view]')).find(item => visible[item.dataset.view] !== false);
+        if (firstVisible) firstVisible.click();
+    }
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     loadUiExtensions();
@@ -424,13 +463,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Restaurer les données SideChannel au chargement
     restoreSidechannelData();
 
-    // Find the active view
-    const activeNavItem = document.querySelector('.nav-item.active');
-    if (activeNavItem && activeNavItem.dataset.view) {
+    // Apply tab visibility from localStorage first (before choosing active view)
+    applyTabsVisibility();
+
+    // Find the active view (only visible tabs are shown; active may have been set by applyTabsVisibility)
+    const visibleForNav = getTabsVisible();
+    const activeNavItem = document.querySelector('.nav-item.active[data-view]');
+    const activeIsVisible = activeNavItem && visibleForNav[activeNavItem.dataset.view] !== false;
+    if (activeNavItem && activeNavItem.dataset.view && activeIsVisible) {
         switchView(activeNavItem.dataset.view, activeNavItem);
     } else {
-        // Default to browser view (accessible via logo)
-        switchView('browser');
+        const firstVisible = Array.from(document.querySelectorAll('.main-nav .nav-item[data-view]')).find(item => visibleForNav[item.dataset.view] !== false);
+        if (firstVisible) {
+            switchView(firstVisible.dataset.view, firstVisible);
+        } else {
+            switchView('browser');
+        }
     }
 
     // Sidebar toggle functionality
@@ -480,44 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Bouton engrenage (cog) en haut à droite : afficher/masquer les onglets
-    const TABS_VISIBLE_KEY = 'kittyproxy-tabs-visible';
-    function getTabsVisible() {
-        try {
-            const s = localStorage.getItem(TABS_VISIBLE_KEY);
-            return s ? JSON.parse(s) : {};
-        } catch (e) { return {}; }
-    }
-    function setTabsVisible(obj) {
-        try {
-            localStorage.setItem(TABS_VISIBLE_KEY, JSON.stringify(obj));
-        } catch (e) {}
-    }
-    function applyTabsVisibility() {
-        const visible = getTabsVisible();
-        const mainNav = document.querySelector('.main-nav');
-        if (!mainNav) return;
-        const activeViewId = document.querySelector('.nav-item.active[data-view]')?.dataset?.view || currentViewId;
-        mainNav.querySelectorAll('.nav-item[data-view]').forEach(item => {
-            const viewId = item.dataset.view;
-            const show = visible[viewId] !== false;
-            item.style.display = show ? '' : 'none';
-        });
-        document.querySelectorAll('.view-section').forEach(section => {
-            const id = section.id;
-            if (!id || !id.endsWith('-view')) return;
-            const viewId = id.slice(0, -5);
-            if (visible[viewId] === false) {
-                section.style.display = 'none';
-            } else {
-                section.style.display = (activeViewId === viewId) ? 'flex' : 'none';
-            }
-        });
-        if (activeViewId && visible[activeViewId] === false) {
-            const firstVisible = Array.from(mainNav.querySelectorAll('.nav-item[data-view]')).find(item => visible[item.dataset.view] !== false);
-            if (firstVisible) firstVisible.click();
-        }
-    }
+    // Bouton engrenage (cog) en haut à droite : afficher/masquer les onglets (getTabsVisible, setTabsVisible, applyTabsVisibility définis plus haut au chargement)
     function addTabsSettingsButtonToTopBar(topBar) {
         if (topBar.querySelector('.tabs-settings-btn')) return;
         topBar.style.position = 'relative';

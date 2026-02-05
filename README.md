@@ -13,6 +13,11 @@
   *Modular • Extensible • Powerful*
   
   [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com)
+
+  **Install (Linux / macOS):**
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
+  ```
 </div>
 
 ---
@@ -34,12 +39,21 @@ KittySploit is a **next-generation penetration testing framework** that combines
 
 ### Installation (30 seconds)
 
+**One-line install (Linux / macOS) — clone + install in one command:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
+```
+Installs to `~/kittysploit-framework` by default. To choose a directory:
+```bash
+curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash -s -- /path/to/install
+```
+
 **Windows:**
 ```batch
 install\install.bat
 ```
 
-**Linux / macOS:**
+**Linux / macOS (from existing clone):**
 ```bash
 chmod +x install/install.sh && ./install/install.sh
 ```
@@ -132,13 +146,18 @@ python kittyconsole.py
 
 The installer handles everything automatically:
 
+**Linux / macOS — one line (clone + install):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
+```
+
 **Windows:**
 ```batch
 cd kittysploit-framework
 install\install.bat
 ```
 
-**Linux / macOS:**
+**Linux / macOS (from existing clone):**
 ```bash
 cd kittysploit-framework
 chmod +x install/install.sh

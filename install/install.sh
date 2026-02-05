@@ -47,10 +47,21 @@ elif python3 -m pip --version &> /dev/null; then
     echo -e "${GREEN}[+]${NC} pip available via python3 -m pip"
     USE_PIP_MODULE=1
 else
-    echo -e "${RED}[!]${NC} Error: pip is not available"
-    echo -e "${YELLOW}[*]${NC} Try: sudo apt-get install python3-pip  (Debian/Ubuntu)"
-    echo -e "${YELLOW}[*]${NC} Or:  python3 -m ensurepip --upgrade"
-    exit 1
+    echo -e "${YELLOW}[*]${NC} pip not found, attempting to bootstrap with ensurepip..."
+    if python3 -m ensurepip --upgrade 2>/dev/null; then
+        if python3 -m pip --version &> /dev/null; then
+            echo -e "${GREEN}[+]${NC} pip installed via ensurepip"
+            USE_PIP_MODULE=1
+        else
+            echo -e "${RED}[!]${NC} ensurepip ran but pip still not available"
+            echo -e "${YELLOW}[*]${NC} Try: sudo apt-get install python3-pip  (Debian/Ubuntu)"
+            exit 1
+        fi
+    else
+        echo -e "${RED}[!]${NC} Error: pip is not available and ensurepip failed"
+        echo -e "${YELLOW}[*]${NC} Try: sudo apt-get install python3-pip python3-venv  (Debian/Ubuntu)"
+        exit 1
+    fi
 fi
 echo
 

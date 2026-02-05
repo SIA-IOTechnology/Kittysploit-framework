@@ -528,7 +528,7 @@
                 <h2>Visualization</h2>
             </div>
             <div style="display: flex; height: 100%; overflow: hidden;">
-                <!-- Sidebar: Domaines -->
+                <!-- Sidebar: Domains -->
                 <div id="viz-domains-sidebar"
                     style="width: 450px; min-width: 300px; max-width: 50%; background: white; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;">
                     <div style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
@@ -1914,6 +1914,24 @@
             line-height: 1.6;
         }
     </style>
+
+    <!-- Modal: affichage des onglets -->
+    <div id="tabs-settings-modal" class="modal-overlay" style="display: none;" aria-hidden="true">
+        <div class="modal-container" style="max-width: 560px; padding: 0; overflow: hidden; background: #fff;">
+            <div style="padding: 20px 24px; border-bottom: 1px solid var(--border-color, #e0e0e0); display: flex; align-items: center; justify-content: space-between;">
+                <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600;">Tab visibility</h3>
+                <button type="button" id="tabs-settings-modal-close" class="btn btn-secondary" style="padding: 6px 10px; min-width: auto;" title="Close">
+                    <span class="material-symbols-outlined" style="font-size: 20px;">close</span>
+                </button>
+            </div>
+            <div id="tabs-settings-list" style="padding: 16px 24px; max-height: 60vh; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 20px; align-content: start;"></div>
+            <div style="padding: 12px 24px 20px; border-top: 1px solid var(--border-color, #e0e0e0); display: flex; gap: 8px; justify-content: flex-end;">
+                <button type="button" id="tabs-settings-select-all" class="btn btn-secondary" style="font-size: 0.9rem;">Check all</button>
+                <button type="button" id="tabs-settings-select-none" class="btn btn-secondary" style="font-size: 0.9rem;">Uncheck all</button>
+                <button type="button" id="tabs-settings-apply" class="btn btn-primary" style="font-size: 0.9rem;">Apply</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js?v=14"></script>
 </body>

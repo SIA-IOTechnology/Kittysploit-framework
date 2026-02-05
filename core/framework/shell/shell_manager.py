@@ -25,6 +25,7 @@ from .ftp_shell import FTPShell
 from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
 from .android_shell import AndroidShell
+from .email_shell import EmailShell
 from core.output_handler import print_info, print_error, print_success
 
 class ShellManager:
@@ -51,6 +52,7 @@ class ShellManager:
             'aws_sqs': AWSSQSShell,
             'aws_sqs_command': AWSSQSCommandShell,
             'android': AndroidShell,
+            'email': EmailShell,
         }
         self.active_shell: Optional[str] = None
     
@@ -77,7 +79,7 @@ class ShellManager:
             shell_class = self.shell_types[shell_type]
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -154,6 +156,8 @@ class ShellManager:
                         shell_type = 'meterpreter'
                     elif session_type == 'android':
                         shell_type = 'android'
+                    elif session_type == 'email':
+                        shell_type = 'email'
                     elif session_type in ('php', 'http', 'https'):
                         shell_type = 'php'
                     elif session_type == 'mysql':

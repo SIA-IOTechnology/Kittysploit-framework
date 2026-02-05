@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Demo Extension</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: 'Inter', sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 640px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    h1 { margin: 0 0 8px 0; font-size: 1.5rem; color: #6200ea; }
+    p { margin: 0 0 16px 0; color: #666; line-height: 1.5; }
+    .badge { display: inline-block; background: #6200ea; color: white; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; }
+    .flows { margin-top: 16px; font-size: 0.9rem; }
+    .flow-item { padding: 8px 12px; background: #f9f9f9; border-radius: 8px; margin-bottom: 8px; font-family: monospace; word-break: break-all; }
+    .flow-item .method { color: #6200ea; font-weight: 600; }
+    .flow-loading, .flow-error { color: #888; font-style: italic; }
+    .flow-error { color: #c62828; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">UI Extension</span>
+    <h1>Demo Extension</h1>
+    <p>This tab uses the <strong>KittyProxy API</strong> to read captured requests. Below: last 5 flows (auto-refresh every 3s).</p>
+    <button id="refresh-btn" type="button" style="margin-bottom: 12px; padding: 8px 14px; background: #6200ea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem;">Refresh now</button>
+    <div id="flows" class="flows flow-loading">Loading…</div>
+  </div>
+  <script src="/extension-api.js"></script>
+  <script>
+    (function () {
+      var el = document.getElementById('flows');
+      var refreshBtn = document.getElementById('refresh-btn');
+      function escapeHtml(s) {
+        var div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
+      }
+      function refreshFlows() {
+        if (!window.KittyProxyAPI) return;
+        el.classList.remove('flow-error');
+        el.classList.add('flow-loading');
+        el.textContent = 'Loading…';
+        window.KittyProxyAPI.getFlows(1, 5)
+          .then(function (data) {
+            var items = (data && data.items) ? data.items : (Array.isArray(data) ? data : []);
+            el.classList.remove('flow-loading');
+            if (items.length === 0) {
+              el.className = 'flows';
+              el.textContent = 'No flows yet. Generate traffic through the proxy to see requests here.';
+              return;
+            }
+            el.className = 'flows';
+            el.innerHTML = items.map(function (f) {
+              var method = f.method || (f.request && f.request.method) || '?';
+              var url = f.url || (f.request && f.request.url) || f.id || '';
+              return '<div class="flow-item"><span class="method">' + escapeHtml(method) + '</span> ' + escapeHtml(url) + '</div>';
+            }).join('');
+          })
+          .catch(function (err) {
+            el.classList.remove('flow-loading');
+            el.className = 'flows flow-error';
+            el.textContent = 'Error: ' + (err.message || err);
+          });
+      }
+      if (!window.KittyProxyAPI) {
+        el.className = 'flows flow-error';
+        el.textContent = 'KittyProxyAPI not loaded. Load /extension-api.js in your extension.';
+        if (refreshBtn) refreshBtn.style.display = 'none';
+        return;
+      }
+      var refreshIntervalId = null;
+      function startAutoRefresh() {
+        if (refreshIntervalId) return;
+        refreshIntervalId = setInterval(refreshFlows, 3000);
+      }
+      function stopAutoRefresh() {
+        if (refreshIntervalId) {
+          clearInterval(refreshIntervalId);
+          refreshIntervalId = null;
+        }
+      }
+      window.addEventListener('message', function (e) {
+        if (e.origin !== window.location.origin || !e.data || e.data.type !== 'kittyproxy-visible') return;
+        if (e.data.visible) {
+          refreshFlows();
+          startAutoRefresh();
+        } else {
+          stopAutoRefresh();
+        }
+      });
+      if (refreshBtn) refreshBtn.addEventListener('click', refreshFlows);
+      // Don't start auto-refresh here: wait for kittyproxy-visible (when user opens this tab)
+    })();
+  </script>
+</body>
+</html>

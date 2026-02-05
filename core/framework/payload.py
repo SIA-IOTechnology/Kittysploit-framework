@@ -186,3 +186,90 @@ class Payload(BaseModule):
         Generate shellcode for port
         """
         return port.to_bytes(2, 'little')
+
+    def get_python_script(self) -> Optional[str]:
+        """
+        Override in Python payloads to return the raw script for compilation to EXE.
+        Default returns None (payload does not support Python compilation).
+        """
+        return None
+
+    def compile_python_to_exe(self,
+                              output_path: str,
+                              script: Optional[str] = None,
+                              target_platform: Optional[str] = None,
+                              target_arch: str = 'x64',
+                              python_binary: Optional[str] = None,
+                              use_compression: bool = False,
+                              standalone: bool = False,
+                              embeddable_path: Optional[str] = None) -> bool:
+        """
+        Compile Python script to executable using Zig.
+
+        Args:
+            output_path: Output executable path
+            script: Python script (if None, uses get_python_script())
+            target_platform: windows, linux, macos (default from payload platform)
+            target_arch: x64, x86, etc.
+            python_binary: python, python3, py (default from payload option if available)
+            use_compression: Use zlib for smaller payload (non-standalone only)
+            standalone: If True, embed Python runtime (python3X.dll + stdlib). No Python install needed on target.
+            embeddable_path: Path to pythonX.Y-embed-amd64.zip (standalone only)
+
+        Returns:
+            True if successful
+        """
+        script_code = script or self.get_python_script()
+        if not script_code:
+            print_error("No Python script: set script= or implement get_python_script()")
+            return False
+
+        if standalone:
+            from core.lib.py_compiler import Py2ExeStandaloneCompiler
+            platform_str = target_platform
+            if platform_str is None:
+                info = getattr(self.__class__, '__info__', {})
+                platform = info.get('platform') if info else None
+                platform_str = getattr(platform, 'value', None) or str(platform or 'windows').lower()
+            if platform_str and platform_str.lower() != 'windows':
+                print_error("Standalone mode is Windows-only for now")
+                return False
+            compiler = Py2ExeStandaloneCompiler(embeddable_path=embeddable_path)
+            if not compiler.is_available():
+                print_error("Zig and/or Python embeddable package not available")
+                print_error("Download pythonX.Y-embed-amd64.zip from python.org and place in core/lib/embed_python/")
+                return False
+            return compiler.compile(
+                script_code=script_code,
+                output_path=output_path,
+                embeddable_path=embeddable_path,
+            )
+
+        from core.lib.py_compiler import Py2ExeCompiler
+        platform_str = target_platform
+        if platform_str is None:
+            info = getattr(self.__class__, '__info__', {})
+            platform = info.get('platform') if info else None
+            if hasattr(platform, 'value'):
+                platform_str = platform.value if platform else 'windows'
+            else:
+                platform_str = str(platform).lower() if platform else 'windows'
+
+        py_bin = python_binary
+        if py_bin is None and hasattr(self, 'python_binary'):
+            pb = getattr(self.python_binary, 'value', self.python_binary)
+            py_bin = str(pb) if pb else 'python'
+
+        compiler = Py2ExeCompiler()
+        if not compiler.is_available():
+            print_error("Zig compiler not available for Python-to-EXE")
+            return False
+
+        return compiler.compile(
+            script_code=script_code,
+            output_path=output_path,
+            target_platform=platform_str,
+            target_arch=target_arch,
+            python_binary=py_bin or 'python',
+            use_compression=use_compression,
+        )

@@ -225,7 +225,8 @@ function switchView(viewId, navItem = null) {
         navItem.classList.add('active');
     }
 
-    viewSections.forEach(section => {
+    // Hide all view sections (including dynamically added UI extension views)
+    document.querySelectorAll('.view-section').forEach(section => {
         section.style.display = 'none';
         section.classList.remove('active');
     });
@@ -268,6 +269,18 @@ function switchView(viewId, navItem = null) {
     } else {
         removeSidechannelApiOverlay();
     }
+
+    // Notify extension iframes whether they are visible (so they can pause/resume timers)
+    document.querySelectorAll('iframe[id^="ext-frame-"]').forEach(iframe => {
+        try {
+            const section = iframe.closest('.view-section');
+            const visible = section && section.id === `${viewId}-view`;
+            iframe.contentWindow && iframe.contentWindow.postMessage(
+                { type: 'kittyproxy-visible', visible: !!visible },
+                window.location.origin
+            );
+        } catch (e) { /* cross-origin or not loaded */ }
+    });
 }
 
 // Logo icon click handler - navigate to browser (home)
@@ -276,14 +289,19 @@ if (logoIcon) {
     logoIcon.addEventListener('click', () => switchView('browser'));
 }
 
-navItems.forEach(item => {
-    item.addEventListener('click', () => {
-        const viewId = item.dataset.view;
-        if (viewId) {
-            switchView(viewId, item);
-        }
+// Use delegation so dynamically added nav items (e.g. UI extensions) also work
+const mainNav = document.querySelector('.main-nav');
+if (mainNav) {
+    mainNav.addEventListener('click', (e) => {
+        const item = e.target.closest('.nav-item');
+        if (!item || !item.dataset.view) return;
+        e.preventDefault();
+        switchView(item.dataset.view, item);
     });
-});
+}
+
+// UI extension tab labels (filled when extensions are loaded)
+window.uiExtensionTitles = window.uiExtensionTitles || {};
 
 // Update top bar title and actions based on current view
 function updateTopBarForView(viewId) {
@@ -303,12 +321,14 @@ function updateTopBarForView(viewId) {
         'replay': 'Repeater',
         'intruder': 'Intruder',
         'api': 'API Tester',
-        'encoder': 'Encoder / Decoder'
+        'encoder': 'Encoder / Decoder',
+        'websocket': 'WebSocket',
+        'sidechannel': 'Side Channel'
     };
 
-    // Update title
+    // Update title (use UI extension title for ext-* views)
     if (titleEl) {
-        titleEl.textContent = viewTitles[viewId] || viewId.charAt(0).toUpperCase() + viewId.slice(1);
+        titleEl.textContent = window.uiExtensionTitles[viewId] || viewTitles[viewId] || viewId.charAt(0).toUpperCase() + viewId.slice(1);
     }
 
     // Update actions - move the actions bar content to the top bar
@@ -327,7 +347,49 @@ function updateTopBarForView(viewId) {
 }
 
 // Initialize top bar on page load
+// Load UI extensions (custom tabs with their own interface, like Burp Suite extensions)
+async function loadUiExtensions() {
+    const mainNav = document.querySelector('.main-nav');
+    const contentWrapper = document.querySelector('.content-wrapper');
+    if (!mainNav || !contentWrapper) return;
+    try {
+        const res = await fetch(`${API_BASE}/ui-extensions`);
+        if (!res.ok) return;
+        const list = await res.json();
+        if (!Array.isArray(list) || list.length === 0) return;
+        list.forEach(ext => {
+            const viewId = 'ext-' + ext.id;
+            window.uiExtensionTitles[viewId] = ext.tabLabel || ext.name;
+            const navItem = document.createElement('div');
+            navItem.className = 'nav-item';
+            navItem.dataset.view = viewId;
+            navItem.dataset.label = ext.tabLabel || ext.name;
+            navItem.title = ext.description || ext.tabLabel || ext.name;
+            navItem.innerHTML = `<span class="material-symbols-outlined">${ext.icon || 'extension'}</span>`;
+            mainNav.appendChild(navItem);
+            const section = document.createElement('div');
+            section.id = viewId + '-view';
+            section.className = 'view-section';
+            section.style.display = 'none';
+            section.style.flexDirection = 'column';
+            section.style.flex = '1';
+            section.style.overflow = 'hidden';
+            section.innerHTML = `
+                <div class="top-bar"><h2>${escapeHtml(ext.tabLabel || ext.name)}</h2></div>
+                <iframe id="ext-frame-${escapeAttr(ext.id)}" src="${escapeAttr(ext.entryUrl)}" title="${escapeAttr(ext.tabLabel)}" style="flex: 1; width: 100%; border: none; background: #fff;"></iframe>
+            `;
+            contentWrapper.appendChild(section);
+        });
+        if (typeof applyTabsVisibility === 'function') applyTabsVisibility();
+    } catch (e) {
+        console.warn('[UI Extensions] Failed to load:', e);
+    }
+}
+function escapeHtml(s) { const div = document.createElement('div'); div.textContent = s; return div.innerHTML; }
+function escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 document.addEventListener('DOMContentLoaded', () => {
+    loadUiExtensions();
     // Load fast mode settings on startup
     loadFastModeSettings();
 
@@ -418,9 +480,117 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Ajouter le bouton toggle à toutes les top-bar
+    // Bouton engrenage (cog) en haut à droite : afficher/masquer les onglets
+    const TABS_VISIBLE_KEY = 'kittyproxy-tabs-visible';
+    function getTabsVisible() {
+        try {
+            const s = localStorage.getItem(TABS_VISIBLE_KEY);
+            return s ? JSON.parse(s) : {};
+        } catch (e) { return {}; }
+    }
+    function setTabsVisible(obj) {
+        try {
+            localStorage.setItem(TABS_VISIBLE_KEY, JSON.stringify(obj));
+        } catch (e) {}
+    }
+    function applyTabsVisibility() {
+        const visible = getTabsVisible();
+        const mainNav = document.querySelector('.main-nav');
+        if (!mainNav) return;
+        const activeViewId = document.querySelector('.nav-item.active[data-view]')?.dataset?.view || currentViewId;
+        mainNav.querySelectorAll('.nav-item[data-view]').forEach(item => {
+            const viewId = item.dataset.view;
+            const show = visible[viewId] !== false;
+            item.style.display = show ? '' : 'none';
+        });
+        document.querySelectorAll('.view-section').forEach(section => {
+            const id = section.id;
+            if (!id || !id.endsWith('-view')) return;
+            const viewId = id.slice(0, -5);
+            if (visible[viewId] === false) {
+                section.style.display = 'none';
+            } else {
+                section.style.display = (activeViewId === viewId) ? 'flex' : 'none';
+            }
+        });
+        if (activeViewId && visible[activeViewId] === false) {
+            const firstVisible = Array.from(mainNav.querySelectorAll('.nav-item[data-view]')).find(item => visible[item.dataset.view] !== false);
+            if (firstVisible) firstVisible.click();
+        }
+    }
+    function addTabsSettingsButtonToTopBar(topBar) {
+        if (topBar.querySelector('.tabs-settings-btn')) return;
+        topBar.style.position = 'relative';
+        topBar.style.paddingRight = '72px';
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position: absolute; right: 16px; top: 50%; transform: translateY(-50%); flex-shrink: 0; display: flex; align-items: center;';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary tabs-settings-btn';
+        btn.title = 'Tab visibility';
+        btn.style.cssText = 'padding: 5px 7px; min-width: auto;';
+        btn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">settings</span>';
+        btn.addEventListener('click', openTabsSettingsModal);
+        wrap.appendChild(btn);
+        topBar.appendChild(wrap);
+    }
+    function openTabsSettingsModal() {
+        const modal = document.getElementById('tabs-settings-modal');
+        const listEl = document.getElementById('tabs-settings-list');
+        if (!modal || !listEl) return;
+        const visible = getTabsVisible();
+        const items = [];
+        document.querySelectorAll('.main-nav .nav-item[data-view]').forEach(item => {
+            const viewId = item.dataset.view;
+            const label = item.dataset.label || item.title || viewId;
+            items.push({ viewId, label, checked: visible[viewId] !== false });
+        });
+        listEl.innerHTML = items.map(({ viewId, label, checked }) =>
+            `<label style="display: flex; align-items: center; gap: 10px; padding: 8px 0; cursor: pointer;">
+                <input type="checkbox" data-tabs-view="${viewId}" ${checked ? 'checked' : ''}>
+                <span>${escapeHtml(label)}</span>
+            </label>`
+        ).join('');
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+    }
+    function closeTabsSettingsModal() {
+        const modal = document.getElementById('tabs-settings-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.setAttribute('aria-hidden', 'true');
+        }
+    }
+    function applyTabsSettingsFromModal() {
+        const listEl = document.getElementById('tabs-settings-list');
+        if (!listEl) return;
+        const visible = {};
+        listEl.querySelectorAll('input[type="checkbox"][data-tabs-view]').forEach(cb => {
+            visible[cb.dataset.tabsView] = cb.checked;
+        });
+        setTabsVisible(visible);
+        applyTabsVisibility();
+        closeTabsSettingsModal();
+    }
+    document.getElementById('tabs-settings-modal-close')?.addEventListener('click', closeTabsSettingsModal);
+    document.getElementById('tabs-settings-apply')?.addEventListener('click', applyTabsSettingsFromModal);
+    document.getElementById('tabs-settings-modal')?.addEventListener('click', function (e) {
+        if (e.target === this) closeTabsSettingsModal();
+    });
+    document.getElementById('tabs-settings-select-all')?.addEventListener('click', function () {
+        document.querySelectorAll('#tabs-settings-list input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    });
+    document.getElementById('tabs-settings-select-none')?.addEventListener('click', function () {
+        document.querySelectorAll('#tabs-settings-list input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    });
+
+    // Ajouter le bouton toggle et le bouton cog à toutes les top-bar
     const allTopBars = document.querySelectorAll('.top-bar');
-    allTopBars.forEach(addToggleButtonToTopBar);
+    allTopBars.forEach(topBar => {
+        addToggleButtonToTopBar(topBar);
+        addTabsSettingsButtonToTopBar(topBar);
+    });
+    applyTabsVisibility();
 
     // Observer pour ajouter le bouton aux top-bar créées dynamiquement
     const topBarObserver = new MutationObserver((mutations) => {
@@ -429,11 +599,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (node.nodeType === 1) { // Element node
                     if (node.classList && node.classList.contains('top-bar')) {
                         addToggleButtonToTopBar(node);
+                        addTabsSettingsButtonToTopBar(node);
                     }
                     // Vérifier aussi les enfants
                     const topBars = node.querySelectorAll && node.querySelectorAll('.top-bar');
                     if (topBars) {
-                        topBars.forEach(addToggleButtonToTopBar);
+                        topBars.forEach(topBar => {
+                            addToggleButtonToTopBar(topBar);
+                            addTabsSettingsButtonToTopBar(topBar);
+                        });
                     }
                 }
             });
@@ -10828,7 +11002,7 @@ function showNavigationTree() {
     html += '<div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">';
     html += '<h2 style="margin: 0 0 20px 0; color: var(--primary-color); font-size: 1.3rem; font-weight: 600; display: flex; align-items: center; gap: 10px;">';
     html += '<span class="material-symbols-outlined" style="font-size: 24px;">account_tree</span>';
-    html += 'Arbre de Navigation</h2>';
+    html += 'Navigation Tree</h2>';
 
     // Statistiques - Style épuré
     const totalDomains = Object.keys(tree).length;
@@ -10838,11 +11012,11 @@ function showNavigationTree() {
     html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px;">';
     html += `<div style="background: white; border: 1px solid var(--border-color); border-left: 3px solid var(--primary-color); border-radius: 6px; padding: 12px;">`;
     html += `<div style="font-size: 24px; font-weight: 600; color: #333; margin-bottom: 4px;">${totalDomains}</div>`;
-    html += `<div style="font-size: 13px; color: var(--text-secondary);">Domaines</div>`;
+    html += `<div style="font-size: 13px; color: var(--text-secondary);">Domains</div>`;
     html += `</div>`;
     html += `<div style="background: white; border: 1px solid var(--border-color); border-left: 3px solid var(--primary-color); border-radius: 6px; padding: 12px;">`;
     html += `<div style="font-size: 24px; font-weight: 600; color: #333; margin-bottom: 4px;">${totalPaths}</div>`;
-    html += `<div style="font-size: 13px; color: var(--text-secondary);">Chemins</div>`;
+    html += `<div style="font-size: 13px; color: var(--text-secondary);">Paths</div>`;
     html += `</div>`;
     html += `<div style="background: white; border: 1px solid var(--border-color); border-left: 3px solid var(--primary-color); border-radius: 6px; padding: 12px;">`;
     html += `<div style="font-size: 24px; font-weight: 600; color: #333; margin-bottom: 4px;">${totalEndpoints}</div>`;

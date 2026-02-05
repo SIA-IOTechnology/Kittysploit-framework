@@ -1,4 +1,4 @@
-from core.base.base_module import BaseModule 
+from core.framework.base_module import BaseModule
 from core.output_handler import *
 
 class Registry(BaseModule):

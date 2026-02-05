@@ -444,6 +444,10 @@ class OutputHandler:
     def _get_thread_context(self):
         return getattr(self._thread_context, "session_id", None)
 
+    def get_current_session_id(self):
+        """Get the current thread's session ID (for web terminal context). Used by interactive plugins."""
+        return self._get_thread_context()
+
     def start_redirection(self):
         """Start redirecting stdout and stderr"""
         if self.redirecting:

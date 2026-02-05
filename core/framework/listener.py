@@ -614,6 +614,9 @@ class Listener(BaseModule):
                 
                 # Create session automatically
                 self._create_session(handler, target, port, session_data)
+            elif isinstance(result, str):
+                # Session already created by listener (e.g. reverse_email, reverse_aws_sqs)
+                pass
             else:
                 print_warning("Unknown result format from listener")
                 

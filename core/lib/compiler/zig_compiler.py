@@ -197,13 +197,14 @@ class ZigCompiler:
             return False
         
         try:
-            # Ensure output directory exists
-            output_dir = os.path.dirname(output_path)
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # Convert to absolute paths
+            # Convert to absolute path first; handle bare filenames (no directory)
             output_path = os.path.abspath(output_path)
             output_dir = os.path.dirname(output_path)
+            if not output_dir:
+                output_dir = os.getcwd()
+                output_path = os.path.join(output_dir, os.path.basename(output_path))
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
             
             # Use output directory for compilation to avoid antivirus issues
             # This is safer than using temp directories that antivirus might block
@@ -221,26 +222,27 @@ class ZigCompiler:
             target_triple = self.get_target_triple(target_platform, target_arch)
             print_info(f"Compiling for target: {target_triple}")
             
-            # Zig doesn't support --output-dir, so we compile in temp dir and move the binary
+            # Use -femit-bin to output directly to target path (avoids move + Windows file lock)
             binary_name = os.path.basename(output_path)
-            # Remove extension for --name (Zig will add it based on target platform)
             binary_name_no_ext = os.path.splitext(binary_name)[0]
-            
+
             # Set custom cache directory to avoid antivirus issues
-            # Use a directory in the workspace instead of AppData/Local/zig/tmp
             env = os.environ.copy()
             workspace_cache = os.path.join(os.path.dirname(output_dir), '.zig_cache')
             os.makedirs(workspace_cache, exist_ok=True)
             env['ZIG_LOCAL_CACHE_DIR'] = workspace_cache
-            
-            # Build zig command
+
+            # Build zig command: -femit-bin=path outputs directly (must be single arg)
+            # Use forward slashes on Windows to avoid backslash parsing issues
+            emit_bin_path = output_path.replace('\\', '/')
             cmd = [
                 self.zig_path,
                 'build-exe',
                 source_file,
-                '-target', target_triple,  # Zig uses -target (single dash), not --target
+                '-target', target_triple,
                 '-O', optimization,
-                '--name', binary_name_no_ext
+                '--name', binary_name_no_ext,
+                '-femit-bin=' + emit_bin_path,
             ]
             
             # Note: Zig generates static binaries by default (since 0.4.0)
@@ -260,6 +262,14 @@ class ZigCompiler:
             # Windows: hide console window (no black window when exe runs)
             if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
                 cmd.extend(['--subsystem', 'windows'])
+
+            # Remove existing output file - lld-link on Windows often fails with "Permission denied"
+            # when trying to overwrite an existing .exe (e.g. from a previous run)
+            if os.path.exists(output_path):
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    print_warning("Cannot remove existing output file (close it if running)")
 
             # Execute compilation
             print_info(f"Compiling with Zig...")
@@ -287,41 +297,32 @@ class ZigCompiler:
                 
                 return False
             
-            # Zig compiles the binary in the current working directory (temp_dir)
-            # The binary name depends on the target platform (adds .exe on Windows)
-            # Try to find the compiled binary
-            compiled_binary = None
-            possible_names = [
-                binary_name,  # Exact name we want
-                binary_name_no_ext,  # Without extension
-                binary_name_no_ext + '.exe',  # With .exe (Windows)
-                binary_name_no_ext + '.bin',  # With .bin (some platforms)
-            ]
-            
-            for name in possible_names:
-                test_path = os.path.join(self.temp_dir, name)
-                if os.path.exists(test_path):
-                    compiled_binary = test_path
-                    break
-            
-            if not compiled_binary:
-                # List files in temp_dir to help debug
-                if os.path.exists(self.temp_dir):
-                    files = os.listdir(self.temp_dir)
-                    print_error(f"Compiled binary not found. Files in temp dir: {files}")
-                return False
-            
-            # Move binary to final output location
-            try:
-                shutil.move(compiled_binary, output_path)
-                # Make executable (Unix)
+            # With -femit-bin, Zig outputs directly to output_path (avoids Windows file lock on move)
+            if os.path.exists(output_path):
                 if os.name != 'nt':
                     os.chmod(output_path, 0o755)
                 print_success(f"Binary compiled successfully: {output_path}")
                 return True
-            except Exception as e:
-                print_error(f"Failed to move binary to output path: {e}")
-                return False
+            # Fallback if -femit-bin wrote to cwd: copy instead of move (move can fail if file locked)
+            compiled_binary = None
+            for name in [binary_name, binary_name_no_ext + '.exe', binary_name_no_ext]:
+                p = os.path.join(self.temp_dir, name)
+                if os.path.exists(p):
+                    compiled_binary = p
+                    break
+            if compiled_binary:
+                try:
+                    shutil.copy2(compiled_binary, output_path)
+                    if os.name != 'nt':
+                        os.chmod(output_path, 0o755)
+                    print_success(f"Binary compiled successfully: {output_path}")
+                    return True
+                except Exception as e:
+                    print_error(f"Failed to copy binary to output path: {e}")
+                    return False
+            if os.path.exists(self.temp_dir):
+                print_error(f"Compiled binary not found. Files: {os.listdir(self.temp_dir)}")
+            return False
                 
         except subprocess.TimeoutExpired:
             print_error("Compilation timeout")

@@ -1,7 +1,7 @@
 {
   "framework": {
     "name": "KittySploit Framework",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "description": "Advanced penetration testing framework",
     "author": "KittySploit Team",
     "license": "MIT"

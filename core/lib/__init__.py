@@ -60,6 +60,18 @@ def analyze_pe(path: str):
     from core.lib.pe_analyzer import PEAnalyzer
     return PEAnalyzer.analyze(path)
 
+def compile_python_to_exe(script_code: str, output_path: str,
+                          target_platform: str = 'windows', target_arch: str = 'x64',
+                          python_binary: str = 'python', use_compression: bool = False):
+    """
+    Compile Python script to executable (Zig). Requires Zig in PATH or
+    core/lib/compiler/zig_executable/
+    """
+    from core.lib.py_compiler.py2exe_zig import compile_python_to_exe as _do_compile
+    return _do_compile(script_code=script_code, output_path=output_path,
+                       target_platform=target_platform, target_arch=target_arch,
+                       python_binary=python_binary, use_compression=use_compression)
+
 __all__ = ['get_remote_connection', 
             'get_connection_manager', 
             'get_tunnel_proxy_manager',
@@ -68,4 +80,5 @@ __all__ = ['get_remote_connection',
             'send_command',
             'disassemble',
             'analyze_elf',
-            'analyze_pe']
+            'analyze_pe',
+            'compile_python_to_exe']

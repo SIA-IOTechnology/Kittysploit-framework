@@ -211,6 +211,10 @@ class MinicomPlugin(Plugin):
         print_info("  minicom> connect COM3")
         print_info("  minicom> connect COM4")
         print_info("")
+        print_info("From main prompt (if 'connect' shows unknown command):")
+        print_info("  minicom connect COM3")
+        print_info("  plugin run minicom -p COM3")
+        print_info("")
         print_info("Note: Bluetooth serial ports require the device to be paired and connected.")
     
     def _connect_serial(self, port_name: str) -> bool:
@@ -588,7 +592,27 @@ Examples:
   exit
         """
         print_info(help_text)
-    
+
+    def _show_connected_help(self):
+        """Show help when connected to a serial port (minicom commands vs raw data)"""
+        help_text = """
+Minicom Commands (prefixed, NOT sent to device):
+  exit, quit              - Disconnect and quit
+  disconnect              - Disconnect (stay in minicom)
+  help                    - Show this help
+  config                  - Show configuration
+  send <data>             - Send raw data to serial port
+  log start <file>        - Start logging
+  log stop                - Stop logging
+  script <file>           - Execute script
+  session save            - Save session to framework
+
+Raw Data (everything else is sent directly to the device):
+  Any text you type will be sent to the serial port
+  Examples: ATZ, help, ls, ?
+        """
+        print_info(help_text)
+
     def _show_config(self):
         """Show current serial port configuration"""
         print_info("=" * 80)
@@ -605,155 +629,229 @@ Examples:
         print_info(f"DSR/DTR: {self.dsrdtr}")
         print_info("=" * 80)
     
+    def _get_interactive_input(self, prompt: str, input_queue) -> str:
+        """Get input from queue (web terminal) or stdin (CLI). Returns None on EOF/sentinel."""
+        if input_queue is not None:
+            # Always display prompt so user knows minicom is ready (otherwise appears to hang)
+            print_info(prompt.rstrip())
+            try:
+                result = input_queue.get()
+                if result is None:
+                    raise EOFError("Interactive session ended")
+                return result
+            except EOFError:
+                raise
+        return input(prompt)
+
     def _interactive_loop(self):
         """Main interactive loop"""
-        while True:
-            try:
-                # Get user input
-                if self.connected:
-                    prompt = f"minicom[{self.port_name}]> "
-                else:
-                    prompt = "minicom> "
-                
+        # Register for web terminal input if we have a session context
+        input_queue = None
+        session_id = None
+        if self.framework:
+            output_handler = getattr(self.framework, 'output_handler', None)
+            if output_handler and hasattr(output_handler, 'get_current_session_id'):
+                session_id = output_handler.get_current_session_id()
+            if session_id and hasattr(self.framework, 'interactive_input_manager'):
+                input_queue = self.framework.interactive_input_manager.register(session_id)
+
+        try:
+            while True:
                 try:
-                    command = input(prompt)
-                except (EOFError, KeyboardInterrupt):
-                    print_info("\nExiting minicom...")
+                    # Get user input
                     if self.connected:
-                        self._disconnect_serial()
-                    break
-                
-                if not command.strip():
-                    continue
-                
-                command = command.strip()
-                cmd_lower = command.lower()
-                
-                # Handle minicom commands
-                if cmd_lower in ['exit', 'quit']:
-                    if self.connected:
-                        self._disconnect_serial()
-                    print_info("Exiting minicom...")
-                    break
-                
-                elif cmd_lower == 'disconnect':
-                    if self.connected:
-                        self._disconnect_serial()
+                        prompt = f"minicom[{self.port_name}]> "
                     else:
-                        print_warning("Not connected to any serial port")
-                
-                elif cmd_lower == 'help':
-                    if self.connected:
-                        self._show_connected_help()
-                    else:
-                        self._show_help()
-                
-                elif cmd_lower == 'clear':
-                    # Clear screen (simple version)
-                    print("\n" * 50)
-                
-                elif cmd_lower in ['list', 'ls']:
-                    self._display_serial_ports()
-                
-                elif cmd_lower.startswith('connect '):
-                    parts = command.split(' ', 1)
-                    if len(parts) > 1:
-                        port_name = parts[1].strip()
-                        if self._connect_serial(port_name):
-                            self._start_read_thread()
-                    else:
-                        print_error("Usage: connect <port>")
-                        print_info("Example: connect COM3 or connect /dev/ttyUSB0")
-                
-                elif cmd_lower.startswith('send '):
-                    if not self.connected:
-                        print_error("Not connected to serial port")
-                        continue
-                    
-                    parts = command.split(' ', 1)
-                    if len(parts) > 1:
-                        data = parts[1]
-                        self._send_data(data)
-                    else:
-                        print_error("Usage: send <data>")
-                
-                elif cmd_lower == 'config':
-                    self._show_config()
-                
-                elif cmd_lower.startswith('set '):
-                    # Handle configuration commands
-                    parts = command.split(' ', 2)
-                    if len(parts) < 3:
-                        print_error("Usage: set <parameter> <value>")
-                        print_info("Parameters: baudrate, bytesize, parity, stopbits, timeout")
-                        continue
-                    
-                    param = parts[1].lower()
-                    value = parts[2]
-                    
+                        prompt = "minicom> "
+
                     try:
-                        if param == 'baudrate':
-                            self.baudrate = int(value)
-                            print_success(f"Baudrate set to {self.baudrate}")
-                            if self.connected:
-                                print_warning("Reconnect to apply new baudrate")
-                        elif param == 'bytesize':
-                            self.bytesize = int(value)
-                            if self.bytesize not in [5, 6, 7, 8]:
-                                print_error("Bytesize must be 5, 6, 7, or 8")
-                                self.bytesize = 8
-                            else:
-                                print_success(f"Data bits set to {self.bytesize}")
-                                if self.connected:
-                                    print_warning("Reconnect to apply new bytesize")
-                        elif param == 'parity':
-                            value_upper = value.upper()
-                            if value_upper in ['N', 'E', 'O']:
-                                self.parity = value_upper
-                                print_success(f"Parity set to {self.parity}")
-                                if self.connected:
-                                    print_warning("Reconnect to apply new parity")
-                            else:
-                                print_error("Parity must be N (None), E (Even), or O (Odd)")
-                        elif param == 'stopbits':
-                            stopbits = float(value)
-                            if stopbits in [1, 1.5, 2]:
-                                self.stopbits = stopbits
-                                print_success(f"Stop bits set to {self.stopbits}")
-                                if self.connected:
-                                    print_warning("Reconnect to apply new stopbits")
-                            else:
-                                print_error("Stop bits must be 1, 1.5, or 2")
-                        elif param == 'timeout':
-                            self.timeout = float(value)
-                            print_success(f"Timeout set to {self.timeout} seconds")
-                            if self.connected:
-                                # Update timeout on active connection
-                                try:
-                                    self.serial_port.timeout = self.timeout
-                                except:
-                                    pass
+                        command = self._get_interactive_input(prompt, input_queue)
+                    except (EOFError, KeyboardInterrupt):
+                        print_info("\nExiting minicom...")
+                        if self.connected:
+                            self._disconnect_serial()
+                        break
+
+                    if not command.strip():
+                        continue
+
+                    command = command.strip()
+                    cmd_lower = command.lower()
+
+                    # Handle minicom commands
+                    if cmd_lower in ['exit', 'quit']:
+                        if self.connected:
+                            self._disconnect_serial()
+                        print_info("Exiting minicom...")
+                        break
+
+                    elif cmd_lower == 'disconnect':
+                        if self.connected:
+                            self._disconnect_serial()
                         else:
-                            print_error(f"Unknown parameter: {param}")
-                    except ValueError:
-                        print_error(f"Invalid value for {param}: {value}")
-                
-                elif self.connected:
-                    # If connected and not a minicom command, send to serial port
-                    self._send_data(command)
-                
-                else:
-                    # Not connected and not a minicom command
-                    print_warning(f"Unknown command: {command}")
-                    print_info("Type 'help' for available commands or 'list' to see available ports")
-                
-            except KeyboardInterrupt:
-                print_info("\nInterrupted. Type 'exit' to quit or 'disconnect' to disconnect.")
-                continue
-            except Exception as e:
-                print_error(f"Error: {e}")
-                continue
-    
+                            print_warning("Not connected to any serial port")
+
+                    elif cmd_lower == 'help':
+                        if self.connected:
+                            self._show_connected_help()
+                        else:
+                            self._show_help()
+
+                    elif cmd_lower == 'clear':
+                        # Clear screen (simple version)
+                        print("\n" * 50)
+
+                    elif cmd_lower in ['list', 'ls']:
+                        self._display_serial_ports()
+
+                    elif cmd_lower.startswith('connect '):
+                        parts = command.split(' ', 1)
+                        if len(parts) > 1:
+                            port_name = parts[1].strip()
+                            if self._connect_serial(port_name):
+                                self._start_read_thread()
+                        else:
+                            print_error("Usage: connect <port>")
+                            print_info("Example: connect COM3 or connect /dev/ttyUSB0")
+
+                    elif cmd_lower.startswith('send '):
+                        if not self.connected:
+                            print_error("Not connected to serial port")
+                            continue
+
+                        parts = command.split(' ', 1)
+                        if len(parts) > 1:
+                            data = parts[1]
+                            self._send_data(data)
+                        else:
+                            print_error("Usage: send <data>")
+
+                    elif cmd_lower == 'config':
+                        self._show_config()
+
+                    elif cmd_lower == 'analyze protocol':
+                        self.protocol_analyzer = True if not self.protocol_analyzer else None
+                        status = "enabled" if self.protocol_analyzer else "disabled"
+                        print_success(f"Protocol analysis {status}")
+
+                    elif cmd_lower.startswith('log start '):
+                        if not self.connected:
+                            print_error("Not connected to serial port")
+                            continue
+                        parts = command.split(' ', 2)
+                        if len(parts) >= 3:
+                            log_file = parts[2].strip()
+                            try:
+                                self.log_file = open(log_file, 'a', encoding='utf-8')
+                                self.logging_enabled = True
+                                print_success(f"Logging to {log_file}")
+                            except Exception as e:
+                                print_error(f"Cannot open log file: {e}")
+                        else:
+                            print_error("Usage: log start <file>")
+
+                    elif cmd_lower == 'log stop':
+                        self.logging_enabled = False
+                        if self.log_file:
+                            try:
+                                self.log_file.close()
+                            except Exception:
+                                pass
+                            self.log_file = None
+                            print_success("Logging stopped")
+                        else:
+                            print_info("Logging was not active")
+
+                    elif cmd_lower.startswith('script '):
+                        if not self.connected:
+                            print_error("Not connected to serial port")
+                            continue
+                        parts = command.split(' ', 1)
+                        if len(parts) > 1:
+                            self._execute_script(parts[1].strip())
+                        else:
+                            print_error("Usage: script <file>")
+
+                    elif cmd_lower == 'session save':
+                        self._save_session_to_framework()
+
+                    elif cmd_lower.startswith('set '):
+                        # Handle configuration commands
+                        parts = command.split(' ', 2)
+                        if len(parts) < 3:
+                            print_error("Usage: set <parameter> <value>")
+                            print_info("Parameters: baudrate, bytesize, parity, stopbits, timeout")
+                            continue
+
+                        param = parts[1].lower()
+                        value = parts[2]
+
+                        try:
+                            if param == 'baudrate':
+                                self.baudrate = int(value)
+                                print_success(f"Baudrate set to {self.baudrate}")
+                                if self.connected:
+                                    print_warning("Reconnect to apply new baudrate")
+                            elif param == 'bytesize':
+                                self.bytesize = int(value)
+                                if self.bytesize not in [5, 6, 7, 8]:
+                                    print_error("Bytesize must be 5, 6, 7, or 8")
+                                    self.bytesize = 8
+                                else:
+                                    print_success(f"Data bits set to {self.bytesize}")
+                                    if self.connected:
+                                        print_warning("Reconnect to apply new bytesize")
+                            elif param == 'parity':
+                                value_upper = value.upper()
+                                if value_upper in ['N', 'E', 'O']:
+                                    self.parity = value_upper
+                                    print_success(f"Parity set to {self.parity}")
+                                    if self.connected:
+                                        print_warning("Reconnect to apply new parity")
+                                else:
+                                    print_error("Parity must be N (None), E (Even), or O (Odd)")
+                            elif param == 'stopbits':
+                                stopbits = float(value)
+                                if stopbits in [1, 1.5, 2]:
+                                    self.stopbits = stopbits
+                                    print_success(f"Stop bits set to {self.stopbits}")
+                                    if self.connected:
+                                        print_warning("Reconnect to apply new stopbits")
+                                else:
+                                    print_error("Stop bits must be 1, 1.5, or 2")
+                            elif param == 'timeout':
+                                self.timeout = float(value)
+                                print_success(f"Timeout set to {self.timeout} seconds")
+                                if self.connected:
+                                    try:
+                                        self.serial_port.timeout = self.timeout
+                                    except Exception:
+                                        pass
+                            else:
+                                print_error(f"Unknown parameter: {param}")
+                        except ValueError:
+                            print_error(f"Invalid value for {param}: {value}")
+
+                    elif self.connected:
+                        # If connected and not a minicom command, send to serial port
+                        self._send_data(command)
+
+                    else:
+                        # Not connected and not a minicom command
+                        print_warning(f"Unknown command: {command}")
+                        print_info("Type 'help' for available commands or 'list' to see available ports")
+
+                except KeyboardInterrupt:
+                    print_info("\nInterrupted. Type 'exit' to quit or 'disconnect' to disconnect.")
+                    continue
+                except Exception as e:
+                    print_error(f"Error: {e}")
+                    continue
+        finally:
+            # Unregister from web terminal input when exiting
+            if session_id and self.framework and hasattr(self.framework, 'interactive_input_manager'):
+                self.framework.interactive_input_manager.unregister(session_id)
+
     def run(self, *args, **kwargs):
         """Main execution method for the plugin"""
         # Check dependencies

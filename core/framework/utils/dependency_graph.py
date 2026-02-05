@@ -113,6 +113,10 @@ class DependencyGraph:
         if dep.endswith('.*'):
             return True
         
+        # Normaliser "module as alias" -> "module" (l'alias n'affecte pas la dépendance réelle)
+        if ' as ' in dep:
+            dep = dep.split(' as ', 1)[0].strip()
+        
         # Extraire le nom du module de base (sans les attributs)
         # Ex: datetime.datetime -> datetime, core.output_handler.print_success -> core
         base_module = dep.split('.')[0]

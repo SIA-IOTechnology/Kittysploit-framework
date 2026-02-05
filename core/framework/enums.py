@@ -32,7 +32,9 @@ class SessionType(Enum):
     BROWSER = "browser"
     ANDROID = "android"
     MQTT = "mqtt"
+    COAP = "coap"
     DNS = "dns"
+    EMAIL = "email"
 
 class ServiceType(Enum):
     """Service types"""

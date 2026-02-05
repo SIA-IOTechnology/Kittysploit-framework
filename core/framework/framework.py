@@ -27,6 +27,7 @@ from core.framework.runtime.extension_contract import ExtensionRegistry
 from core.framework.runtime.pipeline import Pipeline, PipelineStepType
 from core.framework.runtime.hot_reload import HotReloadManager
 from core.tor_manager import TorManager
+from core.interactive_input_manager import InteractiveInputManager
 import os
 import importlib.util
 import sys
@@ -115,6 +116,8 @@ class Framework:
         
         # Initialize debug manager
         self.debug_manager = DebugManager()
+        # Interactive input manager (for web terminal -> plugin routing, e.g. minicom)
+        self.interactive_input_manager = InteractiveInputManager()
         # Register debug manager with output handler
         from core.output_handler import set_debug_manager
         set_debug_manager(self.debug_manager)

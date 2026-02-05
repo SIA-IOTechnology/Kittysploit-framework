@@ -409,6 +409,8 @@ Examples:
                     shell_type = "aws_sqs"
             elif session_type == "android":
                 shell_type = "android"
+            elif session_type == "email":
+                shell_type = "email"
             else:
                 shell_type = "classic"
             

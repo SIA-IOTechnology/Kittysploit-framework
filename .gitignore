@@ -69,3 +69,5 @@ extensions/
 test/
 
 codeline.txt
+
+python-3.13.5-embed-amd64.zip

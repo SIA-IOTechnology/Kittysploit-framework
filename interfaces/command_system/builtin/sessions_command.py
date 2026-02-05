@@ -260,6 +260,9 @@ Session Types:
                     shell_type = "aws_sqs_command"
                 else:
                     shell_type = "aws_sqs"
+            elif session and session.session_type and session.session_type.lower() == "email":
+                session_type = "email"
+                shell_type = "email"
             else:
                 session_type = "standard"
                 shell_type = "classic"

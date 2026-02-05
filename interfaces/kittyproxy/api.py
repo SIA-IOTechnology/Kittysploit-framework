@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from flow_manager import flow_manager
 from proxy_core import plugin_manager
 from endpoint_extractor import endpoint_extractor
+from ui_extensions.manager import list_extensions, get_extension_path
 from performance_monitor import performance_monitor
 from collaboration_manager import collaboration_manager, Collaborator
 from tech_detector import tech_detector
@@ -3113,6 +3114,33 @@ def sidechannel_generate_url(request: SideChannelGenerateUrlRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to generate URL: {str(e)}")
+
+# === UI EXTENSIONS (custom tabs with their own interface) ===
+@app.get("/api/ui-extensions")
+def get_ui_extensions():
+    """List all UI extensions (tabs that can be added to the interface)."""
+    try:
+        return list_extensions()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/extensions/{ext_id}/{path:path}")
+def serve_extension_asset(ext_id: str, path: str):
+    """Serve a static file from an UI extension folder (e.g. /extensions/demo/index.html)."""
+    if ".." in path or path.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    base = get_extension_path(ext_id)
+    if not base:
+        raise HTTPException(status_code=404, detail="Extension not found")
+    full = os.path.normpath(os.path.join(base, path))
+    base_real = os.path.realpath(base)
+    full_real = os.path.realpath(full)
+    if not full_real.startswith(base_real):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(full)
 
 # Serve static files (Frontend) — mounted after API routes to avoid shadowing /api/*
 static_dir = os.path.join(os.path.dirname(__file__), "static")

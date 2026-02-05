@@ -1,0 +1,8 @@
+{
+  "id": "demo",
+  "name": "Demo Extension",
+  "tabLabel": "Demo",
+  "description": "Example UI extension: a custom tab with its own interface.",
+  "icon": "widgets",
+  "entry": "index.html"
+}

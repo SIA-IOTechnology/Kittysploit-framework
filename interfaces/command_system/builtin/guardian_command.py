@@ -26,7 +26,15 @@ class GuardianCommand(BaseCommand):
     
     def __init__(self, framework, session, output_handler):
         super().__init__(framework, session, output_handler)
-        self.guardian_manager = GuardianManager()
+        # Use the framework's guardian_manager instead of creating a new one
+        # This ensures blacklist and settings are shared across the application
+        if hasattr(self.framework, 'guardian_manager') and self.framework.guardian_manager:
+            self.guardian_manager = self.framework.guardian_manager
+        else:
+            # Fallback: create a new one and attach it to the framework
+            self.guardian_manager = GuardianManager()
+            if self.framework:
+                self.framework.guardian_manager = self.guardian_manager
         self.parser = self._create_parser()
     
     def _create_parser(self) -> argparse.ArgumentParser:

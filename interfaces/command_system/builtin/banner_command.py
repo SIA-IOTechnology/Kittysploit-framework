@@ -7,6 +7,7 @@ Banner command implementation
 
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success
+from core.version import VERSION
 
 class BannerCommand(BaseCommand):
     """Command to display the KittySploit banner"""
@@ -34,7 +35,7 @@ class BannerCommand(BaseCommand):
         if 'framework' in kwargs and kwargs['framework']:
             version = f"v{kwargs['framework'].version}"
         else:
-            version = "v1.0.0"  # Fallback version
+            version = f"v{VERSION}"
         
         tagline = "Advanced Penetration Testing Framework"
         author = "Developed by KittySploit Team"

@@ -1,4 +1,8 @@
 <div align="center">
+  <img src="docs/screenshots/banner.png" alt="KittySploit Framework Banner" width="100%">
+</div>
+
+<div align="center">
   <img src="static/logo.jpg" alt="KittySploit Logo" width="120" height="120">
   
   # KittySploit Framework

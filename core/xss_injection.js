@@ -196,7 +196,15 @@
             if (command.type === 'execute_js' && command.code) {
                 try {
                     const result = eval(command.code);
-                    sendResponse(command.id, result !== undefined ? result : 'Executed successfully');
+                    if (result && typeof result.then === 'function') {
+                        result.then(function(res) {
+                            sendResponse(command.id, res !== undefined ? res : 'Executed successfully');
+                        }).catch(function(err) {
+                            sendResponse(command.id, 'Error: ' + (err && err.message ? err.message : String(err)));
+                        });
+                    } else {
+                        sendResponse(command.id, result !== undefined ? result : 'Executed successfully');
+                    }
                 } catch (error) {
                     sendResponse(command.id, `Error: ${error.message}`);
                 }

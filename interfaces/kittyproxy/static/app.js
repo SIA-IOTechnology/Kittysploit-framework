@@ -1,6 +1,8 @@
 const API_BASE = 'http://127.0.0.1:8443/api';
 let currentFlowId = null;
 let currentTab = 'request';
+/** Response body view: 'raw' | 'preview' | 'pretty' | 'hex' */
+let responseBodyViewMode = 'preview';
 let flowsData = [];
 let sharedFlows = new Set(); // IDs des flows partagés en collaboration
 
@@ -67,6 +69,223 @@ function showToast(message, type = 'info') {
     }, 2600);
 }
 
+function showAppConfirm(message, options = {}) {
+    const title = options.title || 'Confirmation';
+    const confirmText = options.confirmText || 'Confirm';
+    const cancelText = options.cancelText || 'Cancel';
+    const danger = !!options.danger;
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.style.zIndex = '12000';
+
+        const container = document.createElement('div');
+        container.className = 'modal-container';
+        container.style.maxWidth = '520px';
+        container.style.width = '90%';
+
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const h3 = document.createElement('h3');
+        h3.textContent = title;
+        header.appendChild(h3);
+
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        const p = document.createElement('p');
+        p.style.margin = '0';
+        p.style.color = 'var(--text-color)';
+        p.textContent = String(message || '');
+        body.appendChild(p);
+
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn-secondary';
+        cancelBtn.textContent = cancelText;
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = danger ? 'btn btn-danger' : 'btn btn-primary';
+        confirmBtn.textContent = confirmText;
+        footer.appendChild(cancelBtn);
+        footer.appendChild(confirmBtn);
+
+        container.appendChild(header);
+        container.appendChild(body);
+        container.appendChild(footer);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+        };
+
+        const done = (result) => {
+            cleanup();
+            resolve(result);
+        };
+
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') done(false);
+            if (e.key === 'Enter') done(true);
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        cancelBtn.addEventListener('click', () => done(false));
+        confirmBtn.addEventListener('click', () => done(true));
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) done(false);
+        });
+        confirmBtn.focus();
+    });
+}
+
+function showAppPrompt(message, options = {}) {
+    const title = options.title || 'Input';
+    const confirmText = options.confirmText || 'Save';
+    const cancelText = options.cancelText || 'Cancel';
+    const placeholder = options.placeholder || '';
+    const defaultValue = options.defaultValue || '';
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.style.zIndex = '12000';
+
+        const container = document.createElement('div');
+        container.className = 'modal-container';
+        container.style.maxWidth = '560px';
+        container.style.width = '92%';
+
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const h3 = document.createElement('h3');
+        h3.textContent = title;
+        header.appendChild(h3);
+
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        const label = document.createElement('label');
+        label.style.display = 'block';
+        label.style.fontWeight = '600';
+        label.style.marginBottom = '8px';
+        label.textContent = String(message || '');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'modal-input';
+        input.placeholder = placeholder;
+        input.value = defaultValue;
+        body.appendChild(label);
+        body.appendChild(input);
+
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn btn-secondary';
+        cancelBtn.textContent = cancelText;
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'btn btn-primary';
+        confirmBtn.textContent = confirmText;
+        footer.appendChild(cancelBtn);
+        footer.appendChild(confirmBtn);
+
+        container.appendChild(header);
+        container.appendChild(body);
+        container.appendChild(footer);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+        };
+
+        const done = (result) => {
+            cleanup();
+            resolve(result);
+        };
+
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') done(null);
+            if (e.key === 'Enter') done(input.value.trim());
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        cancelBtn.addEventListener('click', () => done(null));
+        confirmBtn.addEventListener('click', () => done(input.value.trim()));
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) done(null);
+        });
+        input.focus();
+        input.select();
+    });
+}
+
+function showAppAlert(message, options = {}) {
+    const title = options.title || 'Information';
+    const buttonText = options.buttonText || 'OK';
+
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.style.zIndex = '12000';
+
+        const container = document.createElement('div');
+        container.className = 'modal-container';
+        container.style.maxWidth = '520px';
+        container.style.width = '90%';
+
+        const header = document.createElement('div');
+        header.className = 'modal-header';
+        const h3 = document.createElement('h3');
+        h3.textContent = title;
+        header.appendChild(h3);
+
+        const body = document.createElement('div');
+        body.className = 'modal-body';
+        const p = document.createElement('p');
+        p.style.margin = '0';
+        p.style.color = 'var(--text-color)';
+        p.style.whiteSpace = 'pre-wrap';
+        p.textContent = String(message || '');
+        body.appendChild(p);
+
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'btn btn-primary';
+        okBtn.textContent = buttonText;
+        footer.appendChild(okBtn);
+
+        container.appendChild(header);
+        container.appendChild(body);
+        container.appendChild(footer);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', onKeyDown);
+            overlay.remove();
+            resolve(true);
+        };
+
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape' || e.key === 'Enter') cleanup();
+        };
+
+        document.addEventListener('keydown', onKeyDown);
+        okBtn.addEventListener('click', cleanup);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup();
+        });
+        okBtn.focus();
+    });
+}
+
 async function copyToClipboard(text) {
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -120,6 +339,8 @@ const interceptStatusText = document.getElementById('intercept-status-text');
 const pendingCountText = document.getElementById('pending-count-text');
 const pendingListEl = document.getElementById('pending-list');
 const interceptEditorEl = document.getElementById('intercept-editor');
+const interceptRequestSelectEl = document.getElementById('intercept-request-select');
+const interceptToolbarEl = document.getElementById('intercept-toolbar');
 const resumeAllBtn = document.getElementById('resume-all-btn');
 const dropAllBtn = document.getElementById('drop-all-btn');
 
@@ -268,6 +489,18 @@ function switchView(viewId, navItem = null) {
         restoreSidechannelData();
     } else {
         removeSidechannelApiOverlay();
+    }
+
+    // Intercept tab: recharger immédiatement les requêtes en attente pour qu'elles s'affichent
+    if (viewId === 'intercept') {
+        fetch(`${API_BASE}/intercept/pending`)
+            .then(res => res.json())
+            .then(pending => {
+                pendingInterceptsData = Array.isArray(pending) ? pending : [];
+                renderPendingList();
+                updateInterceptTabBadge();
+            })
+            .catch(err => console.error('Failed to fetch pending intercepts on view switch', err));
     }
 
     // Notify extension iframes whether they are visible (so they can pause/resume timers)
@@ -732,7 +965,7 @@ function runEncoder(action) {
         showToast(`Texte ${action === 'encode' ? 'encodé' : 'décodé'} (${mode})`, 'success');
     } catch (err) {
         console.error('[Encoder] error', err);
-        showToast(`Erreur lors du ${action === 'encode' ? 'codage' : 'décodage'} (${mode})`, 'error');
+        showToast(`Error during ${action === 'encode' ? 'encoding' : 'decoding'} (${mode})`, 'error');
     }
 }
 
@@ -1292,12 +1525,18 @@ function handleSidechannelExportResultsClick() {
     showToast('Results exported successfully', 'success');
 }
 
-function handleSidechannelClearResultsClick() {
+async function handleSidechannelClearResultsClick() {
     if (sidechannelDetections.length === 0) {
         showToast('No results to clear', 'info');
         return;
     }
-    if (confirm('Clear all detection results? This cannot be undone.')) {
+    const ok = await showAppConfirm('Clear all detection results? This cannot be undone.', {
+        title: 'Clear Results',
+        confirmText: 'Clear',
+        cancelText: 'Cancel',
+        danger: true
+    });
+    if (ok) {
         sidechannelDetections = [];
         saveSidechannelData();
         updateSidechannelResultsBadge();
@@ -2647,9 +2886,6 @@ if (resumeAllBtn) {
             selectedInterceptId = null;
             renderPendingList();
             updateInterceptTabBadge();
-            if (interceptEditorEl) {
-                interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
-            }
         } else {
             // Désactiver le mode auto-resume : réinitialiser previousPendingIds
             previousPendingIds = new Set();
@@ -2690,9 +2926,6 @@ if (dropAllBtn) {
         selectedInterceptId = null;
         renderPendingList();
         updateInterceptTabBadge();
-        if (interceptEditorEl) {
-            interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
-        }
     });
 }
 
@@ -2728,105 +2961,160 @@ function updateInterceptTabBadge() {
 }
 
 function renderPendingList() {
-    if (!pendingListEl) return;
-
     if (pendingCountText) {
         pendingCountText.textContent = `${pendingInterceptsData.length} request${pendingInterceptsData.length !== 1 ? 's' : ''} pending`;
     }
-
-    // Mettre à jour le badge de l'onglet
     updateInterceptTabBadge();
 
-    if (pendingInterceptsData.length === 0) {
-        pendingListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No pending requests</div>';
-        return;
+    if (interceptToolbarEl) {
+        interceptToolbarEl.style.display = pendingInterceptsData.length > 0 ? 'flex' : 'none';
     }
-
-    // Auto-select first request if we're on intercept page and none is selected
-    const interceptView = document.getElementById('intercept-view');
-    const isInterceptViewActive = interceptView && interceptView.style.display !== 'none';
-
-    if (isInterceptViewActive && !selectedInterceptId && pendingInterceptsData.length > 0) {
-        selectedInterceptId = pendingInterceptsData[0].id;
-        // Render the editor for the auto-selected request
-        setTimeout(() => renderInterceptEditor(selectedInterceptId), 0);
-    }
-
-    pendingListEl.innerHTML = pendingInterceptsData.map(flow => `
-        <div class="flow-item ${selectedInterceptId === flow.id ? 'active' : ''}" data-flow-id="${flow.id}" style="display: grid; grid-template-columns: 1fr; padding: 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer;">
-            <div style="font-weight: 600; color: #6200ea; margin-bottom: 5px;">${flow.method}</div>
-            <div style="font-size: 0.85em; color: #666; word-break: break-all;">${flow.url}</div>
-        </div>
-    `).join('');
-
-    document.querySelectorAll('#pending-list .flow-item').forEach(item => {
-        item.addEventListener('click', (e) => {
-            const flowId = e.currentTarget.dataset.flowId;
-            selectedInterceptId = flowId;
-            // Désactiver le mode auto-resume quand l'utilisateur sélectionne une requête pour modification manuelle
-            if (autoResumeEnabled) {
-                autoResumeEnabled = false;
-                updateResumeAllButton();
+    if (interceptRequestSelectEl) {
+        interceptRequestSelectEl.innerHTML = '';
+        if (pendingInterceptsData.length === 0) {
+            if (interceptEditorEl) {
+                interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">No request pending. Enable intercept and make a request.</p>';
             }
-            renderPendingList();
-            renderInterceptEditor(flowId);
+            return;
+        }
+        const interceptView = document.getElementById('intercept-view');
+        const isInterceptViewActive = interceptView && interceptView.style.display !== 'none';
+        if (isInterceptViewActive && !selectedInterceptId && pendingInterceptsData.length > 0) {
+            selectedInterceptId = pendingInterceptsData[0].id;
+        }
+        pendingInterceptsData.forEach(flow => {
+            const opt = document.createElement('option');
+            opt.value = String(flow.id);
+            opt.textContent = (flow.method || 'GET') + ' ' + (flow.url && flow.url.length > 80 ? flow.url.slice(0, 77) + '…' : flow.url || '');
+            interceptRequestSelectEl.appendChild(opt);
         });
-    });
+        const firstId = pendingInterceptsData[0] && String(pendingInterceptsData[0].id);
+        interceptRequestSelectEl.value = (selectedInterceptId && pendingInterceptsData.some(f => String(f.id) === String(selectedInterceptId))) ? String(selectedInterceptId) : firstId;
+        selectedInterceptId = interceptRequestSelectEl.value || firstId;
+        renderInterceptEditor(selectedInterceptId);
+    }
+}
+
+/** Build raw HTTP request string (Burp-style) from flow. */
+function buildRawInterceptRequest(flow) {
+    const method = (flow.method || 'GET').trim();
+    const url = (flow.url || '').trim();
+    const headers = flow.request && flow.request.headers ? flow.request.headers : {};
+    const body = flow.request && flow.request.content_bs64 ? atob(flow.request.content_bs64) : '';
+    const lines = [method + ' ' + url + ' HTTP/1.1'];
+    for (const [k, v] of Object.entries(headers)) {
+        const key = typeof k === 'string' ? k : (k && k.toString ? k.toString() : String(k));
+        const val = v != null ? String(v) : '';
+        lines.push(key + ': ' + val);
+    }
+    lines.push('');
+    return lines.join('\r\n') + (body ? '\r\n' + body : '');
+}
+
+/** Parse raw HTTP request string into { method, url, headers, body_bs64 }. baseUrl used if request line is path-only. */
+function parseRawInterceptRequest(raw, baseUrl) {
+    const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const parts = normalized.split('\n');
+    if (parts.length === 0) {
+        return { method: 'GET', url: baseUrl || '', headers: {}, body_bs64: '' };
+    }
+    const firstLine = parts[0].trim();
+    const match = firstLine.match(/^([A-Za-z0-9_-]+)\s+(\S+)\s+HTTP\/[\d.]+\s*$/);
+    let method = 'GET';
+    let urlOrPath = baseUrl || '';
+    if (match) {
+        method = match[1];
+        urlOrPath = match[2].trim();
+    }
+    let i = 1;
+    const headers = {};
+    while (i < parts.length && parts[i].trim() !== '') {
+        const line = parts[i];
+        const colon = line.indexOf(':');
+        if (colon > 0) {
+            const key = line.slice(0, colon).trim();
+            const value = line.slice(colon + 1).trim();
+            headers[key] = value;
+        }
+        i++;
+    }
+    while (i < parts.length && parts[i].trim() === '') i++;
+    const bodyLines = parts.slice(i);
+    const bodyStr = bodyLines.join('\n');
+    let url = urlOrPath;
+    if (urlOrPath.startsWith('/') && baseUrl) {
+        try {
+            const u = new URL(baseUrl);
+            url = u.origin + urlOrPath;
+        } catch (_) {
+            url = baseUrl + urlOrPath;
+        }
+    }
+    return {
+        method,
+        url,
+        headers,
+        body_bs64: bodyStr ? btoa(bodyStr) : ''
+    };
+}
+
+/** Build raw HTTP request string from repeater tab (method, url, headers JSON string, body). */
+function buildRawFromRepeaterTab(tab) {
+    const method = (tab.method || 'GET').trim();
+    const url = (tab.url || '').trim();
+    let headers = {};
+    try {
+        if (tab.headers && String(tab.headers).trim()) {
+            headers = JSON.parse(tab.headers);
+        }
+    } catch (_) {}
+    const body = tab.body != null ? String(tab.body) : '';
+    const lines = [method + ' ' + url + ' HTTP/1.1'];
+    for (const [k, v] of Object.entries(headers)) {
+        lines.push(String(k) + ': ' + (v != null ? String(v) : ''));
+    }
+    lines.push('');
+    return lines.join('\r\n') + (body ? '\r\n' + body : '');
 }
 
 function renderInterceptEditor(flowId) {
-    const flow = pendingInterceptsData.find(f => f.id === flowId);
+    const flow = pendingInterceptsData.find(f => String(f.id) === String(flowId));
     if (!flow || !interceptEditorEl) return;
 
-    const reqHeaders = JSON.stringify(flow.request.headers, null, 2);
-    const reqBody = flow.request.content_bs64 ? atob(flow.request.content_bs64) : '';
+    const rawRequest = buildRawInterceptRequest(flow);
 
     interceptEditorEl.innerHTML = `
-        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
-            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Method</label>
-            <input type="text" id="intercept-method" value="${escapeHtml(flow.method)}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.9rem;">
-        </div>
-        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
-            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">URL</label>
-            <input type="text" id="intercept-url" value="${escapeHtml(flow.url)}" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.9rem; word-wrap: break-word; overflow-wrap: break-word;">
-        </div>
-        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
-            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Headers (JSON)</label>
-            <textarea id="intercept-headers" style="width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.85em; resize: vertical; overflow-x: hidden; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(reqHeaders)}</textarea>
-        </div>
-        <div style="background: white; border: 1px solid #e0e0e0; border-radius: 8px; padding: 16px; box-sizing: border-box;">
-            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333; font-size: 0.9rem;">Body</label>
-            <textarea id="intercept-body" style="width: 100%; height: 150px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', monospace; font-size: 0.85em; resize: vertical; overflow-x: hidden; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(reqBody)}</textarea>
-        </div>
-        <div style="display: flex; gap: 10px; margin-top: auto; padding-top: 10px; box-sizing: border-box;">
-            <button id="resume-intercept-btn" style="flex: 1; padding: 12px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Resume</button>
-            <button id="drop-intercept-btn" style="flex: 1; padding: 12px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: background 0.2s;">Drop</button>
+        <div style="display: flex; flex-direction: column; height: 100%; gap: 12px; box-sizing: border-box;">
+            <label style="font-weight: 600; color: #333; font-size: 0.9rem;">Raw request</label>
+            <textarea id="intercept-raw-request" spellcheck="false" autocomplete="off" style="flex: 1; min-height: 200px; width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.85em; resize: vertical; line-height: 1.4; white-space: pre; overflow-wrap: normal;">${escapeHtml(rawRequest)}</textarea>
+            <div style="display: flex; gap: 10px; padding-top: 8px; flex-shrink: 0;">
+                <button id="resume-intercept-btn" style="flex: 1; padding: 12px; background: #4caf50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem;">Resume</button>
+                <button id="drop-intercept-btn" style="flex: 1; padding: 12px; background: #f44336; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem;">Drop</button>
+            </div>
         </div>
     `;
 
     document.getElementById('resume-intercept-btn').addEventListener('click', async () => {
-        const method = document.getElementById('intercept-method').value;
-        const url = document.getElementById('intercept-url').value;
-        const headersStr = document.getElementById('intercept-headers').value;
-        const bodyStr = document.getElementById('intercept-body').value;
-
+        const rawStr = document.getElementById('intercept-raw-request').value;
         try {
-            const headers = JSON.parse(headersStr);
-            const payload = { method, url, headers, body_bs64: bodyStr ? btoa(bodyStr) : '' };
-
+            const parsed = parseRawInterceptRequest(rawStr, flow.url);
+            const payload = {
+                method: parsed.method,
+                url: parsed.url,
+                headers: parsed.headers,
+                body_bs64: parsed.body_bs64
+            };
             await fetch(`${API_BASE}/intercept/${flowId}/resume`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
             pendingInterceptsData = pendingInterceptsData.filter(f => f.id !== flowId);
             selectedInterceptId = null;
             renderPendingList();
             updateInterceptTabBadge();
-            interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
         } catch (err) {
-            alert('Error: Invalid JSON in headers or failed to resume');
+            showAppAlert('Error: Invalid raw request or failed to resume. Check request line (METHOD URL HTTP/1.1) and headers.');
             console.error(err);
         }
     });
@@ -2838,14 +3126,26 @@ function renderInterceptEditor(flowId) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({})
             });
-
             pendingInterceptsData = pendingInterceptsData.filter(f => f.id !== flowId);
             selectedInterceptId = null;
             renderPendingList();
             updateInterceptTabBadge();
-            interceptEditorEl.innerHTML = '<p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify</p>';
         } catch (err) {
             console.error(err);
+        }
+    });
+}
+
+if (interceptRequestSelectEl) {
+    interceptRequestSelectEl.addEventListener('change', () => {
+        const flowId = interceptRequestSelectEl.value;
+        if (flowId) {
+            selectedInterceptId = flowId;
+            if (autoResumeEnabled) {
+                autoResumeEnabled = false;
+                updateResumeAllButton();
+            }
+            renderInterceptEditor(flowId);
         }
     });
 }
@@ -2935,15 +3235,15 @@ async function refreshModules() {
             await fetchModules();
             refreshModulesBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">refresh</span> Refresh';
             refreshModulesBtn.disabled = false;
-            alert(`Modules cache refreshed: ${data.count} modules loaded`);
+            showAppAlert(`Modules cache refreshed: ${data.count} modules loaded`);
         } else {
-            alert(`Error: ${data.detail || 'Failed to refresh modules'}`);
+            showAppAlert(`Error: ${data.detail || 'Failed to refresh modules'}`);
             refreshModulesBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">refresh</span> Refresh';
             refreshModulesBtn.disabled = false;
         }
     } catch (err) {
         console.error("Failed to refresh modules", err);
-        alert(`Error: ${err.message}`);
+        showAppAlert(`Error: ${err.message}`);
         refreshModulesBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">refresh</span> Refresh';
         refreshModulesBtn.disabled = false;
     }
@@ -3278,7 +3578,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
     const url = urlInput.value.trim();
     if (!url) {
         if (!silent) {
-            alert('Please enter a URL first');
+            showAppAlert('Please enter a URL first');
         }
         return;
     }
@@ -3288,7 +3588,7 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
         new URL(url);
     } catch (e) {
         if (!silent) {
-            alert('Invalid URL format. Please enter a valid URL (e.g., https://example.com:443/path)');
+            showAppAlert('Invalid URL format. Please enter a valid URL (e.g., https://example.com:443/path)');
         }
         return;
     }
@@ -3342,18 +3642,18 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
                         moduleOutput.scrollTop = moduleOutput.scrollHeight;
                     }
                 } else {
-                    alert('No matching options found for this module. Please configure manually.');
+                    showAppAlert('No matching options found for this module. Please configure manually.');
                 }
             }
         } else {
             if (!silent) {
-                alert(`Error: ${data.detail || data.error || 'Failed to auto-configure'}`);
+                showAppAlert(`Error: ${data.detail || data.error || 'Failed to auto-configure'}`);
             }
         }
     } catch (err) {
         console.error('Auto-configure error:', err);
         if (!silent) {
-            alert(`Connection error: ${err.message}`);
+            showAppAlert(`Connection error: ${err.message}`);
         }
     } finally {
         if (btn && !silent) {
@@ -3367,40 +3667,198 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
 
 let apiHistory = [];
 let apiCollections = [];
-let currentApiRequest = {
-    id: null,
-    method: 'GET',
-    url: '',
-    params: [],
-    headers: [],
-    bodyType: 'none',
-    body: '',
-    response: null
-};
+let apiTesterTabs = [];
+let activeApiTesterTabId = null;
+let currentApiRequest = null;
+let apiSidebarActiveTab = 'history';
+
+function getActiveApiTab() {
+    return apiTesterTabs.find(t => t.id === activeApiTesterTabId) || null;
+}
+
+function generateApiTesterTabTitle(method, url) {
+    if (!url || !url.trim()) return (method || 'GET') + ' (no URL)';
+    try {
+        const u = new URL(url);
+        const host = u.hostname || '';
+        if (host.length > 28) return host.slice(0, 25) + '...';
+        return host || url.slice(0, 28);
+    } catch {
+        return url.length > 28 ? url.slice(0, 25) + '...' : url;
+    }
+}
+
+function updateApiTesterTabTitle(tabId) {
+    const tab = apiTesterTabs.find(t => t.id === tabId);
+    if (!tab) return;
+    tab.title = generateApiTesterTabTitle(tab.method, tab.url);
+    renderApiTabs();
+}
+
+// Sync form fields to the currently active tab (call before switching tab)
+function syncFormToActiveTab() {
+    const tab = getActiveApiTab();
+    if (!tab) return;
+    const methodEl = document.getElementById('api-method');
+    const urlEl = document.getElementById('api-url');
+    const headersRawEl = document.getElementById('api-headers-raw');
+    const bodyRawEl = document.getElementById('api-body-raw');
+    if (methodEl) tab.method = methodEl.value;
+    if (urlEl) tab.url = urlEl.value.trim();
+    if (tab.headersMode === 'raw' && headersRawEl) tab.headers = parseRawHeaders(headersRawEl.value);
+    if (tab.bodyMode === 'raw' && bodyRawEl) tab.body = bodyRawEl.value;
+    // bodyTable is updated via updateKv when editing table rows
+}
+
+function createApiTesterTab(tabData = null) {
+    const id = `api-tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const method = tabData?.method || 'GET';
+    const url = tabData?.url || '';
+    const tab = {
+        id,
+        method,
+        url,
+        headers: tabData?.headers ? JSON.parse(JSON.stringify(tabData.headers)) : [],
+        headersMode: tabData?.headersMode || 'raw',
+        bodyMode: tabData?.bodyMode || 'raw',
+        body: tabData?.body != null ? tabData.body : '',
+        bodyTable: tabData?.bodyTable ? JSON.parse(JSON.stringify(tabData.bodyTable)) : [],
+        response: tabData?.response || null,
+        title: generateApiTesterTabTitle(method, url)
+    };
+    apiTesterTabs.push(tab);
+    activeApiTesterTabId = id;
+    currentApiRequest = tab;
+    renderApiTabs();
+    renderApiRequest();
+    saveApiTesterTabs();
+}
+
+function closeApiTesterTab(tabId) {
+    const idx = apiTesterTabs.findIndex(t => t.id === tabId);
+    if (idx === -1) return;
+    syncFormToActiveTab();
+    apiTesterTabs.splice(idx, 1);
+    if (activeApiTesterTabId === tabId) {
+        activeApiTesterTabId = apiTesterTabs.length > 0 ? apiTesterTabs[Math.min(idx, apiTesterTabs.length - 1)].id : null;
+        currentApiRequest = getActiveApiTab();
+        if (!currentApiRequest && apiTesterTabs.length > 0) {
+            activeApiTesterTabId = apiTesterTabs[0].id;
+            currentApiRequest = apiTesterTabs[0];
+        }
+        if (!currentApiRequest) createApiTesterTab();
+        else renderApiRequest();
+    }
+    renderApiTabs();
+    saveApiTesterTabs();
+}
+
+function activateApiTesterTab(tabId) {
+    if (activeApiTesterTabId === tabId) return;
+    syncFormToActiveTab();
+    activeApiTesterTabId = tabId;
+    currentApiRequest = getActiveApiTab();
+    renderApiRequest();
+    renderApiTabs();
+}
+
+function renderApiTabs() {
+    const container = document.getElementById('api-tabs-container');
+    if (!container) return;
+    container.innerHTML = '';
+    apiTesterTabs.forEach(tab => {
+        const tabEl = document.createElement('div');
+        tabEl.className = `api-tab ${activeApiTesterTabId === tab.id ? 'active' : ''}`;
+        tabEl.dataset.tabId = tab.id;
+        const title = tab.title || generateApiTesterTabTitle(tab.method, tab.url);
+        const method = (tab.method || 'GET').toUpperCase();
+        tabEl.innerHTML = `
+            <span class="api-tab-title">
+                <span class="api-tab-url">${escapeHtml(title)}</span>
+                <span class="api-tab-method method-${method}">${escapeHtml(method)}</span>
+            </span>
+            <button type="button" class="api-tab-close" title="Close tab"><span class="material-symbols-outlined" style="font-size: 16px;">close</span></button>
+        `;
+        tabEl.querySelector('.api-tab-title').addEventListener('click', () => activateApiTesterTab(tab.id));
+        tabEl.querySelector('.api-tab-close').addEventListener('click', (e) => { e.stopPropagation(); closeApiTesterTab(tab.id); });
+        container.appendChild(tabEl);
+    });
+}
+
+function saveApiTesterTabs() {
+    try {
+        const toSave = apiTesterTabs.map(t => ({
+            id: t.id,
+            method: t.method,
+            url: t.url,
+            headers: t.headers,
+            headersMode: t.headersMode,
+            bodyMode: t.bodyMode,
+            body: t.body,
+            bodyTable: t.bodyTable
+        }));
+        localStorage.setItem('kittyproxy_api_tester_tabs', JSON.stringify(toSave));
+        localStorage.setItem('kittyproxy_api_tester_active_tab', activeApiTesterTabId);
+    } catch (e) { console.warn('Save API Tester tabs failed', e); }
+}
+
+function loadApiTesterTabs() {
+    try {
+        const raw = localStorage.getItem('kittyproxy_api_tester_tabs');
+        const activeId = localStorage.getItem('kittyproxy_api_tester_active_tab');
+        if (raw) {
+            const arr = JSON.parse(raw);
+            apiTesterTabs = arr.map(t => ({
+                ...t,
+                response: null,
+                title: generateApiTesterTabTitle(t.method, t.url)
+            }));
+            if (apiTesterTabs.length > 0) {
+                activeApiTesterTabId = activeId && apiTesterTabs.some(x => x.id === activeId) ? activeId : apiTesterTabs[0].id;
+                currentApiRequest = getActiveApiTab();
+                renderApiTabs();
+                renderApiRequest();
+                return true;
+            }
+        }
+    } catch (e) { console.warn('Load API Tester tabs failed', e); }
+    return false;
+}
 
 // Initialize API Tester
 function initApiTester() {
-    // Check if API Tester view exists
     const apiView = document.getElementById('api-view');
     if (!apiView) {
         console.warn('API Tester view not found, skipping initialization');
         return;
     }
-
     loadApiHistory();
     loadApiCollections();
-
-    // If no current request, create a blank one or load last history
-    if (!currentApiRequest.id) {
-        if (apiHistory.length > 0) {
-            loadApiRequest(apiHistory[0]);
-        } else {
-            createNewApiRequest();
-        }
+    if (!loadApiTesterTabs()) {
+        createApiTesterTab();
     }
-
     renderApiSidebar();
-    renderApiRequest();
+
+    const methodEl = document.getElementById('api-method');
+    const urlEl = document.getElementById('api-url');
+    if (methodEl) {
+        methodEl.addEventListener('change', () => {
+            if (currentApiRequest) {
+                currentApiRequest.method = methodEl.value;
+                updateApiTesterTabTitle(currentApiRequest.id);
+                saveApiTesterTabs();
+            }
+        });
+    }
+    if (urlEl) {
+        urlEl.addEventListener('blur', () => {
+            if (currentApiRequest) {
+                currentApiRequest.url = urlEl.value.trim();
+                updateApiTesterTabTitle(currentApiRequest.id);
+                saveApiTesterTabs();
+            }
+        });
+    }
 }
 
 // Load/Save History
@@ -3427,6 +3885,147 @@ function saveApiCollections() {
     localStorage.setItem('kittyproxy_api_collections', JSON.stringify(apiCollections));
 }
 
+function buildCollectionNameFromRequest(req) {
+    const method = (req?.method || 'GET').toUpperCase();
+    const rawUrl = (req?.url || '').trim();
+    if (!rawUrl) return `${method} Untitled request`;
+    try {
+        const u = new URL(rawUrl);
+        const path = (u.pathname && u.pathname !== '/') ? u.pathname : '';
+        return `${method} ${u.hostname}${path}`;
+    } catch {
+        return `${method} ${rawUrl}`;
+    }
+}
+
+function snapshotCurrentApiRequest() {
+    syncFormToActiveTab();
+    if (!currentApiRequest) return null;
+    const copy = JSON.parse(JSON.stringify(currentApiRequest));
+    delete copy.response;
+    return copy;
+}
+
+function saveCurrentRequestToCollection() {
+    const req = snapshotCurrentApiRequest();
+    if (!req) return;
+    const baseName = buildCollectionNameFromRequest(req);
+    const timestamp = new Date().toLocaleString();
+    const name = `${baseName} (${timestamp})`;
+    const item = {
+        id: `api-col-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name,
+        createdAt: new Date().toISOString(),
+        request: req
+    };
+    apiCollections.unshift(item);
+    saveApiCollections();
+    renderApiSidebar();
+    if (apiSidebarActiveTab !== 'collections') switchApiSidebarTab('collections');
+    if (typeof showToast === 'function') showToast('Request saved to Collections', 'success');
+}
+
+function loadApiCollectionById(id) {
+    const item = apiCollections.find(c => c.id === id);
+    if (!item || !item.request) return;
+    loadApiRequest(item.request);
+}
+
+async function renameApiCollection(id) {
+    const item = apiCollections.find(c => c.id === id);
+    if (!item) return;
+    const nextName = await showAppPrompt('Collection name', {
+        title: 'Rename Collection Item',
+        defaultValue: item.name || '',
+        confirmText: 'Save',
+        cancelText: 'Cancel'
+    });
+    if (!nextName) return;
+    item.name = nextName;
+    saveApiCollections();
+    renderApiSidebar();
+}
+
+async function deleteApiCollection(id) {
+    const item = apiCollections.find(c => c.id === id);
+    if (!item) return;
+    const ok = await showAppConfirm(`Delete collection item "${item.name || 'Untitled'}"?`, {
+        title: 'Delete Collection Item',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        danger: true
+    });
+    if (!ok) return;
+    apiCollections = apiCollections.filter(c => c.id !== id);
+    saveApiCollections();
+    renderApiSidebar();
+}
+
+async function clearApiCollections() {
+    if (!apiCollections.length) return;
+    const ok = await showAppConfirm(`Clear all collection items (${apiCollections.length})?`, {
+        title: 'Clear Collections',
+        confirmText: 'Clear',
+        cancelText: 'Cancel',
+        danger: true
+    });
+    if (!ok) return;
+    apiCollections = [];
+    saveApiCollections();
+    renderApiSidebar();
+}
+
+function exportApiCollections() {
+    const payload = {
+        version: 1,
+        exported_at: new Date().toISOString(),
+        collections: apiCollections
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kittyproxy-api-collections-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importApiCollectionsFromFile() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                const raw = JSON.parse(String(reader.result || ''));
+                const list = Array.isArray(raw) ? raw : (Array.isArray(raw.collections) ? raw.collections : []);
+                if (!Array.isArray(list) || list.length === 0) {
+                    throw new Error('No collection items found in file');
+                }
+                const imported = list
+                    .filter(x => x && x.request)
+                    .map(x => ({
+                        id: `api-col-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                        name: (x.name || buildCollectionNameFromRequest(x.request) || 'Imported request').trim(),
+                        createdAt: x.createdAt || new Date().toISOString(),
+                        request: JSON.parse(JSON.stringify(x.request))
+                    }));
+                apiCollections = imported.concat(apiCollections);
+                saveApiCollections();
+                renderApiSidebar();
+                if (typeof showToast === 'function') showToast(`Imported ${imported.length} collection item(s)`, 'success');
+            } catch (err) {
+                if (typeof showToast === 'function') showToast(`Import failed: ${err.message}`, 'error');
+            }
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+}
+
 // Render Sidebar
 function renderApiSidebar() {
     const historyList = document.getElementById('api-history-list');
@@ -3445,11 +4044,62 @@ function renderApiSidebar() {
         }
     }
 
-    // TODO: Render collections
+    if (collectionsList) {
+        const toolbarHtml = `
+            <div class="api-collections-toolbar">
+                <button class="btn btn-secondary" onclick="saveCurrentRequestToCollection()" title="Save current request">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">bookmark_add</span>
+                    Save Current
+                </button>
+                <button class="btn btn-secondary" onclick="importApiCollectionsFromFile()" title="Import from JSON">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">upload_file</span>
+                    Import
+                </button>
+                <button class="btn btn-secondary" onclick="exportApiCollections()" title="Export JSON">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">download</span>
+                    Export
+                </button>
+                <button class="btn btn-secondary" onclick="clearApiCollections()" title="Clear collections">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">delete_sweep</span>
+                    Clear
+                </button>
+            </div>
+        `;
+
+        if (apiCollections.length === 0) {
+            collectionsList.innerHTML = `${toolbarHtml}
+                <div style="padding: 20px; text-align: center; color: #999; font-size: 13px;">No collection items yet</div>
+            `;
+        } else {
+            collectionsList.innerHTML = toolbarHtml + apiCollections.map(item => {
+                const req = item.request || {};
+                const method = (req.method || 'GET').toUpperCase();
+                const url = req.url || 'No URL';
+                return `
+                    <div class="api-collection-item" onclick="loadApiCollectionById('${item.id}')">
+                        <span class="method-badge method-${method}">${method}</span>
+                        <div class="api-collection-item-main">
+                            <div class="api-collection-item-name" title="${escapeHtml(item.name || '')}">${escapeHtml(item.name || 'Untitled')}</div>
+                            <div class="api-collection-item-url" title="${escapeHtml(url)}">${escapeHtml(url)}</div>
+                        </div>
+                        <div class="api-collection-item-actions">
+                            <button type="button" class="api-collection-icon-btn" title="Rename" onclick="event.stopPropagation(); renameApiCollection('${item.id}')">
+                                <span class="material-symbols-outlined" style="font-size: 16px;">edit</span>
+                            </button>
+                            <button type="button" class="api-collection-icon-btn" title="Delete" onclick="event.stopPropagation(); deleteApiCollection('${item.id}')">
+                                <span class="material-symbols-outlined" style="font-size: 16px;">delete</span>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+    }
 }
 
 // Switch Sidebar Tab
 function switchApiSidebarTab(tabName) {
+    apiSidebarActiveTab = tabName;
     document.querySelectorAll('.api-sidebar-tab').forEach(t => t.classList.remove('active'));
     document.getElementById(`tab-${tabName}`).classList.add('active');
 
@@ -3543,12 +4193,12 @@ async function loadReactApis() {
         reactApisData.graphqlQueries = data.graphql_queries || {};
 
         if (reactApis.length === 0) {
-            console.log('[REACT APIs] No React APIs found, showing empty state');
+            console.log('[DISCOVERED APIs] No endpoints found, showing empty state');
             reactApisList.innerHTML = `
                 <div style="padding: 20px; text-align: center; color: #999; font-size: 13px;">
                     <span class="material-symbols-outlined" style="font-size: 48px; display: block; margin-bottom: 10px; opacity: 0.5;">code_off</span>
-                    No React APIs discovered yet.<br>
-                    <small style="color: #777;">React APIs will appear here when detected in JavaScript files.</small>
+                    No discovered APIs yet.<br>
+                    <small style="color: #777;">Detected API endpoints from captured frontend traffic/scripts will appear here.</small>
                     <br><br>
                     <small style="color: #999;">Check the console for extraction logs.</small>
                 </div>
@@ -3633,10 +4283,10 @@ async function loadReactApis() {
         }).join('');
 
     } catch (err) {
-        console.error('Error loading React APIs:', err);
+        console.error('Error loading discovered APIs:', err);
         reactApisList.innerHTML = `
             <div style="padding: 20px; text-align: center; color: #f44336; font-size: 13px;">
-                Error loading React APIs: ${err.message}
+                Error loading discovered APIs: ${err.message}
             </div>
         `;
     }
@@ -3653,6 +4303,199 @@ function loadReactApiFromItem(index, url, method = 'GET') {
     loadReactApiIntoRequest(url, method, graphqlQueries);
 }
 
+function extractGraphQLContent(rawContent) {
+    if (rawContent == null) return { query: '', variables: null };
+    let text = rawContent;
+
+    if (typeof text === 'object') {
+        if (typeof text.query === 'string') {
+            return {
+                query: text.query.trim(),
+                variables: text.variables && typeof text.variables === 'object' ? text.variables : null
+            };
+        }
+        try {
+            text = JSON.stringify(text);
+        } catch (_) {
+            text = String(text);
+        }
+    }
+
+    if (typeof text !== 'string') text = String(text);
+    let cleaned = text.trim();
+
+    if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+        try {
+            const decoded = JSON.parse(cleaned);
+            if (typeof decoded === 'string') cleaned = decoded;
+        } catch (_) { }
+    }
+
+    cleaned = cleaned
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\"/g, '"')
+        .trim();
+
+    if ((cleaned.startsWith('{') && cleaned.endsWith('}')) || (cleaned.startsWith('[') && cleaned.endsWith(']'))) {
+        try {
+            const parsed = JSON.parse(cleaned);
+            if (parsed && typeof parsed === 'object' && typeof parsed.query === 'string') {
+                return {
+                    query: parsed.query.trim(),
+                    variables: parsed.variables && typeof parsed.variables === 'object' ? parsed.variables : null
+                };
+            }
+        } catch (_) { }
+    }
+
+    const opMatch = /\b(query|mutation|subscription)\b/i.exec(cleaned);
+    if (!opMatch) return { query: cleaned, variables: null };
+
+    const start = opMatch.index;
+    const braceStart = cleaned.indexOf('{', start);
+    if (braceStart === -1) return { query: cleaned.slice(start).trim(), variables: null };
+
+    let depth = 0;
+    let end = -1;
+    for (let i = braceStart; i < cleaned.length; i++) {
+        const ch = cleaned[i];
+        if (ch === '{') depth += 1;
+        if (ch === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                end = i;
+                break;
+            }
+        }
+    }
+
+    if (end !== -1) {
+        return { query: cleaned.slice(start, end + 1).trim(), variables: null };
+    }
+    return { query: cleaned.slice(start).trim(), variables: null };
+}
+
+function inferGraphQLVariableDefaults(variablesSignature) {
+    const vars = {};
+    if (!variablesSignature || typeof variablesSignature !== 'string') return vars;
+
+    const variableRegex = /\$(\w+)\s*:\s*([!\[\]\w]+)/g;
+    let match;
+    while ((match = variableRegex.exec(variablesSignature)) !== null) {
+        const varName = match[1];
+        const baseType = match[2].replace(/[!\[\]]/g, '');
+
+        if (baseType === 'String' || baseType === 'ID') {
+            vars[varName] = '';
+        } else if (baseType === 'Int' || baseType === 'Float') {
+            vars[varName] = 0;
+        } else if (baseType === 'Boolean') {
+            vars[varName] = false;
+        } else {
+            vars[varName] = null;
+        }
+    }
+
+    return vars;
+}
+
+function buildBodyTableFromJsonPayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+    return Object.entries(payload).map(([key, value]) => {
+        let renderedValue = '';
+        if (typeof value === 'string') {
+            renderedValue = value;
+        } else {
+            try {
+                renderedValue = JSON.stringify(value, null, 2);
+            } catch (_) {
+                renderedValue = String(value);
+            }
+        }
+        return { key, value: renderedValue, active: true };
+    });
+}
+
+function isGraphQLEndpointUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    const lower = url.toLowerCase();
+    return lower.includes('graphql') || lower.includes('/gql') || lower.endsWith('/gql');
+}
+
+function isGraphQLBodyTableRows(rows) {
+    if (!Array.isArray(rows) || !rows.length) return false;
+    const keys = new Set(rows.map(r => String(r?.key || '').trim().toLowerCase()).filter(Boolean));
+    return keys.has('query') || (keys.has('variables') && keys.has('operationname'));
+}
+
+function normalizeGraphQLBodyTableRows(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows || [];
+    const queryRows = [];
+    const variablesRows = [];
+    const otherRows = [];
+    rows.forEach(row => {
+        const key = String(row?.key || '').trim().toLowerCase();
+        if (key === 'query') queryRows.push(row);
+        else if (key === 'variables') variablesRows.push(row);
+        else otherRows.push(row);
+    });
+    return [...queryRows, ...variablesRows, ...otherRows];
+}
+
+function parseBodyTableValueForJson(key, value) {
+    const raw = value == null ? '' : String(value);
+    const trimmed = raw.trim();
+    const loweredKey = String(key || '').trim().toLowerCase();
+
+    if (loweredKey === 'query') return raw;
+    if (!trimmed) return '';
+
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try { return JSON.parse(trimmed); } catch (_) { }
+    }
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+        try { return JSON.parse(trimmed.replace(/^'/, '"').replace(/'$/, '"')); } catch (_) { }
+    }
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (trimmed === 'null') return null;
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+    return raw;
+}
+
+function buildJsonBodyFromTable(rows) {
+    const out = {};
+    (rows || []).forEach(row => {
+        const key = String(row?.key || '').trim();
+        if (!key) return;
+        out[key] = parseBodyTableValueForJson(key, row?.value);
+    });
+    return out;
+}
+
+function upsertRequestHeader(name, value) {
+    if (!currentApiRequest || !Array.isArray(currentApiRequest.headers)) return;
+    const existing = currentApiRequest.headers.find(h => String(h?.key || '').toLowerCase() === String(name).toLowerCase());
+    if (existing) {
+        existing.value = value;
+    } else {
+        currentApiRequest.headers.push({ key: name, value, active: true });
+    }
+}
+
+function rebuildApiBodyRawFromTable() {
+    if (!currentApiRequest) return;
+    const rows = normalizeGraphQLBodyTableRows(currentApiRequest.bodyTable || []);
+    currentApiRequest.bodyTable = rows;
+    const jsonBody = buildJsonBodyFromTable(rows);
+    currentApiRequest.body = JSON.stringify(jsonBody, null, 2);
+    upsertRequestHeader('Content-Type', 'application/json');
+    renderApiRequest();
+    showAppAlert('Raw body rebuilt from table');
+}
+
 // Load a React API into the request builder
 function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
     createNewApiRequest();
@@ -3665,56 +4508,26 @@ function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
     if (graphqlQueries && graphqlQueries.length > 0 && (method === 'POST' || url.toLowerCase().includes('graphql'))) {
         // Utiliser la première requête GraphQL
         const firstQuery = graphqlQueries[0];
-        // Extraire la requête GraphQL (peut être une string ou déjà un objet)
-        let queryString = firstQuery.full_content || firstQuery.content || '';
-
-        // Si c'est déjà un objet JSON, le convertir en string formatée
-        if (typeof queryString === 'object') {
-            queryString = JSON.stringify(queryString, null, 2);
-        }
-
-        // Nettoyer et formater la requête GraphQL (préserver les retours à la ligne)
-        queryString = queryString.trim();
+        const extracted = extractGraphQLContent(firstQuery.full_content || firstQuery.content || '');
+        let queryString = extracted.query;
 
         const graphqlBody = {
             query: queryString
         };
 
         // Ajouter les variables si présentes
-        if (firstQuery.variables) {
-            // Parser les variables depuis la string (ex: "$billingPlatform: BillingPlatform, $planGroup: String")
-            const vars = {};
-            const varMatches = firstQuery.variables.match(/\$(\w+):\s*(\w+)/g);
-            if (varMatches) {
-                varMatches.forEach(v => {
-                    const match = v.match(/\$(\w+):\s*(\w+)/);
-                    if (match) {
-                        // Valeur par défaut basée sur le type
-                        const varName = match[1];
-                        const varType = match[2];
-                        if (varType === 'String') {
-                            vars[varName] = '';
-                        } else if (varType === 'Int' || varType === 'Float') {
-                            vars[varName] = 0;
-                        } else if (varType === 'Boolean') {
-                            vars[varName] = false;
-                        } else if (varType === 'ID') {
-                            vars[varName] = '';
-                        } else {
-                            vars[varName] = null;
-                        }
-                    }
-                });
-            }
-            if (Object.keys(vars).length > 0) {
-                graphqlBody.variables = vars;
-            }
+        if (extracted.variables && typeof extracted.variables === 'object') {
+            graphqlBody.variables = extracted.variables;
+        } else {
+            const vars = inferGraphQLVariableDefaults(firstQuery.variables);
+            if (Object.keys(vars).length > 0) graphqlBody.variables = vars;
         }
 
         // Pré-remplir le body avec la requête GraphQL (formaté avec indentation)
         currentApiRequest.bodyType = 'json';
         // Utiliser JSON.stringify avec indentation pour un formatage propre
         currentApiRequest.body = JSON.stringify(graphqlBody, null, 2);
+        currentApiRequest.bodyTable = buildBodyTableFromJsonPayload(graphqlBody);
 
         // Ajouter le header Content-Type pour GraphQL
         const contentTypeHeader = currentApiRequest.headers.find(h => h.key.toLowerCase() === 'content-type');
@@ -3726,12 +4539,15 @@ function loadReactApiIntoRequest(url, method = 'GET', graphqlQueries = null) {
     }
 
     renderApiRequest();
+    if (currentApiRequest) {
+        updateApiTesterTabTitle(currentApiRequest.id);
+        saveApiTesterTabs();
+    }
 
     // Si c'est GraphQL, basculer automatiquement sur l'onglet Body
     if (graphqlQueries && graphqlQueries.length > 0) {
         setTimeout(() => {
             switchApiReqTab('body');
-            // Format and display JSON after switching to body tab
             setTimeout(() => {
                 formatAndDisplayJson();
             }, 150);
@@ -3779,7 +4595,7 @@ function updateApiTabBadge(count) {
 function showGraphQLQuerySelector(apiUrl, apiIndex) {
     const queries = reactApisData.graphqlQueries[apiUrl] || [];
     if (queries.length === 0) {
-        alert('No GraphQL queries found for this endpoint');
+        showAppAlert('No GraphQL queries found for this endpoint');
         return;
     }
 
@@ -3863,7 +4679,7 @@ function selectGraphQLQuery(apiUrl, apiIndex, queryIndex) {
 function loadGraphQLQuery(apiUrl, apiIndex, queryIndex) {
     const queries = reactApisData.graphqlQueries[apiUrl] || [];
     if (queryIndex >= queries.length) {
-        alert('Query not found');
+        showAppAlert('Query not found');
         return;
     }
 
@@ -3874,19 +4690,9 @@ function loadGraphQLQuery(apiUrl, apiIndex, queryIndex) {
     loadReactApiIntoRequest(apiUrl, method, [selectedQuery]);
 }
 
-// Create New Request
+// Create New Request (adds a new tab)
 function createNewApiRequest() {
-    currentApiRequest = {
-        id: `req_${Date.now()}`,
-        method: 'GET',
-        url: '',
-        params: [{ key: '', value: '', active: true }],
-        headers: [{ key: 'User-Agent', value: 'KittyProxy/1.0', active: true }],
-        bodyType: 'none',
-        body: '',
-        response: null
-    };
-    renderApiRequest();
+    createApiTesterTab();
 }
 
 // Load Request
@@ -3898,12 +4704,24 @@ function loadApiRequestById(id) {
 }
 
 function loadApiRequest(req) {
-    currentApiRequest = JSON.parse(JSON.stringify(req)); // Deep copy
+    const tab = getActiveApiTab();
+    if (!tab) return;
+    const copy = JSON.parse(JSON.stringify(req));
+    copy.paramsMode = copy.paramsMode || 'raw';
+    copy.headersMode = copy.headersMode || 'raw';
+    copy.bodyFormRaw = copy.bodyFormRaw ?? '';
+    copy.id = tab.id;
+    copy.title = generateApiTesterTabTitle(copy.method, copy.url);
+    Object.assign(tab, copy);
+    currentApiRequest = tab;
     renderApiRequest();
+    updateApiTesterTabTitle(tab.id);
+    saveApiTesterTabs();
 }
 
 // Render Request Editor
 function renderApiRequest() {
+    if (!currentApiRequest) return;
     const methodEl = document.getElementById('api-method');
     const urlEl = document.getElementById('api-url');
 
@@ -3918,7 +4736,17 @@ function renderApiRequest() {
         urlEl.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // Render Params
+    // Params mode (Raw / Table)
+    const paramsModeRadio = document.querySelector(`input[name="params-mode"][value="${currentApiRequest.paramsMode}"]`);
+    if (paramsModeRadio) paramsModeRadio.checked = true;
+    const apiParamsRawWrap = document.getElementById('api-params-raw-wrap');
+    const apiParamsTableWrap = document.getElementById('api-params-table-wrap');
+    const apiParamsRaw = document.getElementById('api-params-raw');
+    if (apiParamsRawWrap) apiParamsRawWrap.style.display = currentApiRequest.paramsMode === 'raw' ? 'block' : 'none';
+    if (apiParamsTableWrap) apiParamsTableWrap.style.display = currentApiRequest.paramsMode === 'table' ? 'block' : 'none';
+    if (apiParamsRaw && currentApiRequest.paramsMode === 'raw') {
+        apiParamsRaw.value = serializeParamsToRaw(currentApiRequest.params);
+    }
     const paramsContainer = document.getElementById('api-params-container');
     if (paramsContainer) {
         paramsContainer.innerHTML = currentApiRequest.params.map((p, i) => `
@@ -3930,7 +4758,17 @@ function renderApiRequest() {
         `).join('');
     }
 
-    // Render Headers
+    // Headers mode (Raw / Table)
+    const headersModeRadio = document.querySelector(`input[name="headers-mode"][value="${currentApiRequest.headersMode}"]`);
+    if (headersModeRadio) headersModeRadio.checked = true;
+    const apiHeadersRawWrap = document.getElementById('api-headers-raw-wrap');
+    const apiHeadersTableWrap = document.getElementById('api-headers-table-wrap');
+    const apiHeadersRaw = document.getElementById('api-headers-raw');
+    if (apiHeadersRawWrap) apiHeadersRawWrap.style.display = currentApiRequest.headersMode === 'raw' ? 'flex' : 'none';
+    if (apiHeadersTableWrap) apiHeadersTableWrap.style.display = currentApiRequest.headersMode === 'table' ? 'block' : 'none';
+    if (apiHeadersRaw && currentApiRequest.headersMode === 'raw') {
+        apiHeadersRaw.value = serializeHeadersToRaw(currentApiRequest.headers);
+    }
     const headersContainer = document.getElementById('api-headers-container');
     if (headersContainer) {
         headersContainer.innerHTML = currentApiRequest.headers.map((p, i) => `
@@ -3942,14 +4780,65 @@ function renderApiRequest() {
         `).join('');
     }
 
-    // Render Body
-    const bodyTypeInput = document.querySelector(`input[name="body-type"][value="${currentApiRequest.bodyType}"]`);
-    if (bodyTypeInput) bodyTypeInput.checked = true;
-
-    const bodyEditor = document.getElementById('api-body-editor');
-    if (bodyEditor) bodyEditor.value = currentApiRequest.body || '';
-
-    toggleBodyType();
+    // Render Body (Raw / Table mode - simplified UI)
+    const bodyModeRadio = document.querySelector(`input[name="body-mode"][value="${currentApiRequest.bodyMode || 'raw'}"]`);
+    if (bodyModeRadio) bodyModeRadio.checked = true;
+    const apiBodyRawWrap = document.getElementById('api-body-raw-wrap');
+    const apiBodyTableWrap = document.getElementById('api-body-table-wrap');
+    const apiBodyRaw = document.getElementById('api-body-raw');
+    if (apiBodyRawWrap && apiBodyTableWrap) {
+        const bodyMode = currentApiRequest.bodyMode || 'raw';
+        apiBodyRawWrap.style.display = bodyMode === 'raw' ? 'flex' : 'none';
+        apiBodyTableWrap.style.display = bodyMode === 'table' ? 'block' : 'none';
+        if (apiBodyRaw && bodyMode === 'raw') {
+            apiBodyRaw.value = typeof currentApiRequest.body === 'string' ? currentApiRequest.body : '';
+        }
+        const bodyContainer = document.getElementById('api-body-container');
+        if (bodyContainer) {
+            if (!currentApiRequest.bodyTable || !currentApiRequest.bodyTable.length) {
+                const parsedRows = parseBodyRawToTable(typeof currentApiRequest.body === 'string' ? currentApiRequest.body : '');
+                currentApiRequest.bodyTable = parsedRows.length ? parsedRows : [{ key: '', value: '', active: true }];
+            }
+            currentApiRequest.bodyTable = normalizeGraphQLBodyTableRows(currentApiRequest.bodyTable);
+            bodyContainer.innerHTML = currentApiRequest.bodyTable.map((p, i) => `
+                <div class="kv-editor-row">
+                    <input type="text" class="kv-key" placeholder="Key" value="${escapeHtml(p.key)}" oninput="updateKv('body', ${i}, 'key', this.value)">
+                    <input type="text" class="kv-value" placeholder="Value" value="${escapeHtml(p.value)}" oninput="updateKv('body', ${i}, 'value', this.value)">
+                    <button class="kv-remove" onclick="removeKv('body', ${i})"><span class="material-symbols-outlined" style="font-size: 16px;">close</span></button>
+                </div>
+            `).join('');
+        }
+        const looksLikeGraphQL = isGraphQLEndpointUrl(currentApiRequest.url) || isGraphQLBodyTableRows(currentApiRequest.bodyTable || []);
+        let graphQLActions = apiBodyTableWrap.querySelector('.api-body-graphql-actions');
+        if (!graphQLActions) {
+            graphQLActions = document.createElement('div');
+            graphQLActions.className = 'api-body-graphql-actions';
+            graphQLActions.style.cssText = 'display: none; margin-top: 10px;';
+            graphQLActions.innerHTML = `
+                <button class="btn btn-secondary" onclick="rebuildApiBodyRawFromTable()" title="Rebuild JSON raw body from table values">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">data_object</span> Rebuild JSON body
+                </button>
+            `;
+            const addRowBtn = Array.from(apiBodyTableWrap.querySelectorAll('button')).find(btn =>
+                String(btn.getAttribute('onclick') || '').includes("addKvRow('api-body-container')")
+            );
+            if (addRowBtn && addRowBtn.parentNode) {
+                addRowBtn.parentNode.insertBefore(graphQLActions, addRowBtn.nextSibling);
+            } else {
+                apiBodyTableWrap.appendChild(graphQLActions);
+            }
+        }
+        graphQLActions.style.display = looksLikeGraphQL ? 'block' : 'none';
+    } else {
+        // Legacy body type (none / raw / json / form)
+        const bodyTypeInput = document.querySelector(`input[name="body-type"][value="${currentApiRequest.bodyType || 'none'}"]`);
+        if (bodyTypeInput) bodyTypeInput.checked = true;
+        const bodyFormRawEl = document.getElementById('api-body-form-raw');
+        if (bodyFormRawEl) bodyFormRawEl.value = currentApiRequest.bodyFormRaw || '';
+        const bodyEditor = document.getElementById('api-body-editor');
+        if (bodyEditor) bodyEditor.value = currentApiRequest.body || '';
+        toggleBodyType();
+    }
 
     // Render Response if exists
     const responseSection = document.getElementById('api-response-section');
@@ -3966,25 +4855,155 @@ function renderApiRequest() {
 
 // KV Helpers
 function addKvRow(type) {
-    const list = (type === 'api-params-container' || type === 'params') ? currentApiRequest.params : currentApiRequest.headers;
+    let list;
+    if (type === 'api-params-container' || type === 'params') {
+        list = currentApiRequest.params;
+    } else if (type === 'api-body-container' || type === 'body') {
+        list = currentApiRequest.bodyTable;
+        if (!list) currentApiRequest.bodyTable = list = [];
+    } else {
+        list = currentApiRequest.headers;
+    }
     list.push({ key: '', value: '', active: true });
     renderApiRequest();
 }
 
 function removeKv(type, index) {
-    const list = type === 'params' ? currentApiRequest.params : currentApiRequest.headers;
+    const list = type === 'params' ? currentApiRequest.params : type === 'body' ? currentApiRequest.bodyTable : currentApiRequest.headers;
+    if (!list) return;
     list.splice(index, 1);
     renderApiRequest();
 }
 
 function updateKv(type, index, field, value) {
-    const list = type === 'params' ? currentApiRequest.params : currentApiRequest.headers;
+    const list = type === 'params' ? currentApiRequest.params : type === 'body' ? currentApiRequest.bodyTable : currentApiRequest.headers;
+    if (!list || !list[index]) return;
     list[index][field] = value;
 
-    // If updating params, sync with URL
     if (type === 'params') {
         syncParamsToUrl();
     }
+}
+
+// Parse raw key=value or key: value lines into array of { key, value }
+function parseRawKeyValueLines(text) {
+    if (!text || typeof text !== 'string') return [];
+    const lines = text.split(/\r?\n/);
+    const result = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const colonIdx = trimmed.indexOf(':');
+        const eqIdx = trimmed.indexOf('=');
+        let key = '';
+        let value = '';
+        if (eqIdx >= 0 && (colonIdx < 0 || eqIdx < colonIdx)) {
+            key = trimmed.slice(0, eqIdx).trim();
+            value = trimmed.slice(eqIdx + 1).trim();
+        } else if (colonIdx >= 0) {
+            key = trimmed.slice(0, colonIdx).trim();
+            value = trimmed.slice(colonIdx + 1).trim();
+        } else {
+            key = trimmed;
+        }
+        result.push({ key, value, active: true });
+    }
+    return result;
+}
+
+// Parse raw "Key: Value" lines (headers)
+function parseRawHeaders(text) {
+    return parseRawKeyValueLines(text);
+}
+
+function parseBodyRawToTable(text) {
+    if (!text || typeof text !== 'string') return [];
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+            const parsed = JSON.parse(trimmed);
+            const rows = normalizeGraphQLBodyTableRows(buildBodyTableFromJsonPayload(parsed));
+            if (rows.length) return rows;
+            if (Array.isArray(parsed)) {
+                return [{ key: 'data', value: JSON.stringify(parsed, null, 2), active: true }];
+            }
+        } catch (_) { }
+    }
+
+    return parseRawKeyValueLines(text);
+}
+
+function serializeParamsToRaw(params) {
+    if (!params || !params.length) return '';
+    return params.filter(p => p.key).map(p => `${p.key}=${p.value}`).join('\n');
+}
+
+function serializeHeadersToRaw(headers) {
+    if (!headers || !headers.length) return '';
+    return headers.filter(h => h.key).map(h => `${h.key}: ${h.value}`).join('\n');
+}
+
+function switchApiParamsMode(mode) {
+    const rawWrap = document.getElementById('api-params-raw-wrap');
+    const tableWrap = document.getElementById('api-params-table-wrap');
+    const rawEl = document.getElementById('api-params-raw');
+    if (!rawWrap || !tableWrap) return;
+    currentApiRequest.paramsMode = mode;
+    if (mode === 'raw') {
+        if (rawEl) rawEl.value = serializeParamsToRaw(currentApiRequest.params);
+        rawWrap.style.display = 'block';
+        tableWrap.style.display = 'none';
+    } else {
+        if (rawEl) currentApiRequest.params = parseRawKeyValueLines(rawEl.value);
+        rawWrap.style.display = 'none';
+        tableWrap.style.display = 'block';
+        renderApiRequest();
+    }
+}
+
+function switchApiHeadersMode(mode) {
+    const rawWrap = document.getElementById('api-headers-raw-wrap');
+    const tableWrap = document.getElementById('api-headers-table-wrap');
+    const rawEl = document.getElementById('api-headers-raw');
+    if (!rawWrap || !tableWrap) return;
+    currentApiRequest.headersMode = mode;
+    if (mode === 'raw') {
+        if (rawEl) rawEl.value = serializeHeadersToRaw(currentApiRequest.headers);
+        rawWrap.style.display = 'flex';
+        tableWrap.style.display = 'none';
+    } else {
+        if (rawEl) currentApiRequest.headers = parseRawHeaders(rawEl.value);
+        rawWrap.style.display = 'none';
+        tableWrap.style.display = 'block';
+        renderApiRequest();
+    }
+}
+
+function switchApiBodyMode(mode) {
+    const rawWrap = document.getElementById('api-body-raw-wrap');
+    const tableWrap = document.getElementById('api-body-table-wrap');
+    const rawEl = document.getElementById('api-body-raw');
+    if (!rawWrap || !tableWrap) return;
+    currentApiRequest.bodyMode = mode || 'raw';
+    if (mode === 'raw') {
+        if (rawEl) rawEl.value = typeof currentApiRequest.body === 'string' ? currentApiRequest.body : serializeBodyTableToRaw(currentApiRequest.bodyTable || []);
+        rawWrap.style.display = 'flex';
+        tableWrap.style.display = 'none';
+    } else {
+        if (rawEl) currentApiRequest.body = rawEl.value;
+        const parsedRows = parseBodyRawToTable(rawEl ? rawEl.value : currentApiRequest.body);
+        currentApiRequest.bodyTable = parsedRows.length ? parsedRows : [{ key: '', value: '', active: true }];
+        rawWrap.style.display = 'none';
+        tableWrap.style.display = 'block';
+        renderApiRequest();
+    }
+}
+
+function serializeBodyTableToRaw(rows) {
+    if (!rows || !rows.length) return '';
+    return rows.filter(p => p.key).map(p => `${p.key}=${p.value}`).join('\n');
 }
 
 function syncParamsToUrl() {
@@ -4033,28 +5052,37 @@ function toggleBodyType() {
 
     const container = document.getElementById('api-body-editor-container');
     const msg = document.getElementById('api-body-none-msg');
+    const formWrap = document.getElementById('api-body-form-wrap');
+    const formRaw = document.getElementById('api-body-form-raw');
     const jsonView = document.getElementById('api-body-json-view');
     const bodyEditor = document.getElementById('api-body-editor');
     const formatBtn = document.getElementById('api-body-format-btn');
 
-    if (container && msg) {
-        if (type === 'none') {
-            container.style.display = 'none';
-            msg.style.display = 'block';
-        } else {
-            container.style.display = 'flex';
-            msg.style.display = 'none';
+    if (formWrap) formWrap.style.display = type === 'form' ? 'block' : 'none';
+    if (formRaw && type === 'form') formRaw.value = currentApiRequest.bodyFormRaw || '';
 
-            // Show JSON formatted view for JSON type, textarea for raw
-            if (type === 'json') {
-                if (jsonView) jsonView.style.display = 'flex';
-                if (bodyEditor) bodyEditor.style.display = 'none';
-                if (formatBtn) formatBtn.style.display = 'none';
-                formatAndDisplayJson();
+    if (container && msg) {
+        if (type === 'none' || type === 'form') {
+            container.style.display = type === 'form' ? 'none' : 'none';
+            msg.style.display = type === 'none' ? 'block' : 'none';
+        }
+        if (type !== 'form') {
+            if (type === 'none') {
+                container.style.display = 'none';
+                msg.style.display = 'block';
             } else {
-                if (jsonView) jsonView.style.display = 'none';
-                if (bodyEditor) bodyEditor.style.display = 'block';
-                if (formatBtn) formatBtn.style.display = type === 'raw' ? 'block' : 'none';
+                container.style.display = 'flex';
+                msg.style.display = 'none';
+                if (type === 'json') {
+                    if (jsonView) jsonView.style.display = 'flex';
+                    if (bodyEditor) bodyEditor.style.display = 'none';
+                    if (formatBtn) formatBtn.style.display = 'none';
+                    formatAndDisplayJson();
+                } else {
+                    if (jsonView) jsonView.style.display = 'none';
+                    if (bodyEditor) bodyEditor.style.display = 'block';
+                    if (formatBtn) formatBtn.style.display = type === 'raw' ? 'block' : 'none';
+                }
             }
         }
     }
@@ -4157,27 +5185,38 @@ function formatJsonBody() {
             formatAndDisplayJson();
         }
     } catch (e) {
-        alert('Invalid JSON: ' + e.message);
+        showAppAlert('Invalid JSON: ' + e.message);
     }
 }
 
 // Send Request
 async function sendApiRequest() {
-    // Update current request object from inputs
+    if (!currentApiRequest) return;
     const methodEl = document.getElementById('api-method');
     const urlEl = document.getElementById('api-url');
-    const bodyEl = document.getElementById('api-body-editor');
+    const bodyEl = document.getElementById('api-body-raw') || document.getElementById('api-body-editor');
+    const paramsRawEl = document.getElementById('api-params-raw');
+    const headersRawEl = document.getElementById('api-headers-raw');
+    const bodyFormRawEl = document.getElementById('api-body-form-raw');
 
     if (methodEl) currentApiRequest.method = methodEl.value;
-    if (urlEl) currentApiRequest.url = urlEl.value;
+    if (urlEl) currentApiRequest.url = urlEl.value.trim();
 
-    // Get body from editor (even if hidden, it still has the value)
-    if (bodyEl) {
-        currentApiRequest.body = bodyEl.value;
+    // Sync from Raw panels if active
+    if (currentApiRequest.paramsMode === 'raw' && paramsRawEl) {
+        currentApiRequest.params = parseRawKeyValueLines(paramsRawEl.value);
+        syncParamsToUrl();
+        if (urlEl) currentApiRequest.url = urlEl.value.trim();
+    }
+    if (currentApiRequest.headersMode === 'raw' && headersRawEl) {
+        currentApiRequest.headers = parseRawHeaders(headersRawEl.value);
     }
 
+    if (bodyFormRawEl) currentApiRequest.bodyFormRaw = bodyFormRawEl.value;
+    if (bodyEl) currentApiRequest.body = bodyEl.value;
+
     if (!currentApiRequest.url) {
-        alert('Please enter a URL');
+        showAppAlert('Please enter a URL');
         return;
     }
 
@@ -4189,15 +5228,45 @@ async function sendApiRequest() {
     }
 
     try {
-        // Prepare headers object
         const headers = {};
         currentApiRequest.headers.forEach(h => {
             if (h.key) headers[h.key] = h.value;
         });
 
-        // Prepare body
         let bodyBs64 = '';
-        if (currentApiRequest.bodyType !== 'none' && currentApiRequest.body) {
+        const bodyMode = currentApiRequest.bodyMode || 'raw';
+        if (bodyMode === 'table' && currentApiRequest.bodyTable && currentApiRequest.bodyTable.length) {
+            const normalizedRows = normalizeGraphQLBodyTableRows(currentApiRequest.bodyTable).filter(p => p.key);
+            const isGraphQLTable = isGraphQLBodyTableRows(normalizedRows) || isGraphQLEndpointUrl(currentApiRequest.url);
+            if (isGraphQLTable) {
+                const jsonBody = JSON.stringify(buildJsonBodyFromTable(normalizedRows), null, 2);
+                if (jsonBody && jsonBody !== '{}') {
+                    currentApiRequest.bodyTable = normalizedRows;
+                    currentApiRequest.body = jsonBody;
+                    bodyBs64 = btoa(jsonBody);
+                    if (!Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
+                        headers['Content-Type'] = 'application/json';
+                    }
+                }
+            } else {
+                const encoded = normalizedRows
+                    .map(p => encodeURIComponent(p.key) + '=' + encodeURIComponent(p.value))
+                    .join('&');
+                if (encoded) {
+                    bodyBs64 = btoa(encoded);
+                    if (!Object.keys(headers).some(k => k.toLowerCase() === 'content-type')) {
+                        headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                    }
+                }
+            }
+        } else if (currentApiRequest.bodyType === 'form' && bodyFormRawEl) {
+            const formPairs = parseRawKeyValueLines(bodyFormRawEl.value);
+            const encoded = formPairs.filter(p => p.key).map(p => encodeURIComponent(p.key) + '=' + encodeURIComponent(p.value)).join('&');
+            if (encoded) {
+                bodyBs64 = btoa(encoded);
+                if (!headers['Content-Type']) headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            }
+        } else if ((bodyMode === 'raw' && currentApiRequest.body) || (currentApiRequest.bodyType !== 'none' && currentApiRequest.body)) {
             bodyBs64 = btoa(currentApiRequest.body);
         }
 
@@ -4235,6 +5304,8 @@ async function sendApiRequest() {
 
                 currentApiRequest.response = uiResponse;
                 renderApiResponse(uiResponse);
+                updateApiTesterTabTitle(currentApiRequest.id);
+                saveApiTesterTabs();
 
                 // Add to history if new or changed
                 addToHistory(currentApiRequest);
@@ -4243,12 +5314,12 @@ async function sendApiRequest() {
             }
         } catch (e) {
             console.error('API Error:', e);
-            alert('Error sending request: ' + e.message);
+            showAppAlert('Error sending request: ' + e.message);
         }
 
     } catch (err) {
         console.error('Request Error:', err);
-        alert('Error: ' + err.message);
+        showAppAlert('Error: ' + err.message);
     } finally {
         if (sendBtn) {
             sendBtn.innerHTML = originalText;
@@ -4312,12 +5383,61 @@ function formatBytes(bytes, decimals = 2) {
 // Init API Tester on load
 initApiTester();
 
+// API Tester - Parse URL: extract query string into Params and set URL to base
+function parseApiUrlIntoParams() {
+    const urlEl = document.getElementById('api-url');
+    if (!urlEl) return;
+    const urlStr = urlEl.value.trim();
+    if (!urlStr) return;
+    try {
+        const u = new URL(urlStr);
+        currentApiRequest.params = [];
+        u.searchParams.forEach((value, key) => {
+            currentApiRequest.params.push({ key, value, active: true });
+        });
+        urlEl.value = u.origin + u.pathname + (u.hash || '');
+        currentApiRequest.url = urlEl.value;
+        renderApiRequest();
+        if (typeof showToast === 'function') showToast('Query params moved to Params tab', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Invalid URL', 'error');
+        else showAppAlert('Invalid URL');
+    }
+}
+
+// API Tester - Ctrl+Enter to send
+function initApiTesterKeyboard() {
+    const apiView = document.getElementById('api-view');
+    if (!apiView) return;
+    const sendOnCtrlEnter = (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+            e.preventDefault();
+            sendApiRequest();
+        }
+    };
+    ['api-url', 'api-params-raw', 'api-headers-raw', 'api-body-editor', 'api-body-form-raw'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('keydown', sendOnCtrlEnter);
+    });
+}
+
 // API Tester - New Request Button
 const apiNewRequestBtn = document.getElementById('api-new-request-btn');
 if (apiNewRequestBtn) {
     apiNewRequestBtn.addEventListener('click', () => {
         createNewApiRequest();
     });
+}
+
+const apiParseUrlBtn = document.getElementById('api-parse-url-btn');
+if (apiParseUrlBtn) {
+    apiParseUrlBtn.addEventListener('click', parseApiUrlIntoParams);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApiTesterKeyboard);
+} else {
+    initApiTesterKeyboard();
 }
 
 // === SEARCH ===
@@ -4475,13 +5595,13 @@ if (pcapUploadBtn && pcapUploadInput) {
             if (res.ok && data.imported != null) {
                 await fetchFlows();
                 renderFlowList();
-                showToast(`PCAP importé: ${data.imported} flux HTTP/HTTPS affichés`, 'success');
+                showToast(`PCAP imported: ${data.imported} HTTP/HTTPS flows displayed`, 'success');
             } else {
                 showToast(data.detail || 'Import PCAP échoué', 'error');
             }
         } catch (err) {
             console.error('PCAP import error', err);
-            showToast('Erreur lors de l\'import PCAP', 'error');
+            showToast('Error during PCAP import', 'error');
         } finally {
             pcapUploadBtn.disabled = false;
             pcapUploadBtn.innerHTML = origHtml;
@@ -4491,10 +5611,18 @@ if (pcapUploadBtn && pcapUploadInput) {
 
 // Function to clear all tab histories
 function clearAllTabHistories() {
-    // Clear API Tester history
+    // Clear API Tester history and tabs
     apiHistory = [];
     localStorage.removeItem('kittyproxy_api_history');
+    apiTesterTabs = [];
+    activeApiTesterTabId = null;
+    currentApiRequest = null;
+    localStorage.removeItem('kittyproxy_api_tester_tabs');
+    localStorage.removeItem('kittyproxy_api_tester_active_tab');
     renderApiSidebar();
+    if (typeof renderApiTabs === 'function') {
+        createApiTesterTab();
+    }
 
     // Clear API Collections
     apiCollections = [];
@@ -4540,11 +5668,11 @@ if (replayBtn) {
                 await fetchFlows();
             } else {
                 const data = await res.json();
-                alert(`Replay failed: ${data.detail}`);
+                showAppAlert(`Replay failed: ${data.detail}`);
             }
         } catch (err) {
             console.error("Replay error", err);
-            alert("Replay failed to connect");
+            showAppAlert("Replay failed to connect");
         } finally {
             replayBtn.disabled = false;
             replayBtn.classList.remove('spinning');
@@ -4563,6 +5691,7 @@ function saveRepeaterTabs() {
             url: tab.url,
             headers: tab.headers,
             body: tab.body,
+            rawRequest: tab.rawRequest,
             // Ne pas sauvegarder response et error pour économiser l'espace
         }));
         localStorage.setItem('kittyproxy_repeater_tabs', JSON.stringify(tabsToSave));
@@ -4582,6 +5711,7 @@ function loadRepeaterTabs() {
             const tabs = JSON.parse(savedTabs);
             repeaterTabs = tabs.map(tab => ({
                 ...tab,
+                rawRequest: tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab),
                 response: null,
                 error: null,
                 title: generateRepeaterTabTitle(tab.method, tab.url)
@@ -4648,13 +5778,16 @@ function createRepeaterTab(tabData = null) {
     const tabId = `repeater-tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const method = tabData?.method || 'GET';
     const url = tabData?.url || '';
+    const headers = tabData?.headers || '{"User-Agent": "KittyProxy/1.0"}';
+    const body = tabData?.body || '';
     const tab = {
         id: tabId,
         title: generateRepeaterTabTitle(method, url),
         method: method,
         url: url,
-        headers: tabData?.headers || '{"User-Agent": "KittyProxy/1.0"}',
-        body: tabData?.body || '',
+        headers: headers,
+        body: body,
+        rawRequest: tabData ? buildRawFromRepeaterTab({ method, url, headers, body }) : 'GET https://example.com/ HTTP/1.1\r\n\r\n',
         response: tabData?.response || null,
         error: tabData?.error || null
     };
@@ -4745,34 +5878,17 @@ function renderRepeaterContent() {
         return;
     }
 
+    const rawContent = activeTab.rawRequest != null ? activeTab.rawRequest : buildRawFromRepeaterTab(activeTab);
     repeaterContentContainer.innerHTML = `
         <div class="repeater-tab-content">
-            <div class="repeater-controls">
-                <select id="repeater-method-${activeTab.id}" class="input-field" style="width: 100px;">
-                    <option value="GET" ${activeTab.method === 'GET' ? 'selected' : ''}>GET</option>
-                    <option value="POST" ${activeTab.method === 'POST' ? 'selected' : ''}>POST</option>
-                    <option value="PUT" ${activeTab.method === 'PUT' ? 'selected' : ''}>PUT</option>
-                    <option value="DELETE" ${activeTab.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
-                    <option value="PATCH" ${activeTab.method === 'PATCH' ? 'selected' : ''}>PATCH</option>
-                </select>
-                <input type="text" id="repeater-url-${activeTab.id}" class="input-field" placeholder="https://example.com/api"
-                    style="flex: 1;" value="${escapeHtml(activeTab.url)}">
+            <div class="repeater-controls" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
                 <button id="repeater-send-${activeTab.id}" class="btn btn-primary">Send</button>
             </div>
             <div class="split-pane" style="flex: 1; border: 1px solid var(--border-color); border-radius: 4px; display: flex;">
-                <div class="repeater-editor" id="repeater-editor-${activeTab.id}" style="width: 50%; min-width: 300px; flex-shrink: 0;">
-                    <div class="section-title"
-                        style="padding: 10px; background: #f5f5f5; margin: 0; border-bottom: 1px solid #eee;">
-                        Request Headers (JSON)</div>
-                    <textarea id="repeater-headers-${activeTab.id}"
-                        spellcheck="false" autocapitalize="off" autocomplete="off"
-                        style="flex: 1; border: none; padding: 10px; font-family: 'Fira Code', monospace; resize: none; border-bottom: 1px solid #eee; min-height: 150px;">${escapeHtml(activeTab.headers)}</textarea>
-                    <div class="section-title"
-                        style="padding: 10px; background: #f5f5f5; margin: 0; border-bottom: 1px solid #eee;">
-                        Request Body</div>
-                    <textarea id="repeater-body-${activeTab.id}"
-                        spellcheck="false" autocapitalize="off" autocomplete="off"
-                        style="flex: 1; border: none; padding: 10px; font-family: 'Fira Code', monospace; resize: none; min-height: 150px;">${escapeHtml(activeTab.body)}</textarea>
+                <div class="repeater-editor" id="repeater-editor-${activeTab.id}" style="width: 50%; min-width: 300px; flex-shrink: 0; display: flex; flex-direction: column;">
+                    <div class="section-title" style="padding: 10px; background: #f5f5f5; margin: 0; border-bottom: 1px solid #eee;">Raw request</div>
+                    <textarea id="repeater-raw-${activeTab.id}" spellcheck="false" autocomplete="off"
+                        style="flex: 1; min-height: 180px; border: none; padding: 12px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.85em; resize: vertical; line-height: 1.4; white-space: pre; overflow-wrap: normal;">${escapeHtml(rawContent)}</textarea>
                 </div>
                 <div class="resize-handle" id="repeater-resize-handle-${activeTab.id}"></div>
                 <div class="repeater-response" id="repeater-response-${activeTab.id}" style="flex: 1; min-width: 300px;">
@@ -4784,46 +5900,23 @@ function renderRepeaterContent() {
         </div>
     `;
 
-    // Attacher les event listeners
     const sendBtn = document.getElementById(`repeater-send-${activeTab.id}`);
     if (sendBtn) {
         sendBtn.addEventListener('click', () => sendRepeaterRequest(activeTab.id));
     }
 
-    // Attacher les listeners pour sauvegarder les changements
-    const methodEl = document.getElementById(`repeater-method-${activeTab.id}`);
-    const urlEl = document.getElementById(`repeater-url-${activeTab.id}`);
-    const headersEl = document.getElementById(`repeater-headers-${activeTab.id}`);
-    const bodyEl = document.getElementById(`repeater-body-${activeTab.id}`);
-
-    if (methodEl) {
-        methodEl.addEventListener('change', () => {
-            activeTab.method = methodEl.value;
+    const rawEl = document.getElementById(`repeater-raw-${activeTab.id}`);
+    if (rawEl) {
+        rawEl.addEventListener('input', () => {
+            activeTab.rawRequest = rawEl.value;
+            const parsed = parseRawInterceptRequest(rawEl.value, activeTab.url);
+            activeTab.method = parsed.method;
+            activeTab.url = parsed.url;
             updateRepeaterTabTitle(activeTab.id);
             saveRepeaterTabs();
         });
     }
-    if (urlEl) {
-        urlEl.addEventListener('input', () => {
-            activeTab.url = urlEl.value;
-            updateRepeaterTabTitle(activeTab.id);
-            saveRepeaterTabs();
-        });
-    }
-    if (headersEl) {
-        headersEl.addEventListener('input', () => {
-            activeTab.headers = headersEl.value;
-            saveRepeaterTabs();
-        });
-    }
-    if (bodyEl) {
-        bodyEl.addEventListener('input', () => {
-            activeTab.body = bodyEl.value;
-            saveRepeaterTabs();
-        });
-    }
 
-    // Initialiser le resize handle pour cet onglet
     setupRepeaterResizeHandle(activeTab.id);
 }
 
@@ -4842,33 +5935,36 @@ async function sendRepeaterRequest(tabId) {
     if (!tab) return;
 
     const sendBtn = document.getElementById(`repeater-send-${tabId}`);
+    const rawEl = document.getElementById(`repeater-raw-${tabId}`);
+    const rawStr = rawEl ? rawEl.value : (tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab));
+    if (tab.rawRequest !== rawStr) {
+        tab.rawRequest = rawStr;
+        saveRepeaterTabs();
+    }
     if (sendBtn) {
         sendBtn.disabled = true;
         sendBtn.textContent = 'Sending...';
     }
 
     try {
-        const headersStr = tab.headers.trim();
-        let headers = {};
-        try {
-            headers = headersStr ? JSON.parse(headersStr) : {};
-        } catch (e) {
-            tab.error = "Invalid JSON in Headers";
+        const parsed = parseRawInterceptRequest(rawStr, tab.url);
+        if (!parsed.url || !parsed.url.trim()) {
+            tab.error = "Invalid raw request: URL required (e.g. GET https://example.com/ HTTP/1.1)";
+            tab.response = null;
             renderRepeaterContent();
-            if (sendBtn) {
-                sendBtn.disabled = false;
-                sendBtn.textContent = 'Send';
-            }
+            saveRepeaterTabs();
+            if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
             return;
         }
-
-        const bodyBs64 = tab.body ? btoa(tab.body) : "";
+        tab.method = parsed.method;
+        tab.url = parsed.url;
+        updateRepeaterTabTitle(tab.id);
 
         const payload = {
-            method: tab.method,
-            url: tab.url,
-            headers: headers,
-            body_bs64: bodyBs64
+            method: parsed.method,
+            url: parsed.url,
+            headers: parsed.headers,
+            body_bs64: parsed.body_bs64
         };
 
         const res = await fetch(`${API_BASE}/send_custom`, {
@@ -5046,10 +6142,10 @@ function saveIntruderTabs() {
             url: tab.url,
             headers: tab.headers,
             body: tab.body,
+            rawRequest: tab.rawRequest,
             payloads: tab.payloads,
             marker: tab.marker || '§payload§',
-            attackType: tab.attackType || 'url', // 'url', 'params', 'body', 'headers'
-            results: [] // Ne pas sauvegarder les résultats pour économiser l'espace
+            results: []
         }));
         localStorage.setItem('kittyproxy_intruder_tabs', JSON.stringify(tabsToSave));
         localStorage.setItem('kittyproxy_intruder_active_tab', activeIntruderTabId);
@@ -5068,6 +6164,7 @@ function loadIntruderTabs() {
             const tabs = JSON.parse(savedTabs);
             intruderTabs = tabs.map(tab => ({
                 ...tab,
+                rawRequest: tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab),
                 results: [],
                 title: generateIntruderTabTitle(tab.method, tab.url)
             }));
@@ -5089,27 +6186,29 @@ function loadIntruderTabs() {
     return false;
 }
 
-// Générer un titre pour l'onglet Intruder
+// Extraire le domaine principal (sans sous-domaine) depuis un hostname
+function getRootDomain(hostname) {
+    if (!hostname || typeof hostname !== 'string') return hostname || '';
+    const parts = hostname.split('.').filter(Boolean);
+    if (parts.length <= 2) return hostname;
+    return parts.slice(-2).join('.');
+}
+
+// Générer un titre pour l'onglet Intruder (domaine principal uniquement, sans sous-domaine)
 function generateIntruderTabTitle(method, url) {
     if (!url || url.trim() === '') {
         return `${method || 'GET'} (no URL)`;
     }
-
     try {
         const urlObj = new URL(url);
-        let displayUrl = urlObj.pathname + (urlObj.search || '');
-        if (displayUrl === '/') {
-            displayUrl = urlObj.hostname;
+        const hostname = urlObj.hostname || '';
+        const domain = getRootDomain(hostname);
+        if (domain.length > 40) {
+            return domain.substring(0, 37) + '...';
         }
-
-        if (displayUrl.length > 35) {
-            displayUrl = displayUrl.substring(0, 32) + '...';
-        }
-
-        return displayUrl;
+        return domain || hostname || url;
     } catch {
-        const shortUrl = url.length > 35 ? url.substring(0, 32) + '...' : url;
-        return shortUrl;
+        return url.length > 40 ? url.substring(0, 37) + '...' : url;
     }
 }
 
@@ -5127,17 +6226,20 @@ function createIntruderTab(tabData = null) {
     const tabId = `intruder-tab-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const method = tabData?.method || 'GET';
     const url = tabData?.url || '';
+    const headers = tabData?.headers || '{"User-Agent": "KittyProxy/1.0"}';
+    const body = tabData?.body || '';
     const tab = {
         id: tabId,
         title: generateIntruderTabTitle(method, url),
         method: method,
         url: url,
-        headers: tabData?.headers || '{"User-Agent": "KittyProxy/1.0"}',
-        body: tabData?.body || '',
+        headers: headers,
+        body: body,
+        rawRequest: tabData ? buildRawFromRepeaterTab({ method, url, headers, body }) : 'GET https://example.com/ HTTP/1.1\r\n\r\n',
         payloads: tabData?.payloads || [],
         marker: tabData?.marker || '§payload§',
-        attackType: tabData?.attackType || 'url', // 'url', 'params', 'body', 'headers'
         results: [],
+        resultsFilter: { status: '', timeMin: '', timeMax: '', lengthMin: '', lengthMax: '' },
         isRunning: false
     };
 
@@ -5215,6 +6317,23 @@ function renderIntruderTabs() {
     });
 }
 
+// Helper: HTML du raw request avec marqueur en surbrillance
+function buildHighlightedRaw(text, marker) {
+    if (!text) return '';
+    if (!marker || marker.trim() === '') {
+        return escapeHtml(text);
+    }
+    const parts = text.split(marker);
+    const span = '<span class="intruder-marker-hl" style="background: #fef3c7; color: #92400e; border-radius: 2px; padding: 0 2px;">' + escapeHtml(marker) + '</span>';
+    return parts.map(p => escapeHtml(p)).join(span);
+}
+
+// Récupérer le texte brut depuis l'éditeur raw (contenteditable ou textarea)
+function getRawIntruderValue(el) {
+    if (!el) return '';
+    return el.contentEditable === 'true' ? (el.innerText || '') : (el.value || '');
+}
+
 // Rendre le contenu de l'onglet Intruder actif
 function renderIntruderContent() {
     if (!intruderContentContainer) return;
@@ -5226,50 +6345,35 @@ function renderIntruderContent() {
     }
 
     const payloadsText = activeTab.payloads.join('\n');
-    const resultsHtml = renderIntruderResults(activeTab.results);
+    const f = activeTab.resultsFilter || { status: '', timeMin: '', timeMax: '', lengthMin: '', lengthMax: '' };
+    activeTab.resultsFilter = f;
+    const resultsHtml = renderIntruderResults(activeTab.results, f);
+    const rawContent = activeTab.rawRequest != null ? activeTab.rawRequest : buildRawFromRepeaterTab(activeTab);
+    const rawHighlightedHtml = buildHighlightedRaw(rawContent, activeTab.marker);
 
     intruderContentContainer.innerHTML = `
         <div class="intruder-tab-content" style="display: flex; height: 100%; overflow: hidden; position: relative;">
-            <!-- Left Panel: Request Configuration & Payloads -->
+            <!-- Left Panel: Raw Request & Payloads -->
             <div id="intruder-left-panel-${activeTab.id}" style="width: 50%; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; min-height: 0; padding: 15px; gap: 15px; flex-shrink: 0;">
-                <!-- Configuration Section -->
-                <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; flex-shrink: 0;">
-                    <h3 style="margin: 0 0 15px 0; font-size: 1.1em; color: #333;">Request Configuration</h3>
-                    <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-                        <select id="intruder-method-${activeTab.id}" class="input-field" style="width: 100px;">
-                            <option value="GET" ${activeTab.method === 'GET' ? 'selected' : ''}>GET</option>
-                            <option value="POST" ${activeTab.method === 'POST' ? 'selected' : ''}>POST</option>
-                            <option value="PUT" ${activeTab.method === 'PUT' ? 'selected' : ''}>PUT</option>
-                            <option value="DELETE" ${activeTab.method === 'DELETE' ? 'selected' : ''}>DELETE</option>
-                            <option value="PATCH" ${activeTab.method === 'PATCH' ? 'selected' : ''}>PATCH</option>
-                        </select>
-                        <input type="text" id="intruder-url-${activeTab.id}" class="input-field" placeholder="https://example.com/api/endpoint"
-                            style="flex: 1;" value="${escapeHtml(activeTab.url)}">
-                    </div>
-                    <!-- Attack Type removed -->
-                    <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-                        <label style="min-width: 120px; font-weight: 600; font-size: 0.9em;">Marker:</label>
+                <!-- Raw Request Section (plus d'espace) -->
+                <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; flex: 1; display: flex; flex-direction: column; min-height: 200px; overflow: hidden;">
+                    <h3 style="margin: 0 0 10px 0; font-size: 1.1em; color: #333;">Request Configuration</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+                        <label style="min-width: 60px; font-weight: 600; font-size: 0.9em;">Marker:</label>
                         <input type="text" id="intruder-marker-${activeTab.id}" class="input-field" placeholder="§payload§"
                             style="flex: 1;" value="${escapeHtml(activeTab.marker)}">
+                        <button type="button" id="intruder-copy-marker-${activeTab.id}" class="btn btn-secondary" style="font-size: 0.85em; padding: 6px 12px; white-space: nowrap;" title="Copy marker to clipboard">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">content_copy</span> Copy
+                        </button>
                     </div>
-                    <div style="margin-bottom: 10px; font-size: 0.85em; color: #666; padding-left: 130px;">
-                        Use this marker in URL/params/body/headers
-                    </div>
-                    <div style="margin-bottom: 15px; overflow: hidden;">
-                        <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9em;">Request Headers (JSON)</label>
-                        <textarea id="intruder-headers-${activeTab.id}"
-                            style="width: 100%; min-height: 80px; max-height: 150px; padding: 10px; font-family: 'Fira Code', monospace; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; font-size: 0.85em; box-sizing: border-box; overflow-y: auto;">${escapeHtml(activeTab.headers)}</textarea>
-                    </div>
-                    <div style="overflow: hidden;">
-                        <label style="display: block; font-weight: 600; margin-bottom: 8px; font-size: 0.9em;">Request Body</label>
-                        <textarea id="intruder-body-${activeTab.id}"
-                            style="width: 100%; min-height: 80px; max-height: 150px; padding: 10px; font-family: 'Fira Code', monospace; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; font-size: 0.85em; box-sizing: border-box; overflow-y: auto;">${escapeHtml(activeTab.body)}</textarea>
-                    </div>
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 8px;">Raw request (put the marker where the payload should be injected)</div>
+                    <div id="intruder-raw-${activeTab.id}" contenteditable="true" spellcheck="false" data-gramm="false"
+                        style="flex: 1; min-height: 180px; width: 100%; padding: 10px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.85em; border: 1px solid var(--border-color); border-radius: 4px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; overflow-y: auto; box-sizing: border-box; outline: none;">${rawHighlightedHtml}</div>
                 </div>
 
-                <!-- Payloads Section -->
-                <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
+                <!-- Payloads Section (4 lignes) -->
+                <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; flex: 0 0 auto; display: flex; flex-direction: column; overflow: hidden;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-shrink: 0;">
                         <h3 style="margin: 0; font-size: 1.1em; color: #333;">Payloads</h3>
                         <div style="display: flex; gap: 10px;">
                             <button id="intruder-load-payloads-${activeTab.id}" class="btn btn-secondary" style="font-size: 0.85em; padding: 6px 12px;">
@@ -5286,8 +6390,8 @@ function renderIntruderContent() {
                             </button>
                         </div>
                     </div>
-                    <textarea id="intruder-payloads-${activeTab.id}"
-                        style="flex: 1; width: 100%; padding: 10px; font-family: 'Fira Code', monospace; border: 1px solid var(--border-color); border-radius: 4px; resize: none; min-height: 0; font-size: 0.85em; box-sizing: border-box; overflow-y: auto; overflow-x: hidden;"
+                    <textarea id="intruder-payloads-${activeTab.id}" rows="4"
+                        style="width: 100%; padding: 10px; font-family: 'Fira Code', monospace; border: 1px solid var(--border-color); border-radius: 4px; resize: none; font-size: 0.85em; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; line-height: 1.4;"
                         placeholder="Enter payloads, one per line...">${escapeHtml(payloadsText)}</textarea>
                     <div style="margin-top: 10px; font-size: 0.85em; color: #666; flex-shrink: 0;">
                         ${activeTab.payloads.length} payload${activeTab.payloads.length !== 1 ? 's' : ''} loaded
@@ -5304,7 +6408,15 @@ function renderIntruderContent() {
             <!-- Right Panel: Results -->
             <div id="intruder-right-panel-${activeTab.id}" style="flex: 1; min-width: 300px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; padding: 15px;">
                 <div style="background: white; border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-                    <h3 style="margin: 0 0 15px 0; font-size: 1.1em; color: #333; flex-shrink: 0;">Results</h3>
+                    <h3 style="margin: 0 0 10px 0; font-size: 1.1em; color: #333; flex-shrink: 0;">Results</h3>
+                    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; flex-shrink: 0;">
+                        <span style="font-size: 0.85em; color: #666;">Filter:</span>
+                        <input type="text" id="intruder-filter-status-${activeTab.id}" class="input-field" placeholder="Status (e.g. 200, 2xx)" value="${escapeHtml(f.status)}" style="width: 120px; font-size: 0.85em;">
+                        <input type="number" id="intruder-filter-timemin-${activeTab.id}" class="input-field" placeholder="Time min" value="${f.timeMin ? escapeHtml(f.timeMin) : ''}" style="width: 90px; font-size: 0.85em;" min="0">
+                        <input type="number" id="intruder-filter-timemax-${activeTab.id}" class="input-field" placeholder="Time max" value="${f.timeMax ? escapeHtml(f.timeMax) : ''}" style="width: 90px; font-size: 0.85em;" min="0">
+                        <input type="number" id="intruder-filter-lengthmin-${activeTab.id}" class="input-field" placeholder="Length min" value="${f.lengthMin ? escapeHtml(f.lengthMin) : ''}" style="width: 90px; font-size: 0.85em;" min="0">
+                        <input type="number" id="intruder-filter-lengthmax-${activeTab.id}" class="input-field" placeholder="Length max" value="${f.lengthMax ? escapeHtml(f.lengthMax) : ''}" style="width: 90px; font-size: 0.85em;" min="0">
+                    </div>
                     <div id="intruder-results-${activeTab.id}" style="flex: 1; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border-color); border-radius: 4px; background: #fafafa; min-height: 0;">
                         ${resultsHtml}
                     </div>
@@ -5319,42 +6431,40 @@ function renderIntruderContent() {
 
 // Attacher les event listeners pour un onglet Intruder
 function attachIntruderEventListeners(tab) {
-    const methodEl = document.getElementById(`intruder-method-${tab.id}`);
-    const urlEl = document.getElementById(`intruder-url-${tab.id}`);
-    const headersEl = document.getElementById(`intruder-headers-${tab.id}`);
-    const bodyEl = document.getElementById(`intruder-body-${tab.id}`);
+    const rawEl = document.getElementById(`intruder-raw-${tab.id}`);
     const payloadsEl = document.getElementById(`intruder-payloads-${tab.id}`);
     const markerEl = document.getElementById(`intruder-marker-${tab.id}`);
     const startBtn = document.getElementById(`intruder-start-${tab.id}`);
     const stopBtn = document.getElementById(`intruder-stop-${tab.id}`);
     const loadPayloadsBtn = document.getElementById(`intruder-load-payloads-${tab.id}`);
 
-    if (methodEl) {
-        methodEl.addEventListener('change', () => {
-            tab.method = methodEl.value;
+    if (rawEl) {
+        rawEl.addEventListener('input', () => {
+            const text = getRawIntruderValue(rawEl);
+            tab.rawRequest = text;
+            const parsed = parseRawInterceptRequest(text, tab.url);
+            tab.method = parsed.method;
+            tab.url = parsed.url;
             updateIntruderTabTitle(tab.id);
             saveIntruderTabs();
         });
-    }
-
-    if (urlEl) {
-        urlEl.addEventListener('input', () => {
-            tab.url = urlEl.value;
-            updateIntruderTabTitle(tab.id);
+        rawEl.addEventListener('blur', () => {
+            const text = getRawIntruderValue(rawEl);
+            tab.rawRequest = text;
+            const marker = (markerEl && markerEl.value) ? markerEl.value.trim() : (tab.marker || '');
+            rawEl.innerHTML = buildHighlightedRaw(text, marker);
             saveIntruderTabs();
         });
     }
 
-    if (headersEl) {
-        headersEl.addEventListener('input', () => {
-            tab.headers = headersEl.value;
-            saveIntruderTabs();
-        });
-    }
-
-    if (bodyEl) {
-        bodyEl.addEventListener('input', () => {
-            tab.body = bodyEl.value;
+    if (markerEl) {
+        markerEl.addEventListener('input', () => {
+            tab.marker = markerEl.value || '§payload§';
+            if (rawEl) {
+                const text = getRawIntruderValue(rawEl);
+                tab.rawRequest = text;
+                rawEl.innerHTML = buildHighlightedRaw(text, tab.marker);
+            }
             saveIntruderTabs();
         });
     }
@@ -5367,10 +6477,23 @@ function attachIntruderEventListeners(tab) {
         });
     }
 
-    if (markerEl) {
-        markerEl.addEventListener('input', () => {
-            tab.marker = markerEl.value;
-            saveIntruderTabs();
+    const copyMarkerBtn = document.getElementById(`intruder-copy-marker-${tab.id}`);
+    if (copyMarkerBtn && markerEl) {
+        copyMarkerBtn.addEventListener('click', () => {
+            const value = markerEl.value || '§payload§';
+            navigator.clipboard.writeText(value).then(() => {
+                const label = copyMarkerBtn.querySelector('.material-symbols-outlined')?.nextSibling || copyMarkerBtn.lastChild;
+                const orig = copyMarkerBtn.innerHTML;
+                copyMarkerBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">check</span> Copied!';
+                copyMarkerBtn.style.color = '#4caf50';
+                setTimeout(() => {
+                    copyMarkerBtn.innerHTML = orig;
+                    copyMarkerBtn.style.color = '';
+                }, 1500);
+            }).catch(() => {
+                if (typeof showToast === 'function') showToast('Copy failed', 'error');
+                else showAppAlert('Copy failed');
+            });
         });
     }
 
@@ -5407,12 +6530,79 @@ function attachIntruderEventListeners(tab) {
             input.click();
         });
     }
+
+    // Filtres de résultats
+    const filterStatus = document.getElementById(`intruder-filter-status-${tab.id}`);
+    const filterTimeMin = document.getElementById(`intruder-filter-timemin-${tab.id}`);
+    const filterTimeMax = document.getElementById(`intruder-filter-timemax-${tab.id}`);
+    const filterLengthMin = document.getElementById(`intruder-filter-lengthmin-${tab.id}`);
+    const filterLengthMax = document.getElementById(`intruder-filter-lengthmax-${tab.id}`);
+    const applyResultFilters = () => {
+        tab.resultsFilter = tab.resultsFilter || { status: '', timeMin: '', timeMax: '', lengthMin: '', lengthMax: '' };
+        tab.resultsFilter.status = filterStatus ? filterStatus.value.trim() : '';
+        tab.resultsFilter.timeMin = filterTimeMin ? filterTimeMin.value.trim() : '';
+        tab.resultsFilter.timeMax = filterTimeMax ? filterTimeMax.value.trim() : '';
+        tab.resultsFilter.lengthMin = filterLengthMin ? filterLengthMin.value.trim() : '';
+        tab.resultsFilter.lengthMax = filterLengthMax ? filterLengthMax.value.trim() : '';
+        const resultsDiv = document.getElementById(`intruder-results-${tab.id}`);
+        if (resultsDiv) {
+            resultsDiv.innerHTML = renderIntruderResults(tab.results, tab.resultsFilter);
+        }
+    };
+    [filterStatus, filterTimeMin, filterTimeMax, filterLengthMin, filterLengthMax].forEach(el => {
+        if (el) el.addEventListener('input', applyResultFilters);
+    });
 }
 
-// Rendre les résultats de l'attaque
-function renderIntruderResults(results) {
+// Appliquer les filtres Status / Time / Length aux résultats
+function matchIntruderResultFilter(result, filter) {
+    if (!filter) return true;
+    if (filter.status) {
+        const s = String(filter.status).trim();
+        if (s.includes('x')) {
+            const prefix = s.replace(/x/gi, '');
+            if (prefix && result.status !== undefined) {
+                const statusStr = String(result.status);
+                if (!statusStr.startsWith(prefix)) return false;
+            }
+        } else {
+            const num = parseInt(s, 10);
+            if (!isNaN(num) && result.status !== num) return false;
+        }
+    }
+    const time = typeof result.time === 'number' ? result.time : parseInt(String(result.time || '0'), 10);
+    if (filter.timeMin) {
+        const min = parseInt(String(filter.timeMin).trim(), 10);
+        if (!isNaN(min) && time < min) return false;
+    }
+    if (filter.timeMax) {
+        const max = parseInt(String(filter.timeMax).trim(), 10);
+        if (!isNaN(max) && time > max) return false;
+    }
+    const length = typeof result.length === 'number' ? result.length : parseInt(String(result.length || '0').replace(/\D/g, ''), 10);
+    if (filter.lengthMin) {
+        const min = parseInt(String(filter.lengthMin).trim(), 10);
+        if (!isNaN(min) && length < min) return false;
+    }
+    if (filter.lengthMax) {
+        const max = parseInt(String(filter.lengthMax).trim(), 10);
+        if (!isNaN(max) && length > max) return false;
+    }
+    return true;
+}
+
+// Rendre les résultats de l'attaque (avec filtres optionnels)
+function renderIntruderResults(results, filter) {
     if (!results || results.length === 0) {
         return '<div style="padding: 40px; text-align: center; color: #888;">No results yet. Start an attack to see results here.</div>';
+    }
+
+    const filtered = results
+        .map((r, i) => ({ result: r, originalIndex: i }))
+        .filter(({ result }) => matchIntruderResultFilter(result, filter));
+
+    if (filtered.length === 0) {
+        return '<div style="padding: 24px; text-align: center; color: #888;">No results match the current filters.</div>';
     }
 
     let html = '<div style="display: table; width: 100%; min-width: 800px; border-collapse: collapse;">';
@@ -5427,7 +6617,7 @@ function renderIntruderResults(results) {
     html += '</div>';
 
     // Rows
-    results.forEach((result, index) => {
+    filtered.forEach(({ result, originalIndex }, index) => {
         const statusClass = result.status >= 400 ? 'status-4xx' : result.status >= 300 ? 'status-3xx' : 'status-2xx';
         const rowBg = index % 2 === 0 ? '#ffffff' : '#fafafa';
         const url = result.url || '';
@@ -5441,8 +6631,11 @@ function renderIntruderResults(results) {
                 <div style="display: table-cell; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #666; text-align: center;">${result.time}ms</div>
                 <div style="display: table-cell; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 0.85em; color: #666; text-align: center;">${result.length} bytes</div>
                 <div style="display: table-cell; padding: 8px 10px; border-bottom: 1px solid #eee; text-align: center;">
-                    <button onclick="viewIntruderResult(${index})" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;">
+                    <button onclick="viewIntruderResult(${originalIndex})" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" title="View response">
                         <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">visibility</span>
+                    </button>
+                    <button onclick="replayIntruderResult(${originalIndex})" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em; margin-left: 4px;" title="Replay in Repeater">
+                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">repeat</span>
                     </button>
                 </div>
             </div>
@@ -5513,13 +6706,24 @@ async function startIntruderAttack(tabId) {
     if (!tab) return;
 
     if (tab.payloads.length === 0) {
-        alert('Please add at least one payload');
+        showAppAlert('Please add at least one payload');
         return;
     }
 
     if (!tab.marker || tab.marker.trim() === '') {
-        alert('Please set a marker (e.g., §payload§)');
+        showAppAlert('Please set a marker (e.g., §payload§)');
         return;
+    }
+
+    const rawEl = document.getElementById(`intruder-raw-${tabId}`);
+    if (rawEl) {
+        const rawStr = getRawIntruderValue(rawEl);
+        tab.rawRequest = rawStr;
+        const parsed = parseRawInterceptRequest(rawStr, tab.url);
+        tab.method = parsed.method;
+        tab.url = parsed.url;
+        updateIntruderTabTitle(tabId);
+        saveIntruderTabs();
     }
 
     tab.isRunning = true;
@@ -5594,90 +6798,38 @@ function stopIntruderAttack(tabId) {
     renderIntruderContent();
 }
 
-// Envoyer une requête Intruder avec un payload
+// Envoyer une requête Intruder avec un payload (raw request + replace marker)
 async function sendIntruderRequest(tab, payload, index) {
     const startTime = Date.now();
 
-    // Préparer la requête avec le payload injecté
-    let url = tab.url;
-    let headersStr = tab.headers;
-    let body = tab.body;
-
-    // Injecter le payload selon le type d'attaque
-    if (tab.attackType === 'url') {
-        // Vérifier que l'URL contient le marqueur avant de remplacer
-        if (url.includes(tab.marker)) {
-            url = url.replace(new RegExp(escapeRegex(tab.marker), 'g'), payload);
-        } else {
-            // Si le marqueur n'est pas dans l'URL, l'ajouter à la fin du path
-            try {
-                const urlObj = new URL(url);
-                urlObj.pathname = urlObj.pathname + (urlObj.pathname.endsWith('/') ? '' : '/') + payload;
-                url = urlObj.toString();
-            } catch (e) {
-                // Si l'URL n'est pas valide, simplement concaténer
-                url = url + (url.endsWith('/') ? '' : '/') + payload;
-            }
-        }
-    } else if (tab.attackType === 'params') {
-        // Injecter dans les paramètres de l'URL
-        try {
-            const urlObj = new URL(url);
-            const params = new URLSearchParams(urlObj.search);
-            let foundMarker = false;
-            for (const [key, value] of params.entries()) {
-                if (value.includes(tab.marker)) {
-                    params.set(key, value.replace(new RegExp(escapeRegex(tab.marker), 'g'), payload));
-                    foundMarker = true;
-                }
-            }
-            // Si aucun paramètre ne contient le marqueur, ajouter un nouveau paramètre
-            if (!foundMarker) {
-                params.append('payload', payload);
-            }
-            urlObj.search = params.toString();
-            url = urlObj.toString();
-        } catch (e) {
-            // Si l'URL n'est pas valide, ajouter le payload comme paramètre
-            url = url + (url.includes('?') ? '&' : '?') + 'payload=' + encodeURIComponent(payload);
-        }
-    } else if (tab.attackType === 'body') {
-        body = body.replace(new RegExp(escapeRegex(tab.marker), 'g'), payload);
-    } else if (tab.attackType === 'headers') {
-        // Injecter dans les headers
-        try {
-            const headers = JSON.parse(headersStr);
-            for (const key in headers) {
-                if (String(headers[key]).includes(tab.marker)) {
-                    headers[key] = String(headers[key]).replace(new RegExp(escapeRegex(tab.marker), 'g'), payload);
-                }
-            }
-            headersStr = JSON.stringify(headers);
-        } catch (e) {
-            // Si les headers ne sont pas du JSON valide, essayer de remplacer directement
-            headersStr = headersStr.replace(new RegExp(escapeRegex(tab.marker), 'g'), payload);
-        }
+    // Récupérer le raw depuis le DOM ou le tab
+    const rawEl = document.getElementById(`intruder-raw-${tab.id}`);
+    let rawStr = rawEl ? getRawIntruderValue(rawEl) : (tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab));
+    if (tab.rawRequest !== rawStr && rawEl) {
+        tab.rawRequest = rawStr;
+        saveIntruderTabs();
     }
 
-    // Parser les headers
-    let headers = {};
-    try {
-        headers = headersStr.trim() ? JSON.parse(headersStr) : {};
-    } catch (e) {
-        headers = {};
+    const marker = (tab.marker || '§payload§').trim();
+    if (!marker) {
+        throw new Error('Marker is required');
     }
+    const rawWithPayload = rawStr.split(marker).join(payload);
 
-    // Ajouter un header spécial pour marquer les requêtes de l'Intruder
-    // Cela permettra de les filtrer pour qu'elles n'apparaissent pas dans les autres vues
+    const parsed = parseRawInterceptRequest(rawWithPayload, tab.url);
+    if (!parsed.url || !parsed.url.trim()) {
+        throw new Error('Invalid request: URL required');
+    }
+    const url = parsed.url;
+
+    const headers = { ...parsed.headers };
     headers['X-KittyProxy-Source'] = 'intruder';
 
-    const bodyBs64 = body ? btoa(body) : "";
-
     const requestPayload = {
-        method: tab.method,
-        url: url,
+        method: parsed.method,
+        url: parsed.url,
         headers: headers,
-        body_bs64: bodyBs64
+        body_bs64: parsed.body_bs64
     };
 
     try {
@@ -5748,11 +6900,38 @@ function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Rejouer une requête Intruder dans l'onglet Replay (Repeater)
+window.replayIntruderResult = function (resultIndex) {
+    const activeTab = intruderTabs.find(t => t.id === activeIntruderTabId);
+    if (!activeTab || !activeTab.results || !activeTab.results[resultIndex]) {
+        showAppAlert('Result not found');
+        return;
+    }
+    const result = activeTab.results[resultIndex];
+    const marker = (activeTab.marker || '§payload§').trim();
+    const rawRequest = activeTab.rawRequest != null ? activeTab.rawRequest : buildRawFromRepeaterTab(activeTab);
+    const rawWithPayload = marker ? rawRequest.split(marker).join(result.payload || '') : rawRequest;
+    const parsed = parseRawInterceptRequest(rawWithPayload, activeTab.url);
+    if (!parsed.url || !parsed.url.trim()) {
+        showAppAlert('Invalid request: could not build URL for replay');
+        return;
+    }
+    const bodyStr = parsed.body_bs64 ? (() => { try { return atob(parsed.body_bs64); } catch { return ''; } })() : '';
+    createRepeaterTab({
+        method: parsed.method,
+        url: parsed.url,
+        headers: JSON.stringify(parsed.headers || {}, null, 2),
+        body: bodyStr
+    });
+    const replayNavItem = document.querySelector('[data-view="replay"]');
+    if (replayNavItem) replayNavItem.click();
+};
+
 // Afficher les détails d'un résultat Intruder (fonction globale)
 window.viewIntruderResult = function (resultIndex) {
     const activeTab = intruderTabs.find(t => t.id === activeIntruderTabId);
     if (!activeTab || !activeTab.results || !activeTab.results[resultIndex]) {
-        alert('Result not found');
+        showAppAlert('Result not found');
         return;
     }
 
@@ -5821,14 +7000,14 @@ if (sendToRepeaterBtn) {
             // Récupérer les détails complets de la requête
             const res = await fetch(`${API_BASE}/flows/${currentFlowId}`);
             if (!res.ok) {
-                alert('Failed to load flow details');
+                showAppAlert('Failed to load flow details');
                 return;
             }
 
             const flow = await res.json();
 
             if (!flow.request) {
-                alert('Request details not available');
+                showAppAlert('Request details not available');
                 return;
             }
 
@@ -5859,7 +7038,7 @@ if (sendToRepeaterBtn) {
             }
         } catch (err) {
             console.error("Send to repeater error", err);
-            alert("Failed to load request into repeater");
+            showAppAlert("Failed to load request into repeater");
         }
     });
 }
@@ -5873,14 +7052,14 @@ if (sendToIntruderBtn) {
             // Récupérer les détails complets de la requête
             const res = await fetch(`${API_BASE}/flows/${currentFlowId}`);
             if (!res.ok) {
-                alert('Failed to load flow details');
+                showAppAlert('Failed to load flow details');
                 return;
             }
 
             const flow = await res.json();
 
             if (!flow.request) {
-                alert('Request details not available');
+                showAppAlert('Request details not available');
                 return;
             }
 
@@ -5913,7 +7092,7 @@ if (sendToIntruderBtn) {
             }
         } catch (err) {
             console.error("Send to intruder error", err);
-            alert("Failed to load request into intruder");
+            showAppAlert("Failed to load request into intruder");
         }
     });
 }
@@ -6690,29 +7869,77 @@ function renderResponseTab(flow) {
         bodyContent = typeof flow.response.content === 'string' ? flow.response.content : String(flow.response.content);
     }
 
+    const contentType = flow.response.headers?.['content-type'] || '';
+    const preStyle = 'margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: \'Fira Code\', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);';
+
     let bodyHtml = '';
     if (bodyContent && bodyContent.trim()) {
-        try {
-            // Try to detect content type and format accordingly
-            const contentType = flow.response.headers?.['content-type'] || '';
-            if (contentType.includes('json') || bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[')) {
-                try {
+        const mode = responseBodyViewMode || 'preview';
+        if (mode === 'raw') {
+            bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
+        } else if (mode === 'hex') {
+            const hexContent = generateHexdump(bodyContent);
+            bodyHtml = `<pre style="${preStyle} white-space: pre-wrap; word-break: break-all;"><code>${escapeHtml(hexContent)}</code></pre>`;
+        } else if (mode === 'pretty') {
+            try {
+                if (contentType.includes('json') || bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[')) {
                     const json = JSON.parse(bodyContent);
-                    bodyHtml = `<pre style="margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><code>${escapeHtml(JSON.stringify(json, null, 2))}</code></pre>`;
-                } catch {
-                    bodyHtml = `<pre style="margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><code>${escapeHtml(bodyContent)}</code></pre>`;
+                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(JSON.stringify(json, null, 2))}</code></pre>`;
+                } else {
+                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
                 }
-            } else if (contentType.includes('html')) {
-                bodyHtml = `<pre style="margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><code>${escapeHtml(bodyContent)}</code></pre>`;
-            } else {
-                bodyHtml = `<pre style="margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><code>${escapeHtml(bodyContent)}</code></pre>`;
+            } catch {
+                bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
             }
-        } catch (e) {
-            bodyHtml = `<pre style="margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: 'Fira Code', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><code>${escapeHtml(bodyContent)}</code></pre>`;
+        } else {
+            // preview: HTML → iframe, JSON → pretty, image → img, else → pre
+            try {
+                if (contentType.includes('html')) {
+                    const srcdocEscaped = bodyContent.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+                    bodyHtml = `
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                            <iframe sandbox="allow-same-origin" title="Preview HTML" srcdoc="${srcdocEscaped}" style="flex: 1; min-height: 300px; border: 1px solid #e0e0e0; border-radius: 8px; background: white;"></iframe>
+                        </div>
+                        <details style="margin-top: 8px;"><summary style="cursor: pointer; color: #666; font-size: 0.9em;">Voir la source</summary>
+                        <pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre></details>`;
+                } else if (contentType.includes('json') || bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[')) {
+                    try {
+                        const json = JSON.parse(bodyContent);
+                        bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(JSON.stringify(json, null, 2))}</code></pre>`;
+                    } catch {
+                        bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
+                    }
+                } else if (/^image\//.test(contentType)) {
+                    const dataUrl = flow.response.content_bs64
+                        ? `data:${contentType || 'image/png'};base64,${flow.response.content_bs64}`
+                        : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text x="10" y="20">No image</text></svg>');
+                    bodyHtml = `<div style="padding: 12px; background: #f5f5f5; border-radius: 8px;"><img src="${dataUrl}" alt="Response" style="max-width: 100%; height: auto; border-radius: 4px;" /></div>`;
+                } else {
+                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
+                }
+            } catch (e) {
+                bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
+            }
         }
     } else {
         bodyHtml = '<div style="padding: 20px; color: #888; text-align: center; background: #f5f5f5; border-radius: 8px; border: 1px dashed #ddd;">No response body</div>';
     }
+
+    const viewModes = [
+        { id: 'raw', label: 'Raw', icon: 'code' },
+        { id: 'preview', label: 'Preview', icon: 'visibility' },
+        { id: 'pretty', label: 'Pretty', icon: 'format_align_left' },
+        { id: 'hex', label: 'Hex', icon: 'memory' }
+    ];
+    const viewToolbarHtml = `
+        <div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
+            ${viewModes.map(m => `
+                <button type="button" class="response-view-mode-btn" data-mode="${m.id}"
+                    style="padding: 8px 14px; border-radius: 6px; border: 1px solid #e0e0e0; background: ${responseBodyViewMode === m.id ? '#6200ea' : '#fff'}; color: ${responseBodyViewMode === m.id ? '#fff' : '#333'}; font-size: 0.85em; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">${m.icon}</span>${m.label}
+                </button>
+            `).join('')}
+        </div>`;
 
     // Determine status color
     const statusCode = flow.status_code || 0;
@@ -6773,10 +8000,21 @@ function renderResponseTab(flow) {
                     <span class="material-symbols-outlined" style="font-size: 1.2em; color: #666;">description</span>
                     Body
                 </h4>
+                ${viewToolbarHtml}
             ${bodyHtml}
             </div>
         </div>
     `;
+
+    detailContentEl.querySelectorAll('.response-view-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.getAttribute('data-mode');
+            if (mode) {
+                responseBodyViewMode = mode;
+                renderDetail();
+            }
+        });
+    });
 }
 
 function renderHexdumpTab(flow) {
@@ -7120,7 +8358,7 @@ function showFlowContextMenu(event, flow) {
 function openModuleSelectorFromFlow(flowId) {
     const flow = flowsData.find(f => f.id === flowId);
     if (!flow) {
-        alert('Flow not found');
+        showAppAlert('Flow not found');
         return;
     }
 
@@ -7232,7 +8470,7 @@ async function selectModuleFromFlow(moduleName, flowId) {
 
     const flow = flowsData.find(f => f.id === flowId);
     if (!flow) {
-        alert('Flow not found');
+        showAppAlert('Flow not found');
         return;
     }
 
@@ -7472,12 +8710,12 @@ async function executeModuleFromFlow(moduleName, flowId) {
         } else {
             if (moduleOutput) {
                 moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] ✗ Module execution failed\n`;
-                moduleOutput.textContent += `Error: ${data.detail || 'Erreur inconnue'}\n`;
+                moduleOutput.textContent += `Error: ${data.detail || 'Unknown error'}\n`;
                 moduleOutput.style.color = '#f44336';
                 // Scroll to bottom
                 moduleOutput.scrollTop = moduleOutput.scrollHeight;
             } else {
-                alert(`Error during execution: ${data.detail || 'Unknown error'}`);
+                showAppAlert(`Error during execution: ${data.detail || 'Unknown error'}`);
             }
         }
     } catch (err) {
@@ -7489,7 +8727,7 @@ async function executeModuleFromFlow(moduleName, flowId) {
             // Scroll to bottom
             moduleOutput.scrollTop = moduleOutput.scrollHeight;
         } else {
-            alert(`Connection error: ${err.message}`);
+            showAppAlert(`Connection error: ${err.message}`);
         }
     } finally {
         // Restore button
@@ -7949,11 +9187,11 @@ async function togglePlugin(pluginName, enabled) {
             await fetchPlugins();
         } else {
             const data = await res.json();
-            alert(`Error: ${data.detail || 'Failed to toggle plugin'}`);
+            showAppAlert(`Error: ${data.detail || 'Failed to toggle plugin'}`);
         }
     } catch (err) {
         console.error("Failed to toggle plugin", err);
-        alert(`Error: ${err.message}`);
+        showAppAlert(`Error: ${err.message}`);
     }
 }
 
@@ -7976,7 +9214,7 @@ async function savePluginConfig(pluginName) {
                     modify_headers: modifyHeaders
                 };
             } catch (e) {
-                alert('Invalid JSON in headers configuration');
+                showAppAlert('Invalid JSON in headers configuration');
                 return;
             }
         }
@@ -8006,18 +9244,18 @@ async function savePluginConfig(pluginName) {
         });
 
         if (res.ok) {
-            alert('Configuration saved successfully!');
+            showAppAlert('Configuration saved successfully!');
             await fetchPlugins();
             if (selectedPluginName === pluginName) {
                 renderPluginConfig(pluginName);
             }
         } else {
             const data = await res.json();
-            alert(`Error: ${data.detail || 'Failed to save configuration'}`);
+            showAppAlert(`Error: ${data.detail || 'Failed to save configuration'}`);
         }
     } catch (err) {
         console.error("Failed to save plugin config", err);
-        alert(`Error: ${err.message}`);
+        showAppAlert(`Error: ${err.message}`);
     }
 }
 
@@ -8784,11 +10022,11 @@ async function openModuleSuggestion(modulePath, flowId = null) {
                 <div style="padding: 20px;">
                     <h4 style="margin: 0 0 10px 0; color: #d32f2f;">Module not available</h4>
                     <p style="margin: 0; color: #666;">
-                        Le module <code style="font-family:'Fira Code', monospace;">${escapeHtml(String(modulePath || ''))}</code>
-                        n'est pas disponible dans le cache actuel et n'a pas pu être chargé automatiquement.
+                        The module <code style="font-family:'Fira Code', monospace;">${escapeHtml(String(modulePath || ''))}</code>
+                        is not available in the current cache and could not be loaded automatically.
                     </p>
                     <p style="margin: 10px 0 0 0; color: #888; font-size: 0.9em;">
-                        Astuce: vérifiez que le module existe côté framework et que Kittyproxy peut l'importer (voir <code>/api/modules/debug</code>).
+                        Tip: ensure the module exists in the framework and KittyProxy can import it (see <code>/api/modules/debug</code>).
                     </p>
                 </div>
             `;
@@ -8832,7 +10070,7 @@ async function openModuleSuggestion(modulePath, flowId = null) {
 
 function showCompareDialog() {
     if (flowsData.length < 2) {
-        alert('You need at least 2 requests to compare');
+        showAppAlert('You need at least 2 requests to compare');
         return;
     }
 
@@ -9006,7 +10244,7 @@ function renderDomainsList() {
         : domainsList;
 
     if (filteredDomains.length === 0) {
-        domainsListEl.innerHTML = '<div style="text-align: center; padding: 50px; color: #888; font-size: 0.9rem;">Aucun domaine trouvé</div>';
+        domainsListEl.innerHTML = '<div style="text-align: center; padding: 50px; color: #888; font-size: 0.9rem;">No domain found</div>';
         return;
     }
 
@@ -11419,7 +12657,7 @@ function selectNavTreeNode(path) {
                 return f.url;
             }
         }));
-        alert(`No matching flows found for this path: ${path}\n\nCheck the console for more details.`);
+        showAppAlert(`No matching flows found for this path: ${path}\n\nCheck the console for more details.`);
     }
 }
 
@@ -11725,8 +12963,8 @@ function showHeatmap() {
 
     // Légende
     html += '<div style="margin-bottom: 20px; display: flex; gap: 20px; align-items: center; justify-content: center;">';
-    html += '<div style="display: flex; align-items: center; gap: 5px;"><div style="width: 30px; height: 20px; background: #4caf50; border-radius: 4px;"></div><span>Faible (0-2)</span></div>';
-    html += '<div style="display: flex; align-items: center; gap: 5px;"><div style="width: 30px; height: 20px; background: #ff9800; border-radius: 4px;"></div><span>Moyen (3-5)</span></div>';
+    html += '<div style="display: flex; align-items: center; gap: 5px;"><div style="width: 30px; height: 20px; background: #4caf50; border-radius: 4px;"></div><span>Low (0-2)</span></div>';
+    html += '<div style="display: flex; align-items: center; gap: 5px;"><div style="width: 30px; height: 20px; background: #ff9800; border-radius: 4px;"></div><span>Medium (3-5)</span></div>';
     html += '<div style="display: flex; align-items: center; gap: 5px;"><div style="width: 30px; height: 20px; background: #f44336; border-radius: 4px;"></div><span>High (6+)</span></div>';
     html += '</div>';
 
@@ -12512,7 +13750,7 @@ function showErrorModal(message) {
         errorModal.style.display = 'flex';
     } else {
         // Fallback vers alert si la modale n'existe pas
-        alert(message);
+        showAppAlert(message);
     }
 }
 
@@ -13581,7 +14819,7 @@ function getStatusText(code) {
 // Envoyer un flow partagé vers le Repeater personnel
 function sendSharedFlowToPersonalRepeater(flow) {
     if (!flow || !flow.request) {
-        alert('Request details not available');
+        showAppAlert('Request details not available');
         return;
     }
     try {
@@ -13610,14 +14848,14 @@ function sendSharedFlowToPersonalRepeater(flow) {
         }
     } catch (err) {
         console.error('Send shared flow to repeater error', err);
-        alert('Failed to load request into repeater');
+        showAppAlert('Failed to load request into repeater');
     }
 }
 
 // Envoyer un flow partagé vers l'Intruder personnel
 function sendSharedFlowToIntruder(flow) {
     if (!flow || !flow.request) {
-        alert('Request details not available');
+        showAppAlert('Request details not available');
         return;
     }
     try {
@@ -13649,7 +14887,7 @@ function sendSharedFlowToIntruder(flow) {
         }
     } catch (err) {
         console.error('Send shared flow to intruder error', err);
-        alert('Failed to load request into intruder');
+        showAppAlert('Failed to load request into intruder');
     }
 }
 
@@ -14253,7 +15491,12 @@ function updateAIConfigStatus(message) {
 // Créer une nouvelle API key
 async function createAIAPIKey() {
     try {
-        const name = prompt('Enter a name for your API key:', 'My API Key');
+        const name = await showAppPrompt('API key name', {
+            title: 'Create API Key',
+            defaultValue: 'My API Key',
+            confirmText: 'Create',
+            cancelText: 'Cancel'
+        });
         if (!name) return;
 
         const response = await fetch(`${COLLABORATION_SERVER_URL}/api/v1/api-keys`, {
@@ -14272,29 +15515,34 @@ async function createAIAPIKey() {
             // Sauvegarder la clé API
             localStorage.setItem('collab_api_key', data.key);
 
-            alert(`API Key created successfully!\n\nYour API Key: ${data.key}\n\nThis key has been saved. Please refresh the page.`);
+            await showAppAlert(`API Key created successfully!\n\nYour API Key: ${data.key}\n\nThis key has been saved. Please refresh the page.`);
 
             // Recharger la page pour appliquer les changements
             location.reload();
         } else {
             const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-            alert(`Failed to create API key: ${errorData.detail || response.statusText}`);
+            showAppAlert(`Failed to create API key: ${errorData.detail || response.statusText}`);
         }
     } catch (error) {
-        alert(`Error creating API key: ${error.message}\n\nMake sure the collaboration server is running on ${COLLABORATION_SERVER_URL}`);
+        showAppAlert(`Error creating API key: ${error.message}\n\nMake sure the collaboration server is running on ${COLLABORATION_SERVER_URL}`);
     }
 }
 
 // Configurer une API key existante
-function configureAIAPIKey() {
+async function configureAIAPIKey() {
     const currentKey = localStorage.getItem('collab_api_key') || '';
     const serverUrl = localStorage.getItem('collaboration_server_url') || 'https://proxy.kittysploit.com';
 
-    const apiKey = prompt('Enter your API key (starts with kp_):', currentKey);
-    if (apiKey === null) return; // User cancelled
+    const apiKey = await showAppPrompt('API key (starts with kp_)', {
+        title: 'Configure API Key',
+        defaultValue: currentKey,
+        confirmText: 'Next',
+        cancelText: 'Cancel'
+    });
+    if (apiKey === null) return;
 
     if (apiKey && !apiKey.startsWith('kp_')) {
-        alert('Invalid API key format. API keys must start with "kp_"');
+        showAppAlert('Invalid API key format. API keys must start with "kp_"');
         return;
     }
 
@@ -14304,16 +15552,18 @@ function configureAIAPIKey() {
         localStorage.removeItem('collab_api_key');
     }
 
-    const newServerUrl = prompt('Enter collaboration server URL:', serverUrl);
+    const newServerUrl = await showAppPrompt('Collaboration server URL', {
+        title: 'Configure Server URL',
+        defaultValue: serverUrl,
+        confirmText: 'Save',
+        cancelText: 'Skip'
+    });
     if (newServerUrl !== null) {
-        if (newServerUrl) {
-            localStorage.setItem('collaboration_server_url', newServerUrl);
-        } else {
-            localStorage.removeItem('collaboration_server_url');
-        }
+        if (newServerUrl) localStorage.setItem('collaboration_server_url', newServerUrl);
+        else localStorage.removeItem('collaboration_server_url');
     }
 
-    alert('Configuration saved! Refreshing page...');
+    await showAppAlert('Configuration saved! Refreshing page...');
     location.reload();
 }
 
@@ -14796,7 +16046,7 @@ function loadAIFlowsList() {
 // Analyser un flow avec l'IA
 async function analyzeFlowWithAI(flow) {
     if (!currentSessionId) {
-        alert('No active session');
+        showAppAlert('No active session');
         return;
     }
 
@@ -14950,7 +16200,7 @@ async function analyzeFlowWithAI(flow) {
                 used: data.requests_used,
                 limit: data.requests_limit
             });
-            alert(data.detail || 'AI Assistant requires a paid plan. Please upgrade your plan to access this feature.');
+            showAppAlert(data.detail || 'AI Assistant requires a paid plan. Please upgrade your plan to access this feature.');
             analysisContainer.innerHTML = '<div style="text-align: center; padding: 60px 20px;"><span class="material-symbols-outlined" style="font-size: 40px; color: #ccc; margin-bottom: 16px; display: block;">lock</span><p style="margin: 0; color: #666; font-size: 14px;">Upgrade required</p></div>';
             // Restaurer l'état normal du bouton
             if (flow && flow.id) {
@@ -14966,7 +16216,7 @@ async function analyzeFlowWithAI(flow) {
                 used: errorData.requests_used,
                 limit: errorData.requests_limit
             });
-            alert(errorData.detail || 'AI request limit exceeded. Please upgrade your plan.');
+            showAppAlert(errorData.detail || 'AI request limit exceeded. Please upgrade your plan.');
             analysisContainer.innerHTML = '<div style="text-align: center; padding: 60px 20px;"><span class="material-symbols-outlined" style="font-size: 40px; color: #d32f2f; margin-bottom: 16px; display: block;">error</span><p style="margin: 0; color: #666; font-size: 14px;">Request limit exceeded</p></div>';
             // Restaurer l'état normal du bouton
             if (flow && flow.id) {
@@ -15305,7 +16555,7 @@ function testPayloadInRepeater(payload, targetParam) {
     // Sinon, utiliser le flow analysé comme base
     if (!collabCurrentAIFlow) {
         console.warn('[AI] No analyzed flow available to replay.');
-        alert('Please analyze a flow first.');
+        showAppAlert('Please analyze a flow first.');
         return;
     }
 
@@ -16204,7 +17454,7 @@ function loadFlowIntoRepeater(flow) {
 async function sendCollabRepeaterRequest(tabId) {
     const tab = collabRepeaterTabs.find(t => t.id === tabId);
     if (!tab || !tab.url) {
-        alert('Please enter a URL');
+        showAppAlert('Please enter a URL');
         return;
     }
 
@@ -16265,11 +17515,11 @@ async function sendCollabRepeaterRequest(tabId) {
             }
         } else {
             const error = await response.json();
-            alert(`Error: ${error.detail || 'Failed to send request'}`);
+            showAppAlert(`Error: ${error.detail || 'Failed to send request'}`);
         }
     } catch (error) {
         console.error('[Collaboration] Error sending request:', error);
-        alert('Error sending request: ' + error.message);
+        showAppAlert('Error sending request: ' + error.message);
     } finally {
         if (sendBtn) {
             sendBtn.disabled = false;
@@ -16456,13 +17706,13 @@ if (document.readyState === 'loading') {
 
 async function startBrowserMirroring() {
     if (!currentSessionId || !currentUserId || !collaborationWebSocket) {
-        alert('You must be in a collaboration session');
+        showAppAlert('You must be in a collaboration session');
         return;
     }
 
     // Vérifier que le WebSocket de collaboration est prêt
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
-        alert('WebSocket connection not established. Please wait...');
+        showAppAlert('WebSocket connection not established. Please wait...');
         return;
     }
 
@@ -16475,7 +17725,7 @@ async function startBrowserMirroring() {
 
         // Créer l'instance de mirroring qui utilisera le WebSocket de collaboration
         if (typeof BrowserMirror === 'undefined') {
-            alert('BrowserMirror script not loaded. Please refresh the page.');
+            showAppAlert('BrowserMirror script not loaded. Please refresh the page.');
             return;
         }
 
@@ -16525,7 +17775,7 @@ async function startBrowserMirroring() {
         saveCollaborationState();
     } catch (error) {
         console.error('[Collaboration] Error starting mirror:', error);
-        alert(`Error starting mirroring: ${error.message}`);
+        showAppAlert(`Error starting mirroring: ${error.message}`);
     }
 }
 
@@ -17258,12 +18508,12 @@ if (collabInviteBtn) {
 // Toggle le partage d'un flow
 function toggleShareFlow(flow) {
     if (!currentSessionId || !collaborationWebSocket) {
-        alert('Please join a collaboration session first');
+        showAppAlert('Please join a collaboration session first');
         return;
     }
 
     if (collaborationWebSocket.readyState !== WebSocket.OPEN) {
-        alert('Collaboration connection not ready');
+        showAppAlert('Collaboration connection not ready');
         return;
     }
 
@@ -17296,7 +18546,7 @@ function toggleShareFlow(flow) {
         } catch (error) {
             console.error('[Collaboration] Error sharing flow:', error);
             sharedFlows.delete(flow.id); // Revert on error
-            alert('Error sharing flow: ' + error.message);
+            showAppAlert('Error sharing flow: ' + error.message);
             return;
         }
     }
@@ -17481,7 +18731,7 @@ function selectNavTreeNode(path) {
                 return f.url;
             }
         }));
-        alert(`No matching flows found for this path: ${path}\n\nCheck the console for more details.`);
+        showAppAlert(`No matching flows found for this path: ${path}\n\nCheck the console for more details.`);
     }
 }
 
@@ -17787,6 +19037,7 @@ function loadWebSocketConnections() {
         if (!connectionMap.has(key)) {
             connectionMap.set(key, {
                 id: key,
+                flowId: flow.id || flow.flow_id || null,
                 type: isNativeWebSocket ? 'native' : 'socketio',
                 url: isNativeWebSocket ? (flow.url || flow.request?.url || 'Unknown URL') : socketIoInfo.url,
                 displayUrl: isNativeWebSocket ? (flow.url || flow.request?.url || 'Unknown URL') : (socketIoInfo.displayUrl || socketIoInfo.rawUrl || socketIoInfo.url),
@@ -18012,6 +19263,98 @@ function renderWebSocketDetails(wsId) {
     }
 }
 
+// Copy Socket.IO poll URL or Flow ID (called from Socket.IO Messages tab)
+window.copySocketIoPollUrl = function (pollIndex) {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    const url = ws?.socketIo?.polls?.[pollIndex]?.url;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+        if (typeof showToast === 'function') showToast('URL copied to clipboard', 'success');
+        else showAppAlert('Copied to clipboard');
+    }).catch(() => {});
+};
+window.copySocketIoPollFlowId = function (pollIndex) {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    const flowId = ws?.socketIo?.polls?.[pollIndex]?.id;
+    if (!flowId) return;
+    navigator.clipboard.writeText(flowId).then(() => {
+        if (typeof showToast === 'function') showToast('Flow ID copied to clipboard', 'success');
+        else showAppAlert('Copied to clipboard');
+    }).catch(() => {});
+};
+
+// Replay a WebSocket-related HTTP request (upgrade or Socket.IO poll) in the Repeater
+window.replayWebSocketPoll = async function (flowId) {
+    if (!flowId) return;
+    try {
+        const res = await fetch(`${API_BASE}/flows/${flowId}`);
+        if (!res.ok) {
+            if (typeof showToast === 'function') showToast('Failed to load flow', 'error');
+            else showAppAlert('Failed to load flow');
+            return;
+        }
+        const flow = await res.json();
+        if (!flow.request) {
+            if (typeof showToast === 'function') showToast('Request details not available', 'error');
+            return;
+        }
+        const headers = flow.request.headers || {};
+        let bodyContent = '';
+        if (flow.request.content_bs64) {
+            try { bodyContent = atob(flow.request.content_bs64); } catch (_) {}
+        }
+        createRepeaterTab({
+            method: flow.method || 'GET',
+            url: flow.url || '',
+            headers: JSON.stringify(headers, null, 2),
+            body: bodyContent
+        });
+        const replayNavItem = document.querySelector('[data-view="replay"]');
+        if (replayNavItem) replayNavItem.click();
+        if (typeof showToast === 'function') showToast('Request sent to Replay', 'success');
+    } catch (err) {
+        console.error('Replay WebSocket poll error', err);
+        if (typeof showToast === 'function') showToast('Replay failed', 'error');
+        else showAppAlert('Replay failed');
+    }
+};
+
+// Copy WebSocket message content to clipboard (called from Messages tab)
+window.copyWebSocketMessage = function (messageIndex) {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    if (!ws) return;
+    const messages = getWebSocketMessages(ws);
+    const msg = messages[messageIndex];
+    if (!msg) return;
+    const content = msg.content || msg.text || msg.data || '';
+    let text = typeof content === 'string' ? content : '';
+    if (typeof content !== 'string' && content) {
+        try { text = new TextDecoder().decode(content); } catch (_) { text = String(content); }
+    }
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try { text = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        if (typeof showToast === 'function') showToast('Message copied to clipboard', 'success');
+        else showAppAlert('Copied to clipboard');
+    }).catch(() => {
+        if (typeof showToast === 'function') showToast('Copy failed', 'error');
+    });
+};
+
+// Open the flow that backs this WebSocket connection in the Analyze view
+window.viewWebSocketFlowInAnalyze = function (flowId) {
+    if (!flowId) return;
+    currentFlowId = flowId;
+    switchView('analyze');
+    setTimeout(() => {
+        renderFlowList();
+        updateDetailButtons();
+        renderDetail();
+    }, 100);
+};
+
 // Render WebSocket overview
 function renderWebSocketOverview(ws, container) {
     const url = ws.displayUrl || ws.socketIo?.polls?.[0]?.url || ws.url || ws.request?.url || 'Unknown URL';
@@ -18034,6 +19377,21 @@ function renderWebSocketOverview(ws, container) {
         statusColor = '#ff9800';
     }
 
+    const flowId = ws.flowId || ws.id;
+    const flowIdAttr = flowId ? escapeHtml(String(flowId)) : '';
+    const viewInAnalyzeHtml = flowId ? `
+        <div data-flow-id="${flowIdAttr}">
+            <button type="button" class="btn btn-secondary" style="margin-top: 12px; margin-right: 8px; font-size: 0.85em;" onclick="viewWebSocketFlowInAnalyze(this.closest('[data-flow-id]').getAttribute('data-flow-id'))">
+                <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">analytics</span>
+                View in Analyze
+            </button>
+            <button type="button" class="btn btn-secondary" style="margin-top: 12px; font-size: 0.85em;" onclick="replayWebSocketPoll(this.closest('[data-flow-id]').getAttribute('data-flow-id'))">
+                <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">repeat</span>
+                Replay (Send to Repeater)
+            </button>
+        </div>
+    ` : '';
+
     container.innerHTML = `
         <div style="padding: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #333;">WebSocket Connection Overview</h3>
@@ -18055,6 +19413,7 @@ function renderWebSocketOverview(ws, container) {
                     <div style="font-weight: 600; color: #666;">Messages:</div>
                     <div>${messageCount}</div>
                 </div>
+                ${viewInAnalyzeHtml}
             </div>
             
             <div style="background: white; border-radius: 8px; padding: 16px; border: 1px solid var(--border-color);">
@@ -18126,9 +19485,14 @@ function renderWebSocketMessages(ws, container) {
                                     <span style="color: ${directionColor}; font-weight: 600; font-size: 13px;">${direction}</span>
                                     <span style="margin-left: 12px; font-size: 11px; color: #666;">${date.toLocaleTimeString()}</span>
                                 </div>
-                                <div style="font-size: 11px; color: #666;">
-                                    ${isText ? 'Text' : 'Binary'} • ${size} bytes
-                                    ${isJson ? ' • <span style="color: #4caf50; font-weight: 600;">JSON</span>' : ''}
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 11px; color: #666;">
+                                        ${isText ? 'Text' : 'Binary'} • ${size} bytes
+                                        ${isJson ? ' • <span style="color: #4caf50; font-weight: 600;">JSON</span>' : ''}
+                                    </span>
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="copyWebSocketMessage(${idx})" title="Copy message">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">content_copy</span> Copy
+                                    </button>
                                 </div>
                             </div>
                             <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; word-break: break-all;">
@@ -18147,10 +19511,12 @@ function renderWebSocketMessages(ws, container) {
     `;
 }
 
-// Render WebSocket handshake
+// Render WebSocket handshake (request/response headers from underlying flow)
 function renderWebSocketHandshake(ws, container) {
-    const request = ws.request || {};
-    const response = ws.response || {};
+    const flowId = ws.flowId || ws.id;
+    const flow = flowsData.find(f => (f.id || f.flow_id) === flowId);
+    const request = flow?.request || ws.request || {};
+    const response = flow?.response || ws.response || {};
     let reqHeaders = request.headers || {};
     let resHeaders = response.headers || {};
 
@@ -18172,6 +19538,7 @@ function renderWebSocketHandshake(ws, container) {
 
     const reqHeadersList = Object.entries(reqHeaders);
     const resHeadersList = Object.entries(resHeaders);
+    const noHeadersNote = !flow ? '<div style="font-size: 12px; color: #888; margin-top: 8px;">Headers are taken from the HTTP upgrade flow. Use "View in Analyze" to see the full request.</div>' : '';
 
     container.innerHTML = `
         <div style="padding: 20px;">
@@ -18181,8 +19548,9 @@ function renderWebSocketHandshake(ws, container) {
                 <h4 style="margin: 0 0 12px 0; color: #333;">Request Headers</h4>
                 <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px;">
                     ${reqHeadersList.length > 0 ? reqHeadersList.map(([key, value]) =>
-        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</div>`
+        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(String(key))}:</strong> ${escapeHtml(String(value))}</div>`
     ).join('') : '<div style="color: #888;">No headers available</div>'}
+                ${noHeadersNote}
                 </div>
             </div>
             
@@ -18190,13 +19558,14 @@ function renderWebSocketHandshake(ws, container) {
                 <h4 style="margin: 0 0 12px 0; color: #333;">Response Headers</h4>
                 <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px;">
                     ${resHeadersList.length > 0 ? resHeadersList.map(([key, value]) =>
-        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(key)}:</strong> ${escapeHtml(String(value))}</div>`
+        `<div style="margin-bottom: 4px;"><strong>${escapeHtml(String(key))}:</strong> ${escapeHtml(String(value))}</div>`
     ).join('') : '<div style="color: #888;">No headers available</div>'}
                 </div>
             </div>
         </div>
     `;
 }
+
 
 // Render WebSocket analysis
 function renderWebSocketAnalysis(ws, container) {
@@ -18343,11 +19712,12 @@ function renderSocketIoMessages(ws, container) {
                 <div style="font-size: 12px; color: #666;">SID: ${escapeHtml(info.sid || 'N/A')}</div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
-                ${polls.map(poll => {
+                ${polls.map((poll, idx) => {
         const date = poll.timestamp ? new Date(poll.timestamp * 1000) : null;
         const timeLabel = date ? date.toLocaleTimeString() : '-';
         const status = poll.status_code != null ? poll.status_code : '-';
         const statusClass = status >= 400 ? 'status-4xx' : status === 200 ? 'status-2xx' : 'status-unknown';
+        const flowIdAttr = escapeHtml(String(poll.id || ''));
         return `
                         <div style="background: white; border-radius: 8px; padding: 14px; border: 1px solid var(--border-color);">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -18359,9 +19729,20 @@ function renderSocketIoMessages(ws, container) {
                             <div style="font-size: 12px; color: #555; margin-bottom: 6px; word-break: break-all;">
                                 ${escapeHtml(poll.url || ws.url || '')}
                             </div>
-                            <div style="font-size: 12px; display: flex; align-items: center; gap: 8px;">
+                            <div style="font-size: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <span class="${statusClass}" style="padding: 2px 6px; border-radius: 4px;">Status ${status}</span>
-                                <span style="color: #999;">Flow ID: ${poll.id}</span>
+                                <span style="color: #999;">Flow ID: ${escapeHtml(String(poll.id || ''))}</span>
+                                <span style="margin-left: auto; display: flex; gap: 6px;">
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="copySocketIoPollUrl(${idx})" title="Copy URL">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">content_copy</span> Copy URL
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="copySocketIoPollFlowId(${idx})" title="Copy Flow ID">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">content_copy</span> Copy Flow ID
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="replayWebSocketPoll(this.getAttribute('data-flow-id'))" data-flow-id="${flowIdAttr}" title="Send to Replay (Repeater)">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">repeat</span> Replay
+                                    </button>
+                                </span>
                             </div>
                         </div>
                     `;
@@ -18473,6 +19854,15 @@ function initWebSocketView() {
             }
         });
     });
+
+    // Refresh button
+    const wsRefreshBtn = document.getElementById('ws-refresh-btn');
+    if (wsRefreshBtn) {
+        wsRefreshBtn.addEventListener('click', () => {
+            loadWebSocketConnections();
+            if (typeof showToast === 'function') showToast('WebSocket list refreshed', 'success');
+        });
+    }
 
     // Clear button
     const wsClearBtn = document.getElementById('ws-clear-btn');

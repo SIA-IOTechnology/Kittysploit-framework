@@ -371,6 +371,10 @@
             <div class="top-bar">
                 <h2>WebSocket</h2>
                 <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="ws-refresh-btn" class="btn btn-secondary" title="Refresh WebSocket list from current flows">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">refresh</span>
+                        Refresh
+                    </button>
                     <button id="ws-clear-btn" class="btn btn-secondary">
                         <span class="material-symbols-outlined" style="font-size: 18px;">clear_all</span>
                         Clear
@@ -417,7 +421,7 @@
             </div>
         </div>
 
-        <!-- Intercept View -->
+        <!-- Intercept View: single column, raw editor full width -->
         <div id="intercept-view" class="view-section" style="display: none;">
             <div class="top-bar">
                 <h2>Intercept</h2>
@@ -427,28 +431,16 @@
                         <span id="intercept-status-text">Enable Interception</span>
                     </button>
                     <button id="resume-all-btn" class="btn btn-success">Resume All</button>
-                    <button id="drop-all-btn" class="btn btn-danger">Drop
-                        All</button>
+                    <button id="drop-all-btn" class="btn btn-danger">Drop All</button>
                 </div>
             </div>
-            <div class="split-pane">
-                <div class="flow-list-panel" id="intercept-flow-list-panel">
-                    <div
-                        style="padding: 10px; border-bottom: 1px solid var(--border-color); background: #fff3cd; color: #856404;">
-                        <strong id="pending-count-text">0 requests pending</strong>
-                    </div>
-                    <div id="pending-list" class="flow-list"></div>
+            <div id="intercept-single-pane" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;">
+                <div id="intercept-toolbar" style="flex-shrink: 0; padding: 10px 20px; border-bottom: 1px solid var(--border-color); background: #fff3cd; color: #856404; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <strong id="pending-count-text">0 requests pending</strong>
+                    <select id="intercept-request-select" style="max-width: 100%; min-width: 280px; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-family: 'Fira Code', monospace; font-size: 0.9em; background: white; color: #333;"></select>
                 </div>
-                <div class="resize-handle" id="intercept-resize-handle"></div>
-                <div class="detail-panel" id="intercept-detail-panel">
-                    <div class="detail-header">
-                        <h3 style="margin: 0; padding: 12px 20px;">Request Editor</h3>
-                    </div>
-                    <div id="intercept-editor" class="detail-content"
-                        style="display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; overflow-x: hidden; box-sizing: border-box;">
-                        <p style="color: #888; text-align: center; margin-top: 50px;">Select a request to view/modify
-                        </p>
-                    </div>
+                <div id="intercept-editor" class="detail-content" style="flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 20px; overflow: hidden; box-sizing: border-box;">
+                    <p style="color: #888; text-align: center; margin-top: 50px;">Aucune requête en attente. Activez l’interception et effectuez une requête.</p>
                 </div>
             </div>
         </div>
@@ -730,7 +722,7 @@
                             <div id="collab-mirror-viewer" style="width: 100%; height: 100%; display: block; background: #1a1a1a; position: relative;">
                                 <div id="collab-mirror-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #666;">
                                     <span class="material-symbols-outlined" style="font-size: 64px; color: #444; display: block; margin-bottom: 16px;">desktop_windows</span>
-                                    <p style="margin: 0; font-size: 14px;">Aucun mirroring actif</p>
+                                    <p style="margin: 0; font-size: 14px;">No active mirroring</p>
                                     <p style="margin: 8px 0 0 0; font-size: 12px; color: #888;">Cliquez sur "Start Mirroring" pour partager votre écran</p>
                                 </div>
                                 <div id="collab-mirror-content" style="display: none; width: 100%; height: 100%; overflow: hidden; position: relative;">
@@ -886,12 +878,10 @@
         <div id="api-view" class="view-section" style="display: none;">
             <div class="top-bar">
                 <h2>API Tester</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="api-new-request-btn" class="btn btn-secondary">
-                        <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                        New Request
-                    </button>
-                </div>
+                <button id="api-new-request-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Request
+                </button>
             </div>
             <div class="api-tester-layout">
                 <!-- Sidebar: Collections & History -->
@@ -909,7 +899,7 @@
                             Collections</div>
                         <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
                             <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
-                            React APIs</div>
+                            Discovered APIs</div>
                     </div>
                     <div id="api-history-list" class="api-history-list"></div>
                     <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
@@ -919,6 +909,9 @@
 
                 <!-- Main Content: Request Builder -->
                 <div class="api-tester-main">
+                    <div id="api-tabs-container" class="api-tabs-container">
+                        <!-- Tabs generated by JS -->
+                    </div>
                     <!-- Request Bar -->
                     <div class="api-request-bar">
                         <select id="api-method" class="api-method-select">
@@ -931,78 +924,57 @@
                             <option value="OPTIONS">OPTIONS</option>
                         </select>
                         <input type="text" id="api-url" class="api-url-input"
-                            placeholder="https://example.com/api/endpoint">
-                        <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">
+                            placeholder="https://example.com/api/endpoint" title="Ctrl+Enter to send">
+                        <button id="api-send-btn" class="btn btn-primary" onclick="sendApiRequest()" title="Send request (Ctrl+Enter)">
                             <span class="material-symbols-outlined" style="font-size: 18px;">send</span>
                             Send
                         </button>
                     </div>
 
-                    <!-- Request Tabs (Params, Headers, Body) -->
+                    <!-- Request Tabs (Headers, Body) -->
                     <div class="api-request-tabs">
-                        <div class="api-req-tab active" id="req-tab-params" onclick="switchApiReqTab('params')">Params
-                        </div>
-                        <div class="api-req-tab" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
+                        <div class="api-req-tab active" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
                         <div class="api-req-tab" id="req-tab-body" onclick="switchApiReqTab('body')">Body</div>
                     </div>
 
-                    <!-- Request Body -->
+                    <!-- Request Panels -->
                     <div class="api-request-body">
-                        <!-- Params Panel -->
-                        <div class="api-req-panel active" id="api-panel-params">
-                            <div id="api-params-container"></div>
-                            <button class="btn btn-secondary" onclick="addKvRow('api-params-container')"
-                                style="margin-top: 10px;">
-                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                                Add Param
-                            </button>
-                        </div>
-
                         <!-- Headers Panel -->
-                        <div class="api-req-panel" id="api-panel-headers">
-                            <div id="api-headers-container"></div>
-                            <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')"
-                                style="margin-top: 10px;">
-                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                                Add Header
-                            </button>
+                        <div class="api-req-panel active" id="api-panel-headers">
+                            <div class="api-kv-mode-bar">
+                                <span class="api-kv-mode-label">Headers</span>
+                                <label class="api-kv-toggle"><input type="radio" name="headers-mode" value="raw" checked onchange="switchApiHeadersMode('raw')"> Raw</label>
+                                <label class="api-kv-toggle"><input type="radio" name="headers-mode" value="table" onchange="switchApiHeadersMode('table')"> Table</label>
+                            </div>
+                            <div id="api-headers-raw-wrap" class="api-raw-wrap">
+                                <textarea id="api-headers-raw" class="api-raw-textarea" placeholder="Content-Type: application/json&#10;Authorization: Bearer token" spellcheck="false"></textarea>
+                                <div class="api-raw-hint">One per line: <code>Key: Value</code></div>
+                            </div>
+                            <div id="api-headers-table-wrap" class="api-kv-table-wrap" style="display: none;">
+                                <div id="api-headers-container"></div>
+                                <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')" style="margin-top: 10px;">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span> Add Header
+                                </button>
+                            </div>
                         </div>
 
-                        <!-- Body Panel -->
+                        <!-- Body Panel (Raw or Table) -->
                         <div class="api-req-panel" id="api-panel-body">
-                            <div
-                                style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
-                                <label style="display: flex; gap: 15px; align-items: center;">
-                                    <input type="radio" name="body-type" value="none" checked
-                                        onchange="toggleBodyType()">
-                                    <span>None</span>
-                                </label>
-                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
-                                    <input type="radio" name="body-type" value="raw" onchange="toggleBodyType()">
-                                    <span>Raw</span>
-                                </label>
-                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
-                                    <input type="radio" name="body-type" value="json" onchange="toggleBodyType()">
-                                    <span>JSON</span>
-                                </label>
+                            <div class="api-kv-mode-bar">
+                                <span class="api-kv-mode-label">Body</span>
+                                <label class="api-kv-toggle"><input type="radio" name="body-mode" value="raw" checked onchange="switchApiBodyMode('raw')"> Raw</label>
+                                <label class="api-kv-toggle"><input type="radio" name="body-mode" value="table" onchange="switchApiBodyMode('table')"> Table</label>
                             </div>
-                            <div id="api-body-none-msg"
-                                style="padding: 50px; text-align: center; color: #999; display: none;">
-                                This request does not have a body
+                            <div id="api-body-raw-wrap" class="api-raw-wrap">
+                                <textarea id="api-body-raw" class="api-raw-textarea" placeholder='{"key": "value"}&#10;Or any raw text...' spellcheck="false"></textarea>
+                                <div class="api-raw-hint">Raw body (JSON, XML, text…). Set <code>Content-Type</code> in Headers if needed.</div>
                             </div>
-                            <div id="api-body-editor-container" style="display: none; flex: 1; padding: 15px; flex-direction: column; position: relative;">
-                                <div id="api-body-json-view" style="display: none; flex: 1; overflow-y: auto; overflow-x: hidden; background: #282c34; border-radius: 4px; padding: 15px; position: relative; min-height: 300px;">
-                                    <pre id="api-body-json-formatted" style="margin: 0; font-family: 'Fira Code', monospace; font-size: 13px; color: #abb2bf; line-height: 1.5; white-space: pre; word-wrap: normal; overflow-wrap: normal;"></pre>
-                                    <button id="api-body-edit-btn" onclick="switchToJsonEditor()" style="position: absolute; top: 10px; right: 10px; background: #61afef; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; z-index: 10;">
-                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">edit</span> Edit
-                                    </button>
-                                </div>
-                                <textarea id="api-body-editor"
-                                    oninput="updateApiBody()"
-                                    style="width: 100%; height: 100%; min-height: 300px; font-family: 'Fira Code', monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; display: none;"></textarea>
-                                <button id="api-body-format-btn" onclick="formatJsonBody()" style="display: none; margin-top: 10px; background: #333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-start;">
-                                    <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span> Format JSON
+                            <div id="api-body-table-wrap" class="api-kv-table-wrap" style="display: none;">
+                                <div id="api-body-container"></div>
+                                <button class="btn btn-secondary" onclick="addKvRow('api-body-container')" style="margin-top: 10px;">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span> Add row
                                 </button>
+                                <div class="api-raw-hint" style="margin-top: 8px;">Sent as <code>application/x-www-form-urlencoded</code>.</div>
                             </div>
                         </div>
                     </div>
@@ -1021,22 +993,10 @@
                         <div class="api-response-body">
                             <pre id="api-resp-content"
                                 style="margin: 0; padding: 15px; font-family: 'Fira Code', monospace; font-size: 12px; overflow: auto; height: 100%;"></pre>
-                            <span class="material-symbols-outlined"
-                                style="font-size: 64px; color: #ddd; margin-bottom: 20px;">whatshot</span>
-                            <p>Select a domain to see the heatmap</p>
-                        </div>
-                    </div>
-                    <!-- Navigation Tree Panel -->
-                    <div id="viz-panel-navigation" class="viz-panel" style="display: none;">
-                        <div style="text-align: center; padding: 50px; color: #888;">
-                            <span class="material-symbols-outlined"
-                                style="font-size: 64px; color: #ddd; margin-bottom: 20px;">account_tree</span>
-                            <p>Select a domain to see the navigation tree</p>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
         </div>
 
         <!-- Collaboration View -->
@@ -1115,12 +1075,10 @@
         <div id="api-view" class="view-section" style="display: none;">
             <div class="top-bar">
                 <h2>API Tester</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="api-new-request-btn" class="btn btn-secondary">
-                        <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                        New Request
-                    </button>
-                </div>
+                <button id="api-new-request-btn" class="btn btn-secondary">
+                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+                    New Request
+                </button>
             </div>
             <div class="api-tester-layout">
                 <!-- Sidebar: Collections & History -->
@@ -1138,7 +1096,7 @@
                             Collections</div>
                         <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
                             <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
-                            React APIs</div>
+                            Discovered APIs</div>
                     </div>
                     <div id="api-history-list" class="api-history-list"></div>
                     <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
@@ -1148,6 +1106,9 @@
 
                 <!-- Main Content: Request Builder -->
                 <div class="api-tester-main">
+                    <div id="api-tabs-container" class="api-tabs-container">
+                        <!-- Tabs generated by JS -->
+                    </div>
                     <!-- Request Bar -->
                     <div class="api-request-bar">
                         <select id="api-method" class="api-method-select">
@@ -1160,78 +1121,57 @@
                             <option value="OPTIONS">OPTIONS</option>
                         </select>
                         <input type="text" id="api-url" class="api-url-input"
-                            placeholder="https://example.com/api/endpoint">
-                        <button id="api-send-btn" class="api-send-btn" onclick="sendApiRequest()">
+                            placeholder="https://example.com/api/endpoint" title="Ctrl+Enter to send">
+                        <button id="api-send-btn" class="btn btn-primary" onclick="sendApiRequest()" title="Send request (Ctrl+Enter)">
                             <span class="material-symbols-outlined" style="font-size: 18px;">send</span>
                             Send
                         </button>
                     </div>
 
-                    <!-- Request Tabs (Params, Headers, Body) -->
+                    <!-- Request Tabs (Headers, Body) -->
                     <div class="api-request-tabs">
-                        <div class="api-req-tab active" id="req-tab-params" onclick="switchApiReqTab('params')">Params
-                        </div>
-                        <div class="api-req-tab" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
+                        <div class="api-req-tab active" id="req-tab-headers" onclick="switchApiReqTab('headers')">Headers</div>
                         <div class="api-req-tab" id="req-tab-body" onclick="switchApiReqTab('body')">Body</div>
                     </div>
 
-                    <!-- Request Body -->
+                    <!-- Request Panels -->
                     <div class="api-request-body">
-                        <!-- Params Panel -->
-                        <div class="api-req-panel active" id="api-panel-params">
-                            <div id="api-params-container"></div>
-                            <button class="btn btn-secondary" onclick="addKvRow('api-params-container')"
-                                style="margin-top: 10px;">
-                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                                Add Param
-                            </button>
-                        </div>
-
                         <!-- Headers Panel -->
-                        <div class="api-req-panel" id="api-panel-headers">
-                            <div id="api-headers-container"></div>
-                            <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')"
-                                style="margin-top: 10px;">
-                                <span class="material-symbols-outlined" style="font-size: 18px;">add</span>
-                                Add Header
-                            </button>
+                        <div class="api-req-panel active" id="api-panel-headers">
+                            <div class="api-kv-mode-bar">
+                                <span class="api-kv-mode-label">Headers</span>
+                                <label class="api-kv-toggle"><input type="radio" name="headers-mode" value="raw" checked onchange="switchApiHeadersMode('raw')"> Raw</label>
+                                <label class="api-kv-toggle"><input type="radio" name="headers-mode" value="table" onchange="switchApiHeadersMode('table')"> Table</label>
+                            </div>
+                            <div id="api-headers-raw-wrap" class="api-raw-wrap">
+                                <textarea id="api-headers-raw" class="api-raw-textarea" placeholder="Content-Type: application/json&#10;Authorization: Bearer token" spellcheck="false"></textarea>
+                                <div class="api-raw-hint">One per line: <code>Key: Value</code></div>
+                            </div>
+                            <div id="api-headers-table-wrap" class="api-kv-table-wrap" style="display: none;">
+                                <div id="api-headers-container"></div>
+                                <button class="btn btn-secondary" onclick="addKvRow('api-headers-container')" style="margin-top: 10px;">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span> Add Header
+                                </button>
+                            </div>
                         </div>
 
-                        <!-- Body Panel -->
+                        <!-- Body Panel (Raw or Table) -->
                         <div class="api-req-panel" id="api-panel-body">
-                            <div
-                                style="padding: 15px; border-bottom: 1px solid var(--border-color); background: #fafafa;">
-                                <label style="display: flex; gap: 15px; align-items: center;">
-                                    <input type="radio" name="body-type" value="none" checked
-                                        onchange="toggleBodyType()">
-                                    <span>None</span>
-                                </label>
-                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
-                                    <input type="radio" name="body-type" value="raw" onchange="toggleBodyType()">
-                                    <span>Raw</span>
-                                </label>
-                                <label style="display: flex; gap: 15px; align-items: center; margin-left: 20px;">
-                                    <input type="radio" name="body-type" value="json" onchange="toggleBodyType()">
-                                    <span>JSON</span>
-                                </label>
+                            <div class="api-kv-mode-bar">
+                                <span class="api-kv-mode-label">Body</span>
+                                <label class="api-kv-toggle"><input type="radio" name="body-mode" value="raw" checked onchange="switchApiBodyMode('raw')"> Raw</label>
+                                <label class="api-kv-toggle"><input type="radio" name="body-mode" value="table" onchange="switchApiBodyMode('table')"> Table</label>
                             </div>
-                            <div id="api-body-none-msg"
-                                style="padding: 50px; text-align: center; color: #999; display: none;">
-                                This request does not have a body
+                            <div id="api-body-raw-wrap" class="api-raw-wrap">
+                                <textarea id="api-body-raw" class="api-raw-textarea" placeholder='{"key": "value"}&#10;Or any raw text...' spellcheck="false"></textarea>
+                                <div class="api-raw-hint">Raw body (JSON, XML, text…). Set <code>Content-Type</code> in Headers if needed.</div>
                             </div>
-                            <div id="api-body-editor-container" style="display: none; flex: 1; padding: 15px; flex-direction: column; position: relative;">
-                                <div id="api-body-json-view" style="display: none; flex: 1; overflow-y: auto; overflow-x: hidden; background: #282c34; border-radius: 4px; padding: 15px; position: relative; min-height: 300px;">
-                                    <pre id="api-body-json-formatted" style="margin: 0; font-family: 'Fira Code', monospace; font-size: 13px; color: #abb2bf; line-height: 1.5; white-space: pre; word-wrap: normal; overflow-wrap: normal;"></pre>
-                                    <button id="api-body-edit-btn" onclick="switchToJsonEditor()" style="position: absolute; top: 10px; right: 10px; background: #61afef; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; z-index: 10;">
-                                        <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">edit</span> Edit
-                                    </button>
-                                </div>
-                                <textarea id="api-body-editor"
-                                    oninput="updateApiBody()"
-                                    style="width: 100%; height: 100%; min-height: 300px; font-family: 'Fira Code', monospace; font-size: 13px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; resize: vertical; display: none;"></textarea>
-                                <button id="api-body-format-btn" onclick="formatJsonBody()" style="display: none; margin-top: 10px; background: #333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; align-self: flex-start;">
-                                    <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span> Format JSON
+                            <div id="api-body-table-wrap" class="api-kv-table-wrap" style="display: none;">
+                                <div id="api-body-container"></div>
+                                <button class="btn btn-secondary" onclick="addKvRow('api-body-container')" style="margin-top: 10px;">
+                                    <span class="material-symbols-outlined" style="font-size: 18px;">add</span> Add row
                                 </button>
+                                <div class="api-raw-hint" style="margin-top: 8px;">Sent as <code>application/x-www-form-urlencoded</code>.</div>
                             </div>
                         </div>
                     </div>

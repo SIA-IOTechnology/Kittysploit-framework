@@ -9,8 +9,8 @@
 
 /* Sidebar: Collections & History */
 .api-tester-sidebar {
-    width: 300px;
-    min-width: 200px;
+    width: 360px;
+    min-width: 260px;
     max-width: 50%;
     background: white;
     border-right: 1px solid var(--border-color);
@@ -90,6 +90,67 @@
     color: var(--primary-color);
 }
 
+.api-collections-toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: #fafafa;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.api-collection-item-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.api-collection-item-name {
+    font-weight: 600;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.api-collection-item-url {
+    font-size: 12px;
+    color: #777;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.api-collection-item-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.api-collection-icon-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #666;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+}
+
+.api-collection-icon-btn:hover {
+    background: #f0f0f0;
+    border-color: #ddd;
+    color: #333;
+}
+
 .method-badge {
     font-size: 10px;
     font-weight: 600;
@@ -127,6 +188,7 @@
 /* Main Content: Request Builder */
 .api-tester-main {
     flex: 1;
+    min-height: 0;
     min-width: 400px;
     display: flex;
     flex-direction: column;
@@ -134,51 +196,169 @@
     background: white;
 }
 
+/* API Tester Tabs - same design as Repeater tabs */
+.api-tabs-container {
+    display: flex;
+    gap: 4px;
+    border-bottom: 2px solid var(--border-color);
+    padding: 0 10px;
+    background: #fafafa;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-shrink: 0;
+    height: auto;
+    max-height: 50px;
+    align-items: flex-end;
+}
+
+.api-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #e0e0e0;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    min-width: 120px;
+    max-width: 250px;
+}
+
+.api-tab:hover {
+    background: #d0d0d0;
+}
+
+.api-tab.active {
+    background: white;
+    border-color: var(--primary-color);
+    border-bottom: 2px solid white;
+    margin-bottom: -2px;
+    z-index: 1;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.api-tab-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9em;
+    font-weight: 500;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.api-tab-url {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.api-tab-method {
+    font-size: 0.75em;
+    font-weight: 600;
+    color: #666;
+    background: #e8e8e8;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.api-tab.active .api-tab-title {
+    color: var(--primary-color);
+}
+
+.api-tab.active .api-tab-url {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.api-tab.active .api-tab-method {
+    background: var(--primary-color);
+    color: white;
+}
+
+.api-tab-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+}
+
+.api-tab-close:hover {
+    background: rgba(0, 0, 0, 0.1);
+    opacity: 1;
+    color: #f44336;
+}
+
 .api-request-bar {
-    padding: 15px;
+    padding: 14px 16px;
     border-bottom: 1px solid var(--border-color);
     display: flex;
-    gap: 10px;
+    align-items: center;
+    gap: 12px;
     background: #fafafa;
+    flex-shrink: 0;
 }
 
 .api-method-select {
     width: 100px;
-    padding: 8px;
+    min-width: 100px;
+    padding: 10px 12px;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
+    border-radius: 6px;
     font-weight: 600;
+    font-size: 13px;
 }
 
 .api-url-input {
     flex: 1;
-    padding: 8px 12px;
+    min-width: 0;
+    padding: 10px 14px;
     border: 1px solid var(--border-color);
-    border-radius: 4px;
-    font-family: 'Fira Code', monospace;
+    border-radius: 6px;
+    font-family: 'Fira Code', 'Consolas', monospace;
     font-size: 13px;
 }
 
-.api-send-btn {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    padding: 0 20px;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.api-url-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(98, 0, 234, 0.12);
 }
 
-.api-send-btn:hover {
-    background: #5000d6;
+.api-parse-url-btn {
+    flex-shrink: 0;
+}
+
+@media (max-width: 700px) {
+    .api-parse-url-label { display: none; }
+}
+
+/* Send button uses .btn .btn-primary from main style.css */
+.api-request-bar .btn-primary {
+    min-width: 90px;
 }
 
 /* Request Tabs (Params, Headers, Body) */
 .api-request-tabs {
     display: flex;
+    flex-shrink: 0;
     padding: 0 15px;
     border-bottom: 1px solid var(--border-color);
     background: #fafafa;
@@ -200,6 +380,7 @@
 
 .api-request-body {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -207,13 +388,28 @@
 
 .api-req-panel {
     display: none;
-    flex: 1;
-    overflow-y: auto;
-    padding: 15px;
+    flex: 1 1 0%;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    min-height: 0;
 }
 
 .api-req-panel.active {
-    display: block;
+    display: flex;
+}
+
+/* Headers & Body: raw wrap and textarea fill remaining height */
+.api-req-panel.active .api-raw-wrap {
+    flex: 1 1 0%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.api-req-panel.active .api-raw-textarea {
+    flex: 1 1 0%;
+    min-height: 0;
 }
 
 /* Key-Value Editor */
@@ -306,4 +502,154 @@
     padding: 15px;
     font-family: 'Fira Code', monospace;
     font-size: 12px;
+}
+
+/* Params/Headers Raw vs Table */
+.api-kv-mode-bar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+.api-kv-mode-label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+}
+.api-kv-toggle {
+    cursor: pointer;
+    font-size: 13px;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.api-kv-toggle input { cursor: pointer; }
+
+/* Raw zone - same look as Repeater/Intruder raw editors */
+.api-raw-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    box-sizing: border-box;
+}
+.api-raw-textarea {
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    padding: 12px 14px;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    resize: vertical;
+    box-sizing: border-box;
+    background: #fafafa;
+    color: #333;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.api-raw-textarea::placeholder {
+    color: #999;
+}
+.api-raw-textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(98, 0, 234, 0.12);
+    background: #fff;
+}
+.api-raw-hint {
+    font-size: 12px;
+    color: #888;
+    flex-shrink: 0;
+    padding: 0 2px;
+}
+.api-raw-hint code {
+    background: #eee;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #555;
+}
+.api-kv-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+.api-body-type-bar {
+    padding: 12px 15px;
+    border-bottom: 1px solid var(--border-color);
+    background: #fafafa;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+}
+.api-body-type-option {
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.api-body-type-option input { cursor: pointer; }
+/* API Tester tab UI aligned with Repeater/Intruder tab design */
+.api-sidebar-tabs,
+.api-request-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 10px;
+    background: #fafafa;
+    border-bottom: 2px solid var(--border-color);
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-items: flex-end;
+}
+
+.api-sidebar-tab,
+.api-req-tab {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: #e0e0e0;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 13px;
+    color: #555;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.api-sidebar-tab:hover,
+.api-req-tab:hover {
+    background: #d0d0d0;
+    color: #333;
+}
+
+.api-sidebar-tab.active,
+.api-req-tab.active {
+    background: #fff;
+    border-color: var(--primary-color);
+    border-bottom: 2px solid #fff;
+    margin-bottom: -2px;
+    z-index: 1;
+    color: var(--primary-color);
+    font-weight: 600;
+    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
 }

@@ -10,6 +10,7 @@ from performance_monitor import performance_monitor
 from collaboration_manager import collaboration_manager, Collaborator
 from tech_detector import tech_detector
 from mitmproxy.http import HTTPFlow, Request, Response
+from mitmproxy import connection
 import os
 from typing import Dict, List, Optional
 import requests
@@ -247,8 +248,11 @@ def _create_flow_from_request_response(method: str, url: str, request_headers: D
         for key, value in response_headers.items():
             resp.headers.add(key.encode('utf-8'), str(value).encode('utf-8'))
         
-        # Create flow
-        flow = HTTPFlow(None, req)
+        # Create flow (HTTPFlow expects client_conn, server_conn; then we set request/response)
+        client_conn = connection.Client(peername=("", 0), sockname=("", 0))
+        server_conn = connection.Server(address=None)
+        flow = HTTPFlow(client_conn, server_conn)
+        flow.request = req
         flow.response = resp
         flow.id = str(uuid.uuid4())
         

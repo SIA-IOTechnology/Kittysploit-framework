@@ -30,8 +30,8 @@ from core.framework.framework import Framework
 try:
     import uvicorn
 except ImportError:
-    print_error("uvicorn n'est pas installé!")
-    print_info("Installez-le avec: pip install uvicorn")
+    print_error("uvicorn is not installed!")
+    print_info("Install it with: pip install uvicorn")
     sys.exit(1)
 
 
@@ -41,16 +41,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples:
-  # Démarrer le proxy avec les paramètres par défaut
+  # Start the proxy with default parameters
   python kittyproxy.py
 
-  # Démarrer sur des ports personnalisés
+  # Start on custom ports
   python kittyproxy.py --proxy-port 8080 --api-port 8443
 
-  # Démarrer avec une adresse IP spécifique
+  # Start with a specific IP address
   python kittyproxy.py --api-host 0.0.0.0
 
-  # Démarrer avec un chemin de framework personnalisé
+  # Start with a custom framework path
   python kittyproxy.py --framework-path /chemin/vers/framework
         """
     )
@@ -59,61 +59,61 @@ Exemples:
         '--framework-path',
         type=str,
         default=None,
-        help='Chemin vers le répertoire racine du framework (défaut: répertoire courant)'
+        help='Path to the framework root directory (default: current directory)'
     )
     parser.add_argument(
         '--proxy-port',
         type=int,
         default=8080,
-        help='Port du proxy (défaut: 8080)'
+        help='Proxy port (default: 8080)'
     )
     parser.add_argument(
         '--api-port',
         type=int,
         default=8443,
-        help='Port du serveur API (défaut: 8443)'
+        help='API server port (default: 8443)'
     )
     parser.add_argument(
         '--api-host',
         type=str,
         default='127.0.0.1',
-        help='Adresse IP du serveur API (défaut: 127.0.0.1)'
+        help='API server IP address (default: 127.0.0.1)'
     )
     parser.add_argument(
         '-v', '--verbose',
         action='store_true',
-        help='Mode verbeux'
+        help='Verbose mode'
     )
     
     args = parser.parse_args()
     
-    # Vérifier que mitmproxy est disponible
+    # Check if mitmproxy is available
     try:
-        from mitmproxy import http  # noqa: F401 - vérification de présence
+        from mitmproxy import http  # noqa: F401 - check for presence
     except ImportError:
-        print_error("mitmproxy n'est pas installé!")
-        print_info("Installez-le avec: pip install mitmproxy")
+        print_error("mitmproxy is not installed!")
+        print_info("Install it with: pip install mitmproxy")
         sys.exit(1)
     
     print_success("=" * 60)
     print_success("KittySploit Proxy Interface")
     print_success("=" * 60)
     
-    # Initialiser le framework
+    # Initialize the framework
     try:
         if args.verbose:
-            print_info("Initialisation du framework...")
+            print_info("Initializing framework...")
         
         framework = Framework(clean_sessions=False)
         
-        # Check charter acceptance
+        # Check charter acceptance for first startup
         if not framework.check_charter_acceptance():
             print_info("First startup of KittySploit")
             if not framework.prompt_charter_acceptance():
-                print_error("Charter not accepted. Stopping framework.")
+                print_error("Charter not accepted. Stopping framework initialization.")
                 return 1
         
-        # Handle encryption setup/loading for database unlock
+        # Handle encryption setup/loading for database unlock (if not already initialized)
         if not framework.is_encryption_initialized():
             print_info("Setting up encryption for sensitive data protection...")
             if not framework.initialize_encryption():

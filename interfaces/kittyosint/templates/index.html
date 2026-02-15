@@ -1,0 +1,715 @@
+{% raw %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittyOSINT | Intelligent Graph Mapping</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #060b13;
+            --bg-panel: #0d131f;
+            --bg-surface: #141b2a;
+            --accent: #31c6ff;
+            --accent-glow: rgba(49, 198, 255, 0.4);
+            --accent-dim: #1a4f66;
+            --text-main: #e2e8f0;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --border: rgba(148, 163, 184, 0.15);
+            --border-active: rgba(49, 198, 255, 0.5);
+            --danger: #ff5e5e;
+            --warning: #ffb86c;
+            --success: #50fa7b;
+            --radius-lg: 16px;
+            --radius-md: 10px;
+            --font-main: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --shadow-glow: 0 0 20px rgba(49, 198, 255, 0.15);
+        }
+
+        * { 
+            box-sizing: border-box; 
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #app {
+            display: grid;
+            grid-template-columns: 360px 1fr 380px;
+            grid-template-rows: 70px 1fr;
+            height: 100vh;
+            gap: 1px;
+            background: var(--border);
+        }
+
+        /* --- Header --- */
+        .topbar {
+            grid-column: 1 / -1;
+            background: var(--bg-panel);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+            z-index: 50;
+            position: relative;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .brand-logo {
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, var(--accent), #1a4f66);
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            font-weight: 800;
+            font-size: 14px;
+            color: #fff;
+            box-shadow: var(--shadow-glow);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .brand-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .brand-logo .fallback {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+        }
+
+        .brand-text h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(to right, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-text p {
+            font-size: 11px;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            font-weight: 600;
+            margin-top: -2px;
+        }
+
+        .search-container {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            width: clamp(320px, 46vw, 600px);
+            max-width: calc(100% - 460px);
+        }
+
+        .main-search {
+            width: 100%;
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            height: 44px;
+            padding: 0 50px 0 20px;
+            color: var(--text-main);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .main-search:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: var(--shadow-glow);
+            background: #1a2333;
+        }
+
+        .search-btn {
+            position: absolute;
+            right: 6px;
+            top: 6px;
+            height: 32px;
+            width: 32px;
+            background: rgba(49, 198, 255, 0.12);
+            border: 1px solid var(--border-active);
+            border-radius: 10px;
+            color: var(--accent);
+            display: grid;
+            place-items: center;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .search-btn:hover { background: rgba(49, 198, 255, 0.24); color: #fff; }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* --- Global Sidebar Styles --- */
+        .sidebar {
+            background: var(--bg-panel);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-right: 1px solid var(--border);
+        }
+
+        .sidebar-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sidebar-header h3 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-dim);
+            font-weight: 700;
+        }
+
+        .scrollable {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        /* --- Module Cards --- */
+        .module-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .module-search-wrap {
+            margin-bottom: 12px;
+        }
+
+        .module-search {
+            height: 38px;
+            border-radius: 10px;
+            padding: 0 14px;
+            font-size: 13px;
+        }
+
+        .mod-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mod-card:hover {
+            border-color: var(--border-active);
+            background: #1e283a;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+
+        .mod-card.active {
+            border-color: var(--accent);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .mod-header {
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .mod-name {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-main);
+        }
+
+        .mod-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .module-run-btn {
+            margin-top: 10px;
+            margin-left: auto;
+            width: 56px;
+            height: 24px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .module-run-btn:hover {
+            border-color: var(--border-active);
+            color: var(--text-main);
+            background: rgba(49, 198, 255, 0.12);
+        }
+
+        .pro-badge {
+            background: linear-gradient(135deg, #ffb86c, #ff9100);
+            color: #000;
+            font-size: 9px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        /* --- Metrics --- */
+        .metrics-bar {
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 20px;
+            display: flex;
+            gap: 24px;
+        }
+
+        .metric {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .metric-val {
+            font-family: var(--font-mono);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .metric-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            letter-spacing: 0.1em;
+        }
+
+        /* --- Graph Center --- */
+        .center {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .graph-area {
+            flex: 1;
+            background: var(--bg-deep);
+            background-image: radial-gradient(rgba(49, 198, 255, 0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+            position: relative;
+            min-height: 0;
+        }
+
+        #network {
+            width: 100%;
+            height: 100%;
+        }
+
+        .center-tools {
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(13, 19, 31, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 6px;
+            display: flex;
+            gap: 4px;
+            z-index: 100;
+        }
+
+        .tool-btn {
+            height: 34px;
+            padding: 0 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tool-btn:hover {
+            color: var(--text-main);
+            background: rgba(49, 198, 255, 0.1);
+            border-color: var(--border-active);
+        }
+
+        /* --- Right Inspector --- */
+        .inspector {
+            background: var(--bg-panel);
+            border-left: 1px solid var(--border);
+        }
+
+        .inspect-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-top: 10px;
+        }
+
+        .node-info-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .info-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .info-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-dim);
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }
+
+        .info-value {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-main);
+            word-break: break-all;
+        }
+
+        .feed {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .feed-item {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .feed-time { color: var(--accent); margin-right: 8px; }
+        .feed-msg { color: var(--text-muted); }
+
+        /* --- Buttons --- */
+        .cyber-btn {
+            background: rgba(49, 198, 255, 0.12);
+            color: var(--text-main);
+            border: 1px solid var(--border-active);
+            padding: 9px 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            letter-spacing: 0.02em;
+        }
+
+        .cyber-btn:hover {
+            background: rgba(49, 198, 255, 0.2);
+            border-color: rgba(49, 198, 255, 0.75);
+            color: #fff;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-main);
+        }
+
+        .btn-danger {
+            border-color: rgba(255, 94, 94, 0.45);
+            color: #ff9d9d;
+        }
+
+        .btn-danger:hover {
+            background: rgba(255, 94, 94, 0.14);
+            border-color: rgba(255, 94, 94, 0.75);
+            color: #ffd2d2;
+        }
+
+        .cyber-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* --- Loading --- */
+        .loader-overlay {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            background: rgba(49, 198, 255, 0.1);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 8px 16px;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            backdrop-filter: blur(8px);
+            z-index: 100;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header class="topbar">
+            <div class="brand">
+                <div class="brand-logo">
+                    <img src="/logo.png" alt="KittyOSINT Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';" />
+                    <span class="fallback" style="display:none;">KO</span>
+                </div>
+                <div class="brand-text">
+                    <h1>KittyOSINT</h1>
+                    <p>Intelligent Graph Mapping</p>
+                </div>
+            </div>
+
+            <div class="search-container">
+                <input
+                    id="targetInput"
+                    class="main-search"
+                    placeholder="Target identification: domain, ip, email..."
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                />
+                <button id="runAllBtn" class="search-btn">&rarr;</button>
+            </div>
+        </header>
+
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>Available Transforms</h3>
+                <span id="moduleUnits" class="pro-badge">0 Units</span>
+            </div>
+            <div class="scrollable">
+                <div class="module-grid">
+                    <div class="module-search-wrap">
+                        <input id="moduleSearch" class="main-search module-search" placeholder="Search transforms..." />
+                    </div>
+                    <div id="modulesEmpty" class="empty" style="display:none;">No transforms match this filter.</div>
+                    <div id="modulesList" class="module-grid"></div>
+                </div>
+            </div>
+
+            <div class="sidebar-header" style="border-top: 1px solid var(--border); border-bottom: none;">
+                <h3>System Logs</h3>
+            </div>
+            <div id="logsList" class="scrollable feed" style="height: 200px; padding: 10px 20px;">
+                <div style="color: var(--text-dim);">No operational logs.</div>
+            </div>
+        </aside>
+
+        <main class="center">
+            <div class="metrics-bar">
+                <div class="metric">
+                    <span id="metricNodes" class="metric-val">0</span>
+                    <span class="metric-label">Entities</span>
+                </div>
+                <div class="metric">
+                    <span id="metricEdges" class="metric-val">0</span>
+                    <span class="metric-label">Relations</span>
+                </div>
+                <div class="metric">
+                    <span id="metricStatus" class="metric-val">IDLE</span>
+                    <span class="metric-label">Status</span>
+                </div>
+            </div>
+
+            <section class="graph-area">
+                <div id="network"></div>
+
+                <div id="loadingOverlay" class="loader-overlay" style="display:none;">
+                    <div class="pulse-dot"></div>
+                    <span>Processing Transform Neural Mesh...</span>
+                </div>
+
+                <div class="center-tools">
+                    <button id="focusBtn" class="tool-btn">Focus All</button>
+                    <button id="clearBtn" class="tool-btn">Purge Graph</button>
+                    <button id="physicsBtn" class="tool-btn">Freeze</button>
+                    <button id="exportBtn" class="tool-btn">Export</button>
+                </div>
+            </section>
+        </main>
+
+        <aside class="sidebar inspector">
+            <div class="sidebar-header">
+                <h3>Entity Inspector</h3>
+            </div>
+
+            <div class="scrollable">
+                <div id="linkModeBanner" class="mod-card" style="margin-bottom: 12px; border-color: var(--accent); background: rgba(49,198,255,0.08); display:none;">
+                    <div style="font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 800; margin-bottom: 4px;">Link Mode Active</div>
+                    <div id="linkModeSource" style="font-size: 12px; color: var(--text-main);"></div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Select a destination node in the graph.</div>
+                </div>
+
+                <div id="inspectorEmpty" class="empty" style="margin-top: 50px;">Select an entity on the neural mesh to see data properties.</div>
+
+                <div id="nodeSection" class="node-info-grid" style="display:none;">
+                    <div class="mod-card" style="background: var(--accent-dim); border-color: var(--accent);">
+                        <div style="font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 800; margin-bottom: 4px;">Selected Entity</div>
+                        <div id="nodeLabel" style="font-size: 18px; font-weight: 700; color: #fff;"></div>
+                    </div>
+
+                    <div class="inspect-card">
+                        <div class="info-row">
+                            <span class="info-label">Identification Hash</span>
+                            <span id="nodeId" class="info-value"></span>
+                        </div>
+                        <div class="info-row" style="margin-top: 12px;">
+                            <span class="info-label">Entity Classification</span>
+                            <span id="nodeGroup" class="info-value"></span>
+                        </div>
+                        <div class="info-row" style="margin-top: 12px;">
+                            <span class="info-label">Extended Metadata</span>
+                            <span id="nodeMeta" class="info-value"></span>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; gap: 8px;">
+                        <button id="pivotBtn" class="cyber-btn">Pivot Target</button>
+                        <div style="display: grid; gap: 6px;">
+                            <input id="linkRelationInput" class="main-search" style="height: 34px; border-radius: 8px;" placeholder="Relation label (e.g. RELATED_TO)" value="related_to" />
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                                <button id="startLinkBtn" class="cyber-btn">Link From This Node</button>
+                                <button id="cancelLinkBtn" class="cyber-btn btn-outline" disabled>Cancel Link</button>
+                            </div>
+                        </div>
+                        <button id="purgeNodeBtn" class="cyber-btn btn-outline">Purge Entity</button>
+                    </div>
+                </div>
+
+                <div id="edgeSection" class="node-info-grid" style="display:none;">
+                    <div class="mod-card" style="background: rgba(255,255,255,0.05);">
+                        <div style="font-size: 10px; text-transform: uppercase; color: var(--text-dim); font-weight: 800; margin-bottom: 4px;">Relation Link</div>
+                        <div id="edgeLabel" style="font-size: 16px; font-weight: 700;"></div>
+                    </div>
+
+                    <div class="inspect-card">
+                        <div class="info-row">
+                            <span class="info-label">Origin (Source)</span>
+                            <span id="edgeFrom" class="info-value"></span>
+                        </div>
+                        <div class="info-row" style="margin-top: 12px;">
+                            <span class="info-label">Terminal (To)</span>
+                            <span id="edgeTo" class="info-value"></span>
+                        </div>
+                    </div>
+
+                    <button id="deleteEdgeBtn" class="cyber-btn btn-outline btn-danger">Delete Relation</button>
+                </div>
+            </div>
+
+            <div class="sidebar-header" style="border-top: 1px solid var(--border); border-bottom: none;">
+                <h3>Manual Insertion</h3>
+            </div>
+            <div class="scrollable" style="height: 130px; padding: 12px 20px;">
+                <div class="manual-grid" style="grid-template-columns: 1fr;">
+                    <input id="manualNodeLabel" class="main-search" style="height: 34px; border-radius: 8px;" placeholder="Entity Name..." />
+                    <select id="manualNodeGroup" class="main-search" style="height: 34px; border-radius: 8px; margin-top: 6px;">
+                        <option value="subdomain">subdomain</option>
+                        <option value="domain">domain</option>
+                        <option value="ip">ip</option>
+                        <option value="email">email</option>
+                        <option value="person">person</option>
+                        <option value="organization">organization</option>
+                        <option value="hostname">hostname</option>
+                        <option value="registrar">registrar</option>
+                        <option value="nameserver">nameserver</option>
+                        <option value="location">location</option>
+                        <option value="tech">tech</option>
+                        <option value="generic" selected>generic</option>
+                    </select>
+                    <button id="injectNodeBtn" class="cyber-btn" style="margin-top: 6px; width: 100%; height: 34px;">Inject Node</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+{% endraw %}

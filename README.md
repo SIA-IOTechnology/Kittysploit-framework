@@ -88,6 +88,8 @@ python kittyconsole.py
 - **Integrated Chat** - Communicate while developing
 - **Module Development** - Edit KittySploit modules directly in the browser
 
+### **KittyOsint** - Intelligent Graph Mapping
+
 ### **Complete Module System**
 - **Exploits** - Comprehensive exploit library for various vulnerabilities
 - **Payloads** - Multi-platform payload generation (Python, Bash, PHP, Zig)

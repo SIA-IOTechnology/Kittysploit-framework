@@ -131,6 +131,10 @@ python kittyconsole.py
 ![KittyCollab](docs/screenshots/kittycollab.png)
 *Real-time collaborative code editor*
 
+### KittyOsint
+![KittyOsint](docs/screenshots/kittyosint.png)
+*Osint - Intelligent graph mapping
+
 ### Module Marketplace
 ![Marketplace](docs/screenshots/marketplace.png)
 *Interface for kittysploit framework available on a marketplace*

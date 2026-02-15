@@ -135,7 +135,7 @@ python kittyconsole.py
 
 ### KittyOsint
 ![KittyOsint](docs/screenshots/kittyosint.png)
-*Osint - Intelligent graph mapping
+*Osint - Intelligent graph mapping*
 
 ### Module Marketplace
 ![Marketplace](docs/screenshots/marketplace.png)

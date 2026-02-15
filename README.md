@@ -14,7 +14,7 @@
   
   *Modular • Extensible • Powerful*
   
-  [Documentation](wiki/) • [Quick Start](#quick-start) • [Website](https://kittysploit.com)
+  [Documentation](wiki/) • [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Website](https://kittysploit.com)
 
 <div align="center">
   <img src="docs/screenshots/banner.png" alt="KittySploit Framework Banner" width="100%">

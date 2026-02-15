@@ -3,6 +3,7 @@
 
 import os
 import sys
+from html import escape as html_escape
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
@@ -127,16 +128,21 @@ class CLI:
             collab_client_count = 0
             if hasattr(self.framework, 'collab_client') and self.framework.collab_client:
                 collab_client_count = len(self.framework.collab_client.get_connected_clients())
-            workspace_display = f"[<workspace>collab:{self.framework.current_collab}:{collab_client_count}</workspace>]"
+            safe_collab = html_escape(str(self.framework.current_collab))
+            workspace_display = f"[<workspace>collab:{safe_collab}:{collab_client_count}</workspace>]"
         else:
             # In local mode, show the local workspace
-            workspace_display = f"[<workspace>{workspace}</workspace>]"
+            workspace_display = f"[<workspace>{html_escape(str(workspace))}</workspace>]"
         
+        # Escape user/module/workspace text because prompt_toolkit.HTML expects valid markup.
+        safe_prompt_name = html_escape(str(prompt_name))
+        safe_module_name = html_escape(str(module_name))
+
         # Build the prompt with the workspace, number of sessions and the current module
         if module_name:
-            return HTML(f"{workspace_display} {prompt_name} <sessions>[{session_count}]</sessions> (<module>{module_name}</module>)> ")
+            return HTML(f"{workspace_display} {safe_prompt_name} <sessions>[{session_count}]</sessions> (<module>{safe_module_name}</module>)> ")
         else:
-            return HTML(f"{workspace_display} {prompt_name} <sessions>[{session_count}]</sessions>> ")
+            return HTML(f"{workspace_display} {safe_prompt_name} <sessions>[{session_count}]</sessions>> ")
     
     def start(self):
         # Check charter acceptance before starting

@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-OSINT Plugin for KittySploit
-Run all OSINT auxiliary modules against a target from kittyconsole.
-"""
-
 import shlex
 import socket
 import ipaddress
@@ -62,7 +57,6 @@ class OsintPlugin(Plugin):
             rows.append([
                 module_id,
                 str(info.get("Name") or module_id),
-                str(info.get("Type") or "core"),
             ])
 
         print_info("Available OSINT modules:")
@@ -70,8 +64,7 @@ class OsintPlugin(Plugin):
         for row in rows:
             module_id = self._safe_text(row[0])
             name = self._safe_text(row[1])
-            mtype = self._safe_text(row[2])
-            print_info(f"- {module_id} | {name} | {mtype}")
+            print_info(f"- {module_id} | {name} ")
         print_info("------------------------------------------------------------")
         print_info(f"Total OSINT modules: {len(rows)}")
 

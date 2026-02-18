@@ -187,7 +187,7 @@ chmod +x install/install.sh
 For advanced users who prefer manual setup:
 
 ```bash
-git clone https://github.com/your-username/kittysploit-framework.git
+git clone https://github.com/SIA-IOTechnology/Kittysploit-framework
 cd kittysploit-framework
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate

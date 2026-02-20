@@ -1517,8 +1517,8 @@
                                 <option value="thorough">Thorough (10, 15s)</option>
                             </select>
                         </div>
-                        <div class="fuzzing-use-proxy-wrap" title="Uncheck if requests show Error — sends direct to target">
-                            <input type="checkbox" id="fuzzing-use-proxy" checked>
+                        <div class="fuzzing-use-proxy-wrap" title="Check to send requests via proxy; uncheck to send direct to target">
+                            <input type="checkbox" id="fuzzing-use-proxy">
                             <label for="fuzzing-use-proxy">Use proxy</label>
                         </div>
                     </div>
@@ -1567,7 +1567,7 @@
                         <label style="font-size: 12px;"><input type="checkbox" id="fuzzing-filter-xsslike"> XSS-like</label>
                         <label style="font-size: 12px;"><input type="checkbox" id="fuzzing-filter-sqlilike"> SQLi-like</label>
                         <span style="font-size: 12px; color: #666; margin-left: 8px;">Sort:</span>
-                        <select id="fuzzing-sort" style="padding: 4px 8px; font-size: 12px;">
+                        <select id="fuzzing-sort" class="fuzzing-toolbar-select">
                             <option value="default">Default</option>
                             <option value="param">Param</option>
                             <option value="payload">Payload</option>

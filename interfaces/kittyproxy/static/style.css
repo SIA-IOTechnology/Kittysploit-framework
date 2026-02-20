@@ -2525,7 +2525,7 @@ body {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
-    gap: 16px 24px;
+    gap: 20px 40px;
     margin-bottom: 20px;
 }
 
@@ -2690,6 +2690,25 @@ body {
 
 .fuzzing-file-upload-wrap input[type="file"]:hover {
     background: #f3f4f6;
+}
+
+/* Select Sort dans la barre de résultats Fuzzing — même style que les autres listes */
+.fuzzing-toolbar-select,
+.fuzzing-results-toolbar select {
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-color);
+    background: #fff;
+    min-width: 120px;
+    cursor: pointer;
+    font-family: inherit;
+}
+.fuzzing-toolbar-select:focus,
+.fuzzing-results-toolbar select:focus {
+    outline: none;
+    border-color: var(--primary-color, #6200ea);
 }
 
 .fuzzing-use-proxy-wrap {

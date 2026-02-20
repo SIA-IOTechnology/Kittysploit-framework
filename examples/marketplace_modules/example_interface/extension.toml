@@ -1,0 +1,56 @@
+# Example interface for KittySploit marketplace
+# Type: UI/INTERFACE
+
+# === IDENTITY ===
+id = "example-web-ui"
+name = "Example Web UI"
+version = "1.0.0"
+description = "Example web interface for KittySploit"
+author = "KittySploit Team <team@kittysploit.com>"
+
+# === TYPE ===
+extension_type = "UI"
+
+# === INSTALLATION ===
+# Entry point: main interface file
+entry_point = "src/main.py"
+
+# NOTE: No install_path for interfaces!
+# A launcher will be created at root: launch_example_web_ui.py
+
+# === COMPATIBILITY ===
+[compatibility]
+kittysploit_min = "1.0.0"
+kittysploit_max = "2.0.0"
+
+# === PERMISSIONS ===
+[permissions]
+# Web interface requires network access
+network_access = true
+
+# Database access to read results
+database_access = true
+
+# Sandbox level: standard
+sandbox_level = "standard"
+
+# Allowed Python imports
+allowed_imports = [
+    "flask",
+    "flask_cors",
+    "werkzeug",
+    "jinja2",
+    "json",
+    "sqlite3"
+]
+
+blocked_imports = []
+hooks = []
+events = []
+middlewares = []
+
+# === MARKETPLACE METADATA ===
+[metadata]
+price = 0.0
+currency = "EUR"
+license = "MIT"

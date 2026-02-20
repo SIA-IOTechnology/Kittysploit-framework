@@ -64,7 +64,20 @@ install\install.bat
 chmod +x install/install.sh && ./install/install.sh
 ```
 
-**Start using:**
+**Install via pip (all platforms):**
+```bash
+pip install kittysploit
+```
+Then run: `kittysploit` (console), `kittyproxy` (proxy UI), or `kittyosint` (OSINT).
+
+**From source (editable install):**
+```bash
+git clone https://github.com/SIA-IOTechnology/kittysploit-framework.git
+cd kittysploit-framework
+pip install -e .
+```
+
+**Start using (from clone, without pip):**
 ```bash
 python kittyconsole.py
 ```

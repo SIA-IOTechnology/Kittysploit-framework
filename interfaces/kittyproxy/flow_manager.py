@@ -10,12 +10,12 @@ from collections import OrderedDict
 
 from mitmproxy.http import HTTPFlow
 
-from flow_utils import safe_response_content as _safe_response_content, safe_response_size as _safe_response_size
+from .flow_utils import safe_response_content as _safe_response_content, safe_response_size as _safe_response_size
 
-from tech_detector import tech_detector
-from fingerprint_engine import fingerprint_engine
-from module_suggester import module_suggester
-from endpoint_extractor import endpoint_extractor
+from .tech_detector import tech_detector
+from .fingerprint_engine import fingerprint_engine
+from .module_suggester import module_suggester
+from .endpoint_extractor import endpoint_extractor
 
 class FlowManager:
     def __init__(self, max_flows: int = 5000, fast_mode: bool = False, fast_mode_threshold_kb: int = 100, framework=None):
@@ -492,7 +492,7 @@ class FlowManager:
                     })
             # Try to get from addon's websocket_messages dict
             try:
-                from proxy_core import interceptor_addon_instance
+                from .proxy_core import interceptor_addon_instance
                 if interceptor_addon_instance and flow.id in interceptor_addon_instance.websocket_messages:
                     addon_messages = interceptor_addon_instance.websocket_messages[flow.id]
                     if addon_messages:
@@ -537,7 +537,7 @@ class FlowManager:
                     print(f"[FLOW MANAGER] Flow {flow.id} detected as WebSocket (Sec-WebSocket-Key header)")
             # Check if flow is known in proxy core as a WebSocket (source of truth)
             try:
-                from proxy_core import interceptor_addon_instance
+                from .proxy_core import interceptor_addon_instance
                 if interceptor_addon_instance:
                     if flow.id in interceptor_addon_instance.websocket_messages:
                         is_websocket = True

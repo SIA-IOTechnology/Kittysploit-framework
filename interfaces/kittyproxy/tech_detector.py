@@ -413,7 +413,7 @@ class TechnologyDetector:
         content_type = ""
         if flow.response:
             try:
-                from flow_utils import safe_response_content
+                from .flow_utils import safe_response_content
                 res_content = safe_response_content(flow.response)
                 if res_content:
                     content = res_content.decode('utf-8', errors='ignore')
@@ -730,7 +730,7 @@ class TechnologyDetector:
         if not flow.response:
             return ""
         try:
-            from flow_utils import safe_response_content
+            from .flow_utils import safe_response_content
             res_content = safe_response_content(flow.response)
         except Exception:
             res_content = b""

@@ -516,8 +516,12 @@ class Framework:
         """
         try:
             counts = {}
-            modules_path = "modules"
-            
+            try:
+                import modules as _mod
+                modules_path = os.path.dirname(os.path.abspath(_mod.__file__))
+            except ImportError:
+                modules_path = "modules"
+
             if not os.path.exists(modules_path):
                 return counts
             
@@ -631,7 +635,7 @@ class Framework:
                 self.current_module = module
                 
                 # Enregistrer pour hot reload
-                module_file = os.path.join("modules", module_path.replace("/", os.sep) + ".py")
+                module_file = os.path.join(self.module_loader.modules_path, module_path.replace("/", os.sep) + ".py")
                 if os.path.exists(module_file):
                     self.hot_reload_manager.register_module(module_path, module_file)
                 

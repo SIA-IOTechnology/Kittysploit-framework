@@ -15,7 +15,7 @@ build/
 /database/
 *.db
 *.sqlite
-*.toml
+config.toml
 
 # Output files
 output/

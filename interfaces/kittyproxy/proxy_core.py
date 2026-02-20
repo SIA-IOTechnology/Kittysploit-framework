@@ -11,8 +11,8 @@ try:
 except ImportError as exc:
     raise ImportError("mitmproxy doit être installé (pip install mitmproxy)") from exc
 
-from flow_manager import flow_manager
-from plugins.base import InterceptionPlugin
+from .flow_manager import flow_manager
+from .plugins.base import InterceptionPlugin
 
 # Note: Individual plugins are now in kittyproxy/plugins/ directory
 # They are automatically loaded by InterceptionPluginManager._load_plugins()
@@ -45,7 +45,7 @@ class InterceptionPluginManager:
                 
                 try:
                     # Import the plugin module
-                    module = importlib.import_module(f'plugins.{plugin_name}')
+                    module = importlib.import_module(f'.plugins.{plugin_name}', package=__name__.rsplit('.', 1)[0])
                     
                     # Find plugin classes in the module (classes that inherit from InterceptionPlugin)
                     import inspect
@@ -170,12 +170,12 @@ class InterceptorAddon:
         flow_manager.add_flow(flow)
         
         # Record performance metrics
-        from performance_monitor import performance_monitor
+        from .performance_monitor import performance_monitor
         performance_monitor.record_request(flow)
         
         # Notifier les collaborateurs du nouveau flow
         try:
-            from api import broadcast_flow_to_collaborators
+            from .api import broadcast_flow_to_collaborators
             broadcast_flow_to_collaborators(flow)
         except Exception as e:
             # Ignorer les erreurs de collaboration

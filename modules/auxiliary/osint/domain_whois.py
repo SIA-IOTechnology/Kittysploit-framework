@@ -52,20 +52,38 @@ class Module(Auxiliary):
             org = None
             country = None
 
-            whois = None
+            whois_mod = None
             import_error = None
             try:
-                whois = importlib.import_module("whois")
+                whois_mod = importlib.import_module("whois")
             except Exception as ie:
                 import_error = str(ie)
 
-            if whois is not None and hasattr(whois, "whois") and callable(getattr(whois, "whois")):
-                # python-whois
-                w = whois.whois(target)
-            elif whois is not None and hasattr(whois, "query") and callable(getattr(whois, "query")):
-                # alternate "whois" wrappers
-                w = whois.query(target)
-            else:
+            # Try python-whois API: whois.whois(domain) or whois.query(domain)
+            if whois_mod is not None:
+                for attr in ("whois", "query"):
+                    fn = getattr(whois_mod, attr, None)
+                    if callable(fn):
+                        try:
+                            w = fn(target)
+                            if w is not None:
+                                break
+                        except Exception:
+                            pass
+                else:
+                    # No callable whois/query found; try calling anyway (some wrappers)
+                    if hasattr(whois_mod, "whois"):
+                        try:
+                            w = whois_mod.whois(target)
+                        except Exception:
+                            pass
+                    if not w and hasattr(whois_mod, "query"):
+                        try:
+                            w = whois_mod.query(target)
+                        except Exception:
+                            pass
+
+            if not w:
                 # Fallback: pythonwhois package API
                 try:
                     pythonwhois = importlib.import_module("pythonwhois")
@@ -75,14 +93,23 @@ class Module(Auxiliary):
                     pass
 
             if not w:
-                if whois is None:
-                    err = f"WHOIS package unavailable (import error: {import_error or 'unknown'})"
+                if whois_mod is None:
+                    err = (
+                        f"WHOIS package unavailable (import error: {import_error or 'unknown'}). "
+                        "Install python-whois: pip install -U python-whois"
+                    )
                 else:
-                    module_file = getattr(whois, "__file__", "unknown")
+                    module_origin = getattr(whois_mod, "__file__", None)
+                    if module_origin is None:
+                        module_origin = getattr(whois_mod, "__spec__", None)
+                        if module_origin is not None and hasattr(module_origin, "origin"):
+                            module_origin = module_origin.origin
+                    if module_origin is None:
+                        module_origin = "<whois module, unknown origin>"
                     err = (
                         "Unsupported whois package API for module "
-                        f"'{module_file}' (missing whois/query/get_whois). "
-                        "Install python-whois: pip install -U python-whois"
+                        f"'{module_origin}' (missing whois/query/get_whois). "
+                        "Install or reinstall python-whois: pip install -U python-whois"
                     )
                 print_error(err)
                 return {"error": err}

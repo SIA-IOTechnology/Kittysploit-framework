@@ -2,15 +2,15 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Quer
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from flow_manager import flow_manager
-from proxy_core import plugin_manager
-from endpoint_extractor import endpoint_extractor
-from reflection_checker import check_reflection as reflection_check_reflection
-from fuzzer import create_fuzz_job, get_fuzz_job_status, get_fuzz_job_results, stop_fuzz_job
-from ui_extensions.manager import list_extensions, get_extension_path
-from performance_monitor import performance_monitor
-from collaboration_manager import collaboration_manager, Collaborator
-from tech_detector import tech_detector
+from .flow_manager import flow_manager
+from .proxy_core import plugin_manager
+from .endpoint_extractor import endpoint_extractor
+from .reflection_checker import check_reflection as reflection_check_reflection
+from .fuzzer import create_fuzz_job, get_fuzz_job_status, get_fuzz_job_results, stop_fuzz_job
+from .ui_extensions.manager import list_extensions, get_extension_path
+from .performance_monitor import performance_monitor
+from .collaboration_manager import collaboration_manager, Collaborator
+from .tech_detector import tech_detector
 from mitmproxy.http import HTTPFlow, Request, Response
 from mitmproxy import connection
 import os
@@ -506,7 +506,7 @@ async def import_pcap(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="File must be .pcap or .pcapng")
     tmp = None
     try:
-        from pcap_importer import extract_flows_from_pcap
+        from .pcap_importer import extract_flows_from_pcap
         contents = await file.read()
         suffix = ".pcapng" if file.filename.lower().endswith(".pcapng") else ".pcap"
         fd, tmp = tempfile.mkstemp(suffix=suffix)
@@ -2098,7 +2098,7 @@ def _is_idor_candidate(param_name: str) -> bool:
 @app.get("/api/fuzzing/params/{flow_id}")
 def fuzzing_params(flow_id: str):
     """Get list of parameter names (and location) for a flow. Includes params from request and params discovered from response HTML (forms, links)."""
-    from reflection_checker import get_all_fuzzable_params
+    from .reflection_checker import get_all_fuzzable_params
     flow = flow_manager.get_flow(flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
@@ -2205,7 +2205,7 @@ class IdorTestRequest(BaseModel):
 def _build_request_with_param_value(url: str, method: str, headers: Dict, body_b64: Optional[str], param_name: str, param_location: str, new_value: str):
     """Build (url, body_bytes) with param set to new_value. Does not change method/headers."""
     import base64
-    from reflection_checker import _get_content_type
+    from .reflection_checker import _get_content_type
     parsed = urlparse(url)
     new_query = None
     if parsed.query and param_location == "query":
@@ -2258,7 +2258,7 @@ def idor_test(request: IdorTestRequest):
     Semi-automated IDOR check: send the same request with the param value changed (e.g. +1 or '1'),
     compare status and response length. If they differ, possible IDOR (verify manually).
     """
-    from reflection_checker import parse_request_params
+    from .reflection_checker import parse_request_params
     flow = flow_manager.get_flow(request.flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")

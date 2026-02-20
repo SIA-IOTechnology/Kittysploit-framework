@@ -16,9 +16,20 @@ try:
 except ImportError:
     POLICY_ENGINE_AVAILABLE = False
 
+def _default_modules_path() -> str:
+    """Resolve modules directory: use installed package location if available, else 'modules' (cwd)."""
+    try:
+        import modules as mod
+        return os.path.dirname(os.path.abspath(mod.__file__))
+    except ImportError:
+        return "modules"
+
+
 class ModuleLoader:
     
-    def __init__(self, modules_path: str = "modules", sync_manager=None, enable_policy_validation: bool = True):
+    def __init__(self, modules_path: str = None, sync_manager=None, enable_policy_validation: bool = True):
+        if modules_path is None:
+            modules_path = _default_modules_path()
         self.modules_path = modules_path
         self.modules_cache = {}
         self.enable_policy_validation = enable_policy_validation and POLICY_ENGINE_AVAILABLE

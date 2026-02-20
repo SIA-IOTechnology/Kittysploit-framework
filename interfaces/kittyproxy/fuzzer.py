@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import quote_plus, quote, unquote_plus, unquote, urlparse, urlunparse, parse_qs, urlencode
 
 # Reuse reflection_checker for param parsing and request building
-from reflection_checker import (
+from .reflection_checker import (
     get_all_fuzzable_params,
     build_request_with_canary,
 )

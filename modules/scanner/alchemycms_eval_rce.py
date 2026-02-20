@@ -78,9 +78,9 @@ class Module(Scanner, Http_client):
         print_info(f"Testing for eval() RCE vulnerability...")
         print_debug(f"Ruby payload: {ruby_payload}")
         
-            # Try multiple exploitation vectors
-            exploit_paths = [
-                self.resource_path if self.resource_path else "/admin/resources",
+        # Try multiple exploitation vectors
+        exploit_paths = [
+            self.resource_path if self.resource_path else "/admin/resources",
             "/admin/resources/new",
             "/admin/resources",
             "/admin/pages",

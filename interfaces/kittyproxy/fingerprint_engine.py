@@ -269,7 +269,7 @@ class FingerprintEngine:
         """Extrait le texte de la réponse"""
         if not flow.response:
             return ""
-        from flow_utils import safe_response_content
+        from .flow_utils import safe_response_content
         res_content = safe_response_content(flow.response)
         text = f"HTTP/{flow.response.http_version} {flow.response.status_code}\n"
         text += "\n".join([f"{k}: {v}" for k, v in flow.response.headers.items()])

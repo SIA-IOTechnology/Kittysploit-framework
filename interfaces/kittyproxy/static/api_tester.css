@@ -7,11 +7,11 @@
     overflow: hidden;
 }
 
-/* Sidebar: Collections & History */
+/* Sidebar: Collections & History - largeur par défaut pour afficher les 5 onglets */
 .api-tester-sidebar {
-    width: 360px;
-    min-width: 260px;
-    max-width: 50%;
+    width: 520px;
+    min-width: 280px;
+    max-width: 55%;
     background: white;
     border-right: 1px solid var(--border-color);
     display: flex;

@@ -2477,3 +2477,232 @@ body {
     font-size: 0.75rem;
     color: #616161;
 }
+
+/* === Fuzzing options panel === */
+.fuzzing-options-panel {
+    padding: 20px 24px 24px;
+    background: #f8f9fa;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.fuzzing-options-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 16px 24px;
+    margin-bottom: 20px;
+}
+
+.fuzzing-opt-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.fuzzing-opt-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+    margin-bottom: 6px;
+}
+
+.fuzzing-opt-group select,
+.fuzzing-opt-group input[type="number"] {
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-color);
+    background: #fff;
+    width: 100%;
+    min-width: 100px;
+}
+
+.fuzzing-opt-group select {
+    cursor: pointer;
+}
+
+.fuzzing-opt-group select:focus,
+.fuzzing-opt-group input[type="number"]:focus {
+    outline: none;
+    border-color: var(--primary-color, #6200ea);
+}
+
+.fuzzing-opt-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    border: 1px solid #e5e7eb;
+}
+
+.fuzzing-opt-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.fuzzing-params-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.fuzzing-param-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-color);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.fuzzing-param-chip:hover {
+    background: #e5e7eb;
+}
+
+.fuzzing-param-chip input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--primary-color, #6200ea);
+}
+
+.fuzzing-param-chip.selected {
+    background: #ede9fe;
+    border-color: var(--primary-color, #6200ea);
+    color: var(--primary-color, #6200ea);
+}
+
+.fuzzing-param-chip .param-name {
+    font-weight: 500;
+}
+
+.fuzzing-param-chip .param-meta {
+    font-size: 10px;
+    color: #9ca3af;
+    margin-left: 2px;
+}
+
+.fuzzing-param-chip .param-idor-badge {
+    font-size: 9px;
+    font-weight: 600;
+    color: #b45309;
+    background: #fef3c7;
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-left: 6px;
+}
+
+.fuzzing-payloads-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.fuzzing-payloads-card .fuzzing-opt-card-title {
+    margin-bottom: 8px;
+}
+
+.fuzzing-custom-payloads {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 72px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--text-color);
+    background: #fff;
+    resize: vertical;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+}
+
+.fuzzing-custom-payloads:focus {
+    outline: none;
+    border-color: var(--primary-color, #6200ea);
+}
+
+.fuzzing-file-upload-wrap {
+    margin-top: 10px;
+}
+
+.fuzzing-file-upload-wrap input[type="file"] {
+    font-size: 12px;
+    padding: 6px 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #f9fafb;
+    cursor: pointer;
+}
+
+.fuzzing-file-upload-wrap input[type="file"]:hover {
+    background: #f3f4f6;
+}
+
+.fuzzing-use-proxy-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.fuzzing-use-proxy-wrap input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--primary-color, #6200ea);
+}
+
+.fuzzing-use-proxy-wrap label {
+    font-size: 13px;
+    color: #4b5563;
+    cursor: pointer;
+    margin: 0;
+}
+
+.fuzzing-view-request {
+    font-size: 11px;
+    color: var(--primary-color, #6200ea);
+    text-decoration: none;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
+.fuzzing-view-request:hover {
+    text-decoration: underline;
+}
+
+a.fuzzing-poc-btn {
+    font-size: 11px;
+    color: var(--primary-color, #6200ea);
+    text-decoration: none;
+    margin-left: 6px;
+}
+a.fuzzing-poc-btn:hover {
+    text-decoration: underline;
+}
+
+.fuzzing-payload-text {
+    word-break: break-all;
+}

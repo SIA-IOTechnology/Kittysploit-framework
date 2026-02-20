@@ -371,6 +371,8 @@ const intruderNewTabBtn = document.getElementById('intruder-new-tab-btn');
 const replayBtn = document.getElementById('replay-btn');
 const sendToRepeaterBtn = document.getElementById('send-to-repeater-btn');
 const sendToIntruderBtn = document.getElementById('send-to-intruder-btn');
+const reflectionCheckBtn = document.getElementById('reflection-check-btn');
+const sendToFuzzingBtn = document.getElementById('send-to-fuzzing-btn');
 
 // Search
 const searchInput = document.getElementById('flow-search');
@@ -465,6 +467,10 @@ function switchView(viewId, navItem = null) {
         updateApiTabBadge(0);
     }
 
+    if (viewId === 'fuzzing') {
+        loadFuzzingFlows();
+    }
+
     // WebSocket tab: load connections
     if (viewId === 'websocket') {
         loadWebSocketConnections();
@@ -554,6 +560,7 @@ function updateTopBarForView(viewId) {
         'replay': 'Repeater',
         'intruder': 'Intruder',
         'api': 'API Tester',
+        'fuzzing': 'Fuzzing',
         'encoder': 'Encoder / Decoder',
         'websocket': 'WebSocket',
         'sidechannel': 'Side Channel'
@@ -1593,6 +1600,658 @@ function hydrateSidechannelDom() {
 }
 
 hydrateSidechannelDom();
+
+// === FUZZING (XSS / SQLi) ===
+let currentFuzzJobId = null;
+let fuzzPollInterval = null;
+let fuzzingRawResults = [];
+let currentFuzzType = 'xss';
+/** Flow id chosen for fuzzing (from Analyze selection or from search). No bulk list — scales to thousands of flows. */
+let fuzzingSelectedFlowId = null;
+
+function getFuzzingFlowId() {
+    return fuzzingSelectedFlowId || currentFlowId;
+}
+
+async function loadFuzzingFlows() {
+    // Sync with flow selected in Analyze when opening Fuzzing tab; no bulk load of flows
+    fuzzingSelectedFlowId = fuzzingSelectedFlowId || currentFlowId;
+    await updateFuzzingFlowDisplay();
+}
+
+async function updateFuzzingFlowDisplay() {
+    const label = document.getElementById('fuzzing-current-flow-label');
+    const flowId = getFuzzingFlowId();
+    if (!label) return;
+    if (!flowId) {
+        label.textContent = 'No flow selected';
+        label.title = 'Use « Use current » or « Search » to select a request';
+        onFuzzingFlowChange();
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/flows/${encodeURIComponent(flowId)}`);
+        if (!res.ok) {
+            label.textContent = flowId.slice(0, 12) + '… (load failed)';
+            label.title = flowId;
+            onFuzzingFlowChange();
+            return;
+        }
+        const flow = await res.json();
+        const url = flow.url || flowId;
+        label.textContent = url.length > 60 ? url.slice(0, 57) + '…' : url;
+        label.title = url;
+    } catch (err) {
+        label.textContent = flowId.slice(0, 12) + '…';
+        label.title = flowId;
+    }
+    onFuzzingFlowChange();
+}
+
+async function onFuzzingFlowChange() {
+    const flowId = getFuzzingFlowId();
+    const row = document.getElementById('fuzzing-params-row');
+    const container = document.getElementById('fuzzing-params-checkboxes');
+    if (!row || !container) return;
+    if (!flowId) {
+        row.style.display = 'none';
+        container.innerHTML = '';
+        renderIdorTable([]);
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/fuzzing/params/${encodeURIComponent(flowId)}`);
+        if (!res.ok) { row.style.display = 'none'; renderIdorTable([]); return; }
+        const data = await res.json();
+        const params = data.params || [];
+        container.innerHTML = '';
+        params.forEach(p => {
+            const chip = document.createElement('label');
+            chip.className = 'fuzzing-param-chip selected';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = true;
+            cb.dataset.paramName = p.name || '';
+            cb.dataset.idorCandidate = p.idor_candidate ? '1' : '0';
+            cb.addEventListener('change', () => {
+                chip.classList.toggle('selected', cb.checked);
+                applyFuzzingFiltersAndSort();
+            });
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'param-name';
+            nameSpan.textContent = (p.name || '') + (p.location ? ' (' + p.location + ')' : '');
+            const metaParts = [];
+            if (p.source === 'js') metaParts.push('from JS');
+            else if (p.source && p.source !== 'request') metaParts.push('from page');
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'param-meta';
+            metaSpan.textContent = metaParts.length ? metaParts.join(' · ') : '';
+            chip.appendChild(cb);
+            chip.appendChild(nameSpan);
+            if (p.idor_candidate) {
+                const idorBadge = document.createElement('span');
+                idorBadge.className = 'param-idor-badge';
+                idorBadge.title = 'Possible IDOR — test in the « Test IDOR » section below';
+                idorBadge.textContent = 'IDOR?';
+                chip.appendChild(idorBadge);
+            }
+            if (metaSpan.textContent) chip.appendChild(metaSpan);
+            container.appendChild(chip);
+        });
+        row.style.display = params.length ? 'block' : 'none';
+        // Remplir le tableau IDOR (paramètres candidats uniquement)
+        const idorParams = params.filter(p => p.idor_candidate);
+        renderIdorTable(idorParams);
+    } catch (err) {
+        console.error('[Fuzzing] Load params error:', err);
+        row.style.display = 'none';
+    }
+}
+
+function getFuzzingSelectedParamNames() {
+    const container = document.getElementById('fuzzing-params-checkboxes');
+    if (!container) return null;
+    const names = [];
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        const n = cb.dataset.paramName;
+        if (n) names.push(n);
+    });
+    return names.length ? names : null;
+}
+
+/** Affiche le tableau IDOR et gère les boutons Tester / Tester tous */
+function renderIdorTable(idorParams) {
+    const card = document.getElementById('fuzzing-idor-card');
+    const tbody = document.getElementById('fuzzing-idor-tbody');
+    if (!card || !tbody) return;
+    if (!idorParams || idorParams.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+    const flowId = getFuzzingFlowId();
+    tbody.innerHTML = idorParams.map(p => {
+        const name = (p.name || '').trim();
+        const loc = p.location || 'query';
+        const val = (p.value != null && p.value !== undefined) ? String(p.value) : '—';
+        const valEsc = escapeHtml(val.length > 40 ? val.slice(0, 37) + '…' : val);
+        return `<tr data-param-name="${escapeHtml(name)}">
+            <td style="padding: 8px 10px; border: 1px solid #ddd;">${escapeHtml(name)}</td>
+            <td style="padding: 8px 10px; border: 1px solid #ddd;">${escapeHtml(loc)}</td>
+            <td style="padding: 8px 10px; border: 1px solid #ddd; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="${valEsc}">${valEsc}</td>
+            <td class="idor-result-cell" style="padding: 8px 10px; border: 1px solid #ddd; font-size: 12px;">—</td>
+            <td style="padding: 8px 10px; border: 1px solid #ddd;"><button type="button" class="btn btn-secondary idor-test-one-btn" style="font-size: 11px;">Tester</button></td>
+        </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.idor-test-one-btn').forEach(btn => {
+        const row = btn.closest('tr');
+        const paramName = row && row.dataset.paramName;
+        if (paramName && flowId) {
+            btn.addEventListener('click', () => runIdorTestForParam(flowId, paramName, row));
+        }
+    });
+}
+
+async function runIdorTestForParam(flowId, paramName, rowEl) {
+    const resultCell = rowEl && rowEl.querySelector('.idor-result-cell');
+    const btn = rowEl && rowEl.querySelector('.idor-test-one-btn');
+    if (resultCell) resultCell.textContent = '…';
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/idor/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flow_id: flowId, param_name: paramName })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (resultCell) { resultCell.textContent = data.detail || 'Erreur'; resultCell.style.color = '#c00'; }
+            return;
+        }
+        if (resultCell) {
+            if (data.possible_idor) {
+                resultCell.textContent = `Possible IDOR — ${data.original_status} → ${data.modified_status}, ${data.original_response_length} → ${data.modified_response_length} octets`;
+                resultCell.style.color = '#b45309';
+            } else {
+                resultCell.textContent = `Pas de différence (${data.original_status}, ${data.original_response_length} octets)`;
+                resultCell.style.color = '#059669';
+            }
+        }
+    } catch (err) {
+        if (resultCell) { resultCell.textContent = 'Erreur: ' + (err.message || 'request failed'); resultCell.style.color = '#c00'; }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function runIdorTestAll() {
+    const flowId = getFuzzingFlowId();
+    if (!flowId) return;
+    const tbody = document.getElementById('fuzzing-idor-tbody');
+    const rows = tbody ? tbody.querySelectorAll('tr[data-param-name]') : [];
+    const allBtn = document.getElementById('fuzzing-idor-test-all-btn');
+    if (allBtn) allBtn.disabled = true;
+    for (const row of rows) {
+        const paramName = row.dataset.paramName;
+        if (paramName) await runIdorTestForParam(flowId, paramName, row);
+    }
+    if (allBtn) allBtn.disabled = false;
+}
+
+function getFuzzingCustomPayloads() {
+    const ta = document.getElementById('fuzzing-custom-payloads');
+    let lines = (ta && ta.value) ? ta.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean) : [];
+    const fileInput = document.getElementById('fuzzing-payloads-file');
+    if (fileInput && fileInput.files && fileInput.files[0]) {
+        return new Promise((resolve) => {
+            const fr = new FileReader();
+            fr.onload = () => {
+                const fileLines = (fr.result || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                const merged = [...new Set([...lines, ...fileLines])];
+                resolve(merged.length ? merged : null);
+            };
+            fr.readAsText(fileInput.files[0], 'UTF-8');
+        });
+    }
+    return Promise.resolve(lines.length ? lines : null);
+}
+
+function applyFuzzingFiltersAndSort() {
+    const filterReflected = document.getElementById('fuzzing-filter-reflected')?.checked;
+    const filterXss = document.getElementById('fuzzing-filter-xsslike')?.checked;
+    const filterSqli = document.getElementById('fuzzing-filter-sqlilike')?.checked;
+    const sortVal = document.getElementById('fuzzing-sort')?.value || 'default';
+    let list = (fuzzingRawResults || []).slice();
+    if (filterReflected) list = list.filter(r => r.reflected);
+    if (filterXss) list = list.filter(r => r.xss_like);
+    if (filterSqli) list = list.filter(r => r.sqli_like);
+    if (sortVal && sortVal !== 'default') {
+        const key = sortVal === 'time' ? 'duration_ms' : (sortVal === 'xss_like' ? 'xss_like' : (sortVal === 'sqli_like' ? 'sqli_like' : sortVal));
+        list.sort((a, b) => {
+            const va = a[key];
+            const vb = b[key];
+            if (key === 'param' || key === 'payload') return String(va || '').localeCompare(String(vb || ''));
+            if (key === 'status' || key === 'duration_ms') return (Number(va) || 0) - (Number(vb) || 0);
+            if (key === 'reflected' || key === 'xss_like' || key === 'sqli_like') return (vb ? 1 : 0) - (va ? 1 : 0);
+            return 0;
+        });
+    }
+    renderFuzzingResults(list, true);
+}
+
+window.__lastFuzzingRenderedResults = [];
+
+function showFuzzingRequestModal(result) {
+    const overlay = document.getElementById('fuzzing-request-modal-overlay');
+    const modal = document.getElementById('fuzzing-request-modal');
+    const content = document.getElementById('fuzzing-request-modal-content');
+    if (!overlay || !modal || !content) return;
+    const method = result.request_method || 'GET';
+    const url = result.request_url || '';
+    let body = '';
+    if (result.request_body_b64) {
+        try {
+            body = atob(result.request_body_b64);
+        } catch (e) {
+            body = '(invalid base64)';
+        }
+    }
+    let text = method + ' ' + url;
+    if (body) text += '\n\nRequest Body:\n' + body;
+    if (result.response_snippet) text += '\n\n--- Response (first 300 chars) ---\n' + result.response_snippet;
+    text += '\n\nResponse length: ' + (result.response_length || 0) + ' chars';
+    text += '\nReflected: ' + (result.reflected ? 'Yes' : 'No');
+    text += '\nXSS-like: ' + (result.xss_like ? 'Yes' : 'No');
+    content.textContent = text;
+    overlay.style.display = 'block';
+    modal.style.display = 'flex';
+}
+
+function closeFuzzingRequestModal() {
+    const overlay = document.getElementById('fuzzing-request-modal-overlay');
+    const modal = document.getElementById('fuzzing-request-modal');
+    if (overlay) overlay.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+}
+
+function buildFuzzingPocPython(result) {
+    const method = (result.request_method || 'GET').toUpperCase();
+    const url = result.request_url || '';
+    const payload = result.payload || '';
+    const param = result.param || '';
+    let body = '';
+    if (result.request_body_b64) {
+        try {
+            body = atob(result.request_body_b64);
+        } catch (e) {
+            body = '';
+        }
+    }
+    const lines = [
+        '#!/usr/bin/env python3',
+        '# PoC — replay request from fuzzing result',
+        '',
+        'import requests',
+        '',
+        `url = ${JSON.stringify(url)}`,
+        `payload = ${JSON.stringify(payload)}`,
+        ''
+    ];
+    if (method === 'GET') {
+        lines.push('# GET with full URL (payload already in query)');
+        lines.push('resp = requests.get(url, verify=False)');
+    } else {
+        lines.push(`# ${method} with body`);
+        if (body) {
+            lines.push(`body = ${JSON.stringify(body)}`);
+            lines.push('resp = requests.request("' + method + '", url, data=body.encode("utf-8") if isinstance(body, str) else body, verify=False)');
+        } else {
+            lines.push('resp = requests.request("' + method + '", url, verify=False)');
+        }
+    }
+    lines.push('');
+    lines.push('print(resp.status_code)');
+    lines.push('print(resp.text[:2000])  # first 2000 chars');
+    return lines.join('\n');
+}
+
+function showFuzzingPocModal(result) {
+    const overlay = document.getElementById('fuzzing-poc-modal-overlay');
+    const modal = document.getElementById('fuzzing-poc-modal');
+    const content = document.getElementById('fuzzing-poc-modal-content');
+    if (!overlay || !modal || !content) return;
+    content.textContent = buildFuzzingPocPython(result);
+    overlay.style.display = 'block';
+    modal.style.display = 'flex';
+}
+
+function closeFuzzingPocModal() {
+    const overlay = document.getElementById('fuzzing-poc-modal-overlay');
+    const modal = document.getElementById('fuzzing-poc-modal');
+    if (overlay) overlay.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+}
+window.closeFuzzingPocModal = closeFuzzingPocModal;
+
+function renderFuzzingResults(results, fromFilter) {
+    const tbody = document.getElementById('fuzzing-results-body');
+    if (!tbody) return;
+    if (!fromFilter) fuzzingRawResults = results || [];
+    window.__lastFuzzingRenderedResults = results || [];
+    const type = document.getElementById('fuzzing-type')?.value || 'xss';
+    currentFuzzType = type;
+    const thXss = document.getElementById('fuzzing-th-xss');
+    const thSqli = document.getElementById('fuzzing-th-sqli');
+    if (thXss) thXss.style.display = type === 'sqli' ? 'none' : '';
+    if (thSqli) thSqli.style.display = type === 'sqli' ? '' : 'none';
+    const colCount = type === 'sqli' ? 7 : 6;
+    if (!results || results.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colCount}" style="padding: 24px; text-align: center; color: #999;">No results yet</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = results.map((r, idx) => {
+        const statusVal = r.status;
+        const statusDisplay = statusVal === 0 ? 'Error' : (statusVal || '-');
+        const statusTitle = (statusVal === 0 && r.error) ? escapeHtml(r.error) : '';
+        const statusStyle = statusVal === 0 ? 'color: #c62828;' : '';
+        const ref = r.reflected ? 'Yes' : 'No';
+        const refStyle = r.reflected ? 'color: #2e7d32; font-weight: 600;' : '';
+        const xss = r.xss_like ? 'Yes' : (r.dom_xss_candidate ? 'DOM?' : 'No');
+        const xssStyle = r.xss_like ? 'color: #c62828; font-weight: 600;' : (r.dom_xss_candidate ? 'color: #e65100; font-weight: 600;' : '');
+        const xssTitle = r.dom_xss_candidate ? 'Possible DOM XSS — verify in browser (payload not in HTTP response)' : '';
+        const sqli = r.sqli_like ? 'Yes' : 'No';
+        const sqliStyle = r.sqli_like ? 'color: #e65100; font-weight: 600;' : '';
+        const rowStyle = r.xss_like ? 'background: #ffebee;' : (r.dom_xss_candidate ? 'background: #fff3e0;' : (r.sqli_like ? 'background: #fff8e1;' : (r.reflected ? 'background: #e8f5e9;' : '')));
+        const payloadText = escapeHtml((r.payload || '').slice(0, 55)) + ((r.payload || '').length > 55 ? '…' : '');
+        const viewLink = (r.request_url || r.request_method) ? ` <a href="#" class="fuzzing-view-request" data-fuzz-row-index="${idx}" title="View request">View</a>` : '';
+        const pocLink = (r.request_url || r.request_method) ? ` <a href="#" class="fuzzing-poc-btn" data-fuzz-row-index="${idx}" title="Show Python PoC">Python</a>` : '';
+        const payloadCell = `<td style="padding: 8px; border: 1px solid #ddd; max-width: 280px;" title="${escapeHtml(r.payload || '')}"><span class="fuzzing-payload-text">${payloadText}</span>${viewLink}${pocLink}</td>`;
+        let cells = [
+            `<td style="padding: 8px; border: 1px solid #ddd;">${escapeHtml(r.param || '')}</td>`,
+            payloadCell,
+            `<td style="padding: 8px; border: 1px solid #ddd; ${statusStyle}" title="${statusTitle}">${statusDisplay}</td>`,
+            `<td style="padding: 8px; border: 1px solid #ddd;">${r.duration_ms != null ? r.duration_ms : '-'}</td>`,
+            `<td style="padding: 8px; border: 1px solid #ddd; ${refStyle}">${ref}</td>`,
+            `<td style="padding: 8px; border: 1px solid #ddd; ${xssStyle}" title="${escapeHtml(xssTitle || '')}">${xss}</td>`
+        ];
+        if (type === 'sqli') cells.push(`<td style="padding: 8px; border: 1px solid #ddd; ${sqliStyle}">${sqli}</td>`);
+        return `<tr style="${rowStyle}">${cells.join('')}</tr>`;
+    }).join('');
+    tbody.querySelectorAll('a.fuzzing-view-request').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const idx = parseInt(this.getAttribute('data-fuzz-row-index'), 10);
+            const res = window.__lastFuzzingRenderedResults[idx];
+            if (res) showFuzzingRequestModal(res);
+        });
+    });
+    tbody.querySelectorAll('a.fuzzing-poc-btn').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const idx = parseInt(this.getAttribute('data-fuzz-row-index'), 10);
+            const res = window.__lastFuzzingRenderedResults[idx];
+            if (res) showFuzzingPocModal(res);
+        });
+    });
+}
+
+function stopFuzzPolling() {
+    if (fuzzPollInterval) {
+        clearInterval(fuzzPollInterval);
+        fuzzPollInterval = null;
+    }
+}
+
+async function pollFuzzJob() {
+    if (!currentFuzzJobId) return;
+    try {
+        const [statusRes, resultsRes] = await Promise.all([
+            fetch(`${API_BASE}/fuzzing/status/${currentFuzzJobId}`),
+            fetch(`${API_BASE}/fuzzing/results/${currentFuzzJobId}`)
+        ]);
+        if (!statusRes.ok || !resultsRes.ok) return;
+        const status = await statusRes.json();
+        const data = await resultsRes.json();
+        const results = data.results || [];
+        fuzzingRawResults = results;
+        const statusEl = document.getElementById('fuzzing-status-text');
+        if (statusEl) {
+            statusEl.textContent = status.running
+                ? `Running — ${status.total_sent || 0} requests sent`
+                : `Done — ${status.total_sent || 0} total, ${status.total_ok || 0} OK`;
+        }
+        // DOM XSS warning banner
+        let banner = document.getElementById('fuzzing-dom-xss-banner');
+        if (status.dom_xss_risk) {
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'fuzzing-dom-xss-banner';
+                banner.style.cssText = 'padding: 10px 16px; background: #fff3e0; border: 1px solid #ffb74d; border-radius: 6px; margin: 8px 16px 0; font-size: 13px; color: #e65100; display: flex; align-items: center; gap: 8px;';
+                banner.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">warning</span><span><strong>DOM XSS Risk</strong> — The page contains JavaScript sinks (<code>innerHTML</code>, <code>document.write</code>, etc.) that may execute injected payloads client-side. This type of XSS cannot be confirmed by HTTP fuzzing alone — <strong>manual browser testing is required</strong>.</span>';
+                const toolbar = document.querySelector('.fuzzing-results-toolbar');
+                if (toolbar) toolbar.parentNode.insertBefore(banner, toolbar.nextSibling);
+            }
+        } else if (banner) {
+            banner.remove();
+        }
+        applyFuzzingFiltersAndSort();
+        if (!status.running) {
+            stopFuzzPolling();
+            currentFuzzJobId = null;
+            const startBtn = document.getElementById('fuzzing-start-btn');
+            const stopBtn = document.getElementById('fuzzing-stop-btn');
+            if (startBtn) startBtn.disabled = false;
+            if (stopBtn) stopBtn.disabled = true;
+        }
+    } catch (err) {
+        console.error('[Fuzzing] Poll error:', err);
+    }
+}
+
+function initFuzzingHandlers() {
+    const startBtn = document.getElementById('fuzzing-start-btn');
+    const stopBtn = document.getElementById('fuzzing-stop-btn');
+    const concurrencyEl = document.getElementById('fuzzing-concurrency');
+    const timeoutEl = document.getElementById('fuzzing-timeout');
+    const presetEl = document.getElementById('fuzzing-preset');
+    const reflectionBtn = document.getElementById('fuzzing-reflection-btn');
+    const searchFlowBtn = document.getElementById('fuzzing-search-flow-btn');
+    const searchBox = document.getElementById('fuzzing-search-box');
+    const searchInput = document.getElementById('fuzzing-search-input');
+    const searchDoBtn = document.getElementById('fuzzing-search-do-btn');
+    const searchCancelBtn = document.getElementById('fuzzing-search-cancel-btn');
+    const searchResults = document.getElementById('fuzzing-search-results');
+
+    const useCurrentBtn = document.getElementById('fuzzing-use-current-btn');
+    if (useCurrentBtn) {
+        useCurrentBtn.addEventListener('click', () => {
+            if (!currentFlowId) {
+                showAppAlert('No flow selected in Analyze. Select a request there first.');
+                return;
+            }
+            fuzzingSelectedFlowId = currentFlowId;
+            updateFuzzingFlowDisplay();
+        });
+    }
+    if (searchFlowBtn && searchBox) {
+        searchFlowBtn.addEventListener('click', () => {
+            searchBox.style.display = searchBox.style.display === 'none' ? 'block' : 'none';
+            if (searchBox.style.display === 'block' && searchInput) searchInput.focus();
+        });
+    }
+    if (searchCancelBtn && searchBox) {
+        searchCancelBtn.addEventListener('click', () => {
+            searchBox.style.display = 'none';
+            if (searchResults) searchResults.innerHTML = '';
+        });
+    }
+    const optionsToggle = document.getElementById('fuzzing-options-toggle');
+    const optionsPanel = document.getElementById('fuzzing-options-panel');
+    if (optionsToggle && optionsPanel) {
+        optionsToggle.addEventListener('click', () => {
+            const isOpen = optionsPanel.style.display !== 'none';
+            optionsPanel.style.display = isOpen ? 'none' : 'block';
+            optionsToggle.title = isOpen ? 'Show options' : 'Hide options';
+        });
+    }
+    const idorTestAllBtn = document.getElementById('fuzzing-idor-test-all-btn');
+    if (idorTestAllBtn) {
+        idorTestAllBtn.addEventListener('click', runIdorTestAll);
+    }
+    async function doFuzzingSearch() {
+        const q = (searchInput && searchInput.value && searchInput.value.trim()) || '';
+        if (!searchResults) return;
+        searchResults.innerHTML = '<div style="padding:12px;color:#666;">Searching…</div>';
+        if (q.length < 2) {
+            searchResults.innerHTML = '<div style="padding:12px;color:#888;">Enter at least 2 characters (URL or flow ID).</div>';
+            return;
+        }
+        try {
+            const res = await fetch(`${API_BASE}/flows?page=1&size=25&search=${encodeURIComponent(q)}`);
+            const data = await res.json();
+            const items = data.items || data.flows || [];
+            if (items.length === 0) {
+                searchResults.innerHTML = '<div style="padding:12px;color:#888;">No flows match.</div>';
+                return;
+            }
+            searchResults.innerHTML = items.map(f => {
+                const url = (f.url || f.id || '').slice(0, 80) + ((f.url || '').length > 80 ? '…' : '');
+                return `<div class="fuzzing-search-result" data-flow-id="${escapeHtml(f.id)}" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #eee;font-size:13px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">${escapeHtml(url)}</div>`;
+            }).join('');
+            searchResults.querySelectorAll('.fuzzing-search-result').forEach(el => {
+                el.addEventListener('click', () => {
+                    fuzzingSelectedFlowId = el.dataset.flowId || null;
+                    searchBox.style.display = 'none';
+                    searchResults.innerHTML = '';
+                    if (searchInput) searchInput.value = '';
+                    updateFuzzingFlowDisplay();
+                });
+            });
+        } catch (err) {
+            searchResults.innerHTML = '<div style="padding:12px;color:#c00;">Search failed.</div>';
+        }
+    }
+    if (searchDoBtn) searchDoBtn.addEventListener('click', doFuzzingSearch);
+    if (searchInput) searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFuzzingSearch(); });
+
+    if (presetEl) {
+        presetEl.addEventListener('change', () => {
+            const v = presetEl.value;
+            if (v === 'fast') { if (concurrencyEl) concurrencyEl.value = 50; if (timeoutEl) timeoutEl.value = 5; }
+            else if (v === 'normal') { if (concurrencyEl) concurrencyEl.value = 20; if (timeoutEl) timeoutEl.value = 10; }
+            else if (v === 'thorough') { if (concurrencyEl) concurrencyEl.value = 10; if (timeoutEl) timeoutEl.value = 15; }
+            presetEl.value = '';
+        });
+    }
+
+    ['fuzzing-filter-reflected', 'fuzzing-filter-xsslike', 'fuzzing-filter-sqlilike', 'fuzzing-sort'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', applyFuzzingFiltersAndSort);
+    });
+
+    if (document.getElementById('fuzzing-type')) {
+        document.getElementById('fuzzing-type').addEventListener('change', () => {
+            currentFuzzType = document.getElementById('fuzzing-type').value;
+            applyFuzzingFiltersAndSort();
+        });
+    }
+
+    if (startBtn) {
+        startBtn.addEventListener('click', async () => {
+            const flowId = getFuzzingFlowId();
+            if (!flowId) {
+                showAppAlert('Select a flow to fuzz (or select one in Analyze).');
+                return;
+            }
+            startBtn.disabled = true;
+            if (stopBtn) stopBtn.disabled = false;
+            const statusEl = document.getElementById('fuzzing-status-text');
+            if (statusEl) statusEl.textContent = 'Starting…';
+            try {
+                const customPayloads = await getFuzzingCustomPayloads();
+                const paramNames = getFuzzingSelectedParamNames();
+                const concurrency = Math.min(100, Math.max(1, parseInt(concurrencyEl?.value || '20', 10) || 20));
+                const timeout = Math.min(60, Math.max(1, parseFloat(timeoutEl?.value || '10') || 10));
+                const body = {
+                    flow_id: flowId,
+                    fuzz_type: document.getElementById('fuzzing-type')?.value || 'xss',
+                    param_names: paramNames,
+                    custom_payloads: Array.isArray(customPayloads) ? customPayloads : [],
+                    encoding: document.getElementById('fuzzing-encoding')?.value || 'none',
+                    concurrency,
+                    timeout,
+                    proxy_port: 8080,
+                    use_proxy: document.getElementById('fuzzing-use-proxy')?.checked !== false
+                };
+                const res = await fetch(`${API_BASE}/fuzzing/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || res.statusText);
+                currentFuzzJobId = data.job_id;
+                if (statusEl) statusEl.textContent = 'Running…';
+                stopFuzzPolling();
+                fuzzPollInterval = setInterval(pollFuzzJob, 800);
+                pollFuzzJob();
+            } catch (err) {
+                showAppAlert('Failed to start fuzz: ' + (err.message || 'Unknown error'));
+                startBtn.disabled = false;
+                if (stopBtn) stopBtn.disabled = true;
+                if (statusEl) statusEl.textContent = 'Idle';
+            }
+        });
+    }
+
+    if (stopBtn) {
+        stopBtn.addEventListener('click', async () => {
+            if (!currentFuzzJobId) return;
+            try {
+                await fetch(`${API_BASE}/fuzzing/stop/${currentFuzzJobId}`, { method: 'POST' });
+                stopFuzzPolling();
+                pollFuzzJob();
+                currentFuzzJobId = null;
+                if (startBtn) startBtn.disabled = false;
+                stopBtn.disabled = true;
+            } catch (err) {
+                console.error('[Fuzzing] Stop error:', err);
+            }
+        });
+    }
+
+    if (reflectionBtn) {
+        reflectionBtn.addEventListener('click', async () => {
+            const flowId = getFuzzingFlowId();
+            if (!flowId) {
+                showAppAlert('Select a flow first.');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}/reflection/check`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ flow_id: flowId, proxy_port: 8080 })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.detail || res.statusText);
+                const reflected = data.reflected || [];
+                const notReflected = data.not_reflected || [];
+                let msg = 'Reflection check:\n\nReflected: ' + (reflected.length ? reflected.map(p => p.name + ' (' + (p.location || '') + ')').join(', ') : 'none');
+                msg += '\nNot reflected: ' + (notReflected.length ? notReflected.map(p => p.name + ' (' + (p.location || '') + ')').join(', ') : 'none');
+                showAppAlert(msg);
+            } catch (err) {
+                showAppAlert('Reflection check failed: ' + (err.message || 'Unknown error'));
+            }
+        });
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initFuzzingHandlers);
+} else {
+    initFuzzingHandlers();
+}
 
 // Mode switching
 function switchSidechannelMode(mode) {
@@ -3200,18 +3859,33 @@ setInterval(async () => {
 }, 1000);
 
 // === MODULES ===
+let modulesLoading = false;
+
 async function fetchModules() {
     try {
         const res = await fetch(`${API_BASE}/modules`);
         const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.modules || []);
+        const loading = !Array.isArray(data) && !!data.loading;
 
-        if (JSON.stringify(data) !== JSON.stringify(modulesData)) {
-            modulesData = data;
+        modulesLoading = loading;
+        if (loading) {
+            if (moduleListEl) {
+                moduleListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">Loading modules...</div>';
+            }
+            if (moduleCountText) moduleCountText.textContent = 'Loading...';
+            setTimeout(fetchModules, 2000);
+            return;
+        }
+
+        if (JSON.stringify(list) !== JSON.stringify(modulesData)) {
+            modulesData = list;
             renderModuleList();
         }
     } catch (err) {
         console.error("Failed to fetch modules", err);
         modulesData = [];
+        modulesLoading = false;
         if (moduleListEl) {
             moduleListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;">Failed to connect to Kittysploit Framework</div>';
         }
@@ -3257,7 +3931,7 @@ function renderModuleList() {
     }
 
     if (modulesData.length === 0) {
-        moduleListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">No modules found</div>';
+        moduleListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">' + (modulesLoading ? 'Loading modules...' : 'No modules found') + '</div>';
         return;
     }
 
@@ -4101,15 +4775,148 @@ function renderApiSidebar() {
 function switchApiSidebarTab(tabName) {
     apiSidebarActiveTab = tabName;
     document.querySelectorAll('.api-sidebar-tab').forEach(t => t.classList.remove('active'));
-    document.getElementById(`tab-${tabName}`).classList.add('active');
+    const tabEl = document.getElementById(`tab-${tabName}`);
+    if (tabEl) tabEl.classList.add('active');
 
     document.getElementById('api-history-list').style.display = tabName === 'history' ? 'block' : 'none';
     document.getElementById('api-collections-list').style.display = tabName === 'collections' ? 'block' : 'none';
     document.getElementById('api-react-apis-list').style.display = tabName === 'react-apis' ? 'block' : 'none';
+    const secretsList = document.getElementById('api-secrets-list');
+    const ssrfList = document.getElementById('api-ssrf-redirect-list');
+    if (secretsList) secretsList.style.display = tabName === 'secrets' ? 'block' : 'none';
+    if (ssrfList) ssrfList.style.display = tabName === 'ssrf-redirect' ? 'block' : 'none';
 
-    // Charger les API React si on passe à cet onglet
     if (tabName === 'react-apis') {
         loadReactApis();
+    } else if (tabName === 'secrets') {
+        loadSecrets();
+    } else if (tabName === 'ssrf-redirect') {
+        loadSsrfRedirectCandidates();
+    }
+}
+
+async function loadSecrets() {
+    const listEl = document.getElementById('api-secrets-list');
+    if (!listEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/endpoints`);
+        const data = await res.json();
+        const secrets = data.discovered_secrets || [];
+        if (secrets.length === 0) {
+            listEl.innerHTML = `
+                <div style="padding: 20px; text-align: center; color: #999; font-size: 13px;">
+                    <span class="material-symbols-outlined" style="font-size: 48px; display: block; margin-bottom: 10px; opacity: 0.5;">key_off</span>
+                    No secrets found in JS yet.<br>
+                    <small style="color: #777;">Potential API keys, tokens, passwords extracted from captured scripts will appear here.</small>
+                </div>`;
+            return;
+        }
+        listEl.innerHTML = secrets.map((s, i) => `
+            <div class="api-react-api-item" style="padding: 12px; border-bottom: 1px solid #e0e0e0;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px; color: #ff9800;">key</span>
+                    <span style="background: #fff3e0; color: #e65100; font-size: 10px; padding: 2px 6px; border-radius: 4px;">${escapeHtml(s.type || 'secret')}</span>
+                    <strong style="font-size: 12px;">${escapeHtml(s.name || '')}</strong>
+                </div>
+                <div style="font-size: 11px; color: #666; font-family: 'Fira Code', monospace; word-break: break-all;">${escapeHtml(s.context || '')}</div>
+                <div style="font-size: 10px; color: #999; margin-top: 4px;">${escapeHtml((s.source_url || '').slice(0, 80))}${(s.source_url || '').length > 80 ? '…' : ''}</div>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('[Secrets] Error loading:', err);
+        listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;">Error loading secrets</div>';
+    }
+}
+
+// Store SSRF/Redirect candidates for click-to-load (by index)
+let ssrfRedirectCandidatesData = [];
+
+async function loadFlowIntoApiTesterFromSsrfCandidate(index) {
+    const candidate = ssrfRedirectCandidatesData[index];
+    if (!candidate || !candidate.flow_id) {
+        showAppAlert('Request not found. Select a candidate from the list.');
+        return;
+    }
+    try {
+        const res = await fetch(`${API_BASE}/flows/${encodeURIComponent(candidate.flow_id)}`);
+        if (!res.ok) {
+            showAppAlert('Could not load flow. It may have been cleared.');
+            return;
+        }
+        const flow = await res.json();
+        createNewApiRequest();
+        currentApiRequest.method = flow.method || 'GET';
+        currentApiRequest.url = flow.url || '';
+        const headers = flow.request && flow.request.headers ? flow.request.headers : {};
+        currentApiRequest.headers = Object.entries(headers).map(([k, v]) => ({
+            key: String(k),
+            value: typeof v === 'string' ? v : String(v),
+            active: true
+        }));
+        let bodyContent = '';
+        if (flow.request && flow.request.content_bs64) {
+            try {
+                bodyContent = atob(flow.request.content_bs64);
+            } catch (_) {}
+        }
+        currentApiRequest.body = bodyContent;
+        currentApiRequest.bodyType = bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[') ? 'json' : 'raw';
+        if (currentApiRequest.bodyType === 'json') {
+            try {
+                currentApiRequest.bodyTable = buildBodyTableFromJsonPayload(JSON.parse(bodyContent));
+            } catch (_) {
+                currentApiRequest.bodyTable = [];
+            }
+        }
+        renderApiRequest();
+        if (currentApiRequest) {
+            updateApiTesterTabTitle(currentApiRequest.id);
+            saveApiTesterTabs();
+        }
+        showAppAlert('Request loaded. You can edit and send it.');
+    } catch (err) {
+        console.error('[SSRF/Redirect] Load flow error:', err);
+        showAppAlert('Failed to load request: ' + (err.message || 'Unknown error'));
+    }
+}
+
+async function loadSsrfRedirectCandidates() {
+    const listEl = document.getElementById('api-ssrf-redirect-list');
+    if (!listEl) return;
+    try {
+        const res = await fetch(`${API_BASE}/endpoints`);
+        const data = await res.json();
+        const candidates = data.ssrf_redirect_candidates || [];
+        ssrfRedirectCandidatesData = candidates;
+        if (candidates.length === 0) {
+            listEl.innerHTML = `
+                <div style="padding: 20px; text-align: center; color: #999; font-size: 13px;">
+                    <span class="material-symbols-outlined" style="font-size: 48px; display: block; margin-bottom: 10px; opacity: 0.5;">link_off</span>
+                    No SSRF/redirect candidates yet.<br>
+                    <small style="color: #777;">Parameters like url=, redirect=, next= from captured requests will appear here.</small>
+                </div>`;
+            return;
+        }
+        listEl.innerHTML = candidates.map((c, i) => `
+            <div class="api-react-api-item" role="button" tabindex="0"
+                 onclick="loadFlowIntoApiTesterFromSsrfCandidate(${i})"
+                 onkeydown="if(event.key==='Enter') loadFlowIntoApiTesterFromSsrfCandidate(${i})"
+                 style="padding: 12px; border-bottom: 1px solid #e0e0e0; cursor: pointer; transition: background 0.2s;"
+                 onmouseover="this.style.background='#f0f7ff'"
+                 onmouseout="this.style.background='transparent'"
+                 title="Click to load this request into the API Tester">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <span class="material-symbols-outlined" style="font-size: 18px; color: #2196f3;">link</span>
+                    <code style="background: #e3f2fd; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${escapeHtml(c.param_name || '')}</code>
+                    <span style="font-size: 10px; color: #666;">${escapeHtml(c.location || '')}</span>
+                    <span style="background: ${c.candidate_type === 'redirect' ? '#e8f5e9' : '#fff3e0'}; color: ${c.candidate_type === 'redirect' ? '#2e7d32' : '#e65100'}; font-size: 9px; padding: 2px 4px; border-radius: 3px;">${escapeHtml(c.candidate_type || '')}</span>
+                </div>
+                <div style="font-size: 10px; color: #999; word-break: break-all;">${escapeHtml((c.url || '').slice(0, 100))}${(c.url || '').length > 100 ? '…' : ''}</div>
+            </div>
+        `).join('');
+    } catch (err) {
+        console.error('[SSRF/Redirect] Error loading:', err);
+        listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;">Error loading candidates</div>';
     }
 }
 
@@ -6993,108 +7800,138 @@ if (intruderTabsContainer && intruderContentContainer) {
 
 // Send to Repeater
 if (sendToRepeaterBtn) {
-    sendToRepeaterBtn.addEventListener('click', async () => {
-        if (!currentFlowId) return;
-
-        try {
-            // Récupérer les détails complets de la requête
-            const res = await fetch(`${API_BASE}/flows/${currentFlowId}`);
-            if (!res.ok) {
-                showAppAlert('Failed to load flow details');
-                return;
-            }
-
-            const flow = await res.json();
-
-            if (!flow.request) {
-                showAppAlert('Request details not available');
-                return;
-            }
-
-            // Préparer les données pour le nouvel onglet
-            const headers = flow.request.headers || {};
-            let bodyContent = '';
-            if (flow.request.content_bs64) {
-                try {
-                    bodyContent = atob(flow.request.content_bs64);
-                } catch (e) {
-                    bodyContent = '';
-                }
-            }
-
-            // Créer un nouvel onglet avec les données de la requête
-            // Le titre sera généré automatiquement par generateRepeaterTabTitle
-            createRepeaterTab({
-                method: flow.method || 'GET',
-                url: flow.url || '',
-                headers: JSON.stringify(headers, null, 2),
-                body: bodyContent
-            });
-
-            // Basculer vers l'onglet Repeater
-            const replayNavItem = document.querySelector('[data-view="replay"]');
-            if (replayNavItem) {
-                replayNavItem.click();
-            }
-        } catch (err) {
-            console.error("Send to repeater error", err);
-            showAppAlert("Failed to load request into repeater");
-        }
-    });
+    sendToRepeaterBtn.addEventListener('click', () => sendFlowToRepeater(currentFlowId));
 }
 
 // Send to Intruder
 if (sendToIntruderBtn) {
-    sendToIntruderBtn.addEventListener('click', async () => {
+    sendToIntruderBtn.addEventListener('click', () => sendFlowToIntruder(currentFlowId));
+}
+
+// Reflection check (live URL): inject canary and see if reflected in response
+if (reflectionCheckBtn) {
+    reflectionCheckBtn.addEventListener('click', async () => {
         if (!currentFlowId) return;
-
+        reflectionCheckBtn.disabled = true;
+        reflectionCheckBtn.title = 'Checking...';
         try {
-            // Récupérer les détails complets de la requête
-            const res = await fetch(`${API_BASE}/flows/${currentFlowId}`);
-            if (!res.ok) {
-                showAppAlert('Failed to load flow details');
-                return;
-            }
+            const res = await fetch(`${API_BASE}/reflection/check`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ flow_id: currentFlowId, proxy_port: 8080 })
+            });
+            const data = await res.json().catch(() => ({}));
+            const reflected = data.reflected || [];
+            const notReflected = data.not_reflected || [];
+            const message = data.message || '';
+            const error = data.error;
 
-            const flow = await res.json();
-
-            if (!flow.request) {
-                showAppAlert('Request details not available');
-                return;
-            }
-
-            // Préparer les données pour le nouvel onglet
-            const headers = flow.request.headers || {};
-            let bodyContent = '';
-            if (flow.request.content_bs64) {
-                try {
-                    bodyContent = atob(flow.request.content_bs64);
-                } catch (e) {
-                    bodyContent = '';
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:12000;';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:var(--bg-color,#fff);border-radius:12px;max-width:480px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.2);padding:20px;';
+            let body = '<h3 style="margin:0 0 12px 0;display:flex;align-items:center;gap:8px;"><span class="material-symbols-outlined" style="font-size:24px;">visibility</span> Reflection check</h3>';
+            if (error) {
+                body += `<p style="color:#f44336;margin:0;">${escapeHtml(error)}</p>`;
+            } else {
+                body += `<p style="color:#666;font-size:13px;margin:0 0 12px 0;">${escapeHtml(message)}</p>`;
+                if (reflected.length > 0) {
+                    body += '<p style="margin:0 0 6px 0;font-weight:600;color:#2e7d32;">Reflected parameters:</p><ul style="margin:0 0 12px 0;padding-left:20px;">';
+                    reflected.forEach(r => {
+                        body += `<li><code>${escapeHtml(r.name)}</code> (${escapeHtml(r.location)}) → ${(r.reflected_in || []).join(', ')}</li>`;
+                    });
+                    body += '</ul>';
+                }
+                if (notReflected.length > 0) {
+                    body += '<p style="margin:0 0 6px 0;font-weight:600;color:#666;">Not reflected:</p><ul style="margin:0;padding-left:20px;">';
+                    notReflected.forEach(r => {
+                        body += `<li><code>${escapeHtml(r.name)}</code> (${escapeHtml(r.location)})${r.error ? ' <span style="color:#999">' + escapeHtml(r.error) + '</span>' : ''}</li>`;
+                    });
+                    body += '</ul>';
                 }
             }
-
-            // Créer un nouvel onglet Intruder avec les données de la requête
-            createIntruderTab({
-                method: flow.method || 'GET',
-                url: flow.url || '',
-                headers: JSON.stringify(headers, null, 2),
-                body: bodyContent,
-                payloads: [],
-                marker: '§payload§',
-                attackType: 'url'
-            });
-
-            // Basculer vers l'onglet Intruder
-            const intruderNavItem = document.querySelector('[data-view="intruder"]');
-            if (intruderNavItem) {
-                intruderNavItem.click();
-            }
+            body += '<div style="margin-top:16px;"><button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove()">Close</button></div>';
+            box.innerHTML = body;
+            overlay.appendChild(box);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+            document.body.appendChild(overlay);
         } catch (err) {
-            console.error("Send to intruder error", err);
-            showAppAlert("Failed to load request into intruder");
+            console.error('Reflection check error', err);
+            showAppAlert('Reflection check failed: ' + (err.message || 'Network error'));
+        } finally {
+            reflectionCheckBtn.disabled = !!currentFlowId;
+            reflectionCheckBtn.title = 'Check if parameters are reflected in response';
         }
     });
+}
+
+// Send to Fuzzing: set current flow for fuzzing and switch to Fuzzing view
+if (sendToFuzzingBtn) {
+    sendToFuzzingBtn.addEventListener('click', () => sendFlowToFuzzing(currentFlowId));
+}
+
+// Helpers to send a flow (by id) to Repeater / Intruder / Fuzzing — used by toolbar and context menu
+async function sendFlowToRepeater(flowId) {
+    if (!flowId) return;
+    try {
+        const res = await fetch(`${API_BASE}/flows/${flowId}`);
+        if (!res.ok) { showAppAlert('Failed to load flow details'); return; }
+        const flow = await res.json();
+        if (!flow.request) { showAppAlert('Request details not available'); return; }
+        const headers = flow.request.headers || {};
+        let bodyContent = '';
+        if (flow.request.content_bs64) {
+            try { bodyContent = atob(flow.request.content_bs64); } catch (e) { bodyContent = ''; }
+        }
+        createRepeaterTab({
+            method: flow.method || 'GET',
+            url: flow.url || '',
+            headers: JSON.stringify(headers, null, 2),
+            body: bodyContent
+        });
+        const replayNavItem = document.querySelector('[data-view="replay"]');
+        if (replayNavItem) replayNavItem.click();
+    } catch (err) {
+        console.error('Send to repeater error', err);
+        showAppAlert('Failed to load request into repeater');
+    }
+}
+
+async function sendFlowToIntruder(flowId) {
+    if (!flowId) return;
+    try {
+        const res = await fetch(`${API_BASE}/flows/${flowId}`);
+        if (!res.ok) { showAppAlert('Failed to load flow details'); return; }
+        const flow = await res.json();
+        if (!flow.request) { showAppAlert('Request details not available'); return; }
+        const headers = flow.request.headers || {};
+        let bodyContent = '';
+        if (flow.request.content_bs64) {
+            try { bodyContent = atob(flow.request.content_bs64); } catch (e) { bodyContent = ''; }
+        }
+        createIntruderTab({
+            method: flow.method || 'GET',
+            url: flow.url || '',
+            headers: JSON.stringify(headers, null, 2),
+            body: bodyContent,
+            payloads: [],
+            marker: '§payload§',
+            attackType: 'url'
+        });
+        const intruderNavItem = document.querySelector('[data-view="intruder"]');
+        if (intruderNavItem) intruderNavItem.click();
+    } catch (err) {
+        console.error('Send to intruder error', err);
+        showAppAlert('Failed to load request into intruder');
+    }
+}
+
+function sendFlowToFuzzing(flowId) {
+    if (!flowId) return;
+    fuzzingSelectedFlowId = flowId;
+    const fuzzingNavItem = document.querySelector('.nav-item[data-view="fuzzing"]');
+    switchView('fuzzing', fuzzingNavItem);
 }
 
 tabs.forEach(tab => {
@@ -7477,6 +8314,16 @@ function updateDetailButtons() {
         sendToIntruderBtn.style.opacity = hasSelection ? '1' : '0.5';
         sendToIntruderBtn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
     }
+    if (reflectionCheckBtn) {
+        reflectionCheckBtn.disabled = !hasSelection;
+        reflectionCheckBtn.style.opacity = hasSelection ? '1' : '0.5';
+        reflectionCheckBtn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
+    }
+    if (sendToFuzzingBtn) {
+        sendToFuzzingBtn.disabled = !hasSelection;
+        sendToFuzzingBtn.style.opacity = hasSelection ? '1' : '0.5';
+        sendToFuzzingBtn.style.cursor = hasSelection ? 'pointer' : 'not-allowed';
+    }
 }
 
 async function renderDetail() {
@@ -7530,6 +8377,8 @@ async function renderDetail() {
         renderRequestTab(flow);
     } else if (currentTab === 'response') {
         renderResponseTab(flow);
+    } else if (currentTab === 'preview') {
+        renderPreviewTab(flow);
     } else if (currentTab === 'tech') {
         renderTechTab(flow);
     } else if (currentTab === 'endpoints') {
@@ -7869,77 +8718,15 @@ function renderResponseTab(flow) {
         bodyContent = typeof flow.response.content === 'string' ? flow.response.content : String(flow.response.content);
     }
 
-    const contentType = flow.response.headers?.['content-type'] || '';
-    const preStyle = 'margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: \'Fira Code\', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1);';
+    const preStyle = 'margin: 0; padding: 20px; background: #282c34; color: #abb2bf; overflow-x: auto; border-radius: 8px; font-family: \'Fira Code\', monospace; font-size: 0.9em; line-height: 1.6; box-shadow: 0 2px 8px rgba(0,0,0,0.1); max-height: 70vh; overflow-y: auto;';
 
+    // Onglet Response : uniquement la source brute (raw), pas de rendu body ni "Voir la source"
     let bodyHtml = '';
     if (bodyContent && bodyContent.trim()) {
-        const mode = responseBodyViewMode || 'preview';
-        if (mode === 'raw') {
-            bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-        } else if (mode === 'hex') {
-            const hexContent = generateHexdump(bodyContent);
-            bodyHtml = `<pre style="${preStyle} white-space: pre-wrap; word-break: break-all;"><code>${escapeHtml(hexContent)}</code></pre>`;
-        } else if (mode === 'pretty') {
-            try {
-                if (contentType.includes('json') || bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[')) {
-                    const json = JSON.parse(bodyContent);
-                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(JSON.stringify(json, null, 2))}</code></pre>`;
-                } else {
-                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-                }
-            } catch {
-                bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-            }
-        } else {
-            // preview: HTML → iframe, JSON → pretty, image → img, else → pre
-            try {
-                if (contentType.includes('html')) {
-                    const srcdocEscaped = bodyContent.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-                    bodyHtml = `
-                        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
-                            <iframe sandbox="allow-same-origin" title="Preview HTML" srcdoc="${srcdocEscaped}" style="flex: 1; min-height: 300px; border: 1px solid #e0e0e0; border-radius: 8px; background: white;"></iframe>
-                        </div>
-                        <details style="margin-top: 8px;"><summary style="cursor: pointer; color: #666; font-size: 0.9em;">Voir la source</summary>
-                        <pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre></details>`;
-                } else if (contentType.includes('json') || bodyContent.trim().startsWith('{') || bodyContent.trim().startsWith('[')) {
-                    try {
-                        const json = JSON.parse(bodyContent);
-                        bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(JSON.stringify(json, null, 2))}</code></pre>`;
-                    } catch {
-                        bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-                    }
-                } else if (/^image\//.test(contentType)) {
-                    const dataUrl = flow.response.content_bs64
-                        ? `data:${contentType || 'image/png'};base64,${flow.response.content_bs64}`
-                        : 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg"><text x="10" y="20">No image</text></svg>');
-                    bodyHtml = `<div style="padding: 12px; background: #f5f5f5; border-radius: 8px;"><img src="${dataUrl}" alt="Response" style="max-width: 100%; height: auto; border-radius: 4px;" /></div>`;
-                } else {
-                    bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-                }
-            } catch (e) {
-                bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
-            }
-        }
+        bodyHtml = `<pre style="${preStyle}"><code>${escapeHtml(bodyContent)}</code></pre>`;
     } else {
         bodyHtml = '<div style="padding: 20px; color: #888; text-align: center; background: #f5f5f5; border-radius: 8px; border: 1px dashed #ddd;">No response body</div>';
     }
-
-    const viewModes = [
-        { id: 'raw', label: 'Raw', icon: 'code' },
-        { id: 'preview', label: 'Preview', icon: 'visibility' },
-        { id: 'pretty', label: 'Pretty', icon: 'format_align_left' },
-        { id: 'hex', label: 'Hex', icon: 'memory' }
-    ];
-    const viewToolbarHtml = `
-        <div style="display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap;">
-            ${viewModes.map(m => `
-                <button type="button" class="response-view-mode-btn" data-mode="${m.id}"
-                    style="padding: 8px 14px; border-radius: 6px; border: 1px solid #e0e0e0; background: ${responseBodyViewMode === m.id ? '#6200ea' : '#fff'}; color: ${responseBodyViewMode === m.id ? '#fff' : '#333'}; font-size: 0.85em; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
-                    <span class="material-symbols-outlined" style="font-size: 16px;">${m.icon}</span>${m.label}
-                </button>
-            `).join('')}
-        </div>`;
 
     // Determine status color
     const statusCode = flow.status_code || 0;
@@ -7997,24 +8784,70 @@ function renderResponseTab(flow) {
             
             <div>
                 <h4 style="margin: 0 0 12px 0; color: #333; font-size: 1.1em; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                    <span class="material-symbols-outlined" style="font-size: 1.2em; color: #666;">description</span>
-                    Body
+                    <span class="material-symbols-outlined" style="font-size: 1.2em; color: #666;">code</span>
+                    Source (raw)
                 </h4>
-                ${viewToolbarHtml}
             ${bodyHtml}
             </div>
         </div>
     `;
+}
 
-    detailContentEl.querySelectorAll('.response-view-mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const mode = btn.getAttribute('data-mode');
-            if (mode) {
-                responseBodyViewMode = mode;
-                renderDetail();
-            }
-        });
-    });
+function renderPreviewTab(flow) {
+    if (!flow || !flow.response) {
+        detailContentEl.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">No response yet</div>';
+        return;
+    }
+
+    let bodyContent = '';
+    if (flow.response.content_bs64) {
+        try {
+            bodyContent = atob(flow.response.content_bs64);
+        } catch (e) {
+            console.warn('Error decoding base64 content:', e);
+        }
+    } else if (flow.response.content) {
+        bodyContent = typeof flow.response.content === 'string' ? flow.response.content : String(flow.response.content);
+    }
+
+    const contentType = flow.response.headers?.['content-type'] || '';
+    const isHtml = contentType.includes('html') || (bodyContent.trim() && /^\s*<(!DOCTYPE|html|head|body|\?xml)/i.test(bodyContent));
+
+    if (!bodyContent || !bodyContent.trim()) {
+        detailContentEl.innerHTML = `
+            <div style="padding: 20px; max-width: 100%;">
+                <div style="padding: 40px; text-align: center; color: #888; background: #f5f5f5; border-radius: 8px; border: 1px dashed #ddd;">
+                    <span class="material-symbols-outlined" style="font-size: 48px; color: #ccc; display: block; margin-bottom: 12px;">visibility_off</span>
+                    <p style="margin: 0;">No response body to preview</p>
+                </div>
+            </div>`;
+        return;
+    }
+
+    if (!isHtml) {
+        detailContentEl.innerHTML = `
+            <div style="padding: 20px; max-width: 100%;">
+                <div style="padding: 40px; text-align: center; color: #888; background: #f5f5f5; border-radius: 8px; border: 1px dashed #ddd;">
+                    <span class="material-symbols-outlined" style="font-size: 48px; color: #ccc; display: block; margin-bottom: 12px;">code</span>
+                    <p style="margin: 0;">Preview is available only for HTML responses.</p>
+                    <p style="margin: 8px 0 0 0; font-size: 0.9em;">Content-Type: ${escapeHtml(contentType || 'unknown')}</p>
+                    <p style="margin: 12px 0 0 0; font-size: 0.85em;">Use the Response tab to view raw content.</p>
+                </div>
+            </div>`;
+        return;
+    }
+
+    // HTML: render in iframe with CSS interpretation (inline and <style> in document)
+    const baseTag = flow.url ? `<base target="_blank" href="${escapeHtml(flow.url.replace(/[#?].*$/, ''))}">` : '';
+    const doc = baseTag + bodyContent;
+    const srcdocAttr = doc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
+    detailContentEl.innerHTML = `
+        <div style="padding: 0; max-width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
+            <div style="flex: 1; min-height: 400px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; background: white;">
+                <iframe sandbox="allow-same-origin" title="Preview" srcdoc="${srcdocAttr}" style="width: 100%; height: 100%; min-height: 500px; border: none;"></iframe>
+            </div>
+        </div>`;
 }
 
 function renderHexdumpTab(flow) {
@@ -8309,6 +9142,8 @@ function showFlowContextMenu(event, flow) {
         existingMenu.remove();
     }
 
+    const menuItemStyle = 'padding: 10px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s;';
+
     // Create context menu
     const menu = document.createElement('div');
     menu.id = 'flow-context-menu';
@@ -8321,21 +9156,34 @@ function showFlowContextMenu(event, flow) {
         border-radius: 6px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         z-index: 10000;
-        min-width: 200px;
+        min-width: 220px;
         padding: 4px 0;
     `;
 
-    menu.innerHTML = `
-        <div 
-            class="context-menu-item"
-            onclick="openModuleSelectorFromFlow('${flow.id}')"
-            style="padding: 10px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s;"
-            onmouseover="this.style.background='#f5f5f5'"
-            onmouseout="this.style.background='white'">
-            <span class="material-symbols-outlined" style="font-size: 18px; color: var(--primary-color);">play_arrow</span>
-            <span style="font-weight: 500;">Run module on this URL</span>
-        </div>
-    `;
+    function addContextItem(icon, label, onClick, primary) {
+        const div = document.createElement('div');
+        div.className = 'context-menu-item';
+        div.style.cssText = menuItemStyle;
+        div.onmouseover = () => { div.style.background = '#f5f5f5'; };
+        div.onmouseout = () => { div.style.background = 'white'; };
+        div.innerHTML = `<span class="material-symbols-outlined" style="font-size: 18px; color: ${primary ? 'var(--primary-color)' : '#666'};">${icon}</span><span style="${primary ? 'font-weight: 500;' : ''}">${label}</span>`;
+        div.addEventListener('click', (e) => {
+            e.preventDefault();
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+            document.removeEventListener('contextmenu', closeMenu);
+            onClick();
+        });
+        menu.appendChild(div);
+    }
+
+    addContextItem('play_arrow', 'Run module on this URL', () => openModuleSelectorFromFlow(flow.id), true);
+    const sep = document.createElement('div');
+    sep.style.cssText = 'height: 1px; background: #eee; margin: 4px 0;';
+    menu.appendChild(sep);
+    addContextItem('repeat', 'Send to Repeater', () => sendFlowToRepeater(flow.id), false);
+    addContextItem('science', 'Send to Fuzzing', () => sendFlowToFuzzing(flow.id), false);
+    addContextItem('target', 'Send to Intruder', () => sendFlowToIntruder(flow.id), false);
 
     document.body.appendChild(menu);
 

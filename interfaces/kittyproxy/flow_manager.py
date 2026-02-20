@@ -306,14 +306,15 @@ class FlowManager:
                 
                 all_flows = scope_filtered_flows
             
-            # Filter if search term provided
+            # Filter if search term provided (URL, method, status_code, or flow id)
             if search:
-                search = search.lower()
+                search_lower = search.lower()
                 filtered_flows = [
-                    f for f in all_flows 
-                    if search in f.get('url', '').lower() or 
-                       search in f.get('method', '').lower() or 
-                       str(f.get('status_code', '')).lower() in search
+                    f for f in all_flows
+                    if search_lower in (f.get('id') or '').lower()
+                    or search_lower in f.get('url', '').lower()
+                    or search_lower in f.get('method', '').lower()
+                    or search_lower in str(f.get('status_code', '')).lower()
                 ]
             else:
                 filtered_flows = all_flows
@@ -690,12 +691,23 @@ class FlowManager:
         except Exception as e:
             print(f"[ERROR] Error adding to discovered endpoints: {e}")
         
+        # SSRF/redirect parameter discovery from request (query + body)
+        ssrf_redirect_candidates = []
+        try:
+            ssrf_redirect_candidates = endpoint_extractor.extract_ssrf_redirect_candidates_from_flow(flow)
+            for c in ssrf_redirect_candidates:
+                if c not in endpoint_extractor.ssrf_redirect_candidates:
+                    endpoint_extractor.ssrf_redirect_candidates.append(c)
+        except Exception as e:
+            print(f"[ERROR] Error extracting SSRF/redirect candidates: {e}")
+        
         return {
             "technologies": detected_techs,
             "fingerprint": fingerprint,
             "module_suggestions": module_suggestions,
             "endpoints": extracted_endpoints,
             "discovered_endpoints": sorted(list(set([url for urls in extracted_endpoints.values() for url in urls]))),
+            "ssrf_redirect_candidates": ssrf_redirect_candidates,
         }
     
     def _analysis_worker(self):

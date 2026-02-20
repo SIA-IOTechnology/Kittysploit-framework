@@ -106,6 +106,9 @@
             <div class="nav-item" data-view="api" data-label="API Tester" title="API Tester">
                 <span style="font-family: 'Fira Code', monospace; font-size: 20px; font-weight: 600;">{}</span>
             </div>
+            <div class="nav-item" data-view="fuzzing" data-label="Fuzzing" title="Fuzzing (XSS, ...)">
+                <span class="material-symbols-outlined">science</span>
+            </div>
             <div class="nav-item" data-view="modules" data-label="Modules" title="Modules">
                 <span class="material-symbols-outlined">extension</span>
             </div>
@@ -343,6 +346,7 @@
                         <div class="detail-tabs">
                             <div class="tab active" data-tab="request">Request</div>
                             <div class="tab" data-tab="response">Response</div>
+                            <div class="tab" data-tab="preview">Preview</div>
                             <div class="tab" data-tab="tech">Tech</div>
                             <div class="tab" data-tab="endpoints">Endpoints</div>
                             <div class="tab" data-tab="hexdump">Hexdump</div>
@@ -356,6 +360,12 @@
                             </button>
                             <button id="send-to-intruder-btn" class="replay-btn" title="Send to Intruder">
                                 <span class="material-symbols-outlined">target</span>
+                            </button>
+                            <button id="reflection-check-btn" class="replay-btn" title="Check if parameters are reflected in response">
+                                <span class="material-symbols-outlined">visibility</span>
+                            </button>
+                            <button id="send-to-fuzzing-btn" class="replay-btn" title="Send to Fuzzing (XSS/SQLi)">
+                                <span class="material-symbols-outlined">science</span>
                             </button>
                         </div>
                     </div>
@@ -900,10 +910,18 @@
                         <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
                             <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
                             Discovered APIs</div>
+                        <div class="api-sidebar-tab" id="tab-secrets" onclick="switchApiSidebarTab('secrets')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">key</span>
+                            Secrets (JS)</div>
+                        <div class="api-sidebar-tab" id="tab-ssrf-redirect" onclick="switchApiSidebarTab('ssrf-redirect')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">link</span>
+                            SSRF/Redirect</div>
                     </div>
                     <div id="api-history-list" class="api-history-list"></div>
                     <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
                     <div id="api-react-apis-list" class="api-react-apis-list" style="display: none;"></div>
+                    <div id="api-secrets-list" class="api-react-apis-list" style="display: none;"></div>
+                    <div id="api-ssrf-redirect-list" class="api-react-apis-list" style="display: none;"></div>
                 </div>
                 <div class="resize-handle" id="api-resize-handle"></div>
 
@@ -1097,10 +1115,18 @@
                         <div class="api-sidebar-tab" id="tab-react-apis" onclick="switchApiSidebarTab('react-apis')">
                             <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">code</span>
                             Discovered APIs</div>
+                        <div class="api-sidebar-tab" id="tab-secrets" onclick="switchApiSidebarTab('secrets')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">key</span>
+                            Secrets (JS)</div>
+                        <div class="api-sidebar-tab" id="tab-ssrf-redirect" onclick="switchApiSidebarTab('ssrf-redirect')">
+                            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">link</span>
+                            SSRF/Redirect</div>
                     </div>
                     <div id="api-history-list" class="api-history-list"></div>
                     <div id="api-collections-list" class="api-collections-list" style="display: none;"></div>
                     <div id="api-react-apis-list" class="api-react-apis-list" style="display: none;"></div>
+                    <div id="api-secrets-list" class="api-react-apis-list" style="display: none;"></div>
+                    <div id="api-ssrf-redirect-list" class="api-react-apis-list" style="display: none;"></div>
                 </div>
                 <div class="resize-handle" id="api-resize-handle"></div>
 
@@ -1415,7 +1441,185 @@
                 </div>
             </div>
         </div>
+
+        <!-- Fuzzing View -->
+        <div id="fuzzing-view" class="view-section" style="display: none;">
+            <div class="top-bar">
+                <h2>Fuzzing</h2>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="fuzzing-type" class="btn btn-secondary" style="min-width: 90px;">
+                        <option value="xss">XSS</option>
+                        <option value="sqli">SQLi</option>
+                    </select>
+                    <button id="fuzzing-start-btn" class="btn btn-primary">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">play_arrow</span>
+                        Start
+                    </button>
+                    <button id="fuzzing-stop-btn" class="btn btn-secondary" disabled>
+                        <span class="material-symbols-outlined" style="font-size: 18px;">stop</span>
+                        Stop
+                    </button>
+                    <button id="fuzzing-reflection-btn" class="btn btn-secondary" title="Check reflection for selected flow">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">visibility</span>
+                        Reflection
+                    </button>
+                    <button type="button" id="fuzzing-options-toggle" class="btn btn-secondary" title="Options (encoding, concurrency, payloads)">
+                        <span class="material-symbols-outlined" style="font-size: 18px;">tune</span>
+                        Options
+                    </button>
+                </div>
+            </div>
+            <div class="fuzzing-layout" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;">
+                <!-- Target: one compact row -->
+                <div class="fuzzing-target-bar" style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg-secondary, #f8f9fa); border-bottom: 1px solid #e0e0e0;">
+                    <span style="font-size: 13px; color: #555;">Target:</span>
+                    <span id="fuzzing-current-flow-label" style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #333;">No flow selected</span>
+                    <button type="button" id="fuzzing-use-current-btn" class="btn btn-secondary" style="padding: 6px 10px; font-size: 12px;">Use current</button>
+                    <button type="button" id="fuzzing-search-flow-btn" class="btn btn-secondary" style="padding: 6px 10px; font-size: 12px;">Search</button>
+                    <span id="fuzzing-status-text" style="font-size: 12px; color: #666; min-width: 120px;">Idle</span>
+                </div>
+                <!-- Search flow (hidden by default) -->
+                <div id="fuzzing-search-box" style="display: none; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e0e0e0;">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="text" id="fuzzing-search-input" placeholder="URL or flow ID (min 2 chars)" style="width: 260px; padding: 6px 10px; border-radius: 6px; border: 1px solid #ccc;">
+                        <button type="button" id="fuzzing-search-do-btn" class="btn btn-primary" style="padding: 6px 12px;">Search</button>
+                        <button type="button" id="fuzzing-search-cancel-btn" class="btn btn-secondary" style="padding: 6px 12px;">Cancel</button>
+                    </div>
+                    <div id="fuzzing-search-results" style="margin-top: 8px; max-height: 180px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; background: #fff;"></div>
+                </div>
+                <!-- Options panel (collapsible) -->
+                <div id="fuzzing-options-panel" class="fuzzing-options-panel" style="display: none;">
+                    <div class="fuzzing-options-grid">
+                        <div class="fuzzing-opt-group">
+                            <label class="fuzzing-opt-label" for="fuzzing-encoding">Encoding</label>
+                            <select id="fuzzing-encoding">
+                                <option value="none">None</option>
+                                <option value="url">URL</option>
+                                <option value="double_url">Double URL</option>
+                                <option value="html">HTML</option>
+                                <option value="base64">Base64</option>
+                            </select>
+                        </div>
+                        <div class="fuzzing-opt-group">
+                            <label class="fuzzing-opt-label" for="fuzzing-concurrency">Concurrency</label>
+                            <input type="number" id="fuzzing-concurrency" min="1" max="100" value="20">
+                        </div>
+                        <div class="fuzzing-opt-group">
+                            <label class="fuzzing-opt-label" for="fuzzing-timeout">Timeout (s)</label>
+                            <input type="number" id="fuzzing-timeout" min="1" max="60" value="10" step="0.5">
+                        </div>
+                        <div class="fuzzing-opt-group">
+                            <label class="fuzzing-opt-label" for="fuzzing-preset">Preset</label>
+                            <select id="fuzzing-preset">
+                                <option value="">—</option>
+                                <option value="fast">Fast (50, 5s)</option>
+                                <option value="normal">Normal (20, 10s)</option>
+                                <option value="thorough">Thorough (10, 15s)</option>
+                            </select>
+                        </div>
+                        <div class="fuzzing-use-proxy-wrap" title="Uncheck if requests show Error — sends direct to target">
+                            <input type="checkbox" id="fuzzing-use-proxy" checked>
+                            <label for="fuzzing-use-proxy">Use proxy</label>
+                        </div>
+                    </div>
+                    <div id="fuzzing-params-row" class="fuzzing-opt-card" style="display: none; margin-top: 20px;">
+                        <div class="fuzzing-opt-card-title">Parameters to fuzz</div>
+                        <p style="margin: 0 0 12px 0; font-size: 12px; color: #80868b;">Select parameters to test (empty = all). <span class="param-idor-badge" style="margin-left:0;">IDOR?</span> = possible Insecure Direct Object Reference — use the « Test IDOR » section below.</p>
+                        <div id="fuzzing-params-checkboxes" class="fuzzing-params-list"></div>
+                    </div>
+                    <div id="fuzzing-idor-card" class="fuzzing-opt-card" style="display: none; margin-top: 20px;">
+                        <div class="fuzzing-opt-card-title" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                            <span>Test IDOR (Insecure Direct Object Reference)</span>
+                            <button type="button" id="fuzzing-idor-test-all-btn" class="btn btn-primary" style="font-size: 12px;">Tester tous les paramètres IDOR</button>
+                        </div>
+                        <p style="margin: 0 0 12px 0; font-size: 12px; color: #80868b;">Paramètres susceptibles de référencer un objet (id, user_id, etc.). Cliquez sur « Tester » pour envoyer la requête avec une valeur modifiée et comparer la réponse.</p>
+                        <div class="fuzzing-idor-table-wrap" style="overflow-x: auto;">
+                            <table class="fuzzing-idor-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                <thead>
+                                    <tr style="background: #f0f0f0; text-align: left;">
+                                        <th style="padding: 8px 10px; border: 1px solid #ddd;">Paramètre</th>
+                                        <th style="padding: 8px 10px; border: 1px solid #ddd;">Emplacement</th>
+                                        <th style="padding: 8px 10px; border: 1px solid #ddd;">Valeur actuelle</th>
+                                        <th style="padding: 8px 10px; border: 1px solid #ddd;">Résultat</th>
+                                        <th style="padding: 8px 10px; border: 1px solid #ddd; width: 90px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fuzzing-idor-tbody">
+                                    <tr><td colspan="5" style="padding: 16px; text-align: center; color: #888;">Sélectionnez une requête contenant des paramètres IDOR (id, user_id, etc.)</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="fuzzing-payloads-card" style="margin-top: 20px;">
+                        <div class="fuzzing-opt-card-title">Custom payloads</div>
+                        <p style="margin: 0 0 10px 0; font-size: 12px; color: #80868b;">One payload per line, or upload a file</p>
+                        <textarea id="fuzzing-custom-payloads" class="fuzzing-custom-payloads" rows="3" placeholder="Optional — add payloads here or upload file below"></textarea>
+                        <div class="fuzzing-file-upload-wrap">
+                            <input type="file" id="fuzzing-payloads-file" accept=".txt,.csv" title="Upload payload file">
+                        </div>
+                    </div>
+                </div>
+                <!-- Results: filters + table -->
+                <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                    <div class="fuzzing-results-toolbar" style="display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: #fafafa; border-bottom: 1px solid #e0e0e0;">
+                        <span style="font-size: 12px; color: #666;">Filters:</span>
+                        <label style="font-size: 12px;"><input type="checkbox" id="fuzzing-filter-reflected"> Reflected</label>
+                        <label style="font-size: 12px;"><input type="checkbox" id="fuzzing-filter-xsslike"> XSS-like</label>
+                        <label style="font-size: 12px;"><input type="checkbox" id="fuzzing-filter-sqlilike"> SQLi-like</label>
+                        <span style="font-size: 12px; color: #666; margin-left: 8px;">Sort:</span>
+                        <select id="fuzzing-sort" style="padding: 4px 8px; font-size: 12px;">
+                            <option value="default">Default</option>
+                            <option value="param">Param</option>
+                            <option value="payload">Payload</option>
+                            <option value="status">Status</option>
+                            <option value="time">Time</option>
+                            <option value="reflected">Reflected</option>
+                            <option value="xss_like">XSS-like</option>
+                            <option value="sqli_like">SQLi-like</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1; overflow: auto; padding: 16px;">
+                        <table id="fuzzing-results-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                            <thead>
+                                <tr style="background: #eee; text-align: left;">
+                                    <th style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="param">Param</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="payload">Payload</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="status">Status</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="time">Time (ms)</th>
+                                    <th style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="reflected">Reflected</th>
+                                    <th id="fuzzing-th-xss" style="padding: 10px; border: 1px solid #ddd; cursor: pointer;" data-sort="xss_like">XSS-like</th>
+                                    <th id="fuzzing-th-sqli" style="padding: 10px; border: 1px solid #ddd; cursor: pointer; display: none;" data-sort="sqli_like">SQLi-like</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fuzzing-results-body">
+                                <tr><td colspan="7" style="padding: 24px; text-align: center; color: #999;">Start a fuzz job to see results</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
+
+    <!-- Fuzzing request detail modal -->
+    <div id="fuzzing-request-modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9998;" onclick="closeFuzzingRequestModal()"></div>
+    <div id="fuzzing-request-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 700px; max-height: 85vh; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); z-index: 9999; overflow: hidden; flex-direction: column;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="margin: 0; font-size: 16px;">Request sent</h3>
+            <button type="button" onclick="closeFuzzingRequestModal()" style="background: none; border: none; cursor: pointer; padding: 4px;">&times;</button>
+        </div>
+        <div id="fuzzing-request-modal-content" style="padding: 16px; overflow: auto; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;"></div>
+    </div>
+
+    <!-- Fuzzing PoC / Python code modal -->
+    <div id="fuzzing-poc-modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9998;" onclick="closeFuzzingPocModal()"></div>
+    <div id="fuzzing-poc-modal" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 720px; max-height: 85vh; background: #1e1e1e; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); z-index: 9999; overflow: hidden; flex-direction: column;">
+        <div style="padding: 14px 20px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="margin: 0; font-size: 15px; color: #fff;">Python PoC</h3>
+            <button type="button" onclick="closeFuzzingPocModal()" style="background: #444; border: none; color: #fff; cursor: pointer; padding: 6px 10px; border-radius: 6px;">&times;</button>
+        </div>
+        <pre id="fuzzing-poc-modal-content" style="margin: 0; padding: 16px; overflow: auto; font-family: 'Fira Code', Consolas, monospace; font-size: 12px; color: #d4d4d4; white-space: pre-wrap; word-break: break-all; line-height: 1.5;"></pre>
+    </div>
 
     <!-- SideChannel Test Details Modal -->
     <div id="sidechannel-details-overlay"

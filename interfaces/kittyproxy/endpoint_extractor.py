@@ -27,6 +27,10 @@ class EndpointExtractor:
         self.analyzed_flows: Set[str] = set()  # URLs de flows déjà analysés (pour éviter la réanalyse)
         self.cached_endpoints: Dict[str, Dict[str, List[str]]] = {}  # Cache des endpoints extraits par flow_id
         self.framework = framework  # Framework instance for database access
+        # JS → creds/secrets (type, name, context, source_url - no raw values logged)
+        self.discovered_secrets: List[Dict] = []
+        # SSRF/redirect candidate params: { flow_id, url, param_name, location, candidate_type }
+        self.ssrf_redirect_candidates: List[Dict] = []
 
     def reset(self):
         """Réinitialise tous les jeux de données extraits (utile après un clear)"""
@@ -40,7 +44,151 @@ class EndpointExtractor:
         self.graphql_queries.clear()
         self.analyzed_flows.clear()
         self.cached_endpoints.clear()
-    
+        self.discovered_secrets.clear()
+        self.ssrf_redirect_candidates.clear()
+
+    # Parameter names often used for SSRF or open redirect (case-insensitive match)
+    SSRF_REDIRECT_PARAM_NAMES = frozenset([
+        'url', 'uri', 'target', 'dest', 'destination', 'redirect', 'redirect_uri', 'redirect_url',
+        'return', 'returnurl', 'return_url', 'next', 'next_url', 'continue', 'goto', 'out', 'view',
+        'link', 'href', 'callback', 'cb', 'forward', 'redirect_to', 'redir', 'rurl', 'page',
+        'path', 'file', 'document', 'folder', 'img', 'image', 'load', 'fetch', 'request', 'proxy',
+        'data', 'ref', 'reference', 'host', 'domain', 'site', 'address', 'from', 'to', 'src',
+        'open', 'window', 'popup', 'jump', 'jump_to', 'return_to', 'back', 'ret', 'returnTo',
+    ])
+
+    def _extract_secrets_from_js(self, js: str, base_url: str) -> List[Dict]:
+        """Extract potential credentials/secrets from JavaScript (variable names + context, no raw values)."""
+        from urllib.parse import urlparse
+        results = []
+        seen_keys = set()  # (source_url, type, name_lower) to avoid duplicates
+
+        # Patterns: (regex, secret_type). Capture variable/key name and optional context.
+        # We do NOT capture the actual secret value in logs; we only report "potential secret found".
+        patterns = [
+            # apiKey, API_KEY, api_key, etc.
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*["\'][^"\']{8,}["\']\s*(?:;|\n|$)', 'api_key'),
+            (r'(?:api[_-]?key|apikey|API[_-]?KEY)\s*[:=]\s*["\']([^"\']+)["\']', 'api_key'),
+            (r'["\'](?:api[_-]?key|apikey)["\']\s*:\s*["\']([^"\']+)["\']', 'api_key'),
+            # secret
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[sS]ecret[a-zA-Z_$]*)\s*=\s*["\'][^"\']+["\']', 'secret'),
+            (r'["\'](?:secret|client_secret)["\']\s*:\s*["\']([^"\']+)["\']', 'secret'),
+            (r'(?:secret|client_secret)\s*[:=]\s*["\']([^"\']+)["\']', 'secret'),
+            # password
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[pP]assword[a-zA-Z_$]*)\s*=\s*["\'][^"\']+["\']', 'password'),
+            (r'["\'](?:password|passwd|pwd)["\']\s*:\s*["\']([^"\']+)["\']', 'password'),
+            (r'(?:password|passwd)\s*[:=]\s*["\']([^"\']+)["\']', 'password'),
+            # token, access_token, bearer
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[tT]oken[a-zA-Z_$]*)\s*=\s*["\'][^"\']+["\']', 'token'),
+            (r'["\'](?:access_token|refresh_token|auth_token|token|bearer)["\']\s*:\s*["\']([^"\']+)["\']', 'token'),
+            (r'(?:access_token|token|auth_token)\s*[:=]\s*["\']([^"\']+)["\']', 'token'),
+            # auth
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[aA]uth[a-zA-Z_$]*)\s*=\s*["\'][^"\']+["\']', 'auth'),
+            (r'["\'](?:authorization|auth|basic)["\']\s*:\s*["\']([^"\']+)["\']', 'auth'),
+            # credential
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[cC]redential[a-zA-Z_$]*)\s*=\s*["\'][^"\']+["\']', 'credential'),
+            (r'["\'](?:credential|credentials)["\']\s*:\s*["\']([^"\']+)["\']', 'credential'),
+        ]
+
+        for pattern, secret_type in patterns:
+            for m in re.finditer(pattern, js, re.IGNORECASE | re.MULTILINE):
+                try:
+                    # First group is usually the variable name or a placeholder; we use it for dedup
+                    name = (m.group(1) or '').strip()[:80]
+                    if not name or name.startswith('{{'):
+                        continue
+                    key = (base_url, secret_type, name.lower())
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    # Context: 50 chars around match (no raw value in snippet)
+                    start = max(0, m.start() - 20)
+                    end = min(len(js), m.end() + 30)
+                    context = js[start:end].replace('\n', ' ').strip()[:100]
+                    # Redact potential value in context (replace quoted strings with ***)
+                    context = re.sub(r'["\'][^"\']{4,}["\']', '"***"', context)
+                    results.append({
+                        'type': secret_type,
+                        'name': name,
+                        'context': context,
+                        'source_url': base_url,
+                    })
+                except (IndexError, Exception):
+                    continue
+
+        return results
+
+    def extract_ssrf_redirect_candidates_from_flow(self, flow) -> List[Dict]:
+        """Extract parameter names from flow request that look like SSRF/redirect candidates."""
+        from urllib.parse import urlparse, parse_qs
+        candidates = []
+        if not flow or not getattr(flow, 'request', None):
+            return candidates
+
+        try:
+            url = flow.request.url or ''
+            path = getattr(flow.request, 'path', '') or ''
+            flow_id = getattr(flow, 'id', None) or url
+
+            # Query string params
+            parsed = urlparse(url)
+            if parsed.query:
+                for param_name in parse_qs(parsed.query, keep_blank_values=True).keys():
+                    if param_name and param_name.lower() in self.SSRF_REDIRECT_PARAM_NAMES:
+                        candidates.append({
+                            'flow_id': flow_id,
+                            'url': url,
+                            'param_name': param_name,
+                            'location': 'query',
+                            'candidate_type': 'redirect' if any(x in param_name.lower() for x in ('redirect', 'return', 'next', 'url', 'goto', 'callback', 'returnurl', 'next_url')) else 'ssrf',
+                        })
+
+            # Body: form or JSON
+            content = flow.request.content or b''
+            if not content:
+                return candidates
+
+            ct_raw = flow.request.headers.get('Content-Type') or b''
+            if isinstance(ct_raw, bytes):
+                ct = ct_raw.decode('utf-8', errors='ignore').lower()
+            else:
+                ct = str(ct_raw).lower()
+            try:
+                body_str = content.decode('utf-8', errors='replace') if isinstance(content, bytes) else str(content)
+            except Exception:
+                return candidates
+
+            if 'application/x-www-form-urlencoded' in ct:
+                for part in body_str.split('&'):
+                    if '=' in part:
+                        param_name = part.split('=')[0].strip()
+                        if param_name and param_name.lower() in self.SSRF_REDIRECT_PARAM_NAMES:
+                            candidates.append({
+                                'flow_id': flow_id,
+                                'url': url,
+                                'param_name': param_name,
+                                'location': 'body_form',
+                                'candidate_type': 'redirect' if any(x in param_name.lower() for x in ('redirect', 'return', 'next', 'url', 'goto', 'callback')) else 'ssrf',
+                            })
+            elif 'application/json' in ct:
+                try:
+                    data = json.loads(body_str)
+                    if isinstance(data, dict):
+                        for key in data.keys():
+                            if isinstance(key, str) and key.lower() in self.SSRF_REDIRECT_PARAM_NAMES:
+                                candidates.append({
+                                    'flow_id': flow_id,
+                                    'url': url,
+                                    'param_name': key,
+                                    'location': 'body_json',
+                                    'candidate_type': 'redirect' if any(x in key.lower() for x in ('redirect', 'return', 'next', 'url', 'goto', 'callback')) else 'ssrf',
+                                })
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        except Exception as e:
+            print(f"[ENDPOINT EXTRACTION] Error extracting SSRF/redirect candidates: {e}")
+        return candidates
+
     def extract(self, flow, detected_technologies: Dict = None) -> Dict[str, List[str]]:
         """Extrait tous les endpoints et liens depuis un flow
         
@@ -159,6 +307,15 @@ class EndpointExtractor:
                 if base_url not in self.analyzed_js_files:
                     endpoints['javascript_endpoints'].extend(self._extract_js_endpoints(content, base_url))
                     
+                    # JS → creds/secrets: extract potential secrets (no raw values)
+                    try:
+                        secrets = self._extract_secrets_from_js(content, base_url)
+                        for s in secrets:
+                            if s not in self.discovered_secrets:
+                                self.discovered_secrets.append(s)
+                    except Exception as e:
+                        print(f"[ENDPOINT EXTRACTION] Error extracting secrets from JS: {e}")
+                    
                     # Si React est détecté, extraire spécifiquement les API React
                     if is_react:
                         react_apis = self.extract_react_api_endpoints(content, base_url)
@@ -184,49 +341,60 @@ class EndpointExtractor:
             
             # IMPORTANT: Extraire aussi les API depuis les requêtes réseau réelles
             # Si la requête elle-même ressemble à une API (ex: /graphql, /api/...)
+            # Ne pas ajouter les requêtes issues du fuzzing (XSS/SQLi) aux Discovered APIs
             if flow.request:
-                request_path = flow.request.path.split('?')[0]  # Enlever les query params
-                request_url_full = flow.request.url
-                request_url_clean = request_url_full.split('?')[0]  # Enlever les query params pour la détection
-                
-                # Extraire le domaine de la requête
-                try:
-                    from urllib.parse import urlparse
-                    parsed_req = urlparse(request_url_full)
-                    request_domain = f"{parsed_req.scheme}://{parsed_req.netloc}"
-                except:
-                    request_domain = None
-                
-                # Vérifier le Content-Type pour exclure les pages HTML
-                is_html_page = False
-                if flow.response:
-                    response_content_type = flow.response.headers.get('Content-Type', '').lower()
-                    if 'text/html' in response_content_type:
-                        is_html_page = True
-                
-                # Exclure la racine et les pages HTML normales
-                path_lower = request_path.lower()
-                is_root_or_html = (
-                    request_path == '/' or 
-                    request_path == '' or
-                    is_html_page or
-                    path_lower.endswith('.html') or
-                    path_lower.endswith('.htm') or
-                    ('.' not in path_lower.split('/')[-1] and not any(indicator in path_lower for indicator in ['/api/', '/v', '/graphql', '/rest/', '/rpc/', '/webhook', '/callback', '/oauth', '/auth', '/login', '/logout', '/token']))
-                )
-                
-                # Vérifier si la requête elle-même est une API (et n'est pas une page HTML)
-                if not is_root_or_html and (self._looks_like_api_endpoint(request_path) or self._looks_like_api_endpoint(request_url_clean)):
-                    # Si React est détecté sur ce domaine (actuel ou déjà détecté), ajouter aux API React
-                    is_react_for_request = is_react or (request_domain and request_domain in self.react_domains)
+                _source = None
+                if hasattr(flow, 'metadata') and isinstance(getattr(flow, 'metadata'), dict):
+                    _source = flow.metadata.get('source')
+                if not _source and hasattr(flow.request, 'headers') and flow.request.headers:
+                    _h = flow.request.headers.get(b'X-KittyProxy-Source') or flow.request.headers.get('X-KittyProxy-Source')
+                    if _h:
+                        _source = _h.decode('utf-8', errors='replace') if isinstance(_h, bytes) else str(_h)
+                if _source and _source.lower() == 'fuzzing':
+                    pass  # Ne pas ajouter l'URL de la requête fuzzing aux Discovered APIs
+                else:
+                    request_path = flow.request.path.split('?')[0]  # Enlever les query params
+                    request_url_full = flow.request.url
+                    request_url_clean = request_url_full.split('?')[0]  # Enlever les query params pour la détection
                     
-                    if is_react_for_request:
-                        if request_url_full not in endpoints['react_api_endpoints']:
-                            endpoints['react_api_endpoints'].append(request_url_full)
-                            self.react_api_endpoints.add(request_url_full)
-                    # Ajouter aussi aux endpoints généraux
-                    if request_url_full not in endpoints['api_endpoints']:
-                        endpoints['api_endpoints'].append(request_url_full)
+                    # Extraire le domaine de la requête
+                    try:
+                        from urllib.parse import urlparse
+                        parsed_req = urlparse(request_url_full)
+                        request_domain = f"{parsed_req.scheme}://{parsed_req.netloc}"
+                    except:
+                        request_domain = None
+                    
+                    # Vérifier le Content-Type pour exclure les pages HTML
+                    is_html_page = False
+                    if flow.response:
+                        response_content_type = flow.response.headers.get('Content-Type', '').lower()
+                        if 'text/html' in response_content_type:
+                            is_html_page = True
+                    
+                    # Exclure la racine et les pages HTML normales
+                    path_lower = request_path.lower()
+                    is_root_or_html = (
+                        request_path == '/' or 
+                        request_path == '' or
+                        is_html_page or
+                        path_lower.endswith('.html') or
+                        path_lower.endswith('.htm') or
+                        ('.' not in path_lower.split('/')[-1] and not any(indicator in path_lower for indicator in ['/api/', '/v', '/graphql', '/rest/', '/rpc/', '/webhook', '/callback', '/oauth', '/auth', '/login', '/logout', '/token']))
+                    )
+                    
+                    # Vérifier si la requête elle-même est une API (et n'est pas une page HTML)
+                    if not is_root_or_html and (self._looks_like_api_endpoint(request_path) or self._looks_like_api_endpoint(request_url_clean)):
+                        # Si React est détecté sur ce domaine (actuel ou déjà détecté), ajouter aux API React
+                        is_react_for_request = is_react or (request_domain and request_domain in self.react_domains)
+                        
+                        if is_react_for_request:
+                            if request_url_full not in endpoints['react_api_endpoints']:
+                                endpoints['react_api_endpoints'].append(request_url_full)
+                                self.react_api_endpoints.add(request_url_full)
+                        # Ajouter aussi aux endpoints généraux
+                        if request_url_full not in endpoints['api_endpoints']:
+                            endpoints['api_endpoints'].append(request_url_full)
             
             # Filtrer et normaliser
             for key in endpoints:
@@ -1105,6 +1273,15 @@ class EndpointExtractor:
                     react_apis = self.extract_react_api_endpoints(js_content, js_url)
                     print(f"[REACT API EXTRACTION] Extracted {len(react_apis)} API(s) from {js_url}: {react_apis}")
                     
+                    # JS → creds/secrets from fetched JS
+                    try:
+                        secrets = self._extract_secrets_from_js(js_content, js_url)
+                        for s in secrets:
+                            if s not in self.discovered_secrets:
+                                self.discovered_secrets.append(s)
+                    except Exception as e:
+                        print(f"[REACT API EXTRACTION] Error extracting secrets from JS: {e}")
+                    
                     # Ajouter aux endpoints React
                     for api_url in react_apis:
                         self.react_api_endpoints.add(api_url)
@@ -1219,6 +1396,8 @@ class EndpointExtractor:
             'links': filtered_links,
             'react_api_endpoints': filtered_react_apis,
             'graphql_queries': graphql_data,  # Endpoint -> Liste de requêtes
+            'discovered_secrets': list(self.discovered_secrets),
+            'ssrf_redirect_candidates': list(self.ssrf_redirect_candidates),
         }
     
     def _save_endpoint_to_db(self, url: str, category: str, flow):

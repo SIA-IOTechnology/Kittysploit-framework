@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from flow_manager import flow_manager
 from proxy_core import plugin_manager
 from endpoint_extractor import endpoint_extractor
+from reflection_checker import check_reflection as reflection_check_reflection
+from fuzzer import create_fuzz_job, get_fuzz_job_status, get_fuzz_job_results, stop_fuzz_job
 from ui_extensions.manager import list_extensions, get_extension_path
 from performance_monitor import performance_monitor
 from collaboration_manager import collaboration_manager, Collaborator
@@ -29,19 +31,28 @@ from core.config import Config
 # Framework will be initialized by main.py
 framework = None
 
-# Cache for modules (loaded once at startup)
+# Cache for modules (loaded in background after startup)
 modules_cache = None
 modules_cache_lock = threading.Lock()
+modules_loading = False
 
 def set_framework(fw):
     """Set the framework instance"""
-    global framework
+    global framework, modules_loading
     framework = fw
     # Set framework in flow_manager and endpoint_extractor
     flow_manager.framework = fw
     endpoint_extractor.framework = fw
-    # Load modules cache on framework initialization
-    load_modules_cache()
+    # Load modules cache in background so startup is not blocked
+    def _load_in_background():
+        global modules_loading
+        modules_loading = True
+        try:
+            load_modules_cache()
+        finally:
+            modules_loading = False
+    t = threading.Thread(target=_load_in_background, daemon=True)
+    t.start()
     # Load flows and endpoints from database for current workspace
     if fw:
         current_workspace = fw.get_current_workspace_name()
@@ -982,8 +993,53 @@ def _extract_tags_from_source(file_path: str) -> list:
     
     return []
 
+def _load_one_module(module_path: str, file_path: str):
+    """Load a single module and return module_data dict or None. Used for parallel loading."""
+    try:
+        tags = _extract_tags_from_source(file_path)
+        if "web" not in tags:
+            return None
+        module = framework.load_module(module_path, load_only=False)
+        if not module:
+            return None
+        info = framework.get_module_info(module_path)
+        category = module_path.split('/')[0] if '/' in module_path else 'misc'
+        raw_tags = []
+        if info and isinstance(info, dict):
+            raw_tags = info.get('tags') or info.get('Tags') or []
+            if isinstance(raw_tags, str):
+                raw_tags = [raw_tags]
+            elif not isinstance(raw_tags, list):
+                raw_tags = []
+        module_data = {
+            'name': module_path,
+            'description': info.get('Description', info.get('description', 'No description')) if info else 'No description',
+            'author': info.get('Author', info.get('author', 'Unknown')) if info else 'Unknown',
+            'category': category,
+            'options': [],
+            'tags': raw_tags
+        }
+        try:
+            if module and hasattr(module, 'get_options'):
+                options = module.get_options()
+                if isinstance(options, dict):
+                    for opt_name, opt_obj in options.items():
+                        if hasattr(opt_obj, 'description'):
+                            module_data['options'].append({
+                                'name': opt_name,
+                                'description': opt_obj.description,
+                                'required': getattr(opt_obj, 'required', False),
+                                'default': getattr(opt_obj, 'value', None)
+                            })
+        except Exception:
+            pass
+        return module_data
+    except Exception:
+        return None
+
+
 def load_modules_cache():
-    """Load and cache all modules with 'web' tag (called once at startup)"""
+    """Load and cache all modules with 'web' tag (runs in background at startup or on refresh)."""
     global modules_cache
     
     if not framework:
@@ -992,96 +1048,50 @@ def load_modules_cache():
     
     print("[+] Loading modules cache...")
     try:
-        with modules_cache_lock:
-            # Discover all modules
-            discovered_modules = framework.module_loader.discover_modules()
-            print(f"[+] Discovered {len(discovered_modules)} modules")
-            
-            modules_list = []
-            modules_with_web_tag = 0
-            modules_loaded = 0
-            modules_skipped = 0
-            
-            # Iterate through discovered modules
-            for module_path, file_path in discovered_modules.items():
-                try:
-                    # First, check tags from source file without loading the module
-                    tags = _extract_tags_from_source(file_path)
-                    
-                    # Skip modules without "web" tag (don't load them at all)
-                    if "web" not in tags:
-                        modules_skipped += 1
-                        continue
-                    
-                    modules_with_web_tag += 1
-                    
-                    # Load modules with "web" tag and cache them for immediate use
-                    # Use load_only=False to actually cache the module in the framework
-                    module = framework.load_module(module_path, load_only=False)
-                    if not module:
-                        modules_skipped += 1
-                        continue
-                    
-                    modules_loaded += 1
-                    
-                    # Get module info
-                    info = framework.get_module_info(module_path)
-                    
-                    # Extract category from path
-                    category = module_path.split('/')[0] if '/' in module_path else 'misc'
-                    
-                    # Extract tags if present in __info__
-                    raw_tags = []
-                    if info and isinstance(info, dict):
-                        raw_tags = info.get('tags') or info.get('Tags') or []
-                        if isinstance(raw_tags, str):
-                            raw_tags = [raw_tags]
-                        elif not isinstance(raw_tags, list):
-                            raw_tags = []
-
-                    # Format for frontend
-                    module_data = {
-                        'name': module_path,
-                        'description': info.get('Description', info.get('description', 'No description')) if info else 'No description',
-                        'author': info.get('Author', info.get('author', 'Unknown')) if info else 'Unknown',
-                        'category': category,
-                        'options': [],
-                        'tags': raw_tags
-                    }
-                    
-                    # Get options
+        discovered_modules = framework.module_loader.discover_modules()
+        print(f"[+] Discovered {len(discovered_modules)} modules")
+        
+        # Filter to web-tag modules first (fast, no load)
+        to_load = []
+        modules_skipped = 0
+        for module_path, file_path in discovered_modules.items():
+            tags = _extract_tags_from_source(file_path)
+            if "web" not in tags:
+                modules_skipped += 1
+                continue
+            to_load.append((module_path, file_path))
+        
+        # Load modules in parallel
+        modules_list = []
+        try:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            import os
+            max_workers = min(6, max(1, (os.cpu_count() or 4) - 1))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(_load_one_module, path, fp): path for path, fp in to_load}
+                for future in as_completed(futures):
                     try:
-                        if module and hasattr(module, 'get_options'):
-                            options = module.get_options()
-                            if isinstance(options, dict):
-                                for opt_name, opt_obj in options.items():
-                                    if hasattr(opt_obj, 'description'):
-                                        module_data['options'].append({
-                                            'name': opt_name,
-                                            'description': opt_obj.description,
-                                            'required': getattr(opt_obj, 'required', False),
-                                            'default': getattr(opt_obj, 'value', None)
-                                        })
+                        data = future.result()
+                        if data:
+                            modules_list.append(data)
                     except Exception as e:
                         pass
-                    
-                    modules_list.append(module_data)
-                except Exception as e:
-                    print(f"[DEBUG] Error processing module {module_path}: {e}")
-                    modules_skipped += 1
-                    continue
-            
+        except ImportError:
+            for module_path, file_path in to_load:
+                data = _load_one_module(module_path, file_path)
+                if data:
+                    modules_list.append(data)
+        
+        with modules_cache_lock:
             modules_cache = modules_list
-            print(f"[+] Modules cache loaded: {len(modules_list)} modules with 'web' tag")
-            print(f"    - Modules with 'web' tag found: {modules_with_web_tag}")
-            print(f"    - Modules loaded: {modules_loaded}")
-            print(f"    - Modules skipped (no 'web' tag or load error): {modules_skipped}")
-            
+        print(f"[+] Modules cache loaded: {len(modules_list)} modules with 'web' tag")
+        print(f"    - To load: {len(to_load)}, loaded: {len(modules_list)}, skipped (no web tag): {modules_skipped}")
     except Exception as e:
         import traceback
         print(f"[ERROR] Error loading modules cache: {str(e)}")
-        print(f"[ERROR] Traceback: {traceback.format_exc()}")
-        modules_cache = []
+        print(traceback.format_exc())
+        with modules_cache_lock:
+            modules_cache = []
 module_outputs_lock = threading.Lock()
 
 def capture_module_output(module_name: str):
@@ -1147,16 +1157,13 @@ def get_modules_debug():
 
 @app.get("/api/modules")
 def get_modules():
-    """List all available modules (from cache)"""
+    """List all available modules (from cache). Returns {modules: [], loading: bool}."""
     if not framework:
         raise HTTPException(status_code=500, detail="Framework not initialized")
-    
     with modules_cache_lock:
-        if modules_cache is None:
-            # Cache not loaded yet, load it now
-            load_modules_cache()
-        
-        return modules_cache if modules_cache is not None else []
+        loading = modules_loading
+        cache = modules_cache if modules_cache is not None else []
+    return {"modules": cache, "loading": loading}
 
 @app.post("/api/modules/refresh")
 def refresh_modules_cache():
@@ -1543,11 +1550,10 @@ def get_module_suggestions(payload: Dict):
     config_set = set([c.lower() for c in configs if isinstance(c, str)])
 
     with modules_cache_lock:
-        if modules_cache is None:
-            load_modules_cache()
+        cache = modules_cache if modules_cache is not None else []
 
         suggestions = []
-        for mod in modules_cache or []:
+        for mod in cache:
             name = mod.get('name', '')
             name_lower = name.lower()
             tags = [t.lower() for t in mod.get('tags', []) if isinstance(t, str)]
@@ -1990,7 +1996,9 @@ def get_discovered_endpoints():
             "links": all_endpoints['links'],
             "react_api_endpoints": react_apis,
             "graphql_queries": all_endpoints.get('graphql_queries', {}),
-            "category_counts": category_counts
+            "category_counts": category_counts,
+            "discovered_secrets": all_endpoints.get('discovered_secrets', []),
+            "ssrf_redirect_candidates": all_endpoints.get('ssrf_redirect_candidates', []),
         }
         
         # Ne plus logger à chaque appel pour éviter le spam
@@ -2001,6 +2009,316 @@ def get_discovered_endpoints():
         print(f"[API ENDPOINT] Error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error getting endpoints: {str(e)}")
+
+
+# === REFLECTION CHECK (live URLs) ===
+class ReflectionCheckRequest(BaseModel):
+    flow_id: str
+    proxy_port: Optional[int] = 8080
+
+@app.post("/api/reflection/check")
+def reflection_check(request: ReflectionCheckRequest):
+    """Inject a unique canary in each request parameter and check if it is reflected in the response (body or headers)."""
+    flow = flow_manager.get_flow(request.flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    try:
+        req = flow.get("request") or {}
+        headers = req.get("headers") or {}
+        # Normalize headers to str keys/values (mitmproxy may use bytes)
+        clean_headers = {}
+        for k, v in headers.items():
+            key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+            val = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v)
+            clean_headers[key] = val
+        flow_data = {
+            "request": {
+                "url": flow.get("url"),
+                "method": flow.get("method", "GET"),
+                "headers": clean_headers,
+                "content_bs64": req.get("content_bs64") or "",
+            }
+        }
+        result = reflection_check_reflection(
+            flow_data,
+            proxy_host="127.0.0.1",
+            proxy_port=request.proxy_port or 8080,
+            timeout=15,
+        )
+        return {
+            "flow_id": request.flow_id,
+            "reflected": result.get("reflected", []),
+            "not_reflected": result.get("not_reflected", []),
+            "message": result.get("message", ""),
+            "error": result.get("error"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Reflection check failed: {str(e)}")
+
+
+# === FUZZING (XSS / SQLi) ===
+class FuzzingStartRequest(BaseModel):
+    flow_id: str
+    fuzz_type: str = "xss"
+    param_names: Optional[List[str]] = None
+    custom_payloads: Optional[List[str]] = None
+    encoding: str = "none"
+    concurrency: int = 20
+    timeout: float = 10.0
+    proxy_port: int = 8080
+    use_proxy: bool = True
+
+# Param names that often reference server-side objects (IDOR candidates)
+IDOR_CANDIDATE_PATTERNS = frozenset({
+    "id", "uid", "user_id", "userid", "account_id", "accountid",
+    "document_id", "documentid", "file_id", "fileid", "order_id", "orderid",
+    "report_id", "reportid", "invoice_id", "invoiceid", "customer_id", "customerid",
+    "session_id", "sessionid", "token", "key", "ref", "reference", "num", "number",
+    "doc_id", "docid", "msg_id", "msgid", "comment_id", "commentid", "post_id", "postid",
+    "item_id", "itemid", "product_id", "productid", "cart_id", "cartid",
+    "request_id", "requestid", "ticket_id", "ticketid", "case_id", "caseid",
+})
+
+
+def _is_idor_candidate(param_name: str) -> bool:
+    if not param_name or not isinstance(param_name, str):
+        return False
+    n = param_name.lower().strip()
+    if n in IDOR_CANDIDATE_PATTERNS:
+        return True
+    if n.endswith("_id") or n.endswith("id"):
+        return True
+    return False
+
+
+@app.get("/api/fuzzing/params/{flow_id}")
+def fuzzing_params(flow_id: str):
+    """Get list of parameter names (and location) for a flow. Includes params from request and params discovered from response HTML (forms, links)."""
+    from reflection_checker import get_all_fuzzable_params
+    flow = flow_manager.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    req = flow.get("request") or {}
+    headers = req.get("headers") or {}
+    clean_headers = {}
+    for k, v in headers.items():
+        key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+        val = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v)
+        clean_headers[key] = val
+    url = flow.get("url") or ""
+    method = flow.get("method") or "GET"
+    body_b64 = req.get("content_bs64") or ""
+    resp = flow.get("response") or {}
+    response_body_b64 = resp.get("content_bs64") or ""
+    params = get_all_fuzzable_params(url, method, clean_headers, body_b64, response_body_b64)
+    return {
+        "params": [
+            {
+                "name": p.get("name"),
+                "location": p.get("location"),
+                "source": p.get("source", "request"),
+                "idor_candidate": _is_idor_candidate(p.get("name") or ""),
+                "value": p.get("value") or p.get("original_value") or "",
+            }
+            for p in params
+        ]
+    }
+
+@app.post("/api/fuzzing/start")
+def fuzzing_start(request: FuzzingStartRequest):
+    """Start a fuzz job (XSS or SQLi). Returns job_id."""
+    flow = flow_manager.get_flow(request.flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    req = flow.get("request") or {}
+    headers = req.get("headers") or {}
+    clean_headers = {}
+    for k, v in headers.items():
+        key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+        val = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v)
+        clean_headers[key] = val
+    resp = flow.get("response") or {}
+    flow_data = {
+        "request": {
+            "url": flow.get("url"),
+            "method": flow.get("method", "GET"),
+            "headers": clean_headers,
+            "content_bs64": req.get("content_bs64") or "",
+        },
+        "response": {"content_bs64": resp.get("content_bs64") or ""},
+    }
+    try:
+        job_id = create_fuzz_job(
+            flow_data,
+            fuzz_type=request.fuzz_type,
+            param_names=request.param_names,
+            custom_payloads=request.custom_payloads,
+            encoding=request.encoding or "none",
+            concurrency=min(max(request.concurrency, 1), 100),
+            timeout=min(max(request.timeout, 1.0), 60.0),
+            proxy_port=request.proxy_port or 8080,
+            use_proxy=getattr(request, "use_proxy", True),
+        )
+        return {"job_id": job_id, "message": "Fuzz job started"}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to start fuzz job: {str(e)}")
+
+@app.get("/api/fuzzing/status/{job_id}")
+def fuzzing_status(job_id: str):
+    """Get fuzz job status."""
+    s = get_fuzz_job_status(job_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return s
+
+@app.get("/api/fuzzing/results/{job_id}")
+def fuzzing_results(job_id: str):
+    """Get full results for a fuzz job."""
+    r = get_fuzz_job_results(job_id)
+    if r is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"results": r}
+
+@app.post("/api/fuzzing/stop/{job_id}")
+def fuzzing_stop(job_id: str):
+    """Stop a running fuzz job."""
+    ok = stop_fuzz_job(job_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": "stopped"}
+
+
+# === IDOR TEST (semi-automated) ===
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+
+class IdorTestRequest(BaseModel):
+    flow_id: str
+    param_name: str
+
+
+def _build_request_with_param_value(url: str, method: str, headers: Dict, body_b64: Optional[str], param_name: str, param_location: str, new_value: str):
+    """Build (url, body_bytes) with param set to new_value. Does not change method/headers."""
+    import base64
+    from reflection_checker import _get_content_type
+    parsed = urlparse(url)
+    new_query = None
+    if parsed.query and param_location == "query":
+        qs = parse_qs(parsed.query, keep_blank_values=True)
+        qs[param_name] = [new_value]
+        new_query = urlencode(qs, doseq=True)
+    elif param_location == "query":
+        new_query = urlencode({param_name: new_value})
+    new_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query or parsed.query, parsed.fragment))
+
+    body_raw = b""
+    if body_b64:
+        try:
+            body_raw = base64.b64decode(body_b64)
+        except Exception:
+            pass
+    new_body = body_raw
+    if body_raw and param_location in ("body_form", "body_json"):
+        ct = _get_content_type(headers).lower()
+        try:
+            body_str = body_raw.decode("utf-8", errors="replace")
+        except Exception:
+            return new_url, new_body
+        if "application/x-www-form-urlencoded" in ct:
+            parts = []
+            for part in body_str.split("&"):
+                if "=" in part:
+                    k, _, v = part.partition("=")
+                    if k.strip() == param_name:
+                        parts.append(f"{k}={requests.utils.quote(new_value, safe='')}")
+                    else:
+                        parts.append(part)
+                else:
+                    parts.append(part)
+            new_body = "&".join(parts).encode("utf-8", errors="replace")
+        elif "application/json" in ct:
+            try:
+                data = json.loads(body_str)
+                if isinstance(data, dict):
+                    data[param_name] = new_value
+                    new_body = json.dumps(data).encode("utf-8", errors="replace")
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return new_url, new_body
+
+
+@app.post("/api/idor/test")
+def idor_test(request: IdorTestRequest):
+    """
+    Semi-automated IDOR check: send the same request with the param value changed (e.g. +1 or '1'),
+    compare status and response length. If they differ, possible IDOR (verify manually).
+    """
+    from reflection_checker import parse_request_params
+    flow = flow_manager.get_flow(request.flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    req = flow.get("request") or {}
+    headers = req.get("headers") or {}
+    clean_headers = {}
+    for k, v in headers.items():
+        key = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+        val = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v)
+        clean_headers[key] = val
+    url = flow.get("url") or ""
+    method = (flow.get("method") or "GET").upper()
+    body_b64 = req.get("content_bs64") or ""
+    params = parse_request_params(url, method, clean_headers, body_b64)
+    param_info = next((p for p in params if (p.get("name") or "").strip() == request.param_name.strip()), None)
+    if not param_info:
+        raise HTTPException(status_code=400, detail=f"Parameter '{request.param_name}' not found in request")
+    location = param_info.get("location") or "query"
+    original_value = param_info.get("value") or param_info.get("original_value") or ""
+    try:
+        orig_int = int(original_value)
+        modified_value = str(orig_int + 1)
+    except (ValueError, TypeError):
+        modified_value = "1" if original_value != "1" else "0"
+    try:
+        orig_url, orig_body = _build_request_with_param_value(url, method, clean_headers, body_b64, request.param_name, location, original_value)
+        mod_url, mod_body = _build_request_with_param_value(url, method, clean_headers, body_b64, request.param_name, location, modified_value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Build request failed: {str(e)}")
+    out_headers = {k: v for k, v in clean_headers.items() if k.lower() not in ("host", "content-length")}
+    if orig_body:
+        out_headers["Content-Length"] = str(len(orig_body))
+    try:
+        r_orig = requests.request(method, orig_url, headers=out_headers, data=orig_body, timeout=15, allow_redirects=True)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Request (original) failed: {str(e)}")
+    mod_headers = {k: v for k, v in clean_headers.items() if k.lower() not in ("host", "content-length")}
+    if mod_body:
+        mod_headers["Content-Length"] = str(len(mod_body))
+    try:
+        r_mod = requests.request(method, mod_url, headers=mod_headers, data=mod_body, timeout=15, allow_redirects=True)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Request (modified) failed: {str(e)}")
+    orig_status = r_orig.status_code
+    mod_status = r_mod.status_code
+    orig_len = len(r_orig.content)
+    mod_len = len(r_mod.content)
+    possible_idor = (orig_status != mod_status) or (orig_len != mod_len)
+    return {
+        "possible_idor": possible_idor,
+        "param_name": request.param_name,
+        "original_value": original_value,
+        "modified_value": modified_value,
+        "original_status": orig_status,
+        "modified_status": mod_status,
+        "original_response_length": orig_len,
+        "modified_response_length": mod_len,
+        "message": "Possible IDOR — verify manually (e.g. check if modified request returns another user's data)." if possible_idor else "No obvious difference; param might be validated or value range limited.",
+    }
+
 
 # === PERFORMANCE MONITORING ENDPOINTS ===
 @app.get("/api/performance")

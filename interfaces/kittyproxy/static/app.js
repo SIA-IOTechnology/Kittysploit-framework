@@ -6686,6 +6686,7 @@ function renderRepeaterContent() {
     }
 
     const rawContent = activeTab.rawRequest != null ? activeTab.rawRequest : buildRawFromRepeaterTab(activeTab);
+    const rawRequestHighlighted = highlightHttpRaw(rawContent, false);
     repeaterContentContainer.innerHTML = `
         <div class="repeater-tab-content">
             <div class="repeater-controls" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
@@ -6693,9 +6694,8 @@ function renderRepeaterContent() {
             </div>
             <div class="split-pane" style="flex: 1; border: 1px solid var(--border-color); border-radius: 4px; display: flex;">
                 <div class="repeater-editor" id="repeater-editor-${activeTab.id}" style="width: 50%; min-width: 300px; flex-shrink: 0; display: flex; flex-direction: column;">
-                    <div class="section-title" style="padding: 10px; background: #f5f5f5; margin: 0; border-bottom: 1px solid #eee;">Raw request</div>
-                    <textarea id="repeater-raw-${activeTab.id}" spellcheck="false" autocomplete="off"
-                        style="flex: 1; min-height: 180px; border: none; padding: 12px; font-family: 'Fira Code', 'Consolas', monospace; font-size: 0.85em; resize: vertical; line-height: 1.4; white-space: pre; overflow-wrap: normal;">${escapeHtml(rawContent)}</textarea>
+                    <div class="section-title" style="padding: 10px; background: #282c34; margin: 0; border-bottom: 1px solid #21252b; color: #abb2bf; font-size: 0.9em;">Raw request</div>
+                    <div id="repeater-raw-${activeTab.id}" class="repeater-raw-editor" contenteditable="true" spellcheck="false" data-placeholder="GET https://example.com/ HTTP/1.1&#10;Host: example.com" data-tab-id="${activeTab.id}">${rawRequestHighlighted}</div>
                 </div>
                 <div class="resize-handle" id="repeater-resize-handle-${activeTab.id}"></div>
                 <div class="repeater-response" id="repeater-response-${activeTab.id}" style="flex: 1; min-width: 300px;">
@@ -6715,12 +6715,18 @@ function renderRepeaterContent() {
     const rawEl = document.getElementById(`repeater-raw-${activeTab.id}`);
     if (rawEl) {
         rawEl.addEventListener('input', () => {
-            activeTab.rawRequest = rawEl.value;
-            const parsed = parseRawInterceptRequest(rawEl.value, activeTab.url);
+            const text = rawEl.textContent || '';
+            activeTab.rawRequest = text;
+            const parsed = parseRawInterceptRequest(text, activeTab.url);
             activeTab.method = parsed.method;
             activeTab.url = parsed.url;
             updateRepeaterTabTitle(activeTab.id);
             saveRepeaterTabs();
+        });
+        rawEl.addEventListener('blur', () => {
+            const text = rawEl.textContent || '';
+            if (!text.trim()) return;
+            rawEl.innerHTML = highlightHttpRaw(text, false);
         });
     }
 
@@ -6743,7 +6749,10 @@ async function sendRepeaterRequest(tabId) {
 
     const sendBtn = document.getElementById(`repeater-send-${tabId}`);
     const rawEl = document.getElementById(`repeater-raw-${tabId}`);
-    const rawStr = rawEl ? rawEl.value : (tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab));
+    let rawStr = rawEl ? (typeof rawEl.value !== 'undefined' ? rawEl.value : (rawEl.textContent || '')) : (tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab));
+    if (rawEl && typeof rawEl.value === 'undefined' && rawEl.innerHTML) {
+        rawStr = rawStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    }
     if (tab.rawRequest !== rawStr) {
         tab.rawRequest = rawStr;
         saveRepeaterTabs();
@@ -6834,68 +6843,112 @@ async function sendRepeaterRequest(tabId) {
     }
 }
 
-// Générer le HTML de la réponse
-function displayRepeaterResponseHTML(responseData) {
+// Coloration syntaxique type IDE pour raw HTTP (requête ou réponse). Corps HTML coloré via highlight.js
+function highlightHttpRaw(text, isResponse) {
+    if (!text || typeof text !== 'string') return escapeHtml(text || '');
+    const lines = text.split(/\r\n|\n/);
+    let inBody = false;
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (inBody) {
+            const bodyLines = lines.slice(i);
+            const body = bodyLines.join('\n');
+            if (isResponse && body.trim() && /^\s*<(!DOCTYPE|html|\?xml|[\w-]+)/i.test(body.trim())) {
+                let highlighted = null;
+                if (window.hljs) {
+                    try {
+                        highlighted = window.hljs.highlight(body, { language: 'xml', ignoreIllegals: true }).value;
+                    } catch (e1) {
+                        try {
+                            highlighted = window.hljs.highlight(body, { language: 'html', ignoreIllegals: true }).value;
+                        } catch (e2) {
+                            highlighted = null;
+                        }
+                    }
+                }
+                out.push(highlighted != null ? highlighted : '<span class="repeater-hl-body">' + escapeHtml(body) + '</span>');
+            } else {
+                out.push('<span class="repeater-hl-body">' + escapeHtml(body) + '</span>');
+            }
+            break;
+        }
+        if (i === 0) {
+            if (isResponse) {
+                const m = line.match(/^(HTTP\/[\d.]+)\s+(\d+)\s*(.*)$/);
+                if (m) {
+                    out.push('<span class="repeater-hl-version">' + escapeHtml(m[1]) + '</span> ');
+                    out.push('<span class="repeater-hl-status">' + escapeHtml(m[2]) + '</span>');
+                    if (m[3]) out.push(' <span class="repeater-hl-reason">' + escapeHtml(m[3]) + '</span>');
+                    out.push('\n');
+                } else {
+                    out.push('<span class="repeater-hl-body">' + escapeHtml(line) + '\n</span>');
+                }
+            } else {
+                const m = line.match(/^(\w+)\s+(\S+)\s+(HTTP\/[\d.]+)/);
+                if (m) {
+                    out.push('<span class="repeater-hl-method">' + escapeHtml(m[1]) + '</span> ');
+                    out.push('<span class="repeater-hl-url">' + escapeHtml(m[2]) + '</span> ');
+                    out.push('<span class="repeater-hl-version">' + escapeHtml(m[3]) + '</span>\n');
+                } else {
+                    out.push('<span class="repeater-hl-body">' + escapeHtml(line) + '\n</span>');
+                }
+            }
+            continue;
+        }
+        if (line.trim() === '') {
+            inBody = true;
+            out.push('\n');
+            continue;
+        }
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0) {
+            const name = line.slice(0, colonIdx).trim();
+            const value = line.slice(colonIdx + 1).trim();
+            out.push('<span class="repeater-hl-header-name">' + escapeHtml(name) + '</span>: ');
+            out.push('<span class="repeater-hl-header-value">' + escapeHtml(value) + '</span>\n');
+        } else {
+            out.push('<span class="repeater-hl-body">' + escapeHtml(line) + '\n</span>');
+        }
+    }
+    if (!inBody && lines.length > 1) {
+        out.push('\n');
+    }
+    return out.join('');
+}
+
+// Construire la réponse HTTP brute (ligne de statut + en-têtes + corps), comme la requête
+function buildRawResponseFromRepeaterResponse(responseData) {
+    if (!responseData) return '';
     const statusCode = responseData.status_code || 0;
-    const statusClass = statusCode >= 400 ? 'status-4xx' : statusCode >= 300 ? 'status-3xx' : 'status-2xx';
+    const reason = responseData.reason || 'OK';
     const headers = responseData.headers || {};
     const bodyBs64 = responseData.content_bs64 || '';
-
     let bodyContent = '';
-    let bodyPreview = '';
-
     if (bodyBs64) {
         try {
             bodyContent = atob(bodyBs64);
-            try {
-                const jsonContent = JSON.parse(bodyContent);
-                bodyPreview = JSON.stringify(jsonContent, null, 2);
-            } catch {
-                bodyPreview = bodyContent;
-            }
         } catch (e) {
-            bodyPreview = '[Binary content]';
+            bodyContent = '[Binary / invalid base64]';
         }
     }
-
-    let headersHtml = '';
+    let raw = `HTTP/1.1 ${statusCode} ${reason}\r\n`;
     Object.entries(headers).forEach(([key, value]) => {
-        headersHtml += `<div style="padding: 6px 12px; border-bottom: 1px solid #eee; display: flex; gap: 10px;">
-            <span style="font-weight: 600; color: #6200ea; min-width: 150px;">${escapeHtml(key)}:</span>
-            <span style="color: #333; font-family: 'Fira Code', monospace; font-size: 0.9em;">${escapeHtml(String(value))}</span>
-        </div>`;
+        raw += `${key}: ${value}\r\n`;
     });
+    raw += '\r\n';
+    raw += bodyContent;
+    return raw;
+}
 
+// Générer le HTML de la réponse (raw avec coloration type IDE)
+function displayRepeaterResponseHTML(responseData) {
+    const rawResponse = buildRawResponseFromRepeaterResponse(responseData);
+    const highlighted = highlightHttpRaw(rawResponse || '[No response]', true);
     return `
-        <div style="padding: 20px; height: 100%; overflow-y: auto;">
-            <div style="margin-bottom: 20px;">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
-                    <h3 style="margin: 0; color: #333; font-size: 1.2em;">Response</h3>
-                    <span class="${statusClass}" style="padding: 4px 12px; border-radius: 12px; font-weight: 600; font-size: 0.85em; display: inline-block;">
-                        ${statusCode} ${responseData.reason || ''}
-                    </span>
-                </div>
-            </div>
-            <div style="margin-bottom: 20px;">
-                <h4 style="margin: 0 0 12px 0; color: #6200ea; font-size: 1em; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                    <span class="material-symbols-outlined" style="font-size: 1.1em;">list</span>
-                    Headers
-                    <span style="font-size: 0.8em; font-weight: 400; color: #888; margin-left: auto;">
-                        ${Object.keys(headers).length} header${Object.keys(headers).length !== 1 ? 's' : ''}
-                    </span>
-                </h4>
-                <div style="border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); background: white;">
-                    ${headersHtml || '<p style="padding: 20px; color: #888; text-align: center; margin: 0;">No headers</p>'}
-                </div>
-            </div>
-            <div>
-                <h4 style="margin: 0 0 12px 0; color: #6200ea; font-size: 1em; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                    <span class="material-symbols-outlined" style="font-size: 1.1em;">description</span>
-                    Body
-                    ${bodyBs64 ? `<span style="font-size: 0.8em; font-weight: 400; color: #888; margin-left: auto;">${bodyContent.length} bytes</span>` : ''}
-                </h4>
-                <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; font-family: 'Fira Code', 'Consolas', monospace; margin: 0; max-height: 400px; overflow-y: auto;">${escapeHtml(bodyPreview || '[No body]')}</pre>
-            </div>
+        <div class="repeater-response-raw" style="height: 100%; display: flex; flex-direction: column;">
+            <div class="section-title" style="padding: 10px; background: #282c34; margin: 0; border-bottom: 1px solid #21252b; color: #abb2bf; font-size: 0.9em;">Raw response</div>
+            <div class="repeater-raw-response-wrap" id="repeater-raw-response-content">${highlighted}</div>
         </div>
     `;
 }
@@ -9144,12 +9197,11 @@ function showFlowContextMenu(event, flow) {
 
     const menuItemStyle = 'padding: 10px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.2s;';
 
-    // Create context menu
+    // Create context menu (toujours vers le haut pour avoir de la place)
     const menu = document.createElement('div');
     menu.id = 'flow-context-menu';
     menu.style.cssText = `
         position: fixed;
-        top: ${event.clientY}px;
         left: ${event.clientX}px;
         background: white;
         border: 1px solid var(--border-color);
@@ -9159,6 +9211,9 @@ function showFlowContextMenu(event, flow) {
         min-width: 220px;
         padding: 4px 0;
     `;
+    // Position temporaire pour mesurer la hauteur, puis on place au-dessus du clic
+    menu.style.top = '0';
+    menu.style.visibility = 'hidden';
 
     function addContextItem(icon, label, onClick, primary) {
         const div = document.createElement('div');
@@ -9186,6 +9241,11 @@ function showFlowContextMenu(event, flow) {
     addContextItem('target', 'Send to Intruder', () => sendFlowToIntruder(flow.id), false);
 
     document.body.appendChild(menu);
+    // Toujours afficher le menu vers le haut (au-dessus du clic)
+    const menuHeight = menu.offsetHeight;
+    const gap = 4;
+    menu.style.top = `${Math.max(gap, event.clientY - menuHeight - gap)}px`;
+    menu.style.visibility = '';
 
     // Close menu when clicking outside
     const closeMenu = (e) => {

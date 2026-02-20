@@ -2058,6 +2058,42 @@ body {
     overflow-x: hidden;
 }
 
+/* Replay: coloration type IDE pour raw request / raw response */
+.repeater-raw-editor,
+.repeater-raw-response-wrap {
+    background: #282c34;
+    color: #abb2bf;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85em;
+    line-height: 1.5;
+    white-space: pre;
+    overflow: auto;
+    padding: 12px;
+    min-height: 180px;
+    flex: 1;
+    margin: 0;
+    border: none;
+    outline: none;
+}
+.repeater-raw-response-wrap {
+    outline: none;
+    user-select: text;
+}
+.repeater-raw-editor[contenteditable]:empty::before {
+    content: attr(data-placeholder);
+    color: #5c6370;
+}
+/* Couleurs HTTP type IDE (thème sombre) */
+.repeater-hl-method { color: #61afef; font-weight: 600; }
+.repeater-hl-url { color: #e06c75; }
+.repeater-hl-version { color: #56b6c2; }
+.repeater-hl-status { color: #e5c07b; font-weight: 500; }
+.repeater-hl-reason { color: #98c379; }
+.repeater-hl-header-name { color: #c678dd; }
+.repeater-hl-header-value { color: #98c379; }
+.repeater-hl-body { color: #abb2bf; }
+.repeater-hl-error { color: #f44747; }
+
 /* Intruder Styles */
 .intruder-container {
     padding: 20px;

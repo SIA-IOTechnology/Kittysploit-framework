@@ -10,6 +10,35 @@ from collections import OrderedDict
 
 from mitmproxy.http import HTTPFlow
 
+def _safe_response_content(flow_response):
+    """Get response body without raising when Content-Encoding is gzip but body is not (e.g. BadGzipFile)."""
+    if not flow_response:
+        return b""
+    try:
+        return flow_response.content or b""
+    except ValueError:
+        return getattr(flow_response, 'raw_content', None) or b""
+
+def _safe_response_size(flow_response):
+    """Get response body length; avoid flow.response.content when gzip decode fails."""
+    if not flow_response:
+        return None
+    try:
+        if hasattr(flow_response, 'content') and flow_response.content:
+            return len(flow_response.content)
+    except ValueError:
+        pass
+    if hasattr(flow_response, 'raw_content') and flow_response.raw_content is not None:
+        return len(flow_response.raw_content)
+    if hasattr(flow_response, 'headers') and flow_response.headers:
+        cl = flow_response.headers.get(b'Content-Length') or flow_response.headers.get('Content-Length')
+        if cl:
+            try:
+                return int(cl.decode('utf-8') if isinstance(cl, bytes) else cl)
+            except (ValueError, TypeError):
+                pass
+    return None
+
 from tech_detector import tech_detector
 from fingerprint_engine import fingerprint_engine
 from module_suggester import module_suggester
@@ -201,19 +230,7 @@ class FlowManager:
                 # Check if we should skip analysis (fast mode + large response)
                 should_skip = False
                 if self.fast_mode:
-                    response_size = 0
-                    if hasattr(flow.response, 'content') and flow.response.content:
-                        response_size = len(flow.response.content)
-                    elif hasattr(flow.response, 'headers') and flow.response.headers:
-                        content_length_header = flow.response.headers.get(b'Content-Length') or flow.response.headers.get('Content-Length')
-                        if content_length_header:
-                            try:
-                                if isinstance(content_length_header, bytes):
-                                    content_length_header = content_length_header.decode('utf-8')
-                                response_size = int(content_length_header)
-                            except (ValueError, TypeError):
-                                pass
-                    
+                    response_size = _safe_response_size(flow.response) or 0
                     if response_size > (self.fast_mode_threshold_kb * 1024):
                         should_skip = True
                         print(f"[FLOW MANAGER] Skipping heavy analysis for flow {flow.id} (response size: {response_size} bytes > {self.fast_mode_threshold_kb}KB threshold)")
@@ -366,7 +383,7 @@ class FlowManager:
             }
             
             if flow.response:
-                res_content = flow.response.content or b""
+                res_content = _safe_response_content(flow.response)
                 result["response"] = {
                     "headers": dict(flow.response.headers),
                     "content_bs64": base64.b64encode(res_content).decode('utf-8'),
@@ -447,20 +464,8 @@ class FlowManager:
                 duration = current_time - flow.request.timestamp_start
                 duration_ms = int(duration * 1000) if duration else None
         
-        # Calculate response size
-        response_size = None
-        if flow.response:
-            if hasattr(flow.response, 'content') and flow.response.content:
-                response_size = len(flow.response.content)
-            elif hasattr(flow.response, 'headers') and flow.response.headers:
-                content_length_header = flow.response.headers.get(b'Content-Length') or flow.response.headers.get('Content-Length')
-                if content_length_header:
-                    try:
-                        if isinstance(content_length_header, bytes):
-                            content_length_header = content_length_header.decode('utf-8')
-                        response_size = int(content_length_header)
-                    except (ValueError, TypeError):
-                        pass
+        # Calculate response size (avoid flow.response.content when Content-Encoding is gzip but body is not)
+        response_size = _safe_response_size(flow.response) if flow.response else None
         
         # Check if flow is from API Tester
         source = None
@@ -778,7 +783,7 @@ class FlowManager:
             }
             
             if flow.response:
-                res_content = flow.response.content or b""
+                res_content = _safe_response_content(flow.response)
                 data["response"] = {
                     "headers": dict(flow.response.headers),
                     "content_bs64": base64.b64encode(res_content).decode('utf-8'),
@@ -895,7 +900,7 @@ class FlowManager:
             res_content = b""
             res_headers = {}
             if flow.response:
-                res_content = flow.response.content or b""
+                res_content = _safe_response_content(flow.response)
                 res_headers = dict(flow.response.headers) if flow.response.headers else {}
             
             # Get analysis data

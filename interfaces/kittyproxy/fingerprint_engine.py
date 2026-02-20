@@ -269,14 +269,12 @@ class FingerprintEngine:
         """Extrait le texte de la réponse"""
         if not flow.response:
             return ""
-        
+        from flow_utils import safe_response_content
+        res_content = safe_response_content(flow.response)
         text = f"HTTP/{flow.response.http_version} {flow.response.status_code}\n"
         text += "\n".join([f"{k}: {v}" for k, v in flow.response.headers.items()])
-        if flow.response.content:
-            try:
-                text += "\n" + flow.response.content.decode('utf-8', errors='ignore')
-            except:
-                pass
+        if res_content:
+            text += "\n" + res_content.decode('utf-8', errors='ignore')
         return text
 
 # Instance globale

@@ -52,9 +52,12 @@ class PerformanceMonitor:
                 'timestamp': flow.request.timestamp_start
             })
         
-        # Calculer la bande passante
+        # Calculer la bande passante (safe: évite BadGzipFile si Content-Encoding gzip mais corps brut)
         request_size = len(flow.request.content) if flow.request.content else 0
-        response_size = len(flow.response.content) if flow.response.content else 0
+        from flow_utils import safe_response_size
+        response_size = safe_response_size(flow.response) if flow.response else 0
+        if response_size is None:
+            response_size = 0
         total_size = request_size + response_size
         
         self.bandwidth_usage.append({

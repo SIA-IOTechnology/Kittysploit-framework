@@ -10,34 +10,7 @@ from collections import OrderedDict
 
 from mitmproxy.http import HTTPFlow
 
-def _safe_response_content(flow_response):
-    """Get response body without raising when Content-Encoding is gzip but body is not (e.g. BadGzipFile)."""
-    if not flow_response:
-        return b""
-    try:
-        return flow_response.content or b""
-    except ValueError:
-        return getattr(flow_response, 'raw_content', None) or b""
-
-def _safe_response_size(flow_response):
-    """Get response body length; avoid flow.response.content when gzip decode fails."""
-    if not flow_response:
-        return None
-    try:
-        if hasattr(flow_response, 'content') and flow_response.content:
-            return len(flow_response.content)
-    except ValueError:
-        pass
-    if hasattr(flow_response, 'raw_content') and flow_response.raw_content is not None:
-        return len(flow_response.raw_content)
-    if hasattr(flow_response, 'headers') and flow_response.headers:
-        cl = flow_response.headers.get(b'Content-Length') or flow_response.headers.get('Content-Length')
-        if cl:
-            try:
-                return int(cl.decode('utf-8') if isinstance(cl, bytes) else cl)
-            except (ValueError, TypeError):
-                pass
-    return None
+from flow_utils import safe_response_content as _safe_response_content, safe_response_size as _safe_response_size
 
 from tech_detector import tech_detector
 from fingerprint_engine import fingerprint_engine

@@ -407,19 +407,22 @@ class TechnologyDetector:
         # Extraire les noms de cookies (requête + réponse)
         cookie_names = self._extract_cookie_names(flow)
         
-        # Extraire le contenu HTML/JS séparément
+        # Extraire le contenu HTML/JS séparément (safe: évite BadGzipFile si Content-Encoding gzip mais corps brut)
         html_content = ""
         js_content = ""
         content_type = ""
-        if flow.response and flow.response.content:
+        if flow.response:
             try:
-                content = flow.response.content.decode('utf-8', errors='ignore')
-                content_type = flow.response.headers.get('Content-Type', '').lower()
-                if 'text/html' in content_type:
-                    html_content = content
-                elif 'javascript' in content_type or 'application/javascript' in content_type:
-                    js_content = content
-            except:
+                from flow_utils import safe_response_content
+                res_content = safe_response_content(flow.response)
+                if res_content:
+                    content = res_content.decode('utf-8', errors='ignore')
+                    content_type = flow.response.headers.get('Content-Type', '').lower()
+                    if 'text/html' in content_type:
+                        html_content = content
+                    elif 'javascript' in content_type or 'application/javascript' in content_type:
+                        js_content = content
+            except Exception:
                 pass
         
         # Système de scores pour réduire les faux positifs
@@ -726,14 +729,15 @@ class TechnologyDetector:
         """Extrait le texte de la réponse"""
         if not flow.response:
             return ""
-        
+        try:
+            from flow_utils import safe_response_content
+            res_content = safe_response_content(flow.response)
+        except Exception:
+            res_content = b""
         text = f"HTTP/{flow.response.http_version} {flow.response.status_code}\n"
         text += "\n".join([f"{k}: {v}" for k, v in flow.response.headers.items()])
-        if flow.response.content:
-            try:
-                text += "\n" + flow.response.content.decode('utf-8', errors='ignore')
-            except:
-                pass
+        if res_content:
+            text += "\n" + res_content.decode('utf-8', errors='ignore')
         return text
 
     def _extract_cookie_names(self, flow) -> Set[str]:

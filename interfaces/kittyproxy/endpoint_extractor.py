@@ -208,17 +208,14 @@ class EndpointExtractor:
             'react_api_endpoints': [],
         }
         
-        if not flow.response or not flow.response.content:
+        from flow_utils import safe_response_content
+        res_content = safe_response_content(flow.response) if flow.response else b""
+        if not flow.response or not res_content:
             print(f"[ENDPOINT EXTRACTION] Skipping flow {flow.request.url if flow.request else 'unknown'}: no response or empty content")
             return endpoints
         
-        # Vérifier si le flow a une réponse (nécessaire pour l'extraction)
-        if not flow.response or not flow.response.content:
-            # Pas de réponse disponible, retourner des endpoints vides
-            return endpoints
-        
         try:
-            content = flow.response.content.decode('utf-8', errors='ignore')
+            content = res_content.decode('utf-8', errors='ignore')
             content_type = flow.response.headers.get('Content-Type', '').lower()
             base_url = flow.request.url
             

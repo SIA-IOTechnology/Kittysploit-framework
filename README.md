@@ -14,7 +14,7 @@
   
   *Modular • Extensible • Powerful*
   
-  [Documentation](wiki/) • [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Website](https://kittysploit.com)
+  [Documentation](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Quick Start](#quick-start) • [Screenshots](#screenshots) • [Website](https://kittysploit.com)
 
 <div align="center">
   <img src="docs/screenshots/banner.png" alt="KittySploit Framework Banner" width="100%">
@@ -82,7 +82,7 @@ pip install -e .
 python kittyconsole.py
 ```
 
-> **Need detailed instructions?** Check out our [Complete Installation Guide](wiki/Installation.md)
+> **Need detailed instructions?** Check out our [Complete Installation Guide](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Installation)
 
 ---
 
@@ -207,7 +207,7 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r install/requirements.txt
 ```
 
-> **Detailed installation guide:** [Installation.md](wiki/Installation.md)
+> **Detailed installation guide:** [Installation.md](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Installation)
 
 ## Usage
 
@@ -262,7 +262,7 @@ kittysploit (exploits/http/wordpress_rce)> set RPORT 80
 kittysploit (exploits/http/wordpress_rce)> run
 ```
 
-> **Learn more:** [Getting Started Guide](wiki/Getting-Started.md) • [CLI Reference](wiki/CLI-Reference.md)
+> **Learn more:** [Getting Started Guide](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Getting-Started) • [CLI Reference](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/CLI-Reference)
 
 ## Architecture
 
@@ -280,44 +280,44 @@ KittySploit is built with a modular architecture:
 └─────────────────────────────────────────┘
 ```
 
-> 📖 **Deep dive:** [Architecture Documentation](wiki/Architecture.md)
+> 📖 **Deep dive:** [Architecture Documentation](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Architecture)
 
 ---
 
 ## Documentation
 
-**Complete documentation is available in the [Wiki](wiki/):**
+**Complete documentation is available in the [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki):**
 
 ### Getting Started
-- [Installation Guide](wiki/Installation.md) - Step-by-step installation
-- [Getting Started](wiki/Getting-Started.md) - Your first steps
-- [Examples](wiki/Examples.md) - Real-world usage examples
+- [Installation Guide](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Installation) - Step-by-step installation
+- [Getting Started](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Getting-Started) - Your first steps
+- [Examples](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Examples) - Real-world usage examples
 
 ### Core Documentation
-- [Modules](wiki/Modules.md) - Using modules
-- [CLI Reference](wiki/CLI-Reference.md) - All commands
-- [API Reference](wiki/API-Reference.md) - REST API
-- [RPC Reference](wiki/RPC-Reference.md) - RPC server
+- [Modules](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Modules) - Using modules
+- [CLI Reference](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/CLI-Reference) - All commands
+- [API Reference](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/API-Reference) - REST API
+- [RPC Reference](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/RPC-Reference) - RPC server
 
 ### Components
-- [KittyProxy](wiki/KittyProxy.md) - Web proxy with AI analysis
-- [KittyCollab](wiki/KittyCollab.md) - Collaborative editor
-- [Sessions](wiki/Sessions.md) - Session management
-- [Listeners](wiki/Listeners.md) - Connection handlers
-- [Payloads](wiki/Payloads.md) - Payload generation
-- [Scanners](wiki/Scanners.md) - Vulnerability detection
-- [Post-Exploitation](wiki/Post-Exploitation.md) - Post-exploit modules
-- [Workflows](wiki/Workflows.md) - Automation
+- [KittyProxy](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/KittyProxy) - Web proxy with AI analysis
+- [KittyCollab](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/KittyCollab) - Collaborative editor
+- [Sessions](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Sessions) - Session management
+- [Listeners](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Listeners) - Connection handlers
+- [Payloads](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Payloads) - Payload generation
+- [Scanners](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Scanners) - Vulnerability detection
+- [Post-Exploitation](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Post-Exploitation) - Post-exploit modules
+- [Workflows](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Workflows) - Automation
 
 ### Advanced
-- [Configuration](wiki/Configuration.md) - Framework settings
-- [Tor Integration](wiki/Tor-Integration.md) - Anonymous operations
-- [Marketplace](wiki/Marketplace.md) - Module marketplace
-- [Development](wiki/Development.md) - Create your own modules
+- [Configuration](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Configuration) - Framework settings
+- [Tor Integration](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Tor-Integration) - Anonymous operations
+- [Marketplace](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Marketplace) - Module marketplace
+- [Development](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Development) - Create your own modules
 
 ### Help
-- [FAQ](wiki/FAQ.md) - Frequently asked questions
-- [Troubleshooting](wiki/Troubleshooting.md) - Problem solving
+- [FAQ](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/FAQ) - Frequently asked questions
+- [Troubleshooting](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Troubleshooting) - Problem solving
 
 ---
 
@@ -376,7 +376,7 @@ We welcome contributions! Whether it's:
 - Code contributions
 - Module submissions
 
-See our [Contributing Guide](wiki/Contributing.md) for details.
+See our [Contributing Guide](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Contributing) for details.
 
 ## Project Status
 
@@ -396,7 +396,7 @@ See our [Contributing Guide](wiki/Contributing.md) for details.
 ## Support & Community
 
 - **Website:** [app.kittysploit.com](https://kittysploit.com) - Official KittySploit web platform
-- **Documentation:** [Wiki](wiki/)
+- **Documentation:** [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
 - **Bug Reports:** [GitHub Issues](https://github.com/SIA-IOTechnology/kittysploit-framework/issues)
 - **IRC:** [irc.libera.chat/#KittySploit](ircs://irc.libera.chat:6697/#KittySploit) - Join our IRC channel for real-time support
 

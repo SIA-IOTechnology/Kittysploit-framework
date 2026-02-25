@@ -145,16 +145,21 @@ class BrowserServerCommand(BaseCommand):
             )
             server_thread.start()
             
+            # Display URL host: 0.0.0.0 means "all interfaces" and is not usable in a browser
+            url_host = "127.0.0.1" if (parsed_args.host == "0.0.0.0" or parsed_args.host == "") else parsed_args.host
+            
             # Wait and check multiple times to ensure server started
             max_attempts = 5
             for attempt in range(max_attempts):
                 time.sleep(0.5)  # Wait 0.5 seconds between checks
                 if self.framework.browser_server.is_running():
                     print_success(f"Browser server started successfully!")
-                    print_status(f"Injection script available at: http://{parsed_args.host}:{parsed_args.port}/inject.js")
-                    print_status(f"XSS injection script: http://{parsed_args.host}:{parsed_args.port}/xss.js")
-                    print_status(f"Management interface: http://{parsed_args.host}:{parsed_args.port}/admin")
-                    print_status(f"Test page: http://{parsed_args.host}:{parsed_args.port}/test")
+                    print_status(f"Injection script available at: http://{url_host}:{parsed_args.port}/inject.js")
+                    print_status(f"XSS injection script: http://{url_host}:{parsed_args.port}/xss.js")
+                    print_status(f"Management interface: http://{url_host}:{parsed_args.port}/admin")
+                    print_status(f"Test page: http://{url_host}:{parsed_args.port}/test")
+                    if parsed_args.host == "0.0.0.0":
+                        print_info("(Listening on all interfaces; use this machine's IP from other hosts)")
                     return True
             
             # If we get here, server didn't start in time
@@ -162,10 +167,12 @@ class BrowserServerCommand(BaseCommand):
             time.sleep(0.5)
             if self.framework.browser_server.is_running():
                 print_success(f"Browser server started successfully!")
-                print_status(f"Injection script available at: http://{parsed_args.host}:{parsed_args.port}/inject.js")
-                print_status(f"XSS injection script: http://{parsed_args.host}:{parsed_args.port}/xss.js")
-                print_status(f"Management interface: http://{parsed_args.host}:{parsed_args.port}/admin")
-                print_status(f"Test page: http://{parsed_args.host}:{parsed_args.port}/test")
+                print_status(f"Injection script available at: http://{url_host}:{parsed_args.port}/inject.js")
+                print_status(f"XSS injection script: http://{url_host}:{parsed_args.port}/xss.js")
+                print_status(f"Management interface: http://{url_host}:{parsed_args.port}/admin")
+                print_status(f"Test page: http://{url_host}:{parsed_args.port}/test")
+                if parsed_args.host == "0.0.0.0":
+                    print_info("(Listening on all interfaces; use this machine's IP from other hosts)")
                 return True
             else:
                 print_error("Failed to start browser server (timeout waiting for server to start)")
@@ -234,13 +241,17 @@ class BrowserServerCommand(BaseCommand):
         
         return True
     
+    def _url_host(self, host: str) -> str:
+        """Return host suitable for URLs (0.0.0.0 is not usable in a browser)."""
+        return "127.0.0.1" if (host == "0.0.0.0" or host == "") else host
+    
     def show_injection_script(self, args) -> bool:
         """Show the injection script"""
         if not hasattr(self.framework, 'browser_server') or not self.framework.browser_server:
             print_warning("Browser server is not running")
             return True
         
-        host = self.framework.browser_server.host
+        host = self._url_host(self.framework.browser_server.host)
         port = self.framework.browser_server.port
         # WebSocket removed - HTTP polling only
         
@@ -264,7 +275,7 @@ class BrowserServerCommand(BaseCommand):
             print_warning("Browser server is not running")
             return True
         
-        host = self.framework.browser_server.host
+        host = self._url_host(self.framework.browser_server.host)
         port = self.framework.browser_server.port
         # WebSocket removed - HTTP polling only
         

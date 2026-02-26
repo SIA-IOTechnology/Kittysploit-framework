@@ -18,12 +18,10 @@ ensure_venv(__file__)
 
 import argparse
 
-kittyproxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'interfaces', 'kittyproxy')
-if kittyproxy_dir not in sys.path:
-    sys.path.insert(0, kittyproxy_dir)
-
-from proxy_core import MitmProxyWrapper
-from api import app, set_framework
+# Use package imports so that interfaces.kittyproxy uses relative imports correctly.
+# Do not add interfaces/kittyproxy to sys.path (would break "from .flow_manager" in proxy_core).
+from interfaces.kittyproxy.proxy_core import MitmProxyWrapper
+from interfaces.kittyproxy.api import app, set_framework
 from core.output_handler import print_info, print_success, print_error, print_warning
 from core.framework.framework import Framework
 

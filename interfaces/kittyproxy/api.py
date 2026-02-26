@@ -3437,6 +3437,106 @@ def sidechannel_generate_url(request: SideChannelGenerateUrlRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to generate URL: {str(e)}")
 
+# === JWT (decode, crack with common secrets) ===
+# Common secrets / passwords often used as JWT secret
+JWT_CRACK_WORDLIST = [
+    "", "secret", "Secret", "SECRET", "password", "Password", "PASSWORD",
+    "123456", "12345678", "qwerty", "admin", "jwt", "JWT", "token", "Token",
+    "key", "Key", "KEY", "secretkey", "secret_key", "jwt_secret", "jwt-secret",
+    "your-256-bit-secret", "your_256_bit_secret", "changeme", "ChangeMe",
+    "supersecret", "super_secret", "mysecret", "my_secret", "api_secret",
+    "apisecret", "auth_secret", "authsecret", "test", "Test", "dev", "development",
+    "staging", "production", "default", "foobar", "barfoo", "abc123",
+]
+
+
+@app.post("/api/jwt/crack")
+def jwt_crack(body: Dict):
+    """Try to crack a JWT (HS256/HS384/HS512) using built-in wordlist or optional custom wordlist."""
+    token = (body or {}).get("token") or ""
+    token = (token or "").strip()
+    custom_wordlist = (body or {}).get("wordlist")
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    try:
+        import jwt as pyjwt
+    except ImportError:
+        raise HTTPException(status_code=503, detail="PyJWT not installed")
+    try:
+        import base64
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise HTTPException(status_code=400, detail="Invalid JWT format")
+        raw_header = parts[0]
+        pad = len(raw_header) % 4
+        if pad:
+            raw_header += "=" * (4 - pad)
+        raw_header = raw_header.replace("-", "+").replace("_", "/")
+        header = json.loads(base64.b64decode(raw_header).decode("utf-8", errors="replace"))
+        alg = (header.get("alg") or "HS256").upper()
+        if alg not in ("HS256", "HS384", "HS512"):
+            return {"error": f"Algorithm {alg} not supported for cracking (only HS256/384/512)"}
+        if isinstance(custom_wordlist, list) and len(custom_wordlist) > 0:
+            wordlist = [str(s).strip() for s in custom_wordlist if s is not None]
+        else:
+            wordlist = JWT_CRACK_WORDLIST
+        for secret in wordlist:
+            try:
+                pyjwt.decode(token, secret, algorithms=[alg])
+                return {"secret": secret if secret else "(empty string)"}
+            except Exception:
+                continue
+        return {"error": "Secret not found in wordlist. Try a larger or different wordlist."}
+    except pyjwt.InvalidTokenError as e:
+        return {"error": f"Invalid JWT: {e}"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/jwt/sign")
+def jwt_sign(body: Dict):
+    """Re-encode and sign a JWT from header and payload (JSON). alg: none, HS256, HS384, HS512."""
+    header = (body or {}).get("header")
+    payload = (body or {}).get("payload")
+    secret = (body or {}).get("secret", "")
+    alg = ((body or {}).get("alg") or "HS256").strip().upper()
+    if alg == "NONE":
+        alg = "none"
+    if header is None or payload is None:
+        raise HTTPException(status_code=400, detail="header and payload are required")
+    try:
+        import jwt as pyjwt
+    except ImportError:
+        raise HTTPException(status_code=503, detail="PyJWT not installed")
+    try:
+        if isinstance(header, str):
+            header = json.loads(header)
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    if alg not in ("none", "HS256", "HS384", "HS512"):
+        raise HTTPException(status_code=400, detail="alg must be none, HS256, HS384, or HS512")
+    try:
+        if alg == "none":
+            import base64
+            def b64url_encode(data: bytes) -> str:
+                return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+            header_b64 = b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+            payload_b64 = b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+            token = f"{header_b64}.{payload_b64}."
+        else:
+            token = pyjwt.encode(
+                payload,
+                secret,
+                algorithm=alg,
+                headers=header,
+            )
+        return {"token": token if isinstance(token, str) else token.decode("utf-8")}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # === UI EXTENSIONS (custom tabs with their own interface) ===
 @app.get("/api/ui-extensions")
 def get_ui_extensions():

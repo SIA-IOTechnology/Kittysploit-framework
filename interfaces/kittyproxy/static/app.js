@@ -560,6 +560,7 @@ function updateTopBarForView(viewId) {
         'replay': 'Repeater',
         'intruder': 'Intruder',
         'api': 'API Tester',
+        'jwt': 'JWT',
         'fuzzing': 'Fuzzing',
         'encoder': 'Encoder / Decoder',
         'websocket': 'WebSocket',
@@ -2251,6 +2252,382 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initFuzzingHandlers);
 } else {
     initFuzzingHandlers();
+}
+
+// === JWT TAB ===
+let jwtSelectedFlowId = null;
+let jwtCustomWordlist = null;  // { words: string[], fileName: string } or null for built-in
+
+function jwtBase64UrlDecode(str) {
+    try {
+        let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        const pad = base64.length % 4;
+        if (pad) base64 += '===='.slice(0, 4 - pad);
+        return decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+    } catch (e) {
+        return null;
+    }
+}
+
+function jwtDecode(token) {
+    const raw = (token || '').trim();
+    if (!raw) return { header: null, payload: null, parts: [] };
+    const parts = raw.split('.');
+    if (parts.length !== 3) return { header: null, payload: null, parts };
+    const header = jwtBase64UrlDecode(parts[0]);
+    const payload = jwtBase64UrlDecode(parts[1]);
+    return {
+        header: header ? JSON.stringify(JSON.parse(header), null, 2) : null,
+        payload: payload ? JSON.stringify(JSON.parse(payload), null, 2) : null,
+        rawHeader: header,
+        rawPayload: payload,
+        parts
+    };
+}
+
+function jwtScanVulnerabilities(decoded) {
+    const vulns = [];
+    if (!decoded || !decoded.rawHeader) return vulns;
+    let header;
+    try {
+        header = typeof decoded.rawHeader === 'string' ? JSON.parse(decoded.rawHeader) : decoded.rawHeader;
+    } catch (e) {
+        return vulns;
+    }
+    const alg = (header.alg || '').toUpperCase();
+    if (alg === 'NONE' || alg === 'NON' || alg === '') {
+        vulns.push({ id: 'alg-none', name: 'Algorithm "none" (no signature)', severity: 'high', desc: 'Accepts a JWT without signature verification.' });
+    }
+    if (alg === 'HS256' && header.alg === 'none') {
+        vulns.push({ id: 'alg-none-variant', name: 'Algorithm none (case variant)', severity: 'high', desc: 'alg=none variant.' });
+    }
+    if (['HS256', 'HS384', 'HS512'].includes(alg)) {
+        vulns.push({ id: 'weak-secret', name: 'Symmetric secret (HS*)', severity: 'medium', desc: 'If the secret is weak, the JWT can be forged (crack or wordlist).' });
+    }
+    if (alg === 'RS256' || alg === 'RS384' || alg === 'RS512') {
+        vulns.push({ id: 'key-confusion', name: 'Key confusion (RS* vs HS*)', severity: 'high', desc: 'If the server verifies with the public key as HMAC secret, the token can be forged.' });
+    }
+    if (header.jku) {
+        vulns.push({ id: 'jku', name: 'Header "jku" (key URL)', severity: 'high', desc: 'An attacker can point jku to their own JWKS and sign tokens.' });
+    }
+    if (header.x5u) {
+        vulns.push({ id: 'x5u', name: 'Header "x5u" (certificate URL)', severity: 'medium', desc: 'Risk if the server loads keys from an untrusted URL.' });
+    }
+    if (header.kid) {
+        vulns.push({ id: 'kid-injection', name: 'Header "kid" (Key ID)', severity: 'medium', desc: 'Injection risk (path traversal, SQL) if kid is used without sanitization.' });
+    }
+    return vulns;
+}
+
+function initJwtHandlers() {
+    const decodeBtn = document.getElementById('jwt-decode-btn');
+    const importFlowBtn = document.getElementById('jwt-import-flow-btn');
+    const scanVulnBtn = document.getElementById('jwt-scan-vuln-btn');
+    const crackBtn = document.getElementById('jwt-crack-btn');
+    const reencodeBtn = document.getElementById('jwt-reencode-btn');
+    const replayBtn = document.getElementById('jwt-replay-btn');
+    const inputEl = document.getElementById('jwt-input');
+    const headerEl = document.getElementById('jwt-decoded-header');
+    const payloadEl = document.getElementById('jwt-decoded-payload');
+    const vulnListEl = document.getElementById('jwt-vuln-items');
+    const resultEl = document.getElementById('jwt-result');
+    const signAlgEl = document.getElementById('jwt-sign-alg');
+    const signSecretEl = document.getElementById('jwt-sign-secret');
+    const crackWordlistFileEl = document.getElementById('jwt-crack-wordlist-file');
+    const crackWordlistLoadBtn = document.getElementById('jwt-crack-wordlist-load-btn');
+    const crackWordlistLabelEl = document.getElementById('jwt-crack-wordlist-label');
+    const crackClearWordlistBtn = document.getElementById('jwt-crack-clear-wordlist');
+
+    function updateCrackWordlistLabel() {
+        if (!crackWordlistLabelEl) return;
+        if (jwtCustomWordlist) {
+            crackWordlistLabelEl.textContent = `Custom: ${jwtCustomWordlist.fileName} (${jwtCustomWordlist.words.length} entries)`;
+            crackWordlistLabelEl.style.color = '#1976d2';
+        } else {
+            crackWordlistLabelEl.textContent = 'Built-in wordlist';
+            crackWordlistLabelEl.style.color = '#888';
+        }
+    }
+
+    if (crackWordlistLoadBtn && crackWordlistFileEl) {
+        crackWordlistLoadBtn.addEventListener('click', () => crackWordlistFileEl.click());
+    }
+    if (crackWordlistFileEl) {
+        crackWordlistFileEl.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const text = (reader.result || '').toString();
+                let words = text.split(/\r?\n/).map(s => s.trim());
+                if (words.length === 0) words = [''];
+                const maxEntries = 100000;
+                if (words.length > maxEntries) {
+                    words = words.slice(0, maxEntries);
+                    showToast(`Dictionary truncated to ${maxEntries} entries`, 'info');
+                }
+                jwtCustomWordlist = { words, fileName: file.name };
+                updateCrackWordlistLabel();
+                showToast(`Dictionary loaded: ${file.name} (${jwtCustomWordlist.words.length} entries)`, 'success');
+            };
+            reader.readAsText(file, 'utf-8');
+        });
+    }
+    if (crackClearWordlistBtn) {
+        crackClearWordlistBtn.addEventListener('click', () => {
+            jwtCustomWordlist = null;
+            if (crackWordlistFileEl) crackWordlistFileEl.value = '';
+            updateCrackWordlistLabel();
+            showToast('Using built-in wordlist', 'info');
+        });
+    }
+    updateCrackWordlistLabel();
+
+    function setDecoded(header, payload) {
+        if (headerEl) headerEl.value = header || '';
+        if (payloadEl) payloadEl.value = payload || '';
+    }
+
+    function setResult(html, isError) {
+        if (!resultEl) return;
+        resultEl.innerHTML = html;
+        resultEl.style.color = isError ? '#c62828' : '#333';
+    }
+
+    if (decodeBtn) {
+        decodeBtn.addEventListener('click', () => {
+            const token = inputEl ? inputEl.value.trim() : '';
+            const decoded = jwtDecode(token);
+            setDecoded(decoded.header, decoded.payload);
+            if (!token) setResult('<span style="color:#888;">Paste a JWT then click Decode.</span>', false);
+            else setResult('', false);
+        });
+    }
+
+    if (scanVulnBtn) {
+        scanVulnBtn.addEventListener('click', () => {
+            const token = inputEl ? inputEl.value.trim() : '';
+            const decoded = jwtDecode(token);
+            setDecoded(decoded.header, decoded.payload);
+            if (!vulnListEl) return;
+            vulnListEl.innerHTML = '';
+            if (!decoded.rawHeader) {
+                vulnListEl.innerHTML = '<li style="color:#888;">Paste a valid JWT then click Vulnerabilities.</li>';
+                return;
+            }
+            const vulns = jwtScanVulnerabilities(decoded);
+            if (vulns.length === 0) {
+                vulnListEl.innerHTML = '<li style="color:#2e7d32;">No obvious vulnerability detected (check alg, jku, kid manually).</li>';
+            } else {
+                vulns.forEach(v => {
+                    const li = document.createElement('li');
+                    li.style.marginBottom = '8px';
+                    li.innerHTML = `<strong style="color:${v.severity === 'high' ? '#c62828' : '#f57c00'};">${v.name}</strong> — ${v.desc}`;
+                    vulnListEl.appendChild(li);
+                });
+            }
+        });
+    }
+
+    if (importFlowBtn) {
+        importFlowBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetch(`${API_BASE}/flows?page=1&size=30`);
+                const data = await res.json();
+                const items = data.items || data.flows || (Array.isArray(data) ? data : []);
+                if (items.length === 0) {
+                    showToast('No flows available', 'error');
+                    return;
+                }
+                showToast('Searching for JWT in flows...', 'info');
+                const flowsWithJwt = [];
+                const limit = Math.min(items.length, 15);
+                for (let i = 0; i < limit; i++) {
+                    const f = items[i];
+                    const id = f.id;
+                    if (!id) continue;
+                    try {
+                        const detailRes = await fetch(`${API_BASE}/flows/${id}`);
+                        if (!detailRes.ok) continue;
+                        const flow = await detailRes.json();
+                        const req = flow.request || flow;
+                        const headers = req.headers || {};
+                        let token = null;
+                        const auth = headers['Authorization'] || headers['authorization'];
+                        if (auth && (typeof auth === 'string' && (auth.startsWith('Bearer ') || auth.startsWith('bearer ')))) {
+                            token = auth.replace(/^Bearer\s+/i, '').trim();
+                        }
+                        const cookies = headers['Cookie'] || headers['cookie'] || '';
+                        if (!token && cookies) {
+                            const m = (typeof cookies === 'string' ? cookies : String(cookies)).match(/(?:^|;\s*)(?:jwt|token|auth|session)(?:=([^;]*))/i);
+                            if (m) token = m[1].trim();
+                        }
+                        if (token) flowsWithJwt.push({ id: flow.id, method: flow.method || req.method, url: flow.url || req.url, token });
+                    } catch (_) { /* skip */ }
+                }
+                if (flowsWithJwt.length === 0) {
+                    showToast('No flow with JWT (Authorization: Bearer or jwt/token cookie) in the first 15 flows', 'error');
+                    return;
+                }
+                const choice = flowsWithJwt.length === 1 ? flowsWithJwt[0] : await new Promise(resolve => {
+                    const msg = flowsWithJwt.map((f, i) => `${i + 1}. ${f.method} ${f.url}`).join('\n') + '\n\nEnter number (1-' + flowsWithJwt.length + ') or cancel:';
+                    const n = prompt(msg, '1');
+                    if (n === null || n === '') { resolve(null); return; }
+                    const idx = parseInt(n, 10);
+                    if (idx >= 1 && idx <= flowsWithJwt.length) resolve(flowsWithJwt[idx - 1]);
+                    else resolve(null);
+                });
+                if (choice && inputEl) {
+                    inputEl.value = choice.token;
+                    jwtSelectedFlowId = choice.id;
+                    if (replayBtn) replayBtn.disabled = false;
+                    const decoded = jwtDecode(choice.token);
+                    setDecoded(decoded.header, decoded.payload);
+                    showToast('JWT imported from flow', 'success');
+                }
+            } catch (e) {
+                showToast('Import error: ' + (e.message || e), 'error');
+            }
+        });
+    }
+
+    if (crackBtn) {
+        crackBtn.addEventListener('click', async () => {
+            setResult('', false);
+            const token = inputEl ? inputEl.value.trim() : '';
+            if (!token) {
+                setResult('Paste a JWT (HS256/384/512) then click Crack secret.', true);
+                return;
+            }
+            const payload = { token };
+            if (jwtCustomWordlist && jwtCustomWordlist.words.length > 0) {
+                payload.wordlist = jwtCustomWordlist.words;
+                setResult(`Cracking with custom dictionary (${jwtCustomWordlist.words.length} entries)...`, false);
+            } else {
+                setResult('Cracking (built-in wordlist)...', false);
+            }
+            try {
+                const res = await fetch(`${API_BASE}/jwt/crack`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (data.secret) {
+                    setResult(`<strong>Secret found:</strong> <code>${escapeHtml(data.secret)}</code>`, false);
+                } else {
+                    setResult(data.error || 'Secret not found in wordlist.', true);
+                }
+            } catch (e) {
+                setResult('Error: ' + (e.message || e), true);
+            }
+        });
+    }
+
+    if (reencodeBtn && headerEl && payloadEl && signAlgEl && signSecretEl) {
+        reencodeBtn.addEventListener('click', async () => {
+            const headerStr = headerEl.value.trim();
+            const payloadStr = payloadEl.value.trim();
+            if (!headerStr || !payloadStr) {
+                setResult('Decode a JWT first, then edit Header and Payload (valid JSON) and click Re-encode.', true);
+                return;
+            }
+            let headerObj, payloadObj;
+            try {
+                headerObj = JSON.parse(headerStr);
+            } catch (e) {
+                setResult('Invalid JSON in Header: ' + (e.message || e), true);
+                return;
+            }
+            try {
+                payloadObj = JSON.parse(payloadStr);
+            } catch (e) {
+                setResult('Invalid JSON in Payload: ' + (e.message || e), true);
+                return;
+            }
+            const alg = signAlgEl.value || 'HS256';
+            const secret = (signSecretEl.value || '').trim();
+            if (alg !== 'none' && !secret) {
+                setResult('Enter a secret for HS256/384/512, or choose "none" for no signature.', true);
+                return;
+            }
+            setResult('Re-encoding...', false);
+            try {
+                const res = await fetch(`${API_BASE}/jwt/sign`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ header: headerObj, payload: payloadObj, secret, alg: alg === 'none' ? 'none' : alg })
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || err.error || res.statusText);
+                }
+                const data = await res.json();
+                if (data.token && inputEl) {
+                    inputEl.value = data.token;
+                    setResult('Token re-encoded and signed. It has been written to the JWT input.', false);
+                } else {
+                    setResult('Unexpected response from server.', true);
+                }
+            } catch (e) {
+                setResult('Re-encode error: ' + (e.message || e), true);
+            }
+        });
+    }
+
+    if (replayBtn) {
+        replayBtn.addEventListener('click', async () => {
+            const token = inputEl ? inputEl.value.trim() : '';
+            if (!token) {
+                setResult('Paste a JWT and/or import a flow, then click Replay.', true);
+                return;
+            }
+            const flowId = jwtSelectedFlowId;
+            if (!flowId) {
+                setResult('Import a flow (Import flow) to replay with this token.', true);
+                return;
+            }
+            setResult('Replaying...', false);
+            try {
+                const flowRes = await fetch(`${API_BASE}/flows/${flowId}`);
+                if (!flowRes.ok) throw new Error('Flow not found');
+                const flow = await flowRes.json();
+                const req = flow.request || flow;
+                const rawHeaders = req.headers || {};
+                const headers = {};
+                Object.keys(rawHeaders).forEach(k => {
+                    const key = typeof k === 'string' ? k : (k && k.toString ? k.toString() : String(k));
+                    if (!key) return;
+                    let val = rawHeaders[k];
+                    if (val != null) headers[key] = typeof val === 'string' ? val : String(val);
+                });
+                headers['Authorization'] = 'Bearer ' + token;
+                let bodyBs64 = '';
+                if (req.content_bs64) bodyBs64 = req.content_bs64;
+                const sendRes = await fetch(`${API_BASE}/send_custom`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        method: flow.method || req.method || 'GET',
+                        url: flow.url || req.url,
+                        headers,
+                        body_bs64: bodyBs64
+                    })
+                });
+                if (!sendRes.ok) throw new Error((await sendRes.text()) || 'Send failed');
+                const result = await sendRes.json();
+                setResult('Request replayed with the new token. Response recorded in flows.', false);
+            } catch (e) {
+                setResult('Replay error: ' + (e.message || e), true);
+            }
+        });
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initJwtHandlers);
+} else {
+    initJwtHandlers();
 }
 
 // Mode switching

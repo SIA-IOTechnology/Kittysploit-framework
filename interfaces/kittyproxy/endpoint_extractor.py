@@ -57,6 +57,12 @@ class EndpointExtractor:
         'open', 'window', 'popup', 'jump', 'jump_to', 'return_to', 'back', 'ret', 'returnTo',
     ])
 
+    # Variable names that are often false positives (cache keys, CSS classes, paths, etc.)
+    _SECRET_FALSE_POSITIVE_NAMES = frozenset({
+        'cache_name', 'offline_url', 'storage_key', 'launcher_class', 'cache_key',
+        'class_name', 'url', 'path', 'name', 'key', 'id', 'type', 'value',
+    })
+
     def _extract_secrets_from_js(self, js: str, base_url: str) -> List[Dict]:
         """Extract potential credentials/secrets from JavaScript (variable names + context, no raw values)."""
         from urllib.parse import urlparse
@@ -66,8 +72,8 @@ class EndpointExtractor:
         # Patterns: (regex, secret_type). Capture variable/key name and optional context.
         # We do NOT capture the actual secret value in logs; we only report "potential secret found".
         patterns = [
-            # apiKey, API_KEY, api_key, etc.
-            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*["\'][^"\']{8,}["\']\s*(?:;|\n|$)', 'api_key'),
+            # apiKey, API_KEY, api_key (variable name must contain "api" to avoid CACHE_NAME, STORAGE_KEY, etc.)
+            (r'(?:const|let|var)\s+([a-zA-Z_$][\w$]*[aA][pP][iI][a-zA-Z_$]*)\s*=\s*["\'][^"\']{8,}["\']\s*(?:;|\n|$)', 'api_key'),
             (r'(?:api[_-]?key|apikey|API[_-]?KEY)\s*[:=]\s*["\']([^"\']+)["\']', 'api_key'),
             (r'["\'](?:api[_-]?key|apikey)["\']\s*:\s*["\']([^"\']+)["\']', 'api_key'),
             # secret
@@ -97,7 +103,14 @@ class EndpointExtractor:
                     name = (m.group(1) or '').strip()[:80]
                     if not name or name.startswith('{{'):
                         continue
-                    key = (base_url, secret_type, name.lower())
+                    name_lower = name.lower()
+                    # Skip minified single-char or very short names (e.g. "f" from apexcharts)
+                    if len(name) <= 2:
+                        continue
+                    # Skip known false positives (CACHE_NAME, STORAGE_KEY, LAUNCHER_CLASS, etc.)
+                    if name_lower in self._SECRET_FALSE_POSITIVE_NAMES:
+                        continue
+                    key = (base_url, secret_type, name_lower)
                     if key in seen_keys:
                         continue
                     seen_keys.add(key)

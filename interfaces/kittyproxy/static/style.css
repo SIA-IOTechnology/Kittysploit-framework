@@ -2034,6 +2034,11 @@ body {
     flex-shrink: 0;
 }
 
+/* Device profile dropdown: wider for full option labels (Chrome (Win), Firefox (Linux), etc.) */
+.device-profile-select {
+    min-width: 200px;
+}
+
 .input-field {
     padding: 8px;
     border: 1px solid var(--border-color);

@@ -537,8 +537,8 @@ Examples:
                 # Reason: dynamic first, then from __info__ description
                 result['message'] = dynamic_info.get('reason') or module_info.get('description', '')
                 
-                # Confidence: from __info__ or default
-                result['confidence'] = dynamic_info.get('confidence') or module_info.get('confidence', 'high')
+                # Severity: from __info__ or dynamic (for detection/vuln level)
+                result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
                 
                 # Version and other dynamic details
                 if dynamic_info.get('version'):
@@ -548,9 +548,9 @@ Examples:
                 if module_info.get('module'):
                     result['exploit_module'] = module_info['module']
                 
-                # Other dynamic details (excluding reason, version, confidence)
+                # Other dynamic details (excluding reason, version, severity)
                 result['details'] = {k: v for k, v in dynamic_info.items() 
-                                   if k not in ['reason', 'version', 'confidence']}
+                                   if k not in ['reason', 'version', 'severity']}
                 
             except Exception as e:
                 result['message'] = f"Error: {str(e)}"
@@ -610,8 +610,8 @@ Examples:
                 print_info(f"    Reason: {result['message']}")
                 if 'version' in result:
                     print_info(f"    Version: {result['version']}")
-                if 'confidence' in result:
-                    print_info(f"    Confidence: {result['confidence']}")
+                if result.get('severity'):
+                    print_info(f"    Severity: {result['severity']}")
                 if result['details']:
                     for key, value in result['details'].items():
                         print_info(f"    {key}: {value}")

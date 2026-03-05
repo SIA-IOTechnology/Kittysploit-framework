@@ -543,6 +543,75 @@ def resume_intercept(flow_id: str, data: Dict):
     flow_manager.resume_intercept(flow_id, data)
     return {"status": "resumed"}
 
+
+@app.get("/api/intercept/breakpoints")
+def get_intercept_breakpoints():
+    """Get conditional breakpoint rules. Empty list = pause all requests when intercept is on."""
+    return {"rules": getattr(flow_manager, "breakpoint_rules", [])}
+
+
+@app.post("/api/intercept/breakpoints")
+def set_intercept_breakpoints(data: Dict):
+    """Set conditional breakpoint rules. Only requests matching at least one enabled rule will be paused."""
+    rules = data.get("rules", [])
+    if not isinstance(rules, list):
+        raise HTTPException(status_code=400, detail="rules must be a list")
+    normalized = []
+    for r in rules:
+        if not isinstance(r, dict):
+            continue
+        normalized.append({
+            "type": (r.get("type") or "url_contains").strip(),
+            "value": (r.get("value") or "").strip(),
+            "enabled": r.get("enabled", True),
+        })
+    flow_manager.set_breakpoint_rules(normalized)
+    return {"status": "ok", "rules": flow_manager.breakpoint_rules}
+
+
+@app.post("/api/websocket/send")
+async def websocket_send(body: Dict):
+    """Replay WebSocket messages: connect to the flow's WS URL and send the given messages (for replay/edit)."""
+    flow_id = (body or {}).get("flow_id")
+    messages = (body or {}).get("messages", [])
+    if not flow_id:
+        raise HTTPException(status_code=400, detail="flow_id is required")
+    if not isinstance(messages, list) or len(messages) == 0:
+        raise HTTPException(status_code=400, detail="messages must be a non-empty list of { content, is_text }")
+    flow = flow_manager.get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow not found")
+    url = flow.get("url") or (flow.get("request") or {}).get("url") or ""
+    if not url:
+        raise HTTPException(status_code=400, detail="Flow has no URL")
+    if url.startswith("https://"):
+        ws_url = "wss://" + url[8:]
+    elif url.startswith("http://"):
+        ws_url = "ws://" + url[7:]
+    else:
+        ws_url = url if url.startswith("ws") else "ws://" + url
+    try:
+        import websockets
+    except ImportError:
+        raise HTTPException(status_code=503, detail="websockets library not installed")
+    errors = []
+    try:
+        async with websockets.connect(ws_url, open_timeout=10, close_timeout=5) as ws:
+            for i, m in enumerate(messages):
+                content = m.get("content", "")
+                is_text = m.get("is_text", True)
+                if is_text:
+                    msg = content if isinstance(content, str) else str(content)
+                    await ws.send(msg)
+                else:
+                    msg = content.encode("utf-8", errors="replace") if isinstance(content, str) else content
+                    await ws.send(msg)
+    except Exception as e:
+        errors.append(str(e))
+        raise HTTPException(status_code=502, detail=f"WebSocket send failed: {e}")
+    return {"status": "ok", "sent": len(messages), "url": ws_url}
+
+
 import subprocess
 import shutil
 import tempfile

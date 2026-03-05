@@ -359,6 +359,16 @@ let activeRepeaterTabId = null;
 const repeaterTabsContainer = document.getElementById('repeater-tabs-container');
 const repeaterContentContainer = document.getElementById('repeater-content-container');
 const repeaterNewTabBtn = document.getElementById('repeater-new-tab-btn');
+if (repeaterContentContainer) {
+    repeaterContentContainer.addEventListener('click', (e) => {
+        const headerBtn = e.target.closest('.repeater-csrf-inject-header');
+        const bodyBtn = e.target.closest('.repeater-csrf-inject-body');
+        const tabId = (headerBtn || bodyBtn) && (headerBtn || bodyBtn).getAttribute('data-tab-id');
+        if (tabId && typeof injectCsrfIntoRepeaterRequest === 'function') {
+            injectCsrfIntoRepeaterRequest(tabId, headerBtn ? 'header' : 'body');
+        }
+    });
+}
 
 // Intruder - Système d'onglets
 let intruderTabs = [];
@@ -497,7 +507,7 @@ function switchView(viewId, navItem = null) {
         removeSidechannelApiOverlay();
     }
 
-    // Intercept tab: recharger immédiatement les requêtes en attente pour qu'elles s'affichent
+    // Intercept tab: recharger les requêtes en attente et les breakpoints
     if (viewId === 'intercept') {
         fetch(`${API_BASE}/intercept/pending`)
             .then(res => res.json())
@@ -507,6 +517,7 @@ function switchView(viewId, navItem = null) {
                 updateInterceptTabBadge();
             })
             .catch(err => console.error('Failed to fetch pending intercepts on view switch', err));
+        loadInterceptBreakpoints();
     }
 
     // Notify extension iframes whether they are visible (so they can pause/resume timers)
@@ -3875,6 +3886,108 @@ if (launchBtn) {
 }
 
 // === INTERCEPTION ===
+const INTERCEPT_BREAKPOINT_TYPES = [
+    { value: 'url_contains', label: 'URL contains' },
+    { value: 'url_regex', label: 'URL regex' },
+    { value: 'method_equals', label: 'Method equals' },
+    { value: 'header_contains', label: 'Header contains' },
+    { value: 'body_contains', label: 'Body contains' }
+];
+let interceptBreakpointsRules = [];
+
+async function loadInterceptBreakpoints() {
+    try {
+        const res = await fetch(`${API_BASE}/intercept/breakpoints`);
+        const data = await res.json();
+        interceptBreakpointsRules = Array.isArray(data.rules) ? data.rules : [];
+        renderInterceptBreakpointsList();
+    } catch (e) {
+        console.error('Failed to load intercept breakpoints', e);
+    }
+}
+
+function renderInterceptBreakpointsList() {
+    const listEl = document.getElementById('intercept-breakpoints-list');
+    if (!listEl) return;
+    if (interceptBreakpointsRules.length === 0) {
+        listEl.innerHTML = '<p style="font-size: 12px; color: #888; margin: 0; padding: 8px 0;">No breakpoints. Add one or leave empty to pause all requests.</p>';
+        return;
+    }
+    listEl.innerHTML = interceptBreakpointsRules.map((r, idx) => {
+        const typeLabel = (INTERCEPT_BREAKPOINT_TYPES.find(t => t.value === r.type) || {}).label || r.type;
+        const val = (r.value || '').toString().replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        return `
+            <div class="intercept-breakpoint-row" data-idx="${idx}" style="margin-bottom: 10px; padding: 8px 10px; background: #fff; border: 1px solid #e0e0e0; border-radius: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                    <input type="checkbox" ${r.enabled !== false ? 'checked' : ''} class="intercept-bp-enabled" data-idx="${idx}" title="Enabled">
+                    <select class="intercept-bp-type" data-idx="${idx}" style="flex: 1; padding: 4px 8px; font-size: 11px; border-radius: 4px;">
+                        ${INTERCEPT_BREAKPOINT_TYPES.map(t => `<option value="${t.value}" ${t.value === (r.type || 'url_contains') ? 'selected' : ''}>${t.label}</option>`).join('')}
+                    </select>
+                    <button type="button" class="intercept-bp-remove" data-idx="${idx}" title="Remove" style="padding: 2px 6px; font-size: 16px; line-height: 1; background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; color: #666;">&times;</button>
+                </div>
+                <input type="text" class="intercept-bp-value" data-idx="${idx}" value="${val}" placeholder="Value" style="width: 100%; padding: 6px 8px; font-size: 11px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+            </div>`;
+    }).join('');
+    listEl.querySelectorAll('.intercept-bp-type').forEach(el => {
+        el.addEventListener('change', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (!isNaN(idx) && interceptBreakpointsRules[idx]) {
+                interceptBreakpointsRules[idx].type = el.value;
+                saveInterceptBreakpoints();
+            }
+        });
+    });
+    listEl.querySelectorAll('.intercept-bp-value').forEach(el => {
+        el.addEventListener('input', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (!isNaN(idx) && interceptBreakpointsRules[idx]) {
+                interceptBreakpointsRules[idx].value = el.value;
+                saveInterceptBreakpoints();
+            }
+        });
+    });
+    listEl.querySelectorAll('.intercept-bp-enabled').forEach(el => {
+        el.addEventListener('change', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (!isNaN(idx) && interceptBreakpointsRules[idx]) {
+                interceptBreakpointsRules[idx].enabled = el.checked;
+                saveInterceptBreakpoints();
+            }
+        });
+    });
+    listEl.querySelectorAll('.intercept-bp-remove').forEach(el => {
+        el.addEventListener('click', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (!isNaN(idx)) {
+                interceptBreakpointsRules.splice(idx, 1);
+                renderInterceptBreakpointsList();
+                saveInterceptBreakpoints();
+            }
+        });
+    });
+}
+
+async function saveInterceptBreakpoints() {
+    try {
+        await fetch(`${API_BASE}/intercept/breakpoints`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rules: interceptBreakpointsRules })
+        });
+    } catch (e) {
+        console.error('Failed to save intercept breakpoints', e);
+    }
+}
+
+const interceptBreakpointAddBtn = document.getElementById('intercept-breakpoint-add-btn');
+if (interceptBreakpointAddBtn) {
+    interceptBreakpointAddBtn.addEventListener('click', () => {
+        interceptBreakpointsRules.push({ type: 'url_contains', value: '', enabled: true });
+        renderInterceptBreakpointsList();
+        saveInterceptBreakpoints();
+    });
+}
+
 if (interceptToggleBtn) {
     interceptToggleBtn.addEventListener('click', async () => {
         interceptEnabled = !interceptEnabled;
@@ -4105,6 +4218,111 @@ function buildRawFromRepeaterTab(tab) {
         }
     } catch (_) {}
     const body = tab.body != null ? String(tab.body) : '';
+    const lines = [method + ' ' + url + ' HTTP/1.1'];
+    for (const [k, v] of Object.entries(headers)) {
+        lines.push(String(k) + ': ' + (v != null ? String(v) : ''));
+    }
+    lines.push('');
+    return lines.join('\r\n') + (body ? '\r\n' + body : '');
+}
+
+/** Device presets: User-Agent and optional headers for Desktop, Mobile, Tablet. */
+const DEVICE_PROFILES = {
+    desktop: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    desktop_edge: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    desktop_firefox_win: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    linux_firefox: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    linux_chrome: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    mac_safari: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    mac_chrome: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    mobile: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    },
+    tablet: {
+        'User-Agent': 'Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+};
+
+function applyDeviceProfileToHeaders(headersObj, profileKey) {
+    if (!headersObj || !profileKey || !DEVICE_PROFILES[profileKey]) return headersObj;
+    const profile = DEVICE_PROFILES[profileKey];
+    const out = { ...headersObj };
+    for (const [k, v] of Object.entries(profile)) {
+        out[k] = v;
+    }
+    return out;
+}
+
+/** CSRF token names commonly found in HTML (inputs and meta). */
+const CSRF_TOKEN_NAMES = ['_csrf', 'authenticity_token', 'csrf_token', '__RequestVerificationToken', 'csrftoken', '_token', 'token', 'csrf-token', 'X-CSRF-Token', 'X-XSRF-TOKEN'];
+
+/** Extract CSRF-related tokens from HTML (hidden inputs and meta tags). Returns [{ name, value }]. */
+function extractCsrfTokensFromHtml(html) {
+    if (!html || typeof html !== 'string') return [];
+    const tokens = [];
+    try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const nameLower = (n) => (n || '').toLowerCase();
+        const isCsrfName = (n) => CSRF_TOKEN_NAMES.some(c => nameLower(n) === nameLower(c) || nameLower(n).includes('csrf') || nameLower(n).includes('authenticity'));
+
+        doc.querySelectorAll('input[type="hidden"]').forEach(input => {
+            const name = input.getAttribute('name');
+            if (name && isCsrfName(name)) {
+                const value = input.getAttribute('value') || '';
+                if (!tokens.some(t => t.name === name && t.value === value)) tokens.push({ name, value });
+            }
+        });
+        doc.querySelectorAll('meta[name]').forEach(meta => {
+            const name = meta.getAttribute('name');
+            if (name && isCsrfName(name)) {
+                const value = meta.getAttribute('content') || '';
+                if (!tokens.some(t => t.name === name && t.value === value)) tokens.push({ name, value });
+            }
+        });
+    } catch (e) {
+        console.warn('CSRF extract parse error', e);
+    }
+    return tokens;
+}
+
+/** Build raw HTTP request from parsed { method, url, headers, body_bs64 }. */
+function buildRawFromParsedRequest(parsed) {
+    const method = (parsed.method || 'GET').trim();
+    const url = (parsed.url || '').trim();
+    const headers = parsed.headers || {};
+    const body = parsed.body_bs64 ? atob(parsed.body_bs64) : '';
     const lines = [method + ' ' + url + ' HTTP/1.1'];
     for (const [k, v] of Object.entries(headers)) {
         lines.push(String(k) + ': ' + (v != null ? String(v) : ''));
@@ -5188,17 +5406,24 @@ async function loadSecrets() {
                 </div>`;
             return;
         }
-        listEl.innerHTML = secrets.map((s, i) => `
-            <div class="api-react-api-item" style="padding: 12px; border-bottom: 1px solid #e0e0e0;">
+        const safeUrl = (url) => String(url || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        listEl.innerHTML = secrets.map((s, i) => {
+            const srcUrl = s.source_url || '';
+            const attrs = srcUrl ? ` data-source-url="${safeUrl(srcUrl)}" role="button" tabindex="0" title="Ouvrir l'URL source dans un nouvel onglet"` : '';
+            return `
+            <div class="api-react-api-item api-secret-item" style="padding: 12px; border-bottom: 1px solid #e0e0e0; cursor: ${srcUrl ? 'pointer' : 'default'};"${attrs}
+                onclick="var u=this.getAttribute('data-source-url'); if(u) window.open(u,'_blank');"
+                onkeydown="if(event.key==='Enter'||event.key===' ') { var u=this.getAttribute('data-source-url'); if(u) window.open(u,'_blank'); event.preventDefault(); }">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                     <span class="material-symbols-outlined" style="font-size: 18px; color: #ff9800;">key</span>
                     <span style="background: #fff3e0; color: #e65100; font-size: 10px; padding: 2px 6px; border-radius: 4px;">${escapeHtml(s.type || 'secret')}</span>
                     <strong style="font-size: 12px;">${escapeHtml(s.name || '')}</strong>
+                    ${srcUrl ? '<span class="material-symbols-outlined" style="font-size: 14px; color: #999; margin-left: auto;" title="Ouvrir l\'URL">open_in_new</span>' : ''}
                 </div>
-                <div style="font-size: 11px; color: #666; font-family: 'Fira Code', monospace; word-break: break-all;">${escapeHtml(s.context || '')}</div>
+                <div style="font-size: 11px; color: #666; font-family: \'Fira Code\', monospace; word-break: break-all;">${escapeHtml(s.context || '')}</div>
                 <div style="font-size: 10px; color: #999; margin-top: 4px;">${escapeHtml((s.source_url || '').slice(0, 80))}${(s.source_url || '').length > 80 ? '…' : ''}</div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     } catch (err) {
         console.error('[Secrets] Error loading:', err);
         listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;">Error loading secrets</div>';
@@ -6416,6 +6641,10 @@ async function sendApiRequest() {
         currentApiRequest.headers.forEach(h => {
             if (h.key) headers[h.key] = h.value;
         });
+        const deviceProfileEl = document.getElementById('api-device-profile');
+        if (deviceProfileEl && deviceProfileEl.value && typeof DEVICE_PROFILES !== 'undefined' && DEVICE_PROFILES[deviceProfileEl.value]) {
+            Object.assign(headers, DEVICE_PROFILES[deviceProfileEl.value]);
+        }
 
         let bodyBs64 = '';
         const bodyMode = currentApiRequest.bodyMode || 'raw';
@@ -6544,6 +6773,23 @@ function renderApiResponse(resp) {
             contentCode.textContent = resp.body;
         }
     }
+
+    // CSRF detection: scan HTML response for tokens
+    const csrfPanel = document.getElementById('api-csrf-panel');
+    const csrfListEl = document.getElementById('api-csrf-tokens-list');
+    if (csrfPanel && csrfListEl && resp.body && typeof resp.body === 'string') {
+        const looksLikeHtml = /^\s*</.test(resp.body.trim()) && (resp.body.includes('<html') || resp.body.includes('<form') || resp.body.includes('<input'));
+        const tokens = looksLikeHtml ? extractCsrfTokensFromHtml(resp.body) : [];
+        window.lastDetectedCsrfTokens = tokens;
+        if (tokens.length > 0) {
+            csrfListEl.innerHTML = tokens.map(t => `<span style="margin-right: 12px;"><code>${escapeHtml(t.name)}</code>: ${escapeHtml(t.value.length > 40 ? t.value.slice(0, 40) + '…' : t.value)}</span>`).join('');
+            csrfPanel.style.display = 'block';
+        } else {
+            csrfPanel.style.display = 'none';
+        }
+    } else if (csrfPanel) {
+        csrfPanel.style.display = 'none';
+    }
 }
 
 function addToHistory(req) {
@@ -6602,6 +6848,91 @@ function initApiTesterKeyboard() {
     ['api-url', 'api-params-raw', 'api-headers-raw', 'api-body-editor', 'api-body-form-raw'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('keydown', sendOnCtrlEnter);
+    });
+}
+
+// API Tester - CSRF inject handlers
+const apiCsrfInjectHeaderBtn = document.getElementById('api-csrf-inject-header');
+const apiCsrfInjectBodyBtn = document.getElementById('api-csrf-inject-body');
+if (apiCsrfInjectHeaderBtn) {
+    apiCsrfInjectHeaderBtn.addEventListener('click', () => {
+        const tokens = window.lastDetectedCsrfTokens;
+        if (!currentApiRequest || !tokens || !tokens.length) return;
+        const first = tokens[0];
+        const headerName = 'X-CSRF-Token';
+        const keyLower = (k) => k.toLowerCase();
+        const idx = currentApiRequest.headers.findIndex(h => keyLower(h.key) === keyLower(headerName));
+        if (idx >= 0) {
+            currentApiRequest.headers[idx].value = first.value;
+        } else {
+            currentApiRequest.headers.push({ key: headerName, value: first.value, active: true });
+        }
+        const headersRaw = document.getElementById('api-headers-raw');
+        if (currentApiRequest.headersMode === 'raw' && headersRaw) {
+            headersRaw.value = serializeHeadersToRaw(currentApiRequest.headers);
+        } else {
+            renderApiRequest();
+        }
+        if (typeof showToast === 'function') showToast(`Added ${headerName} from ${first.name}`, 'success');
+    });
+}
+if (apiCsrfInjectBodyBtn) {
+    apiCsrfInjectBodyBtn.addEventListener('click', () => {
+        const tokens = window.lastDetectedCsrfTokens;
+        if (!currentApiRequest || !tokens || !tokens.length) return;
+        if (!currentApiRequest.bodyTable) currentApiRequest.bodyTable = [];
+        const keyLower = (k) => (k || '').toLowerCase();
+        for (const t of tokens) {
+            const idx = currentApiRequest.bodyTable.findIndex(r => keyLower(r.key) === keyLower(t.name));
+            if (idx >= 0) {
+                currentApiRequest.bodyTable[idx].value = t.value;
+            } else {
+                currentApiRequest.bodyTable.push({ key: t.name, value: t.value, active: true });
+            }
+        }
+        currentApiRequest.bodyMode = 'table';
+        const apiBodyRawWrap = document.getElementById('api-body-raw-wrap');
+        const apiBodyTableWrap = document.getElementById('api-body-table-wrap');
+        if (apiBodyRawWrap) apiBodyRawWrap.style.display = 'none';
+        if (apiBodyTableWrap) apiBodyTableWrap.style.display = 'block';
+        document.querySelectorAll('.api-req-tab').forEach(el => el.classList.remove('active'));
+        const bodyTab = document.getElementById('req-tab-body');
+        if (bodyTab) bodyTab.classList.add('active');
+        document.querySelectorAll('.api-req-panel').forEach(el => el.classList.remove('active'));
+        const bodyPanel = document.getElementById('api-panel-body');
+        if (bodyPanel) bodyPanel.classList.add('active');
+        renderApiRequest();
+        if (typeof showToast === 'function') showToast('CSRF tokens added to body', 'success');
+    });
+}
+
+// API Tester - Device profile: apply to headers when selection changes
+const apiDeviceProfileEl = document.getElementById('api-device-profile');
+if (apiDeviceProfileEl && typeof DEVICE_PROFILES !== 'undefined') {
+    apiDeviceProfileEl.addEventListener('change', () => {
+        const profileKey = apiDeviceProfileEl.value;
+        if (!currentApiRequest || !profileKey || !DEVICE_PROFILES[profileKey]) return;
+        const profile = DEVICE_PROFILES[profileKey];
+        const keyLower = (k) => k.toLowerCase();
+        currentApiRequest.headers = currentApiRequest.headers.filter(h => {
+            const k = keyLower(h.key);
+            return k !== 'user-agent' && k !== 'accept' && k !== 'accept-language';
+        });
+        for (const [k, v] of Object.entries(profile)) {
+            const idx = currentApiRequest.headers.findIndex(h => keyLower(h.key) === keyLower(k));
+            if (idx >= 0) {
+                currentApiRequest.headers[idx].value = v;
+            } else {
+                currentApiRequest.headers.push({ key: k, value: v, active: true });
+            }
+        }
+        const headersRaw = document.getElementById('api-headers-raw');
+        const headersContainer = document.getElementById('api-headers-container');
+        if (currentApiRequest.headersMode === 'raw' && headersRaw) {
+            headersRaw.value = serializeHeadersToRaw(currentApiRequest.headers);
+        } else if (headersContainer) {
+            renderApiRequest();
+        }
     });
 }
 
@@ -6876,6 +7207,7 @@ function saveRepeaterTabs() {
             headers: tab.headers,
             body: tab.body,
             rawRequest: tab.rawRequest,
+            deviceProfile: tab.deviceProfile,
             // Ne pas sauvegarder response et error pour économiser l'espace
         }));
         localStorage.setItem('kittyproxy_repeater_tabs', JSON.stringify(tabsToSave));
@@ -7064,10 +7396,31 @@ function renderRepeaterContent() {
 
     const rawContent = activeTab.rawRequest != null ? activeTab.rawRequest : buildRawFromRepeaterTab(activeTab);
     const rawRequestHighlighted = highlightHttpRaw(rawContent, false);
+    const deviceProfileValue = activeTab.deviceProfile || '';
     repeaterContentContainer.innerHTML = `
         <div class="repeater-tab-content">
-            <div class="repeater-controls" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px;">
+            <div class="repeater-controls" style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
                 <button id="repeater-send-${activeTab.id}" class="btn btn-primary">Send</button>
+                <label style="font-size: 12px; color: #666;">Device:</label>
+                <select id="repeater-device-${activeTab.id}" class="api-method-select device-profile-select" style="font-size: 12px; padding: 6px 8px; min-width: 200px;">
+                    <option value="">—</option>
+                    <option value="desktop"${deviceProfileValue === 'desktop' ? ' selected' : ''}>Chrome (Win)</option>
+                    <option value="desktop_edge"${deviceProfileValue === 'desktop_edge' ? ' selected' : ''}>Edge (Win)</option>
+                    <option value="desktop_firefox_win"${deviceProfileValue === 'desktop_firefox_win' ? ' selected' : ''}>Firefox (Win)</option>
+                    <option value="linux_firefox"${deviceProfileValue === 'linux_firefox' ? ' selected' : ''}>Firefox (Linux)</option>
+                    <option value="linux_chrome"${deviceProfileValue === 'linux_chrome' ? ' selected' : ''}>Chrome (Linux)</option>
+                    <option value="mac_safari"${deviceProfileValue === 'mac_safari' ? ' selected' : ''}>Safari (Mac)</option>
+                    <option value="mac_chrome"${deviceProfileValue === 'mac_chrome' ? ' selected' : ''}>Chrome (Mac)</option>
+                    <option value="mobile"${deviceProfileValue === 'mobile' ? ' selected' : ''}>Mobile</option>
+                    <option value="tablet"${deviceProfileValue === 'tablet' ? ' selected' : ''}>Tablet</option>
+                </select>
+                <span style="font-size: 12px; color: #666;">Monitor:</span>
+                <input type="number" id="repeater-monitor-interval-${activeTab.id}" min="5" max="3600" value="30" style="width: 56px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px;">
+                <span style="font-size: 12px; color: #666;">sec</span>
+                <span class="material-symbols-outlined repeater-monitor-info" style="font-size: 16px; color: #888; cursor: help; vertical-align: middle;" title="Re-sends the request every X seconds and alerts you when the response status or size changes.">info</span>
+                <button type="button" id="repeater-monitor-start-${activeTab.id}" class="btn btn-secondary" style="font-size: 12px;">Start monitor</button>
+                <button type="button" id="repeater-monitor-stop-${activeTab.id}" class="btn btn-secondary" style="font-size: 12px; display: none;">Stop monitor</button>
+                <span id="repeater-monitor-status-${activeTab.id}" style="font-size: 11px; color: #888;"></span>
             </div>
             <div class="split-pane" style="flex: 1; border: 1px solid var(--border-color); border-radius: 4px; display: flex;">
                 <div class="repeater-editor" id="repeater-editor-${activeTab.id}" style="width: 50%; min-width: 300px; flex-shrink: 0; display: flex; flex-direction: column;">
@@ -7076,7 +7429,7 @@ function renderRepeaterContent() {
                 </div>
                 <div class="resize-handle" id="repeater-resize-handle-${activeTab.id}"></div>
                 <div class="repeater-response" id="repeater-response-${activeTab.id}" style="flex: 1; min-width: 300px;">
-                    ${activeTab.response ? displayRepeaterResponseHTML(activeTab.response) :
+                    ${activeTab.response ? displayRepeaterResponseHTML(activeTab.response, activeTab.id) :
             activeTab.error ? displayRepeaterErrorHTML(activeTab.error) :
                 '<div style="color: #888; text-align: center; margin-top: 20px;">Response will appear here</div>'}
                 </div>
@@ -7087,6 +7440,95 @@ function renderRepeaterContent() {
     const sendBtn = document.getElementById(`repeater-send-${activeTab.id}`);
     if (sendBtn) {
         sendBtn.addEventListener('click', () => sendRepeaterRequest(activeTab.id));
+    }
+
+    const deviceSelect = document.getElementById(`repeater-device-${activeTab.id}`);
+    if (deviceSelect) {
+        deviceSelect.addEventListener('change', () => {
+            const profileKey = deviceSelect.value;
+            const tab = repeaterTabs.find(t => t.id === activeTab.id);
+            if (!tab) return;
+            tab.deviceProfile = profileKey || undefined;
+            const rawEl = document.getElementById(`repeater-raw-${tab.id}`);
+            const rawStr = rawEl ? (rawEl.textContent || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n') : (tab.rawRequest != null ? tab.rawRequest : buildRawFromRepeaterTab(tab));
+            const parsed = parseRawInterceptRequest(rawStr, tab.url);
+            if (profileKey && DEVICE_PROFILES[profileKey]) {
+                parsed.headers = applyDeviceProfileToHeaders(parsed.headers, profileKey);
+                const newRaw = buildRawFromParsedRequest(parsed);
+                tab.rawRequest = newRaw;
+                if (rawEl) {
+                    rawEl.textContent = '';
+                    rawEl.innerHTML = highlightHttpRaw(newRaw, false);
+                }
+            }
+            saveRepeaterTabs();
+        });
+    }
+
+    const monitorStartBtn = document.getElementById(`repeater-monitor-start-${activeTab.id}`);
+    const monitorStopBtn = document.getElementById(`repeater-monitor-stop-${activeTab.id}`);
+    const monitorIntervalInput = document.getElementById(`repeater-monitor-interval-${activeTab.id}`);
+    const monitorStatusEl = document.getElementById(`repeater-monitor-status-${activeTab.id}`);
+    if (monitorStartBtn && monitorStopBtn && monitorIntervalInput) {
+        const tabId = activeTab.id;
+        const state = window.repeaterMonitorByTab = window.repeaterMonitorByTab || {};
+        if (state[tabId] && state[tabId].intervalId) {
+            monitorStartBtn.style.display = 'none';
+            monitorStopBtn.style.display = 'inline-block';
+            if (monitorStatusEl) monitorStatusEl.textContent = 'Monitoring…';
+        }
+        monitorStartBtn.addEventListener('click', () => {
+            const sec = Math.max(5, Math.min(3600, parseInt(monitorIntervalInput.value, 10) || 30));
+            const tab = repeaterTabs.find(t => t.id === tabId);
+            if (!tab) return;
+            if (state[tabId] && state[tabId].intervalId) return;
+            state[tabId] = { baseline: null, intervalId: null };
+            const run = async () => {
+                const t = repeaterTabs.find(x => x.id === tabId);
+                if (!t) return;
+                const rawEl = document.getElementById(`repeater-raw-${tabId}`);
+                const rawStr = rawEl ? (rawEl.textContent || '') : (t.rawRequest != null ? t.rawRequest : buildRawFromRepeaterTab(t));
+                const parsed = parseRawInterceptRequest(rawStr.replace(/\r\n/g, '\n').replace(/\r/g, '\n'), t.url);
+                let headers = parsed.headers;
+                if (t.deviceProfile && DEVICE_PROFILES[t.deviceProfile]) {
+                    headers = applyDeviceProfileToHeaders({ ...parsed.headers }, t.deviceProfile);
+                }
+                const payload = { method: parsed.method, url: parsed.url, headers, body_bs64: parsed.body_bs64 };
+                try {
+                    const res = await fetch(`${API_BASE}/send_custom`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const data = await res.json();
+                    const statusCode = data.status_code;
+                    const contentLen = data.content_bs64 ? (atob(data.content_bs64).length || 0) : 0;
+                    const baseline = state[tabId] && state[tabId].baseline;
+                    if (!baseline) {
+                        state[tabId].baseline = { status_code: statusCode, content_length: contentLen };
+                        if (monitorStatusEl) monitorStatusEl.textContent = `Baseline: ${statusCode}, ${contentLen} bytes`;
+                        return;
+                    }
+                    if (baseline.status_code !== statusCode || baseline.content_length !== contentLen) {
+                        if (typeof showToast === 'function') showToast(`Monitor: response changed! Status ${baseline.status_code}→${statusCode}, size ${baseline.content_length}→${contentLen}`, 'error');
+                        state[tabId].baseline = { status_code: statusCode, content_length: contentLen };
+                    }
+                    if (monitorStatusEl) monitorStatusEl.textContent = `Last check: ${statusCode}, ${contentLen} B`;
+                } catch (e) {
+                    if (monitorStatusEl) monitorStatusEl.textContent = 'Check failed';
+                }
+            };
+            state[tabId].intervalId = setInterval(run, sec * 1000);
+            run();
+            monitorStartBtn.style.display = 'none';
+            monitorStopBtn.style.display = 'inline-block';
+            if (monitorStatusEl) monitorStatusEl.textContent = 'Monitoring…';
+        });
+        monitorStopBtn.addEventListener('click', () => {
+            if (state[tabId] && state[tabId].intervalId) {
+                clearInterval(state[tabId].intervalId);
+                state[tabId].intervalId = null;
+            }
+            monitorStartBtn.style.display = 'inline-block';
+            monitorStopBtn.style.display = 'none';
+            if (monitorStatusEl) monitorStatusEl.textContent = '';
+        });
     }
 
     const rawEl = document.getElementById(`repeater-raw-${activeTab.id}`);
@@ -7153,10 +7595,14 @@ async function sendRepeaterRequest(tabId) {
         tab.url = parsed.url;
         updateRepeaterTabTitle(tab.id);
 
+        let sendHeaders = parsed.headers;
+        if (tab.deviceProfile && DEVICE_PROFILES[tab.deviceProfile]) {
+            sendHeaders = applyDeviceProfileToHeaders({ ...parsed.headers }, tab.deviceProfile);
+        }
         const payload = {
             method: parsed.method,
             url: parsed.url,
-            headers: parsed.headers,
+            headers: sendHeaders,
             body_bs64: parsed.body_bs64
         };
 
@@ -7318,16 +7764,78 @@ function buildRawResponseFromRepeaterResponse(responseData) {
     return raw;
 }
 
-// Générer le HTML de la réponse (raw avec coloration type IDE)
-function displayRepeaterResponseHTML(responseData) {
+// Générer le HTML de la réponse (raw avec coloration type IDE). Optionally include CSRF panel if tabId provided and HTML body contains tokens.
+function displayRepeaterResponseHTML(responseData, tabId) {
     const rawResponse = buildRawResponseFromRepeaterResponse(responseData);
     const highlighted = highlightHttpRaw(rawResponse || '[No response]', true);
+    let bodyContent = '';
+    if (responseData && responseData.content_bs64) {
+        try { bodyContent = atob(responseData.content_bs64); } catch (_) {}
+    }
+    const looksLikeHtml = bodyContent && /^\s*</.test(bodyContent.trim()) && (bodyContent.includes('<html') || bodyContent.includes('<form') || bodyContent.includes('<input'));
+    const csrfTokens = looksLikeHtml ? extractCsrfTokensFromHtml(bodyContent) : [];
+    if (tabId && csrfTokens.length > 0) {
+        window.lastDetectedCsrfTokensRepeater = csrfTokens;
+        window.lastDetectedCsrfTabIdRepeater = tabId;
+    }
+    const csrfPanelHtml = (tabId && csrfTokens.length > 0) ? `
+        <div class="repeater-csrf-panel" data-tab-id="${escapeHtml(tabId)}" style="padding: 10px 12px; background: #1e2228; border-bottom: 1px solid #21252b; font-size: 11px; color: #abb2bf;">
+            <div style="font-weight: 600; margin-bottom: 6px;">CSRF tokens detected</div>
+            <div class="repeater-csrf-tokens-list" style="margin-bottom: 8px;">${csrfTokens.map(t => `<span style="margin-right: 10px;"><code>${escapeHtml(t.name)}</code>: ${escapeHtml(t.value.length > 30 ? t.value.slice(0, 30) + '…' : t.value)}</span>`).join('')}</div>
+            <div style="display: flex; gap: 8px;">
+                <button type="button" class="btn btn-secondary repeater-csrf-inject-header" data-tab-id="${escapeHtml(tabId)}" style="font-size: 11px;">Inject as header</button>
+                <button type="button" class="btn btn-secondary repeater-csrf-inject-body" data-tab-id="${escapeHtml(tabId)}" style="font-size: 11px;">Add to body</button>
+            </div>
+        </div>
+    ` : '';
     return `
         <div class="repeater-response-raw" style="height: 100%; display: flex; flex-direction: column;">
+            ${csrfPanelHtml}
             <div class="section-title" style="padding: 10px; background: #282c34; margin: 0; border-bottom: 1px solid #21252b; color: #abb2bf; font-size: 0.9em;">Raw response</div>
             <div class="repeater-raw-response-wrap" id="repeater-raw-response-content">${highlighted}</div>
         </div>
     `;
+}
+
+/** Inject detected CSRF tokens into Repeater request: mode 'header' adds X-CSRF-Token, 'body' adds form fields. */
+function injectCsrfIntoRepeaterRequest(tabId, mode) {
+    const tokens = window.lastDetectedCsrfTokensRepeater;
+    if (!tokens || !tokens.length) return;
+    const tab = repeaterTabs.find(t => t.id === tabId);
+    if (!tab) return;
+    const rawEl = document.getElementById(`repeater-raw-${tabId}`);
+    const rawStr = rawEl ? (rawEl.textContent || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n') : (tab.rawRequest || buildRawFromRepeaterTab(tab));
+    const parsed = parseRawInterceptRequest(rawStr, tab.url);
+    if (mode === 'header') {
+        parsed.headers['X-CSRF-Token'] = tokens[0].value;
+        const newRaw = buildRawFromParsedRequest(parsed);
+        tab.rawRequest = newRaw;
+        if (rawEl) rawEl.innerHTML = highlightHttpRaw(newRaw, false);
+        if (typeof showToast === 'function') showToast('CSRF token added as X-CSRF-Token header', 'success');
+    } else if (mode === 'body') {
+        const ct = (parsed.headers['Content-Type'] || parsed.headers['content-type'] || '').toLowerCase();
+        let bodyStr = parsed.body_bs64 ? atob(parsed.body_bs64) : '';
+        const pairs = [];
+        if (bodyStr && ct.includes('application/x-www-form-urlencoded')) {
+            bodyStr.split('&').forEach(p => {
+                const eq = p.indexOf('=');
+                if (eq >= 0) pairs.push([decodeURIComponent(p.slice(0, eq)), decodeURIComponent(p.slice(eq + 1).replace(/\+/g, ' '))]);
+            });
+        }
+        tokens.forEach(t => {
+            const existing = pairs.findIndex(([k]) => k === t.name);
+            if (existing >= 0) pairs[existing][1] = t.value;
+            else pairs.push([t.name, t.value]);
+        });
+        const newBody = pairs.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+        parsed.body_bs64 = btoa(newBody);
+        if (!parsed.headers['Content-Type'] && !parsed.headers['content-type']) parsed.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+        const newRaw = buildRawFromParsedRequest(parsed);
+        tab.rawRequest = newRaw;
+        if (rawEl) rawEl.innerHTML = highlightHttpRaw(newRaw, false);
+        if (typeof showToast === 'function') showToast('CSRF tokens added to body', 'success');
+    }
+    saveRepeaterTabs();
 }
 
 // Générer le HTML d'erreur
@@ -20722,19 +21230,122 @@ function renderWebSocketOverview(ws, container) {
     `;
 }
 
+// Resend or replay WebSocket messages (calls API to open new WS and send)
+async function sendWebSocketMessages(flowId, messages) {
+    if (!flowId || !Array.isArray(messages) || messages.length === 0) return;
+    try {
+        const res = await fetch(`${API_BASE}/websocket/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                flow_id: flowId,
+                messages: messages.map(m => ({
+                    content: typeof m.content === 'string' ? m.content : (m.content && m.content.byteLength !== undefined ? String.fromCharCode.apply(null, new Uint8Array(m.content)) : ''),
+                    is_text: m.type !== 'binary'
+                }))
+            })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            if (typeof showToast === 'function') showToast(err.detail || 'Send failed', 'error');
+            return;
+        }
+        if (typeof showToast === 'function') showToast(`Sent ${messages.length} message(s)`, 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Send failed: ' + (e.message || e), 'error');
+    }
+}
+
+// Open modal to edit and resend a WebSocket message
+window.editAndResendWebSocketMessage = function (messageIndex) {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    if (!ws || ws.type !== 'native') return;
+    const messages = getWebSocketMessages(ws);
+    const msg = messages[messageIndex];
+    if (!msg || (msg.from_client === false || msg.direction === 'server')) {
+        if (typeof showToast === 'function') showToast('Only client messages can be resent', 'info');
+        return;
+    }
+    const content = String(msg.content || msg.text || msg.data || '');
+    const flowId = ws.flowId || ws.id;
+    const modal = document.getElementById('ws-edit-resend-modal');
+    const overlay = document.getElementById('ws-edit-resend-overlay');
+    const textarea = document.getElementById('ws-edit-resend-content');
+    if (!modal || !textarea) return;
+    textarea.value = content;
+    modal.dataset.flowId = flowId;
+    modal.dataset.isText = (msg.type !== 'binary') ? '1' : '0';
+    if (overlay) overlay.style.display = 'block';
+    modal.style.display = 'block';
+};
+window.closeWsEditResendModal = function () {
+    const modal = document.getElementById('ws-edit-resend-modal');
+    const overlay = document.getElementById('ws-edit-resend-overlay');
+    if (overlay) overlay.style.display = 'none';
+    if (modal) modal.style.display = 'none';
+};
+window.doWsEditResendSend = async function () {
+    const modal = document.getElementById('ws-edit-resend-modal');
+    const textarea = document.getElementById('ws-edit-resend-content');
+    const flowId = modal && modal.dataset.flowId;
+    if (!flowId || !textarea) return;
+    const isText = modal.dataset.isText !== '0';
+    await sendWebSocketMessages(flowId, [{ content: textarea.value, type: isText ? 'text' : 'binary' }]);
+    window.closeWsEditResendModal();
+};
+
+// Resend a single message as-is (by index)
+window.resendWebSocketMessage = async function (flowId, messageIndex) {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    if (!ws) return;
+    const messages = getWebSocketMessages(ws);
+    const msg = messages[messageIndex];
+    if (!msg) return;
+    const content = msg.content || msg.text || msg.data || '';
+    const isText = msg.type === 'text' || typeof content === 'string';
+    await sendWebSocketMessages(flowId, [{ content: typeof content === 'string' ? content : String(content), type: isText ? 'text' : 'binary' }]);
+};
+
+// Replay all client messages in order
+window.replayWebSocketSequence = async function () {
+    const ws = wsConnections.find(w => (w.id || w.flow_id) === selectedWsId);
+    if (!ws || ws.type !== 'native') {
+        if (typeof showToast === 'function') showToast('Select a native WebSocket connection', 'info');
+        return;
+    }
+    const messages = getWebSocketMessages(ws);
+    const clientMessages = messages.filter(m => m.from_client !== false && m.direction !== 'server');
+    if (clientMessages.length === 0) {
+        if (typeof showToast === 'function') showToast('No client messages to replay', 'info');
+        return;
+    }
+    const flowId = ws.flowId || ws.id;
+    await sendWebSocketMessages(flowId, clientMessages);
+};
+
 // Render WebSocket messages
 function renderWebSocketMessages(ws, container) {
     const messages = getWebSocketMessages(ws);
+    const flowId = ws.flowId || ws.id;
+    const isNative = ws.type === 'native';
 
     if (!Array.isArray(messages) || messages.length === 0) {
         container.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">No messages captured</div>';
         return;
     }
 
+    const clientMessages = messages.filter(m => m.from_client !== false && m.direction !== 'server');
+    const replayBtnHtml = isNative && flowId && clientMessages.length > 0
+        ? `<button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.85em;" onclick="replayWebSocketSequence()" title="Reconnect and send all client messages in order">
+            <span class="material-symbols-outlined" style="font-size: 16px; vertical-align: middle;">repeat</span> Replay sequence
+           </button>`
+        : '';
+
     container.innerHTML = `
         <div style="padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
                 <h3 style="margin: 0; color: #333;">Messages (${messages.length})</h3>
+                <div>${replayBtnHtml}</div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 12px;">
                 ${messages.map((msg, idx) => {
@@ -20746,6 +21357,14 @@ function renderWebSocketMessages(ws, container) {
         const timestamp = msg.timestamp || (ws.timestamp_start || 0) + (idx * 0.001);
         const date = new Date(timestamp * 1000);
         const size = typeof content === 'string' ? content.length : (content.byteLength || 0);
+        const canResend = isNative && flowId && isClient;
+        const resendBtns = canResend ? `
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="editAndResendWebSocketMessage(${idx})" title="Edit and resend">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">edit</span> Edit &amp; resend
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="resendWebSocketMessage('${escapeHtml(flowId)}', ${idx})" title="Resend as-is">
+                                        <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">send</span> Resend
+                                    </button>` : '';
 
         // Try to parse JSON if it's text
         let parsedContent = null;
@@ -20778,6 +21397,7 @@ function renderWebSocketMessages(ws, container) {
                                     <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75em;" onclick="copyWebSocketMessage(${idx})" title="Copy message">
                                         <span class="material-symbols-outlined" style="font-size: 14px; vertical-align: middle;">content_copy</span> Copy
                                     </button>
+                                    ${resendBtns}
                                 </div>
                             </div>
                             <div style="background: #f5f5f5; border-radius: 4px; padding: 12px; font-family: 'Fira Code', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; word-break: break-all;">

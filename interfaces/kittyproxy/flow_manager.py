@@ -26,6 +26,7 @@ class FlowManager:
         self.intercept_enabled: bool = False
         self.intercept_queue: Dict[str, threading.Event] = {}
         self.pending_intercepts: Dict[str, 'HTTPFlow'] = {}
+        self.breakpoint_rules: List[Dict] = []  # Conditional breakpoints: [{ "type", "value", "enabled" }, ...]
         self._lock = threading.RLock()
         self.callbacks: List[Callable[[Dict], None]] = []
         self.framework = framework  # Framework instance for database access
@@ -370,10 +371,61 @@ class FlowManager:
 
     def toggle_intercept(self, enabled: bool):
         self.intercept_enabled = enabled
+
+    def set_breakpoint_rules(self, rules: List[Dict]):
+        """Set conditional breakpoint rules. Empty list = pause all when intercept is on."""
+        with self._lock:
+            self.breakpoint_rules = list(rules) if rules else []
+
+    def _flow_matches_breakpoints(self, flow) -> bool:
+        """Return True if the request matches at least one enabled breakpoint rule (or no rules = match all)."""
+        with self._lock:
+            rules = list(self.breakpoint_rules)
+        if not rules:
+            return True
+        import re
+        url = (flow.request.url or "") if hasattr(flow.request, "url") else ""
+        method = (flow.request.method or "GET").upper() if hasattr(flow.request, "method") else "GET"
+        headers_str = ""
+        if hasattr(flow.request, "headers") and flow.request.headers:
+            for k, v in (flow.request.headers.items() if hasattr(flow.request.headers, "items") else []):
+                kk = k.decode("utf-8", errors="replace") if isinstance(k, bytes) else str(k)
+                vv = v.decode("utf-8", errors="replace") if isinstance(v, bytes) else str(v)
+                headers_str += kk + ": " + vv + "\n"
+        body = flow.request.content or b""
+        body_str = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
+        for r in rules:
+            if not r.get("enabled", True):
+                continue
+            t = (r.get("type") or "").strip().lower()
+            val = (r.get("value") or "").strip()
+            if not val and t not in ("body_contains",):
+                continue
+            try:
+                if t == "url_contains":
+                    if val.lower() in url.lower():
+                        return True
+                elif t == "url_regex":
+                    if re.search(val, url, re.IGNORECASE):
+                        return True
+                elif t == "method_equals":
+                    if method == val.upper():
+                        return True
+                elif t == "header_contains":
+                    if val.lower() in headers_str.lower():
+                        return True
+                elif t == "body_contains":
+                    if val in body_str or (val.encode("utf-8", errors="replace") in body):
+                        return True
+            except Exception:
+                continue
+        return False
         
     def intercept_request(self, flow):
-        """Blocks execution if interception is enabled."""
+        """Blocks execution if interception is enabled and (no breakpoint rules or flow matches a rule)."""
         if not self.intercept_enabled:
+            return
+        if not self._flow_matches_breakpoints(flow):
             return
             
         event = threading.Event()

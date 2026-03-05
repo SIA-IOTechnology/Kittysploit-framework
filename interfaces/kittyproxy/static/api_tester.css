@@ -84,6 +84,11 @@
     background: #f5f5f5;
 }
 
+/* Secrets (JS) list: clickable items open source URL */
+.api-secret-item[data-source-url]:hover {
+    background: #f5f5f5;
+}
+
 .api-collection-item.active,
 .api-history-item.active {
     background: #e3f2fd;
@@ -324,6 +329,11 @@
     border-radius: 6px;
     font-weight: 600;
     font-size: 13px;
+}
+
+.device-profile-select {
+    min-width: 200px;
+    width: auto;
 }
 
 .api-url-input {

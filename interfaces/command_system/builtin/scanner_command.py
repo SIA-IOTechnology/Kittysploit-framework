@@ -354,6 +354,8 @@ Examples:
             80: 'http', 443: 'http', 8080: 'http', 8443: 'http', 8000: 'http', 8888: 'http',
             # LDAP / AD
             389: 'ldap', 636: 'ldap',
+            # SMB
+            445: 'smb', 139: 'smb',
             # FTP
             21: 'ftp', 2121: 'ftp',
             # SSH
@@ -414,7 +416,7 @@ Examples:
     
     def _scan_ports(self, hostname: str, default_port: Optional[int] = None, timeout: float = 1.0) -> List[int]:
         """Scan common ports on target hostname"""
-        common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 636, 993, 995, 3306, 3389, 5432, 5900, 8080, 8443, 2222]
+        common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 636, 993, 995, 3306, 3389, 5432, 5900, 8080, 8443, 2222]
         
         # If default_port specified, prioritize it
         if default_port and default_port not in common_ports:

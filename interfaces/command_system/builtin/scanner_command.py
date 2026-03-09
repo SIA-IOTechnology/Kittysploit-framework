@@ -61,6 +61,9 @@ Examples:
     scanner -u example.com --tags ssh --port 2222
     scanner -u example.com --scan-ports
     scanner --list
+    # Cloud (AWS S3, Azure, GCP, K8s, metadata):
+    scanner -u https://bucket.s3.region.amazonaws.com --protocol cloud
+    scanner -u https://storage.blob.core.windows.net --module cloud/aws_s3_detect
         """
     
     def execute(self, args, **kwargs) -> bool:
@@ -396,11 +399,13 @@ Examples:
         """Filter modules based on open ports"""
         # Get protocols for open ports
         protocols = set()
+        http_ports = (80, 443, 8080, 8443, 8000, 8888)
         for port in ports:
             proto = self._port_to_protocol(port)
             if proto:
                 protocols.add(proto)
-        
+            if port in http_ports:
+                protocols.add("cloud")  # cloud scanners use HTTP
         if not protocols:
             return []
         

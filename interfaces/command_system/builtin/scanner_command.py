@@ -64,6 +64,10 @@ Examples:
     # Cloud (AWS S3, Azure, GCP, K8s, metadata):
     scanner -u https://bucket.s3.region.amazonaws.com --protocol cloud
     scanner -u https://storage.blob.core.windows.net --module cloud/aws_s3_detect
+    # Telecom / 5G (GTP, Diameter, PFCP, management):
+    scanner -u 10.0.0.1 --port 3868 --module telecom/diameter_port_detect
+    scanner -u 10.0.0.1 --port 2152 --module telecom/gtp_udp_detect
+    scanner -u https://oss.example.com --protocol telecom
         """
     
     def execute(self, args, **kwargs) -> bool:
@@ -377,6 +381,11 @@ Examples:
             25: 'smtp', 587: 'smtp',
             # DNS
             53: 'dns',
+            # Telecom / 5G (3GPP)
+            3868: 'telecom',   # Diameter
+            2123: 'telecom',   # GTP-C
+            2152: 'telecom',   # GTP-U
+            8805: 'telecom',   # PFCP (5G N4)
         }
         return port_protocol_map.get(port)
     
@@ -405,7 +414,8 @@ Examples:
             if proto:
                 protocols.add(proto)
             if port in http_ports:
-                protocols.add("cloud")  # cloud scanners use HTTP
+                protocols.add("cloud")   # cloud scanners use HTTP
+                protocols.add("telecom")  # telecom management UIs use HTTP
         if not protocols:
             return []
         
@@ -421,7 +431,7 @@ Examples:
     
     def _scan_ports(self, hostname: str, default_port: Optional[int] = None, timeout: float = 1.0) -> List[int]:
         """Scan common ports on target hostname"""
-        common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 636, 993, 995, 3306, 3389, 5432, 5900, 8080, 8443, 2222]
+        common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 636, 993, 995, 2123, 2152, 3306, 3389, 3868, 5432, 5900, 8080, 8443, 8805, 2222]
         
         # If default_port specified, prioritize it
         if default_port and default_port not in common_ports:

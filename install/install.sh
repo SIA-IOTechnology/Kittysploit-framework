@@ -298,62 +298,73 @@ echo
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo -e "${YELLOW}[*]${NC} Creating desktop entry..."
     
-    # Find icon file (PNG, SVG, or ICO)
     PROJECT_DIR=$(pwd)
-    ICON_PATH=""
+    ICON_FILE=""
     
-    # Try to find icon in order of preference
+    # Prefer project-specific icons, then bundled default in install/
     for icon_file in "install/kittysploit.png" "install/kittysploit.svg" "install/kittysploit.ico" \
                      "kittysploit.png" "kittysploit.svg" "kittysploit.ico" \
                      "icon.png" "icon.svg" "icon.ico"; do
         if [ -f "$PROJECT_DIR/$icon_file" ]; then
-            ICON_PATH="$PROJECT_DIR/$icon_file"
+            ICON_FILE="$PROJECT_DIR/$icon_file"
             break
         fi
     done
     
-    # If no icon found, use a default or Python icon
-    if [ -z "$ICON_PATH" ]; then
-        # Try to use Python's icon or a system default
-        if command -v python3 &> /dev/null; then
-            PYTHON_PATH=$(which python3)
-            # Some systems have Python icons in /usr/share/pixmaps
-            if [ -f "/usr/share/pixmaps/python3.xpm" ]; then
-                ICON_PATH="/usr/share/pixmaps/python3.xpm"
-            elif [ -f "/usr/share/pixmaps/python3.png" ]; then
-                ICON_PATH="/usr/share/pixmaps/python3.png"
-            else
-                # Fallback to a generic terminal icon
-                ICON_PATH="utilities-terminal"
-            fi
-        else
-            ICON_PATH="utilities-terminal"
+    # Install into user icon theme so menus resolve Icon= reliably (Freedesktop hicolor)
+    ICON_DESKTOP_VALUE="kittysploit"
+    LOCAL_ICON_DIR="$HOME/.local/share/icons/hicolor/scalable/apps"
+    if [ -n "$ICON_FILE" ]; then
+        case "$ICON_FILE" in
+            *.svg)
+                mkdir -p "$LOCAL_ICON_DIR"
+                cp -f "$ICON_FILE" "$LOCAL_ICON_DIR/kittysploit.svg"
+                ICON_DESKTOP_VALUE="kittysploit"
+                ;;
+            *.png)
+                ICON_PNG_DIR="$HOME/.local/share/icons/hicolor/48x48/apps"
+                mkdir -p "$ICON_PNG_DIR"
+                cp -f "$ICON_FILE" "$ICON_PNG_DIR/kittysploit.png"
+                ICON_DESKTOP_VALUE="kittysploit"
+                ;;
+            *.ico)
+                ICON_ICO_DIR="$HOME/.local/share/icons/hicolor/48x48/apps"
+                mkdir -p "$ICON_ICO_DIR"
+                cp -f "$ICON_FILE" "$ICON_ICO_DIR/kittysploit.ico"
+                ICON_DESKTOP_VALUE="$ICON_ICO_DIR/kittysploit.ico"
+                ;;
+        esac
+        if command -v gtk-update-icon-cache &> /dev/null; then
+            gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
         fi
+        echo -e "${GREEN}[+]${NC} Installed menu icon: $ICON_FILE → ~/.local/share/icons/hicolor/"
+    else
+        ICON_DESKTOP_VALUE="utilities-terminal"
+        echo -e "${YELLOW}[*]${NC} No icon file in project; using theme icon: $ICON_DESKTOP_VALUE"
     fi
     
-    # Create desktop entry directory if it doesn't exist
-    mkdir -p ~/.local/share/applications
+    mkdir -p "$HOME/.local/share/applications"
     
-    cat > ~/.local/share/applications/kittysploit.desktop << EOF
+    cat > "$HOME/.local/share/applications/kittysploit.desktop" << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=KittySploit Framework
 Comment=Advanced penetration testing framework
 Exec=$PROJECT_DIR/start_kittysploit.sh
-Icon=$ICON_PATH
+Icon=$ICON_DESKTOP_VALUE
 Terminal=true
 Categories=Security;Network;
 Keywords=security;penetration;testing;framework;hacking;
 EOF
     
-    # Make desktop entry executable
-    chmod +x ~/.local/share/applications/kittysploit.desktop
+    chmod +x "$HOME/.local/share/applications/kittysploit.desktop"
+    
+    if command -v update-desktop-database &> /dev/null; then
+        update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+    fi
     
     echo -e "${GREEN}[+]${NC} Desktop entry created: ~/.local/share/applications/kittysploit.desktop"
-    if [ -n "$ICON_PATH" ] && [ "$ICON_PATH" != "utilities-terminal" ]; then
-        echo -e "${GREEN}[+]${NC} Using icon: $ICON_PATH"
-    fi
     echo
 fi
 

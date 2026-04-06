@@ -36,6 +36,10 @@ modules_cache = None
 modules_cache_lock = threading.Lock()
 modules_loading = False
 
+# Registry of active exploit sessions for interactive shell (session_id → module instance or socket)
+http_shell_modules: dict = {}   # HTTP RCE: session_id → module instance (has execute() method)
+http_shell_modules_lock = threading.Lock()
+
 def set_framework(fw):
     """Set the framework instance"""
     global framework, modules_loading
@@ -1065,6 +1069,8 @@ def _extract_tags_from_source(file_path: str) -> list:
 def _load_one_module(module_path: str, file_path: str):
     """Load a single module and return module_data dict or None. Used for parallel loading."""
     try:
+        if module_path.split('/')[0] == 'scanner':
+            return None
         tags = _extract_tags_from_source(file_path)
         if "web" not in tags:
             return None
@@ -1124,6 +1130,10 @@ def load_modules_cache():
         to_load = []
         modules_skipped = 0
         for module_path, file_path in discovered_modules.items():
+            # Exclude pure scanner-category modules (path starts with "scanner/")
+            if module_path.split('/')[0] == 'scanner':
+                modules_skipped += 1
+                continue
             tags = _extract_tags_from_source(file_path)
             if "web" not in tags:
                 modules_skipped += 1
@@ -1153,8 +1163,8 @@ def load_modules_cache():
         
         with modules_cache_lock:
             modules_cache = modules_list
-        print(f"[+] Modules cache loaded: {len(modules_list)} modules with 'web' tag")
-        print(f"    - To load: {len(to_load)}, loaded: {len(modules_list)}, skipped (no web tag): {modules_skipped}")
+        print(f"[+] Modules cache loaded: {len(modules_list)} modules (web tag, non-scanner)")
+        print(f"    - To load: {len(to_load)}, loaded: {len(modules_list)}, skipped (no web tag or scanner category): {modules_skipped}")
     except Exception as e:
         import traceback
         print(f"[ERROR] Error loading modules cache: {str(e)}")
@@ -1540,6 +1550,14 @@ def execute_module_from_flow(request: Dict):
                         module_outputs[execution_id] += f"\nResult: {result}"
                         # Mark as completed in a way the frontend can detect
                         module_outputs[execution_id] += "\n[MODULE_COMPLETED]"
+
+                    # Detect interactive shell session in output and persist module reference
+                    import re as _re_run
+                    _sid_match = _re_run.search(r'Exploit session created:\s*(\S+)', output_text)
+                    if _sid_match:
+                        _sid = _sid_match.group(1).strip()
+                        with http_shell_modules_lock:
+                            http_shell_modules[_sid] = module
                 finally:
                     sys.stdout = old_stdout
                     sys.stderr = old_stderr
@@ -1583,19 +1601,75 @@ def execute_module_from_flow(request: Dict):
                 else:
                     module_result['value'] = None
         
+        # Extract shell session id from output to surface it to frontend
+        import re as _re_resp
+        _sm = _re_resp.search(r'Exploit session created:\s*(\S+)', output_text)
+        shell_session = _sm.group(1).strip() if _sm else None
+
         return {
             'status': 'success' if not is_running else 'running',
             'execution_id': execution_id,
             'output': output_text,
             'configured_options': auto_options,
             'is_running': is_running,
-            'result': module_result.get('value')
+            'result': module_result.get('value'),
+            'shell_session': shell_session,
         }
     except HTTPException:
         raise
     except Exception as e:
         import traceback
         raise HTTPException(status_code=500, detail=f"Error executing module: {str(e)}\n{traceback.format_exc()}")
+
+
+def _get_shell_prompt(session_id: str) -> str:
+    """Return the prompt string for a given session, falling back to '$ '."""
+    if framework and hasattr(framework, 'shell_manager'):
+        try:
+            return framework.shell_manager.get_shell_prompt(session_id)
+        except Exception:
+            pass
+    return '$ '
+
+
+@app.post("/api/shell/{session_id}/exec")
+def shell_execute(session_id: str, payload: Dict):
+    """Execute a single command inside an active shell session."""
+    cmd = (payload.get('command') or '').strip()
+    if not cmd:
+        return {'output': '', 'prompt': _get_shell_prompt(session_id), 'status': 0}
+
+    # 1) HTTP-RCE module (exposes an execute() method)
+    with http_shell_modules_lock:
+        module = http_shell_modules.get(session_id)
+
+    if module is not None:
+        try:
+            output = module.execute(cmd)
+            if isinstance(output, bytes):
+                output = output.decode('utf-8', errors='replace')
+            return {
+                'output': str(output or ''),
+                'prompt': _get_shell_prompt(session_id),
+                'status': 0,
+            }
+        except Exception as exc:
+            return {'output': f'Error: {exc}', 'prompt': '', 'status': 1}
+
+    # 2) TCP/SSH/classic shell via ShellManager
+    if framework and hasattr(framework, 'shell_manager'):
+        try:
+            result = framework.shell_manager.execute_command(session_id, cmd, framework)
+            prompt = _get_shell_prompt(session_id)
+            return {
+                'output': result.get('output', ''),
+                'prompt': prompt,
+                'status': result.get('status', 0),
+            }
+        except Exception as exc:
+            return {'output': f'Error: {exc}', 'prompt': '', 'status': 1}
+
+    raise HTTPException(status_code=404, detail=f'Session {session_id} not found')
 
 
 @app.post("/api/modules/suggestions")

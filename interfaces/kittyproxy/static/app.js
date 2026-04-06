@@ -351,7 +351,9 @@ const moduleListEl = document.getElementById('module-list');
 const moduleConfigEl = document.getElementById('module-config');
 const moduleCountText = document.getElementById('module-count-text');
 const runModuleBtn = document.getElementById('run-module-btn');
-let moduleOutputCache = {}; // Preserve output when switching modules
+// Single shared history for all module runs (tabs survive when changing the selected module in the list)
+const MODULE_RUNS_GLOBAL_KEY = '__kitty_module_runs__';
+let moduleOutputCache = {};
 
 // Repeater - Système d'onglets
 let repeaterTabs = [];
@@ -642,11 +644,18 @@ function escapeAttr(s) { return String(s).replace(/&/g, '&amp;').replace(/"/g, '
 
 // Tab visibility (global so loadUiExtensions can call applyTabsVisibility after async load)
 const TABS_VISIBLE_KEY = 'kittyproxy-tabs-visible';
+/** Per-view defaults when absent from localStorage (`false` = tab hidden). */
+const TABS_VISIBLE_DEFAULTS = {
+    'ext-demo': false, // Demo UI extension: off until enabled in tab settings (gear icon)
+};
 function getTabsVisible() {
     try {
         const s = localStorage.getItem(TABS_VISIBLE_KEY);
-        return s ? JSON.parse(s) : {};
-    } catch (e) { return {}; }
+        const stored = s ? JSON.parse(s) : {};
+        return { ...TABS_VISIBLE_DEFAULTS, ...stored };
+    } catch (e) {
+        return { ...TABS_VISIBLE_DEFAULTS };
+    }
 }
 function setTabsVisible(obj) {
     try {
@@ -4476,6 +4485,7 @@ async function fetchModules() {
         if (JSON.stringify(list) !== JSON.stringify(modulesData)) {
             modulesData = list;
             renderModuleList();
+            updateModulesNavBadge();
         }
     } catch (err) {
         console.error("Failed to fetch modules", err);
@@ -4484,6 +4494,18 @@ async function fetchModules() {
         if (moduleListEl) {
             moduleListEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #f44336;">Failed to connect to Kittysploit Framework</div>';
         }
+    }
+}
+
+function updateModulesNavBadge() {
+    const badge = document.getElementById('modules-nav-badge');
+    if (!badge) return;
+    const count = modulesData.length;
+    if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
     }
 }
 
@@ -4560,35 +4582,330 @@ function renderModuleList() {
     });
 }
 
-function saveCurrentModuleOutput() {
-    const moduleOutput = document.getElementById('module-output');
-    if (moduleOutput && selectedModuleId) {
-        moduleOutputCache[selectedModuleId] = {
-            content: moduleOutput.textContent,
-            visible: moduleOutput.style.display !== 'none',
-            color: moduleOutput.style.color || '#d4d4d4'
-        };
+// ─── Terminal rendering helpers ──────────────────────────────────────────────
+
+(function _injectTerminalCSS() {
+    if (document.getElementById('kitty-terminal-css')) return;
+    const s = document.createElement('style');
+    s.id = 'kitty-terminal-css';
+    s.textContent = `
+        [data-tb]::-webkit-scrollbar { width: 5px; }
+        [data-tb]::-webkit-scrollbar-track { background: #0d1117; }
+        [data-tb]::-webkit-scrollbar-thumb { background: #2d3748; border-radius: 3px; }
+        [data-tb] div { padding: 1px 0; }
+    `;
+    document.head.appendChild(s);
+})();
+
+function _termEsc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _colorInner(safe) {
+    // Prefixes structurés
+    if (/^\[(\+|✓|OK)\]/i.test(safe))        return `<span style="color:#4ade80">${safe}</span>`;
+    if (/^✓\s/.test(safe))                    return `<span style="color:#4ade80">${safe}</span>`;
+    if (/^\[✗\]|^✗\s/.test(safe))            return `<span style="color:#f87171">${safe}</span>`;
+    if (/^\[\*\]/.test(safe))                  return `<span style="color:#7dd3fc">${safe}</span>`;
+    if (/^\[-\]/.test(safe))                   return `<span style="color:#94a3b8">${safe}</span>`;
+    if (/^\[(!|ERROR|FAIL)\]/i.test(safe))    return `<span style="color:#f87171">${safe}</span>`;
+    if (/^\[WARNING\]/i.test(safe))            return `<span style="color:#fbbf24">${safe}</span>`;
+
+    // Séparateurs — discrets mais lisibles
+    if (/^={3,}|^-{3,}/.test(safe.trim()))    return `<span style="color:#3f4f63">${safe}</span>`;
+
+    // Enrichissements inline (CVE, URL, bool)
+    let out = safe;
+    out = out.replace(/(CVE-\d{4}-\d+)/g,         '<span style="color:#fb923c;font-weight:700">$1</span>');
+    out = out.replace(/(https?:\/\/[^\s&<>"]+)/g, '<span style="color:#67e8f9">$1</span>');
+    out = out.replace(/\b(True)\b/g,              '<span style="color:#4ade80;font-weight:600">$1</span>');
+    out = out.replace(/\b(False)\b/g,             '<span style="color:#f87171;font-weight:600">$1</span>');
+
+    // Lignes de résumé importantes
+    if (/(Result:|Case Found:|Summary|Vulnerabilities Found:|Detected:|Found \d)/i.test(safe))
+        return `<span style="color:#f1f5f9;font-weight:600">${out}</span>`;
+
+    // Lignes de details/severity
+    if (/^\s*-\s*\[High\]/i.test(safe))   return `<span style="color:#fca5a5">${out}</span>`;
+    if (/^\s*-\s*\[Medium\]/i.test(safe)) return `<span style="color:#fdba74">${out}</span>`;
+    if (/^\s*-\s*\[Low\]/i.test(safe))    return `<span style="color:#fde68a">${out}</span>`;
+    if (/^\s*-\s*Details?:/i.test(safe))  return `<span style="color:#cbd5e1">${out}</span>`;
+    if (/^\s*-\s/.test(safe))             return `<span style="color:#cbd5e1">${out}</span>`;
+
+    // Enrichissement inline trouvé → couleur normale mais lisible
+    if (out !== safe) return `<span style="color:#e2e8f0">${out}</span>`;
+
+    // Texte générique — blanc cassé, bien lisible
+    return `<span style="color:#dde4ee">${safe}</span>`;
+}
+
+function colorizeTerminalLine(rawLine) {
+    if (!String(rawLine).trim()) return '<div style="height:4px"></div>';
+    const safe = _termEsc(rawLine);
+    const tsm = safe.match(/^(\[\d{2}:\d{2}:\d{2}\])\s*(.*)/s);
+    if (tsm) {
+        return `<div><span style="color:#334155;font-size:0.9em">${tsm[1]}</span> ${_colorInner(tsm[2])}</div>`;
     }
+    return `<div>${_colorInner(safe)}</div>`;
+}
+
+function _termGetBody() {
+    const wrap = document.getElementById('module-output');
+    return wrap ? (wrap.querySelector('[data-tb]') || wrap) : null;
+}
+
+function _termSetHeaderBadge(status) {
+    const el = document.getElementById('module-output-status');
+    if (!el) return;
+    const cfg = {
+        running:    { border: '#92400e', color: '#fbbf24', bg: '#1c110022', label: '● running' },
+        success:    { border: '#166534', color: '#4ade80', bg: '#05200e22', label: '✓ done' },
+        error:      { border: '#7f1d1d', color: '#f87171', bg: '#1c000022', label: '✗ error' },
+        configured: { border: '#1e3a5f', color: '#60a5fa', bg: '#0c1a2e22', label: '⚙ configured' },
+        idle:       { border: '#334155', color: '#64748b', bg: '#0f172a22', label: 'idle' },
+    }[status] || { border: '#334155', color: '#64748b', bg: '#0f172a22', label: 'idle' };
+    el.style.cssText = `font-size:11px;padding:3px 12px;border-radius:20px;font-family:'Fira Code',monospace;` +
+        `border:1px solid ${cfg.border};color:${cfg.color};background:${cfg.bg};transition:all 0.25s;white-space:nowrap;`;
+    el.textContent = cfg.label;
+}
+
+function _termSetStatus(status) {
+    _termSetHeaderBadge(status);
+    // Mirror status to the visible run tab
+    _updateActiveTabStatus(status);
+}
+
+/** Update a specific run tab + header badge only if that tab is currently visible (used during async module runs). */
+function _setRunTabStatus(tabId, status) {
+    if (!tabId || !_runTabs[tabId]) return;
+    const pill = {
+        running: 'running', success: 'success', error: 'error', configured: 'configured', idle: 'idle',
+    }[status] || 'idle';
+    _runTabs[tabId].status = pill;
+    _renderRunTabBar();
+    if (_activeRunTabId === tabId) {
+        _termSetHeaderBadge(status);
+    }
+}
+
+// ─── Run tabs ─────────────────────────────────────────────────────────────────
+
+let _runTabs     = {};   // { tabId: { label, moduleId, status, html } }
+let _runTabOrder = [];   // ordered tabIds
+let _activeRunTabId = null;
+let _runCounter  = 0;
+/** While a module run is in flight, output must go to this tab even if the user switches run tabs. */
+let _currentModuleRunTabId = null;
+
+function _runTabShortName(moduleId) {
+    const parts = String(moduleId || '').split('/');
+    return parts[parts.length - 1] || moduleId;
+}
+
+function createRunTab(moduleId) {
+    _runCounter++;
+    const tabId = `run_${Date.now()}_${_runCounter}`;
+    _runTabs[tabId] = {
+        label: `#${_runCounter} ${_runTabShortName(moduleId)}`,
+        moduleId,
+        status: 'running',
+        html: ''
+    };
+    _runTabOrder.push(tabId);
+    _activeRunTabId = tabId;
+    // Clear terminal body for fresh output
+    const body = _termGetBody();
+    if (body) body.innerHTML = '';
+    _renderRunTabBar();
+    return tabId;
+}
+
+function _switchRunTab(tabId) {
+    if (!_runTabs[tabId]) return;
+    // Save current body to active tab
+    const body = _termGetBody();
+    if (body && _activeRunTabId && _runTabs[_activeRunTabId]) {
+        _runTabs[_activeRunTabId].html = body.innerHTML;
+    }
+    _activeRunTabId = tabId;
+    // Restore selected tab content
+    if (body) {
+        body.innerHTML = _runTabs[tabId].html || '';
+        body.scrollTop = body.scrollHeight;
+    }
+    // Reflect status badge
+    const statusMap = { running: 'running', success: 'success', error: 'error', idle: 'idle' };
+    _termSetStatus(statusMap[_runTabs[tabId].status] || 'idle');
+    _renderRunTabBar();
+}
+
+function _closeRunTab(tabId) {
+    if (!_runTabs[tabId]) return;
+    const idx = _runTabOrder.indexOf(tabId);
+    _runTabOrder.splice(idx, 1);
+    delete _runTabs[tabId];
+
+    const body = _termGetBody();
+    if (_activeRunTabId === tabId) {
+        _activeRunTabId = _runTabOrder[Math.min(idx, _runTabOrder.length - 1)] || null;
+        if (body) body.innerHTML = _activeRunTabId ? (_runTabs[_activeRunTabId]?.html || '') : '';
+        if (_activeRunTabId) _termSetStatus(_runTabs[_activeRunTabId]?.status || 'idle');
+    }
+
+    if (_runTabOrder.length === 0) {
+        const wrap = document.getElementById('module-output');
+        if (wrap) wrap.style.display = 'none';
+    }
+    _renderRunTabBar();
+}
+
+function _renderRunTabBar() {
+    const bar = document.getElementById('module-run-tabbar');
+    if (!bar) return;
+
+    const wrap = document.getElementById('module-output');
+    if (_runTabOrder.length === 0) {
+        bar.style.display = 'none';
+        if (wrap) { wrap.style.borderRadius = '10px'; wrap.style.borderTop = '1px solid #1e293b'; }
+        return;
+    }
+
+    bar.style.display = 'flex';
+    if (wrap) { wrap.style.borderRadius = '0 0 10px 10px'; wrap.style.borderTop = 'none'; }
+
+    const sIcon  = { running: '●', success: '✓', error: '✗', idle: '○' };
+    const sColor = { running: '#fbbf24', success: '#4ade80', error: '#f87171', idle: '#64748b' };
+
+    bar.innerHTML = _runTabOrder.map(id => {
+        const t = _runTabs[id];
+        if (!t) return '';
+        const active = id === _activeRunTabId;
+        const ic = sIcon[t.status]  || '○';
+        const cl = sColor[t.status] || '#64748b';
+        return `<div onclick="_switchRunTab('${id}')" style="
+                display:flex;align-items:center;gap:5px;
+                padding:6px 10px 7px;border-radius:6px 6px 0 0;cursor:pointer;
+                font-family:'Fira Code',monospace;font-size:11px;white-space:nowrap;max-width:170px;
+                background:${active ? '#161b22' : 'transparent'};
+                color:${active ? '#e2e8f0' : '#64748b'};
+                border:1px solid ${active ? '#1e293b' : 'transparent'};
+                border-bottom:${active ? '1px solid #161b22' : 'none'};
+                margin-bottom:${active ? '-1px' : '0'};
+                transition:all 0.12s;"
+            onmouseover="if('${id}'!=='${_activeRunTabId}')this.style.color='#94a3b8'"
+            onmouseout="if('${id}'!=='${_activeRunTabId}')this.style.color='#64748b'">
+            <span style="color:${cl};font-size:9px;flex-shrink:0">${ic}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${escapeHtml(t.label)}</span>
+            <button onclick="event.stopPropagation();_closeRunTab('${id}')" style="
+                background:none;border:none;color:#475569;cursor:pointer;
+                padding:0 0 0 4px;font-size:14px;line-height:1;flex-shrink:0;"
+                onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#475569'">×</button>
+        </div>`;
+    }).join('');
+}
+
+function _updateActiveTabStatus(status) {
+    if (_activeRunTabId && _runTabs[_activeRunTabId]) {
+        _runTabs[_activeRunTabId].status = status;
+        _renderRunTabBar();
+    }
+}
+
+function writeTerminal(text, mode) {
+    const body = _termGetBody();
+    if (!body) return;
+    const html = String(text).split('\n').map(colorizeTerminalLine).join('');
+    const sinkTabId = _currentModuleRunTabId || _activeRunTabId;
+    const wrap = document.getElementById('module-output');
+    if (wrap) wrap.style.display = 'block';
+
+    if (sinkTabId && _activeRunTabId === sinkTabId) {
+        if (mode === 'append') {
+            body.innerHTML += html;
+        } else {
+            body.innerHTML = html;
+        }
+        body.scrollTop = body.scrollHeight;
+        if (_runTabs[sinkTabId]) {
+            _runTabs[sinkTabId].html = body.innerHTML;
+        }
+    } else if (sinkTabId && _runTabs[sinkTabId]) {
+        const prev = _runTabs[sinkTabId].html || '';
+        _runTabs[sinkTabId].html = mode === 'append' ? (prev + html) : html;
+    }
+}
+
+// ─── Module output cache ──────────────────────────────────────────────────────
+
+function saveCurrentModuleOutput() {
+    const body = _termGetBody();
+    const wrap = document.getElementById('module-output');
+
+    // Flush the active tab's current HTML before saving
+    if (body && _activeRunTabId && _runTabs[_activeRunTabId]) {
+        _runTabs[_activeRunTabId].html = body.innerHTML;
+    }
+
+    moduleOutputCache[MODULE_RUNS_GLOBAL_KEY] = {
+        html: body ? body.innerHTML : '',
+        visible: wrap ? wrap.style.display !== 'none' : false,
+        runTabs: JSON.parse(JSON.stringify(_runTabs)),
+        runTabOrder: [..._runTabOrder],
+        activeRunTabId: _activeRunTabId,
+        runCounter: _runCounter,
+    };
 }
 
 function restoreModuleOutput(moduleId) {
-    const cached = moduleOutputCache[moduleId];
-    const moduleOutput = document.getElementById('module-output');
-    if (moduleOutput && cached) {
-        moduleOutput.textContent = cached.content || '';
-        moduleOutput.style.display = cached.visible ? 'block' : 'none';
-        moduleOutput.style.color = cached.color || '#d4d4d4';
+    const cached = moduleOutputCache[MODULE_RUNS_GLOBAL_KEY];
+    const wrap = document.getElementById('module-output');
+
+    if (!cached || !cached.runTabOrder || cached.runTabOrder.length === 0) {
+        // No runs yet in this session — empty terminal
+        _runTabs = {};
+        _runTabOrder = [];
+        _activeRunTabId = null;
+        _runCounter = 0;
+        _renderRunTabBar();
+        if (wrap) wrap.style.display = 'none';
+        _termSetStatus('idle');
+        return;
     }
+
+    // Restore shared run history (all modules) — selecting another module does not wipe previous runs
+    _runTabs        = cached.runTabs        || {};
+    _runTabOrder    = cached.runTabOrder    || [];
+    _activeRunTabId = cached.activeRunTabId || null;
+    _runCounter     = cached.runCounter     || 0;
+
+    _renderRunTabBar();
+
+    const body = _termGetBody();
+    if (body && _activeRunTabId && _runTabs[_activeRunTabId]) {
+        body.innerHTML = _runTabs[_activeRunTabId].html || '';
+        body.scrollTop = body.scrollHeight;
+        const statusMap = { success: 'success', error: 'error', running: 'running' };
+        _termSetStatus(statusMap[_runTabs[_activeRunTabId].status] || 'idle');
+    }
+    if (wrap) wrap.style.display = 'block';
 }
 
-function updateModuleOutputCache(moduleOutput) {
-    if (moduleOutput && selectedModuleId) {
-        moduleOutputCache[selectedModuleId] = {
-            content: moduleOutput.textContent,
-            visible: moduleOutput.style.display !== 'none',
-            color: moduleOutput.style.color || '#d4d4d4'
-        };
+function updateModuleOutputCache() {
+    const body = _termGetBody();
+    const wrap = document.getElementById('module-output');
+
+    if (body && _activeRunTabId && _runTabs[_activeRunTabId]) {
+        _runTabs[_activeRunTabId].html = body.innerHTML;
     }
+
+    moduleOutputCache[MODULE_RUNS_GLOBAL_KEY] = {
+        html: body ? body.innerHTML : '',
+        visible: wrap ? wrap.style.display !== 'none' : false,
+        runTabs: JSON.parse(JSON.stringify(_runTabs)),
+        runTabOrder: [..._runTabOrder],
+        activeRunTabId: _activeRunTabId,
+        runCounter: _runCounter,
+    };
 }
 
 function renderModuleConfig(moduleId) {
@@ -4599,26 +4916,46 @@ function renderModuleConfig(moduleId) {
         runModuleBtn.disabled = false;
     }
 
-    // Get recent unique URLs from flows (last 20)
-    const recentUrls = [];
+    // Get recent unique URLs from flows, grouped by scope
+    const inScopeUrls = [];
+    const outScopeUrls = [];
     if (flowsData && flowsData.length > 0) {
         const urlSet = new Set();
-        for (let i = flowsData.length - 1; i >= 0 && recentUrls.length < 20; i--) {
+        for (let i = flowsData.length - 1; i >= 0 && (inScopeUrls.length + outScopeUrls.length) < 40; i--) {
             const flow = flowsData[i];
             if (flow.url && !urlSet.has(flow.url)) {
                 urlSet.add(flow.url);
-                recentUrls.push({
-                    url: flow.url,
-                    method: flow.method || 'GET',
-                    status: flow.status_code || 0
-                });
+                const item = { url: flow.url, method: flow.method || 'GET', status: flow.status_code || 0 };
+                if (isInScope(flow.url)) inScopeUrls.push(item);
+                else outScopeUrls.push(item);
             }
         }
     }
 
-    const recentUrlsHtml = recentUrls.map(f =>
-        `<option value="${escapeHtml(f.url)}">${escapeHtml(f.method)} ${escapeHtml(f.url.length > 60 ? f.url.substring(0, 57) + '...' : f.url)}</option>`
-    ).join('');
+    const _flowOpt = f => {
+        const label = `${f.method}  ${f.url.length > 58 ? f.url.substring(0, 55) + '…' : f.url}`;
+        return `<option value="${escapeHtml(f.url)}">${escapeHtml(label)}</option>`;
+    };
+
+    const scopeActive = scopeConfig.enabled && scopeConfig.patterns.length > 0;
+    let recentUrlsHtml = '';
+    if (scopeActive) {
+        if (inScopeUrls.length > 0) {
+            recentUrlsHtml += `<optgroup label="🎯 In Scope (${inScopeUrls.length})">` +
+                inScopeUrls.slice(0, 20).map(_flowOpt).join('') +
+                `</optgroup>`;
+        }
+        if (outScopeUrls.length > 0) {
+            recentUrlsHtml += `<optgroup label="⛔ Out of Scope (${outScopeUrls.length})">` +
+                outScopeUrls.slice(0, 10).map(f => {
+                    const label = `${f.method}  ${f.url.length > 58 ? f.url.substring(0, 55) + '…' : f.url}`;
+                    return `<option value="${escapeHtml(f.url)}" style="color:#6b7280">${escapeHtml(label)}</option>`;
+                }).join('') +
+                `</optgroup>`;
+        }
+    } else {
+        recentUrlsHtml = [...inScopeUrls, ...outScopeUrls].slice(0, 20).map(_flowOpt).join('');
+    }
 
     const optionsHtml = module.options && module.options.length > 0 ?
         module.options.map(opt => `
@@ -4656,9 +4993,9 @@ function renderModuleConfig(moduleId) {
                     style="flex: 1; min-width: 300px; padding: 8px 12px; border: 1px solid #90caf9; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.9em;">
                 <select 
                     id="module-url-from-flows" 
-                    style="width: 250px; padding: 8px 12px; border: 1px solid #90caf9; border-radius: 4px; background: white; cursor: pointer;"
+                    style="width: 260px; padding: 8px 12px; border: 1px solid ${scopeActive ? '#86efac' : '#90caf9'}; border-radius: 4px; background: white; cursor: pointer;"
                     onchange="document.getElementById('module-target-url').value = this.value;">
-                    <option value="">Select from flows...</option>
+                    <option value="">${scopeActive ? `🎯 ${inScopeUrls.length} flow(s) in scope…` : 'Select from flows...'}</option>
                     ${recentUrlsHtml}
                 </select>
             </div>
@@ -4673,10 +5010,13 @@ function renderModuleConfig(moduleId) {
         <div style="display: flex; flex-direction: column; gap: 15px; flex: 1; overflow-y: auto;">
             ${optionsHtml}
         </div>
-        <div id="module-output" style="margin-top: 15px; padding: 15px; background: #1e1e1e; color: #d4d4d4; border-radius: 4px; font-family: 'Fira Code', monospace; font-size: 0.85em; height: 45vh; max-height: 50vh; min-height: 220px; overflow-y: auto; display: none; white-space: pre-wrap; line-height: 1.5;"></div>
     `;
 
-    // Restore cached output if available
+    // Update the module name shown in the persistent terminal header
+    const titleEl = document.getElementById('module-output-title');
+    if (titleEl) titleEl.textContent = moduleId;
+
+    // Restore saved tab history or reset terminal for fresh module
     restoreModuleOutput(moduleId);
 }
 
@@ -4703,12 +5043,11 @@ if (runModuleBtn) {
         runModuleBtn.disabled = true;
         runModuleBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">hourglass_empty</span> Running...';
 
-        const moduleOutput = document.getElementById('module-output');
-        if (moduleOutput) {
-            moduleOutput.style.display = 'block';
-            moduleOutput.textContent = 'Executing module...\n';
-            updateModuleOutputCache(moduleOutput);
-        }
+        const runTabId = createRunTab(selectedModuleId);
+        _currentModuleRunTabId = runTabId;
+        writeTerminal('[*] Executing module...');
+        _setRunTabStatus(runTabId, 'running');
+        updateModuleOutputCache();
 
         try {
             // Collect options
@@ -4727,10 +5066,8 @@ if (runModuleBtn) {
             const targetUrl = targetInput ? targetInput.value.trim() : '';
             if (!targetUrl) {
                 showToast('Veuillez saisir une URL cible avant d\'exécuter le module', 'error');
-                if (moduleOutput) {
-                    moduleOutput.textContent += '\n✗ Module execution failed\n\nError:\nMissing target URL';
-                    moduleOutput.style.color = '#f44336';
-                }
+                writeTerminal('[!] Module execution failed\n\nError:\nMissing target URL', 'append');
+                _setRunTabStatus(runTabId, 'error');
                 return;
             }
 
@@ -4740,10 +5077,8 @@ if (runModuleBtn) {
                 parsed = new URL(targetUrl);
             } catch (e) {
                 showToast('URL cible invalide', 'error');
-                if (moduleOutput) {
-                    moduleOutput.textContent += `\n✗ Module execution failed\n\nError:\nInvalid target URL`;
-                    moduleOutput.style.color = '#f44336';
-                }
+                writeTerminal('[!] Module execution failed\n\nError:\nInvalid target URL', 'append');
+                _setRunTabStatus(runTabId, 'error');
                 return;
             }
 
@@ -4802,42 +5137,177 @@ if (runModuleBtn) {
 
             const data = await res.json();
 
-            if (moduleOutput) {
-                moduleOutput.style.color = '#d4d4d4';
-                const resultVal = data.result;
-                const isRunning = data.is_running;
-                const baseOutput = data.output || '';
-                const isExplicitFailure = resultVal === false;
-                if (res.ok) {
-                    moduleOutput.textContent += `\nOutput:\n${baseOutput || 'No output captured.'}`;
-                    if (isRunning) {
-                        moduleOutput.textContent += `\n\nStatus: still running...`;
-                        moduleOutput.style.color = '#ffa000';
-                    } else if (isExplicitFailure) {
-                        moduleOutput.textContent += `\n\nResult: false`;
-                        moduleOutput.style.color = '#f44336';
-                    } else if (resultVal !== undefined && resultVal !== null) {
-                        moduleOutput.textContent += `\n\nResult: ${resultVal}`;
-                    }
+            const resultVal = data.result;
+            const isRunning = data.is_running;
+            const baseOutput = data.output || '';
+            const isExplicitFailure = resultVal === false;
+            if (res.ok) {
+                writeTerminal(`\nOutput:\n${baseOutput || 'No output captured.'}`, 'append');
+                if (isRunning) {
+                    writeTerminal('\n[*] Status: still running...', 'append');
+                    _setRunTabStatus(runTabId, 'running');
+                } else if (isExplicitFailure) {
+                    writeTerminal('\n[!] Result: false', 'append');
+                    _setRunTabStatus(runTabId, 'error');
+                } else if (resultVal !== undefined && resultVal !== null) {
+                    writeTerminal(`\n[+] Result: ${resultVal}`, 'append');
+                    _setRunTabStatus(runTabId, 'success');
                 } else {
-                    moduleOutput.textContent += `\n✗ Module execution failed\n\nError:\n${data.error || data.detail || 'Unknown error'}`;
-                    moduleOutput.style.color = '#f44336';
+                    _setRunTabStatus(runTabId, 'success');
                 }
-                updateModuleOutputCache(moduleOutput);
+
+                // If the module opened an interactive session, open a shell tab
+                if (data.shell_session) {
+                    setTimeout(() => openShellTab(data.shell_session, selectedModuleId), 400);
+                }
+            } else {
+                writeTerminal(`\n[!] Module execution failed\n\nError:\n${data.error || data.detail || 'Unknown error'}`, 'append');
+                _setRunTabStatus(runTabId, 'error');
             }
+            updateModuleOutputCache();
         } catch (err) {
             console.error("Module execution error", err);
-            if (moduleOutput) {
-                moduleOutput.textContent += `\n✗ Connection error: ${err.message}`;
-                moduleOutput.style.color = '#f44336';
-                updateModuleOutputCache(moduleOutput);
-            }
+            writeTerminal(`\n[!] Connection error: ${err.message}`, 'append');
+            _setRunTabStatus(runTabId, 'error');
+            updateModuleOutputCache();
         } finally {
+            _currentModuleRunTabId = null;
             runModuleBtn.disabled = false;
             runModuleBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px;">play_arrow</span> Run Module';
         }
     });
 }
+
+// ─── Interactive shell (post-exploit) ─────────────────────────────────────────
+
+const _shellHistory = [];
+let _shellHistIdx = -1;
+let _activeShellSessionId = null;
+
+async function openShellTab(sessionId, moduleId) {
+    _activeShellSessionId = sessionId;
+
+    // Create a dedicated run tab for the interactive shell
+    const tabId = createRunTab((moduleId || 'shell') + ' [SHELL]');
+    if (_runTabs[tabId]) {
+        _runTabs[tabId].status = 'running';
+        _renderRunTabBar();
+    }
+
+    // Display connection banner in the terminal
+    writeTerminal(
+        `[+] Shell session opened: ${sessionId}\n` +
+        `[*] Type commands in the bar below — "exit" to close the session.`,
+        'append'
+    );
+    _termSetStatus('running');
+    updateModuleOutputCache();
+
+    // Remove any pre-existing input bar (e.g. from a previous session)
+    const existing = document.getElementById('shell-input-bar');
+    if (existing) existing.remove();
+
+    // Build the interactive input bar and append it below the terminal wrapper
+    const wrap = document.getElementById('module-output');
+    if (!wrap) return;
+
+    const inputBar = document.createElement('div');
+    inputBar.id = 'shell-input-bar';
+    inputBar.style.cssText = [
+        'display:flex', 'align-items:center', 'gap:8px',
+        'background:#161b22', 'border-top:1px solid #1e293b',
+        'padding:8px 14px',
+        "font-family:'Fira Code',monospace", 'font-size:0.82em',
+        'flex-shrink:0',
+    ].join(';');
+    inputBar.innerHTML = `
+        <span id="shell-prompt" style="color:#4ade80;white-space:nowrap;flex-shrink:0">$ </span>
+        <input id="shell-cmd-input" type="text" autocomplete="off" spellcheck="false"
+            placeholder="enter command…"
+            style="flex:1;background:transparent;border:none;outline:none;
+                   color:#e2e8f0;font-family:'Fira Code',monospace;font-size:inherit;" />
+        <button id="shell-send-btn"
+            style="background:#1e293b;border:1px solid #334155;border-radius:6px;
+                   color:#60a5fa;padding:4px 12px;cursor:pointer;font-size:11px;">
+            ▶ Send
+        </button>
+    `;
+    wrap.appendChild(inputBar);
+
+    // Wire events
+    const inp = document.getElementById('shell-cmd-input');
+    const btn = document.getElementById('shell-send-btn');
+    if (inp) {
+        inp.focus();
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                sendShellCommand(sessionId);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (_shellHistory.length > 0) {
+                    _shellHistIdx = Math.min(_shellHistIdx + 1, _shellHistory.length - 1);
+                    inp.value = _shellHistory[_shellHistIdx] || '';
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                _shellHistIdx = Math.max(_shellHistIdx - 1, -1);
+                inp.value = _shellHistIdx >= 0 ? (_shellHistory[_shellHistIdx] || '') : '';
+            }
+        });
+    }
+    if (btn) {
+        btn.addEventListener('click', () => sendShellCommand(sessionId));
+    }
+}
+
+async function sendShellCommand(sessionId) {
+    const inp = document.getElementById('shell-cmd-input');
+    if (!inp) return;
+    const cmd = inp.value.trim();
+    if (!cmd) return;
+    inp.value = '';
+
+    // Save to history (most recent first)
+    _shellHistory.unshift(cmd);
+    _shellHistIdx = -1;
+
+    // Echo the command in the terminal
+    writeTerminal(`\n<span style="color:#4ade80">$ ${_termEsc(cmd)}</span>`, 'append');
+
+    if (cmd === 'exit') {
+        writeTerminal('\n[*] Shell session closed.', 'append');
+        document.getElementById('shell-input-bar')?.remove();
+        _termSetStatus('idle');
+        _activeShellSessionId = null;
+        updateModuleOutputCache();
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/shell/${encodeURIComponent(sessionId)}/exec`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd }),
+        });
+        const data = await res.json();
+        const output = (data.output || '').replace(/\r\n/g, '\n');
+        if (output) writeTerminal(output, 'append');
+
+        // Update prompt if backend sent one
+        if (data.prompt) {
+            const promptEl = document.getElementById('shell-prompt');
+            if (promptEl) promptEl.textContent = data.prompt + ' ';
+        }
+    } catch (err) {
+        writeTerminal(`\n[!] Error: ${_termEsc(err.message)}`, 'append');
+    }
+
+    updateModuleOutputCache();
+    // Keep focus on input
+    inp.focus();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Auto-configure module from URL
 async function autoConfigureModuleFromUrl(moduleId, silent = false) {
@@ -4901,15 +5371,11 @@ async function autoConfigureModuleFromUrl(moduleId, silent = false) {
             // Show success message (only if not silent)
             if (!silent) {
                 if (filledCount > 0) {
-                    const moduleOutput = document.getElementById('module-output');
-                    if (moduleOutput) {
-                        moduleOutput.style.display = 'block';
-                        moduleOutput.style.color = '#4caf50';
-                        moduleOutput.style.background = '#1e1e1e';
-                        moduleOutput.style.border = 'none';
-                        moduleOutput.textContent = `✓ Auto-configured ${filledCount} option(s) from URL:\n${url}\n\nConfigured options:\n${Object.entries(data.options).map(([k, v]) => `  ${k}: ${String(v).substring(0, 80)}${String(v).length > 80 ? '...' : ''}`).join('\n')}`;
-                        moduleOutput.scrollTop = moduleOutput.scrollHeight;
-                    }
+                    const optsText = Object.entries(data.options)
+                        .map(([k, v]) => `[*]   ${k}: ${String(v).substring(0, 80)}${String(v).length > 80 ? '...' : ''}`)
+                        .join('\n');
+                    writeTerminal(`[+] Auto-configured ${filledCount} option(s) from URL:\n[*] ${url}\n\n${optsText}`);
+                    _termSetStatus('configured');
                 } else {
                     showAppAlert('No matching options found for this module. Please configure manually.');
                 }
@@ -10044,7 +10510,7 @@ function renderTechTab(flow) {
             html += `</div>`;
 
             // Execute Button
-            html += `<button onclick="event.stopPropagation(); executeModuleFromFlow('${sugg.module}', '${flow.id}')" class="execute-btn" style="
+            html += `<button onclick="event.stopPropagation(); executeModuleFromFlow('${sugg.module}', '${flow.id}', event)" class="execute-btn" style="
                 background: #6200ea; 
                 color: white; 
                 border: none; 
@@ -10292,18 +10758,10 @@ async function selectModuleFromFlow(moduleName, flowId) {
                 if (flow.url) {
                     await autoConfigureModuleFromUrl(moduleName, true);
 
-                    // Show a notification about which flow was used
-                    const moduleOutput = document.getElementById('module-output');
-                    if (moduleOutput) {
-                        moduleOutput.style.display = 'block';
-                        moduleOutput.style.color = '#2196f3';
-                        moduleOutput.style.background = '#e3f2fd';
-                        moduleOutput.style.border = '1px solid #90caf9';
-                        moduleOutput.style.borderRadius = '4px';
-                        moduleOutput.style.padding = '12px';
-                        moduleOutput.textContent = `✓ Module configured from flow:\n  URL: ${flow.url}\n  Method: ${flow.method || 'N/A'}\n  Status: ${flow.status_code || 'N/A'}\n\nOptions have been auto-configured. Review and click "Run Module" when ready.`;
-                        moduleOutput.scrollTop = moduleOutput.scrollHeight;
-                    }
+                    writeTerminal(
+                        `[+] Module configured from flow:\n[*]   URL: ${flow.url}\n[*]   Method: ${flow.method || 'N/A'}\n[*]   Status: ${flow.status_code || 'N/A'}\n\n[*] Options have been auto-configured. Click "Run Module" when ready.`
+                    );
+                    _termSetStatus('configured');
                 }
             }, 200);
         }, 100);
@@ -10400,133 +10858,29 @@ function showModuleConfirmation(moduleName, message) {
 }
 
 // Function to execute module from flow
-async function executeModuleFromFlow(moduleName, flowId) {
+async function executeModuleFromFlow(moduleName, flowId, ev) {
     const proceed = await showModuleConfirmation(
         moduleName,
         'The options will be automatically configured from the request. Continue?'
     );
     if (!proceed) return;
 
-    // Show loading state
-    const btn = event.currentTarget;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="material-symbols-outlined" style="font-size: 18px; animation: spin 1s linear infinite;">refresh</span> Running...';
-    btn.disabled = true;
-    btn.style.opacity = '0.7';
-
-    // Switch to modules view and show terminal
-    const modulesView = document.getElementById('modules-view');
-    const modulesNavItem = document.querySelector('[data-view="modules"]');
-    if (modulesView && modulesNavItem) {
-        // Switch to modules view
-        modulesNavItem.click();
-
-        // Wait a bit for the view to render
-        setTimeout(() => {
-            const moduleOutput = document.getElementById('module-output');
-            if (moduleOutput) {
-                moduleOutput.style.display = 'block';
-                moduleOutput.textContent = `[${new Date().toLocaleTimeString()}] Executing module: ${moduleName}\n`;
-                moduleOutput.style.color = '#d4d4d4';
-                // Scroll to bottom
-                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-            }
-        }, 100);
+    // Load + auto-configure the module in the Modules tab
+    const loaded = await openModuleSuggestion(moduleName, flowId);
+    if (!loaded) {
+        showToast(`Impossible de charger le module: ${moduleName}`, 'error');
+        return;
     }
 
-    try {
-        const res = await fetch(`${API_BASE}/execute_module_from_flow`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                module_name: moduleName,
-                flow_id: flowId
-            })
-        });
+    // Let the UI settle after openModuleSuggestion (it already waits internally, but give one extra tick)
+    await new Promise(r => setTimeout(r, 100));
 
-        const data = await res.json();
-
-        // Get terminal element
-        const moduleOutput = document.getElementById('module-output');
-
-        if (res.ok) {
-            if (moduleOutput) {
-                // Show auto-configured options
-                const optionsText = Object.entries(data.configured_options || {})
-                    .map(([k, v]) => `  ${k}: ${String(v).substring(0, 80)}${String(v).length > 80 ? '...' : ''}`)
-                    .join('\n');
-
-                moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] Auto-configured options:\n${optionsText}\n`;
-
-                // If module is still running, poll for output
-                if (data.is_running && data.execution_id) {
-                    moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] Module is running...\n`;
-                    moduleOutput.textContent += `[${new Date().toLocaleTimeString()}] Output so far:\n${data.output || 'No output yet'}\n`;
-
-                    // Poll for updates
-                    const pollInterval = setInterval(async () => {
-                        try {
-                            const pollRes = await fetch(`${API_BASE}/module-output/${data.execution_id}`);
-                            const pollData = await pollRes.json();
-
-                            if (pollData.output) {
-                                // Update output, but remove the [MODULE_COMPLETED] marker if present
-                                let cleanOutput = pollData.output.replace(/\n\[MODULE_COMPLETED\]/g, '');
-                                moduleOutput.textContent = moduleOutput.textContent.split('\n[')[0] + '\n' + cleanOutput;
-                                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-
-                                // Check if module is completed (has Result: True/False or [MODULE_COMPLETED] marker)
-                                if (pollData.output.includes('[MODULE_COMPLETED]') ||
-                                    pollData.output.includes('Result: True') ||
-                                    pollData.output.includes('Result: False') ||
-                                    pollData.output.includes('Error executing module')) {
-                                    clearInterval(pollInterval);
-                                    moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] ✓ Module execution completed\n`;
-                                    moduleOutput.style.color = '#4caf50';
-                                }
-                            }
-                        } catch (err) {
-                            console.error("Polling error:", err);
-                            clearInterval(pollInterval);
-                        }
-                    }, 1000); // Poll every second
-                } else {
-                    // Module completed
-                    moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] Output:\n${data.output || 'No output'}\n`;
-                    moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] ✓ Module execution completed\n`;
-                    moduleOutput.style.color = '#4caf50';
-                }
-
-                // Scroll to bottom
-                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-            }
-        } else {
-            if (moduleOutput) {
-                moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] ✗ Module execution failed\n`;
-                moduleOutput.textContent += `Error: ${data.detail || 'Unknown error'}\n`;
-                moduleOutput.style.color = '#f44336';
-                // Scroll to bottom
-                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-            } else {
-                showAppAlert(`Error during execution: ${data.detail || 'Unknown error'}`);
-            }
-        }
-    } catch (err) {
-        console.error("Execution error:", err);
-        const moduleOutput = document.getElementById('module-output');
-        if (moduleOutput) {
-            moduleOutput.textContent += `\n[${new Date().toLocaleTimeString()}] ✗ Connection error: ${err.message}\n`;
-            moduleOutput.style.color = '#f44336';
-            // Scroll to bottom
-            moduleOutput.scrollTop = moduleOutput.scrollHeight;
-        } else {
-            showAppAlert(`Connection error: ${err.message}`);
-        }
-    } finally {
-        // Restore button
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-        btn.style.opacity = '1';
+    // Trigger Run Module button — reuses the full, tested execution path
+    const btn = document.getElementById('run-module-btn');
+    if (btn && !btn.disabled) {
+        btn.click();
+    } else {
+        showToast('Le module est chargé. Cliquez sur "Run Module" pour lancer.', 'info');
     }
 }
 
@@ -11788,7 +12142,7 @@ async function openModuleSuggestion(modulePath, flowId = null) {
     const modulesTab = document.querySelector('[data-view="modules"]');
     if (!modulesTab) {
         console.error('[MODULE] Modules tab not found');
-        return;
+        return false;
     }
 
     modulesTab.click();
@@ -11824,7 +12178,7 @@ async function openModuleSuggestion(modulePath, flowId = null) {
                 </div>
             `;
         }
-        return;
+        return false;
     }
 
     const resolvedModuleName = ensured?.name || modulePath;
@@ -11842,16 +12196,8 @@ async function openModuleSuggestion(modulePath, flowId = null) {
 
         try {
             await autoConfigureModuleFromUrl(resolvedModuleName, true);
-            const moduleOutput = document.getElementById('module-output');
-            if (moduleOutput) {
-                moduleOutput.style.display = 'block';
-                moduleOutput.style.color = '#2196f3';
-                moduleOutput.style.background = '#e3f2fd';
-                moduleOutput.style.border = '1px solid #90caf9';
-                moduleOutput.style.padding = '12px';
-                moduleOutput.textContent = `✓ Module préconfiguré pour: ${urlToUse}\nCliquez sur "Run Module" pour lancer.`;
-                moduleOutput.scrollTop = moduleOutput.scrollHeight;
-            }
+            writeTerminal(`[+] Module préconfiguré pour: ${urlToUse}\n[*] Cliquez sur "Run Module" pour lancer.`);
+            _termSetStatus('configured');
         } catch (err) {
             console.error('[MODULE] Auto-config error:', err);
         }
@@ -11859,6 +12205,7 @@ async function openModuleSuggestion(modulePath, flowId = null) {
 
     const item = document.querySelector(`#module-list .flow-item[data-module-id="${CSS.escape(resolvedModuleName)}"]`);
     if (item) item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return true;
 }
 
 function showCompareDialog() {
@@ -21806,7 +22153,7 @@ let scopeConfig = {
     patterns: []
 };
 
-// Charger le scope depuis localStorage
+// Charger le scope depuis localStorage (repli si le serveur est injoignable)
 function loadScope() {
     try {
         const saved = localStorage.getItem('kittyproxy_scope');
@@ -21817,6 +22164,32 @@ function loadScope() {
     } catch (e) {
         console.error('[SCOPE] Error loading scope:', e);
     }
+}
+
+/** Au chargement de la page : aligner le client sur le serveur (scope vide après redémarrage de KittyProxy). */
+async function initScopeFromServer() {
+    try {
+        const res = await fetch(`${API_BASE}/scope`);
+        if (res.ok) {
+            const data = await res.json();
+            const s = data.scope || {};
+            scopeConfig = {
+                enabled: !!s.enabled,
+                mode: s.mode === 'exclude' ? 'exclude' : 'include',
+                patterns: Array.isArray(s.patterns) ? [...s.patterns] : []
+            };
+            try {
+                localStorage.setItem('kittyproxy_scope', JSON.stringify(scopeConfig));
+            } catch (e) { /* ignore */ }
+            updateScopeStatus();
+            updateScopeButton();
+            return;
+        }
+    } catch (e) {
+        console.warn('[SCOPE] Impossible de synchroniser avec le serveur, cache local utilisé.', e);
+    }
+    loadScope();
+    updateScopeButton();
 }
 
 // Sauvegarder le scope dans localStorage
@@ -21975,34 +22348,62 @@ function isInScope(url) {
     }
 }
 
-// Vérifier si un pattern correspond à une URL
+/** True if pattern looks like a host / domain (must not match as a keyword in query strings). */
+function _scopePatternIsDomainLike(pattern) {
+    const p = String(pattern || '').trim().toLowerCase().replace(/\*/g, '');
+    if (!p || p.includes('/') || p.includes('?')) return false;
+    const parts = p.split('.').filter(Boolean);
+    if (parts.length < 2) return false;
+    const tld = parts[parts.length - 1];
+    return tld.length >= 2 && /^[a-z]+$/i.test(tld);
+}
+
+// Vérifier si un pattern correspond à une URL (hostname / sous-domaines — pas les mots dans la query)
 function matchesPattern(pattern, hostname, pathname, fullUrl) {
-    // Convertir le pattern wildcard en regex
-    let regexPattern = pattern
+    const regexPattern = pattern
         .replace(/\./g, '\\.')
         .replace(/\*/g, '.*')
         .replace(/\?/g, '.');
-    
-    // Tester sur le hostname
-    if (new RegExp(`^${regexPattern}$`).test(hostname)) {
+
+    const hostLower = String(hostname || '').toLowerCase();
+    const patPlain = pattern.replace(/\*/g, '').toLowerCase();
+
+    // Hostname exact ou regex wildcard
+    if (new RegExp(`^${regexPattern}$`, 'i').test(hostname)) {
         return true;
     }
-    
-    // Tester sur le pathname
+
+    // Sous-domaines : "example.com" => www.example.com, api.example.com
+    if (patPlain && !pattern.includes('/') && _scopePatternIsDomainLike(pattern)) {
+        if (hostLower === patPlain || hostLower.endsWith('.' + patPlain)) {
+            return true;
+        }
+    }
+
+    // Pattern "*.example.com"
+    if (pattern.startsWith('*.')) {
+        const domain = pattern.slice(2).toLowerCase();
+        if (hostLower === domain || hostLower.endsWith('.' + domain)) {
+            return true;
+        }
+    }
+
+    // Chemin uniquement (jamais la query) — évite les faux positifs type ?command=example.com
     if (new RegExp(`^${regexPattern}$`).test(pathname)) {
         return true;
     }
-    
-    // Tester sur l'URL complète
-    if (new RegExp(`^${regexPattern}$`).test(fullUrl)) {
+
+    const pathLower = String(pathname || '').toLowerCase();
+    const patternClean = pattern.replace(/\*/g, '').replace(/\?/g, '');
+    if (patternClean && !_scopePatternIsDomainLike(pattern) && pathLower.includes(patternClean.toLowerCase())) {
         return true;
     }
-    
-    // Tester si le pattern est dans l'URL
-    if (fullUrl.includes(pattern.replace(/\*/g, ''))) {
+
+    // Motif type chemin / préfixe (sans matcher un domaine dans toute l'URL)
+    if (new RegExp(`^${regexPattern}$`, 'i').test(fullUrl)) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -22043,8 +22444,8 @@ loadScope = function() {
     updateScopeButton();
 };
 
-// Charger le scope au démarrage
-loadScope();
+// Scope : vérité côté serveur (vide au démarrage du proxy), puis cache local
+initScopeFromServer();
 
 // Hook into fetchFlows to update WebSocket list when flows are updated
 const originalFetchFlows = fetchFlows;

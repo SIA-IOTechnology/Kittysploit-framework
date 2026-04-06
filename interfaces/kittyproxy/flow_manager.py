@@ -98,6 +98,18 @@ class FlowManager:
             traceback.print_exc()
             return True  # On error, accept the flow
     
+    @staticmethod
+    def _scope_pattern_is_domain_like(pattern_clean: str) -> bool:
+        """True if pattern looks like host.example.tld — must not use path/query substring matching."""
+        p = (pattern_clean or '').strip().lower()
+        if not p or '/' in p or '?' in p:
+            return False
+        parts = [x for x in p.split('.') if x]
+        if len(parts) < 2:
+            return False
+        tld = parts[-1]
+        return len(tld) >= 2 and tld.isalpha()
+
     def _matches_pattern(self, pattern: str, url: str, hostname: Optional[str], path: Optional[str]) -> bool:
         """Check if a pattern matches a URL."""
         try:
@@ -157,13 +169,16 @@ class FlowManager:
                 if pattern_clean and path_lower.startswith(pattern_clean.lower()):
                     return True
             
-            # Test 4: Match on full URL
+            # Test 4: Match on full URL (exact regex only; never substring on query string)
             if re.match(f'^{regex_pattern}$', url, re.IGNORECASE):
                 return True
             
-            # Test 5: Pattern contained in URL (for partial matches like "api" matching "/api/v1/...")
+            # Test 5: Substring on path only — domain-like patterns must match hostname above,
+            # not appear as query params (e.g. ?command=kittysploit.com on another host).
             pattern_clean = pattern.replace('*', '').replace('?', '')
-            if pattern_clean and pattern_clean.lower() in url_lower:
+            if pattern_clean and self._scope_pattern_is_domain_like(pattern_clean):
+                return False
+            if pattern_clean and pattern_clean.lower() in path_lower:
                 return True
             
             return False

@@ -430,6 +430,28 @@ body {
     pointer-events: none;
 }
 
+.modules-nav-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #7c3aed;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    box-shadow: 0 0 0 2px #1e1e1e;
+    pointer-events: none;
+    z-index: 10;
+    line-height: 1;
+    font-family: 'Fira Code', monospace;
+}
+
 .intercept-badge {
     position: absolute;
     top: -6px;

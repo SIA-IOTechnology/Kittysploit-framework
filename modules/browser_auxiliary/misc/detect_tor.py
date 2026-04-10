@@ -18,7 +18,7 @@ class Module(BrowserAuxiliary):
     timeout = OptInteger(5, "Timeout in seconds to wait for the image load", required=True)
 
     def run(self):
-        tor_url = self.tor_resource.value.strip().replace("\\", "\\\\").replace("'", "\\'")
+        tor_url = self.tor_resource.strip().replace("\\", "\\\\").replace("'", "\\'")
         timeout_sec = int(self.timeout) if self.timeout else 5
 
         code_js = (

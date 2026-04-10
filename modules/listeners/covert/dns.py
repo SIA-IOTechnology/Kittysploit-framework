@@ -162,10 +162,10 @@ class Module(Listener):
                     if session_id:
                         try:
                             s = b64chunk.replace("-", "+").replace("_", "/")
-pad = 4 - len(s) % 4
-if pad and pad != 4:
-    s += "=" * pad
-chunk = base64.b64decode(s).decode("utf-8", errors="replace")
+                            pad = 4 - len(s) % 4
+                            if pad and pad != 4:
+                                s += "=" * pad
+                            chunk = base64.b64decode(s).decode("utf-8", errors="replace")
                             self._append_output(session_id, chunk)
                         except Exception:
                             pass

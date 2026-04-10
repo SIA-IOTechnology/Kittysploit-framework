@@ -18,7 +18,7 @@ class Module(Post, FTPClientMixin):
     
     def check(self):
         """Check if the module can run"""
-        session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+        session_id_value = str(self.session_id)
         if not session_id_value:
             print_error("Session ID not set")
             return False
@@ -346,7 +346,7 @@ class Module(Post, FTPClientMixin):
             print_info("=" * 70)
             
             # Load session first to ensure it's available
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             if session_id_value and hasattr(self, 'framework') and self.framework:
                 if hasattr(self.framework, 'session_manager'):
                     session = self.framework.session_manager.get_session(session_id_value)

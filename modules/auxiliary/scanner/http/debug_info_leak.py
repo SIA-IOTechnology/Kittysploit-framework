@@ -302,8 +302,8 @@ class Module(Auxiliary, Http_client):
         paths_to_test = list(self.COMMON_DEBUG_PATHS)
         
         # Ajouter les chemins personnalisés
-        if self.paths.value:
-            custom_paths = [p.strip() for p in self.paths.value.split(',') if p.strip()]
+        if self.paths:
+            custom_paths = [p.strip() for p in self.paths.split(',') if p.strip()]
             paths_to_test.extend(custom_paths)
         
         # Tester le chemin racine

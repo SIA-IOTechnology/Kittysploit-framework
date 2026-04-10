@@ -56,9 +56,9 @@ class Module(Listener):
         
         try:
             # Get CAN interface configuration
-            interface = str(self.interface.value) if hasattr(self.interface, 'value') else str(self.interface) if self.interface else "socketcan"
-            channel = str(self.channel.value) if hasattr(self.channel, 'value') else str(self.channel) if self.channel else "can0"
-            bitrate = int(self.bitrate.value) if hasattr(self.bitrate, 'value') else int(self.bitrate) if self.bitrate else 500000
+            interface = str(self.interface) if self.interface else "socketcan"
+            channel = str(self.channel) if self.channel else "can0"
+            bitrate = int(self.bitrate) if self.bitrate else 500000
             
             self.can_interface = interface
             self.can_channel = channel

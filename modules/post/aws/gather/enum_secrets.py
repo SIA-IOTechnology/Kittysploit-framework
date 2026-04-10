@@ -40,7 +40,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # Enumerate Secrets Manager
-            if self.enum_secrets_manager.value:
+            if self.enum_secrets_manager:
                 print_info("\n[1] Enumerating AWS Secrets Manager...")
                 secrets = self._enum_secrets_manager()
                 if secrets:
@@ -54,7 +54,7 @@ class Module(Post):
                         print_info(f"    ARN: {arn}")
                         
                         # Retrieve value if requested
-                        if self.retrieve_values.value:
+                        if self.retrieve_values:
                             print_info(f"    Retrieving value...")
                             value = self._get_secret_value(name)
                             if value:
@@ -74,7 +74,7 @@ class Module(Post):
                     print_info("No secrets found in Secrets Manager or access denied")
             
             # Enumerate Parameter Store
-            if self.enum_parameter_store.value:
+            if self.enum_parameter_store:
                 print_info("\n[2] Enumerating Systems Manager Parameter Store...")
                 parameters = self._enum_parameter_store()
                 if parameters:
@@ -87,7 +87,7 @@ class Module(Post):
                         print_info(f"  - {name} ({param_type})")
                         
                         # Retrieve value if requested
-                        if self.retrieve_values.value:
+                        if self.retrieve_values:
                             value = self._get_parameter_value(name, param_type == 'SecureString')
                             if value:
                                 param['value'] = value
@@ -109,24 +109,24 @@ class Module(Post):
             print_info(f"  - Secrets Manager: {len(results.get('secrets_manager', []))}")
             print_info(f"  - Parameter Store: {len(results.get('parameter_store', []))}")
             
-            if self.retrieve_values.value:
+            if self.retrieve_values:
                 print_warning("⚠️  Secret values were retrieved - ensure secure storage!")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
                     # Don't save actual values unless explicitly requested
                     save_data = results.copy()
-                    if not self.retrieve_values.value:
+                    if not self.retrieve_values:
                         # Remove any accidentally retrieved values
                         for secret in save_data.get('secrets_manager', []):
                             secret.pop('value', None)
                         for param in save_data.get('parameter_store', []):
                             param.pop('value', None)
                     
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(save_data, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             
@@ -149,9 +149,9 @@ class Module(Post):
                 secrets = data.get('SecretList', [])
                 
                 # Filter by pattern if specified
-                if self.filter_pattern.value:
+                if self.filter_pattern:
                     import fnmatch
-                    pattern = self.filter_pattern.value
+                    pattern = self.filter_pattern
                     secrets = [s for s in secrets if fnmatch.fnmatch(s.get('Name', ''), pattern)]
                 
                 return secrets
@@ -175,9 +175,9 @@ except Exception as e:
             try:
                 secrets = json.loads(result)
                 # Filter by pattern if specified
-                if self.filter_pattern.value:
+                if self.filter_pattern:
                     import fnmatch
-                    pattern = self.filter_pattern.value
+                    pattern = self.filter_pattern
                     secrets = [s for s in secrets if fnmatch.fnmatch(s.get('Name', ''), pattern)]
                 return secrets
             except:
@@ -214,9 +214,9 @@ except Exception as e:
                 parameters = data.get('Parameters', [])
                 
                 # Filter by pattern if specified
-                if self.filter_pattern.value:
+                if self.filter_pattern:
                     import fnmatch
-                    pattern = self.filter_pattern.value
+                    pattern = self.filter_pattern
                     parameters = [p for p in parameters if fnmatch.fnmatch(p.get('Name', ''), pattern)]
                 
                 return parameters
@@ -240,9 +240,9 @@ except Exception as e:
             try:
                 parameters = json.loads(result)
                 # Filter by pattern if specified
-                if self.filter_pattern.value:
+                if self.filter_pattern:
                     import fnmatch
-                    pattern = self.filter_pattern.value
+                    pattern = self.filter_pattern
                     parameters = [p for p in parameters if fnmatch.fnmatch(p.get('Name', ''), pattern)]
                 return parameters
             except:

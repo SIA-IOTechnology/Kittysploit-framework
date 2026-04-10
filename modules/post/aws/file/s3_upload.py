@@ -25,8 +25,8 @@ class Module(Post):
     def run(self):
         """Run the S3 upload"""
         try:
-            bucket = self.bucket_name.value
-            local_path = self.local_path.value
+            bucket = self.bucket_name
+            local_path = self.local_path
             
             if not bucket or not local_path:
                 print_error("Both bucket_name and local_path are required")
@@ -50,21 +50,21 @@ class Module(Post):
             if is_directory:
                 # Upload directory
                 print_info("\n[1] Uploading directory...")
-                success = self._upload_directory(bucket, local_path, self.make_public.value)
+                success = self._upload_directory(bucket, local_path, self.make_public)
             else:
                 # Upload single file
                 print_info("\n[1] Uploading file...")
-                s3_key = self.s3_key.value
+                s3_key = self.s3_key
                 if not s3_key:
                     # Use filename from local path
                     s3_key = os.path.basename(local_path)
                 
-                success = self._upload_file(bucket, local_path, s3_key, self.make_public.value, self.content_type.value, self.encrypt.value)
+                success = self._upload_file(bucket, local_path, s3_key, self.make_public, self.content_type, self.encrypt)
             
             if success:
                 print_success("Upload completed successfully")
                 
-                if self.make_public.value:
+                if self.make_public:
                     print_warning("⚠️  Uploaded objects are PUBLIC!")
                     print_info(f"  Public URL: https://{bucket}.s3.amazonaws.com/{s3_key if not is_directory else '...'}")
                 

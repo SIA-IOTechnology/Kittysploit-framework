@@ -41,7 +41,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # Check current identity
-            if self.check_permissions.value:
+            if self.check_permissions:
                 print_info("\n[1] Checking current IAM identity...")
                 identity = self._get_caller_identity()
                 if identity:
@@ -53,7 +53,7 @@ class Module(Post):
                     print_warning("Could not retrieve IAM identity")
             
             # Enumerate users
-            if self.enum_users.value:
+            if self.enum_users:
                 print_info("\n[2] Enumerating IAM users...")
                 users = self._enum_users()
                 if users:
@@ -67,7 +67,7 @@ class Module(Post):
                     print_info("No users found or access denied")
             
             # Enumerate roles
-            if self.enum_roles.value:
+            if self.enum_roles:
                 print_info("\n[3] Enumerating IAM roles...")
                 roles = self._enum_roles()
                 if roles:
@@ -81,7 +81,7 @@ class Module(Post):
                     print_info("No roles found or access denied")
             
             # Enumerate groups
-            if self.enum_groups.value:
+            if self.enum_groups:
                 print_info("\n[4] Enumerating IAM groups...")
                 groups = self._enum_groups()
                 if groups:
@@ -93,7 +93,7 @@ class Module(Post):
                     print_info("No groups found or access denied")
             
             # Enumerate policies
-            if self.enum_policies.value:
+            if self.enum_policies:
                 print_info("\n[5] Enumerating IAM policies...")
                 policies = self._enum_policies()
                 if policies:
@@ -107,7 +107,7 @@ class Module(Post):
                     print_info("No policies found or access denied")
             
             # Enumerate attached policies
-            if self.enum_attached_policies.value and results.get('users'):
+            if self.enum_attached_policies and results.get('users'):
                 print_info("\n[6] Enumerating attached policies for users...")
                 for user in results['users'][:5]:  # Limit to first 5 users
                     username = user.get('UserName')
@@ -117,7 +117,7 @@ class Module(Post):
                             user['attached_policies'] = attached
                             print_info(f"  {username}: {len(attached)} attached policies")
             
-            if self.enum_attached_policies.value and results.get('roles'):
+            if self.enum_attached_policies and results.get('roles'):
                 print_info("\n[7] Enumerating attached policies for roles...")
                 for role in results['roles'][:5]:  # Limit to first 5 roles
                     role_name = role.get('RoleName')
@@ -138,11 +138,11 @@ class Module(Post):
             print_info(f"  - Policies: {len(results.get('policies', []))}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

@@ -42,7 +42,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # Enumerate VPCs
-            if self.enum_vpcs.value:
+            if self.enum_vpcs:
                 print_info("\n[1] Enumerating VPCs...")
                 vpcs = self._enum_vpcs()
                 if vpcs:
@@ -63,7 +63,7 @@ class Module(Post):
                     print_info("No VPCs found or access denied")
             
             # Enumerate subnets
-            if self.enum_subnets.value:
+            if self.enum_subnets:
                 print_info("\n[2] Enumerating subnets...")
                 subnets = self._enum_subnets()
                 if subnets:
@@ -88,7 +88,7 @@ class Module(Post):
                     print_info("No subnets found or access denied")
             
             # Enumerate route tables
-            if self.enum_route_tables.value:
+            if self.enum_route_tables:
                 print_info("\n[3] Enumerating route tables...")
                 route_tables = self._enum_route_tables()
                 if route_tables:
@@ -112,7 +112,7 @@ class Module(Post):
                     print_info("No route tables found or access denied")
             
             # Enumerate internet gateways
-            if self.enum_internet_gateways.value:
+            if self.enum_internet_gateways:
                 print_info("\n[4] Enumerating internet gateways...")
                 igws = self._enum_internet_gateways()
                 if igws:
@@ -124,7 +124,7 @@ class Module(Post):
                     print_info("No internet gateways found")
             
             # Enumerate NAT gateways
-            if self.enum_nat_gateways.value:
+            if self.enum_nat_gateways:
                 print_info("\n[5] Enumerating NAT gateways...")
                 nat_gws = self._enum_nat_gateways()
                 if nat_gws:
@@ -138,7 +138,7 @@ class Module(Post):
                     print_info("No NAT gateways found")
             
             # Enumerate VPC peering
-            if self.enum_vpc_peering.value:
+            if self.enum_vpc_peering:
                 print_info("\n[6] Enumerating VPC peering connections...")
                 peerings = self._enum_vpc_peering()
                 if peerings:
@@ -152,7 +152,7 @@ class Module(Post):
                     print_info("No VPC peering connections found")
             
             # Map topology
-            if self.map_topology.value and results.get('vpcs'):
+            if self.map_topology and results.get('vpcs'):
                 print_info("\n[7] Mapping network topology...")
                 topology = self._map_topology(results)
                 if topology:
@@ -178,11 +178,11 @@ class Module(Post):
             print_info(f"  - VPC Peering: {len(results.get('vpc_peering', []))}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

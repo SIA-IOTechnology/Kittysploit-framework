@@ -39,7 +39,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # Enumerate assumable roles if requested
-            if self.enumerate_roles.value:
+            if self.enumerate_roles:
                 print_info("\n[1] Enumerating assumable roles...")
                 roles = self._enumerate_assumable_roles()
                 if roles:
@@ -53,10 +53,10 @@ class Module(Post):
                     print_info("No assumable roles found")
             
             # Assume role
-            role_arn = self.role_arn.value
+            role_arn = self.role_arn
             if role_arn:
                 print_info(f"\n[2] Attempting to assume role: {role_arn}")
-                credentials = self._assume_role(role_arn, self.session_name.value, self.duration.value)
+                credentials = self._assume_role(role_arn, self.session_name, self.duration)
                 
                 if credentials:
                     results['assumed_role'] = {
@@ -91,11 +91,11 @@ class Module(Post):
                 print_warning("Role assumption failed")
             
             # Save to file if requested
-            if self.output_file.value and results:
+            if self.output_file and results:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

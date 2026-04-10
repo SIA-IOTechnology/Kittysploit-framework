@@ -23,21 +23,21 @@ class Module(Post, System):
         """Scan internal network from compromised machine"""
         
         print_status("Scanning internal network from compromised machine...")
-        print_info(f"Network range: {self.network_range.value}")
-        print_info(f"Scan type: {self.scan_type.value}")
+        print_info(f"Network range: {self.network_range}")
+        print_info(f"Scan type: {self.scan_type}")
         
-        if not self.network_range.value:
+        if not self.network_range:
             print_error("Network range is required")
             print_info("Example: 192.168.1.0/24 or 10.0.0.0/24")
             return False
         
         # Detect network if not provided
-        if "/" not in self.network_range.value:
+        if "/" not in self.network_range:
             print_status("Auto-detecting network range...")
             detected_network = self._detect_network()
             if detected_network:
                 print_info(f"Detected network: {detected_network}")
-                self.network_range.value = detected_network
+                self.network_range = detected_network
             else:
                 print_error("Could not auto-detect network. Please specify network range.")
                 return False
@@ -45,22 +45,22 @@ class Module(Post, System):
         results = {}
         
         # Perform scans based on type
-        if self.scan_type.value == "all" or self.scan_type.value == "arp":
+        if self.scan_type == "all" or self.scan_type == "arp":
             print_status("Performing ARP scan...")
             arp_results = self._arp_scan()
             results.update(arp_results)
         
-        if self.scan_type.value == "all" or self.scan_type.value == "ping":
+        if self.scan_type == "all" or self.scan_type == "ping":
             print_status("Performing ICMP ping sweep...")
             ping_results = self._ping_sweep()
             results.update(ping_results)
         
-        if self.scan_type.value == "all" or self.scan_type.value == "tcp":
+        if self.scan_type == "all" or self.scan_type == "tcp":
             print_status("Performing TCP port scan...")
             tcp_results = self._tcp_scan()
             results.update(tcp_results)
         
-        if self.scan_type.value == "all" or self.scan_type.value == "udp":
+        if self.scan_type == "all" or self.scan_type == "udp":
             print_status("Performing UDP scan...")
             udp_results = self._udp_scan()
             results.update(udp_results)
@@ -124,7 +124,7 @@ class Module(Post, System):
         results = {}
         try:
             # Extract network base
-            network_base = self.network_range.value.split('/')[0]
+            network_base = self.network_range.split('/')[0]
             base_parts = network_base.split('.')
             
             if len(base_parts) == 4:
@@ -178,7 +178,7 @@ class Module(Post, System):
         """Perform ICMP ping sweep"""
         results = {}
         try:
-            network_base = self.network_range.value.split('/')[0]
+            network_base = self.network_range.split('/')[0]
             base_parts = network_base.split('.')
             
             if len(base_parts) == 4:
@@ -203,7 +203,7 @@ class Module(Post, System):
                     print_info("Using ping (this may take a while)...")
                     for i in range(1, 255):
                         ip = f"{base}.{i}"
-                        ping_cmd = f"ping -c 1 -W {self.timeout.value} {ip} 2>/dev/null | grep '1 received'"
+                        ping_cmd = f"ping -c 1 -W {self.timeout} {ip} 2>/dev/null | grep '1 received'"
                         result = self.cmd_exec(ping_cmd)
                         if result and result.strip():
                             results[ip] = {
@@ -226,7 +226,7 @@ class Module(Post, System):
             alive_hosts = []
             
             # Quick ping to find alive hosts
-            network_base = self.network_range.value.split('/')[0]
+            network_base = self.network_range.split('/')[0]
             base_parts = network_base.split('.')
             
             if len(base_parts) == 4:
@@ -234,8 +234,8 @@ class Module(Post, System):
                 
                 # Use nmap if available
                 if self.command_exists('nmap'):
-                    ports = self.ports.value.replace(' ', '')
-                    nmap_cmd = f"nmap -sn {self.network_range.value} 2>/dev/null | grep -E '^Nmap scan report' | awk '{{print $5}}'"
+                    ports = self.ports.replace(' ', '')
+                    nmap_cmd = f"nmap -sn {self.network_range} 2>/dev/null | grep -E '^Nmap scan report' | awk '{{print $5}}'"
                     hosts_output = self.cmd_exec(nmap_cmd)
                     if hosts_output:
                         alive_hosts = [h.strip() for h in hosts_output.strip().split('\n') if h.strip()]
@@ -247,7 +247,7 @@ class Module(Post, System):
                             alive_hosts = [h.strip() for h in fping_output.strip().split('\n') if h.strip()]
                 
                 # Scan ports on alive hosts
-                ports_list = [p.strip() for p in self.ports.value.split(',') if p.strip()]
+                ports_list = [p.strip() for p in self.ports.split(',') if p.strip()]
                 
                 print_info(f"Scanning {len(ports_list)} port(s) on {len(alive_hosts)} host(s)...")
                 
@@ -263,7 +263,7 @@ class Module(Post, System):
                         try:
                             port_num = int(port)
                             # Use nc or bash /dev/tcp
-                            nc_cmd = f"timeout {self.timeout.value} bash -c '</dev/tcp/{host}/{port_num}' 2>/dev/null && echo 'open'"
+                            nc_cmd = f"timeout {self.timeout} bash -c '</dev/tcp/{host}/{port_num}' 2>/dev/null && echo 'open'"
                             result = self.cmd_exec(nc_cmd)
                             if result and 'open' in result:
                                 results[host]['ports'][port_num] = 'open'
@@ -284,7 +284,7 @@ class Module(Post, System):
             print_info("Scanning common UDP ports...")
             
             # UDP scanning is complex and slow, so we'll do a basic check
-            network_base = self.network_range.value.split('/')[0]
+            network_base = self.network_range.split('/')[0]
             base_parts = network_base.split('.')
             
             if len(base_parts) == 4:
@@ -292,7 +292,7 @@ class Module(Post, System):
                 
                 # Use nmap for UDP if available
                 if self.command_exists('nmap'):
-                    nmap_cmd = f"nmap -sU --top-ports 10 {self.network_range.value} 2>/dev/null"
+                    nmap_cmd = f"nmap -sU --top-ports 10 {self.network_range} 2>/dev/null"
                     output = self.cmd_exec(nmap_cmd)
                     if output:
                         # Parse nmap output

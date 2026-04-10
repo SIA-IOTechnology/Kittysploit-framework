@@ -58,6 +58,7 @@ uvicorn
 mitmproxy
 boto3
 pure-python-adb
+pyftpdlib
 pyjwt
 Pillow
 mcp

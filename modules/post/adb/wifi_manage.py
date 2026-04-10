@@ -13,7 +13,7 @@ class Module(Post):
 
     def run(self):
         try:
-            action = str(self.action.value if hasattr(self.action, "value") else self.action).strip().lower()
+            action = str(self.action).strip().lower()
 
             if action == "enable":
                 out = self.cmd_execute("svc wifi enable")

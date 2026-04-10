@@ -132,11 +132,11 @@ class Module(Auxiliary, Http_client):
         """
         Vérifie si la cible est accessible
         """
-        if not self.target.value:
+        if not self.target:
             print_error("Target URL is required")
             return False
         
-        print_info(f"Checking target: {self.target.value}")
+        print_info(f"Checking target: {self.target}")
         
         try:
             # Test de connexion basique
@@ -201,11 +201,11 @@ class Module(Auxiliary, Http_client):
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
             # Parser l'URL cible
-            parsed = urlparse(self.target.value)
+            parsed = urlparse(self.target)
             
             # Construire les paramètres de requête
             params = parse_qs(parsed.query)
-            params[self.parameter.value] = [payload]
+            params[self.parameter] = [payload]
             
             # Reconstruire l'URL avec le nouveau paramètre
             new_query = urlencode(params, doseq=True)
@@ -221,7 +221,7 @@ class Module(Auxiliary, Http_client):
             # Utiliser requests directement pour plus de flexibilité
             response = requests.get(
                 new_url,
-                timeout=self.timeout.value,
+                timeout=self.timeout,
                 verify=False,
                 allow_redirects=True,
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -302,9 +302,9 @@ class Module(Auxiliary, Http_client):
         self.successful_payloads = []
         
         print_status("Starting LFI fuzzing...")
-        print_info(f"Target: {self.target.value}")
-        print_info(f"Parameter: {self.parameter.value}")
-        print_info(f"Threads: {self.threads.value}")
+        print_info(f"Target: {self.target}")
+        print_info(f"Parameter: {self.parameter}")
+        print_info(f"Threads: {self.threads}")
         print_info("")
         
         # Générer les payloads
@@ -333,14 +333,14 @@ class Module(Auxiliary, Http_client):
                 
                 self.successful_payloads.append(result)
                 self.vulnerable_params.append({
-                    'parameter': self.parameter.value,
+                    'parameter': self.parameter,
                     'payload': payload,
                     'result': result
                 })
             
             # Délai entre les requêtes (convertir millisecondes en secondes)
-            if self.delay.value > 0:
-                time.sleep(self.delay.value / 1000.0)
+            if self.delay > 0:
+                time.sleep(self.delay / 1000.0)
         
         # Résumé
         print_info("")

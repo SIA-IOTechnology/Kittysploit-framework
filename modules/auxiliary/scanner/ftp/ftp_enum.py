@@ -47,10 +47,10 @@ class Module(Auxiliary, FTPClientMixin):
         
         # Afficher la configuration
         print_status("Configuration:")
-        print_info(f"  Target:   {self.rhost.value}:{self.rport.value}")
-        print_info(f"  Username: {self.ftp_user.value}")
-        print_info(f"  Password: {'*' * len(str(self.ftp_password.value))}")
-        print_info(f"  Timeout:  {self.timeout.value}s")
+        print_info(f"  Target:   {self.rhost}:{self.rport}")
+        print_info(f"  Username: {self.ftp_user}")
+        print_info(f"  Password: {'*' * len(str(self.ftp_password))}")
+        print_info(f"  Timeout:  {self.timeout}s")
         print_info()
         
         try:
@@ -62,7 +62,7 @@ class Module(Auxiliary, FTPClientMixin):
             print_status("Step 1: Connecting to FTP server...")
             
             ftp = self.get_ftp_connection()
-            print_success(f"✓ Connected to {self.rhost.value}")
+            print_success(f"✓ Connected to {self.rhost}")
             print_info()
             
             # ===================================================================
@@ -99,7 +99,7 @@ class Module(Auxiliary, FTPClientMixin):
             
             # Utiliser la méthode list_files() du mixin
             # Cette méthode fonctionne aussi bien en mode Direct qu'en mode Session!
-            files = self.list_files(self.remote_path.value)
+            files = self.list_files(self.remote_path)
             
             if not files:
                 print_warning("No files found or access denied")
@@ -114,7 +114,7 @@ class Module(Auxiliary, FTPClientMixin):
                 file_type = file_info.get('type', 'unknown')
                 
                 # Filtrer les fichiers cachés si demandé
-                if not self.show_hidden.value and name.startswith('.'):
+                if not self.show_hidden and name.startswith('.'):
                     continue
                 
                 if file_type == 'directory':

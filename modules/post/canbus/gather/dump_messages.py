@@ -32,7 +32,7 @@ class Module(Post):
     def check(self):
         """Check if session is a CANBUS session"""
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             if not session_id_value:
                 print_error("Session ID not set")
                 return False
@@ -58,7 +58,7 @@ class Module(Post):
     def run(self):
         """Dump CAN messages to file"""
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             
             if not self.framework or not hasattr(self.framework, 'session_manager'):
                 print_error("Framework or session manager not available")
@@ -83,8 +83,8 @@ class Module(Post):
             
             # Filter by CAN ID if specified
             filter_id = None
-            if self.filter_id.value:
-                filter_id_str = str(self.filter_id.value) if hasattr(self.filter_id, 'value') else str(self.filter_id)
+            if self.filter_id:
+                filter_id_str = str(self.filter_id)
                 if filter_id_str.startswith('0x') or filter_id_str.startswith('0X'):
                     filter_id = int(filter_id_str, 16)
                 else:
@@ -100,15 +100,15 @@ class Module(Post):
                 filtered_messages = messages
             
             # Apply limit
-            limit = int(self.limit.value) if hasattr(self.limit, 'value') else int(self.limit)
+            limit = int(self.limit)
             if limit > 0:
                 filtered_messages = filtered_messages[:limit]
             
             print_info(f"Messages to dump: {len(filtered_messages)}")
             
             # Get output format
-            format_type = str(self.format.value) if hasattr(self.format, 'value') else str(self.format)
-            output_file = str(self.output_file.value) if hasattr(self.output_file, 'value') else str(self.output_file)
+            format_type = str(self.format)
+            output_file = str(self.output_file)
             
             # Dump based on format
             if format_type == "json":

@@ -1123,7 +1123,7 @@ const CommandParsed = struct {
     }
     
     pub fn value(self: *const CommandParsed) Command {
-        return self.parsed.value;
+        return self.parsed;
     }
 };
 

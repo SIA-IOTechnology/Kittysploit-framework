@@ -47,7 +47,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # EC2
-            if self.enum_ec2.value:
+            if self.enum_ec2:
                 print_info("\n[1] Enumerating EC2...")
                 ec2_data = self._enum_ec2()
                 if ec2_data:
@@ -57,7 +57,7 @@ class Module(Post):
                     print_success(f"Found {count} EC2 instances")
             
             # S3
-            if self.enum_s3.value:
+            if self.enum_s3:
                 print_info("\n[2] Enumerating S3...")
                 s3_data = self._enum_s3()
                 if s3_data:
@@ -67,7 +67,7 @@ class Module(Post):
                     print_success(f"Found {count} S3 buckets")
             
             # Lambda
-            if self.enum_lambda.value:
+            if self.enum_lambda:
                 print_info("\n[3] Enumerating Lambda...")
                 lambda_data = self._enum_lambda()
                 if lambda_data:
@@ -77,7 +77,7 @@ class Module(Post):
                     print_success(f"Found {count} Lambda functions")
             
             # RDS
-            if self.enum_rds.value:
+            if self.enum_rds:
                 print_info("\n[4] Enumerating RDS...")
                 rds_data = self._enum_rds()
                 if rds_data:
@@ -87,7 +87,7 @@ class Module(Post):
                     print_success(f"Found {count} RDS instances")
             
             # IAM
-            if self.enum_iam.value:
+            if self.enum_iam:
                 print_info("\n[5] Enumerating IAM...")
                 iam_data = self._enum_iam()
                 if iam_data:
@@ -99,7 +99,7 @@ class Module(Post):
                     print_success(f"Found {users} IAM users, {roles} IAM roles")
             
             # VPC
-            if self.enum_vpc.value:
+            if self.enum_vpc:
                 print_info("\n[6] Enumerating VPC...")
                 vpc_data = self._enum_vpc()
                 if vpc_data:
@@ -109,7 +109,7 @@ class Module(Post):
                     print_success(f"Found {count} VPCs")
             
             # CloudFormation
-            if self.enum_cloudformation.value:
+            if self.enum_cloudformation:
                 print_info("\n[7] Enumerating CloudFormation...")
                 cf_data = self._enum_cloudformation()
                 if cf_data:
@@ -119,7 +119,7 @@ class Module(Post):
                     print_success(f"Found {count} CloudFormation stacks")
             
             # CloudTrail
-            if self.enum_cloudtrail.value:
+            if self.enum_cloudtrail:
                 print_info("\n[8] Enumerating CloudTrail...")
                 trail_data = self._enum_cloudtrail()
                 if trail_data:
@@ -129,7 +129,7 @@ class Module(Post):
                     print_success(f"Found {count} CloudTrail trails")
             
             # Other services
-            if self.enum_other.value:
+            if self.enum_other:
                 print_info("\n[9] Enumerating other services...")
                 other_data = self._enum_other_services()
                 if other_data:
@@ -151,11 +151,11 @@ class Module(Post):
             print_success(f"\nTotal services with resources: {services_found}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

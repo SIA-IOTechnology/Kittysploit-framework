@@ -71,6 +71,7 @@ dependencies = [
     "mitmproxy",
     "boto3",
     "pure-python-adb",
+    "pyftpdlib",
     "pyjwt",
     "Pillow",
     "mcp",
@@ -91,6 +92,10 @@ windows = [
 kittysploit = "kittysploit.__main__:main"
 kittyproxy = "interfaces.kittyproxy.__main__:main"
 kittyosint = "interfaces.kittyosint:main"
+kittymcp = "kittymcp:main"
+
+[tool.setuptools]
+py-modules = ["kittymcp"]
 
 [tool.setuptools.packages.find]
 where = ["."]

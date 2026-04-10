@@ -318,7 +318,7 @@ mysql_close($link);
 			
 			# Store credentials in session data for MySQL listener/shell
 			if hasattr(self, 'framework') and self.framework and hasattr(self.framework, 'session_manager'):
-				session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+				session_id_value = str(self.session_id)
 				if session_id_value:
 					session = self.framework.session_manager.get_session(session_id_value)
 					if session:

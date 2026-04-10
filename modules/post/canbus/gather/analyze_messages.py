@@ -32,7 +32,7 @@ class Module(Post):
     def check(self):
         """Check if session is a CANBUS session"""
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             if not session_id_value:
                 print_error("Session ID not set")
                 return False
@@ -58,7 +58,7 @@ class Module(Post):
     def run(self):
         """Run the CAN message analysis"""
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             
             if not self.framework or not hasattr(self.framework, 'session_manager'):
                 print_error("Framework or session manager not available")
@@ -95,14 +95,14 @@ class Module(Post):
             
             if messages:
                 # Pattern detection
-                if self.detect_patterns.value:
+                if self.detect_patterns:
                     print_info("[1] Detecting message patterns...")
                     patterns = self._detect_patterns(messages)
                     analysis_results['patterns'] = patterns
                     self._display_patterns(patterns)
                 
                 # Anomaly detection
-                if self.detect_anomalies.value:
+                if self.detect_anomalies:
                     print_info("\n[2] Detecting anomalies...")
                     anomalies = self._detect_anomalies(messages)
                     analysis_results['anomalies'] = anomalies
@@ -121,11 +121,11 @@ class Module(Post):
                 self._display_timing_analysis(timing_analysis)
             
             # Save results
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(analysis_results, f, indent=2)
-                    print_success(f"\nAnalysis results saved to: {self.output_file.value}")
+                    print_success(f"\nAnalysis results saved to: {self.output_file}")
                 except Exception as e:
                     print_error(f"Error saving results: {e}")
             

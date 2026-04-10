@@ -44,7 +44,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # 1. Check environment variables
-            if self.check_environment.value:
+            if self.check_environment:
                 print_info("\n[1] Checking environment variables...")
                 env_creds = self._check_environment_variables()
                 if env_creds:
@@ -54,7 +54,7 @@ class Module(Post):
                     print_info("No AWS credentials found in environment variables")
             
             # 2. Check credential files
-            if self.check_files.value:
+            if self.check_files:
                 print_info("\n[2] Checking AWS credential files...")
                 file_creds = self._check_credential_files()
                 if file_creds:
@@ -64,7 +64,7 @@ class Module(Post):
                     print_info("No AWS credential files found")
             
             # 3. Check EC2 Instance Metadata Service
-            if self.check_imds.value:
+            if self.check_imds:
                 print_info("\n[3] Checking EC2 Instance Metadata Service (IMDS)...")
                 imds_creds = self._check_imds()
                 if imds_creds:
@@ -74,7 +74,7 @@ class Module(Post):
                     print_info("Not running on EC2 or IMDS not accessible")
             
             # 4. Check IAM identity
-            if self.check_iam.value:
+            if self.check_iam:
                 print_info("\n[4] Checking IAM identity...")
                 iam_info = self._check_iam_identity()
                 if iam_info:
@@ -107,11 +107,11 @@ class Module(Post):
                                 print_info(f"  {key}: {value}")
                 
                 # Save to file if requested
-                if self.output_file.value:
+                if self.output_file:
                     try:
-                        with open(self.output_file.value, 'w') as f:
+                        with open(self.output_file, 'w') as f:
                             json.dump(credentials_found, f, indent=2)
-                        print_success(f"Credentials saved to {self.output_file.value}")
+                        print_success(f"Credentials saved to {self.output_file}")
                     except Exception as e:
                         print_error(f"Failed to save credentials to file: {e}")
             else:

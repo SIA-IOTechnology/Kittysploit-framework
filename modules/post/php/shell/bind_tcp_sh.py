@@ -103,7 +103,7 @@ class Module(Post, Bind):
 		@socket_close($msgsock);
 """
 		# Replace port placeholder with actual port
-		rport_val = int(self.rport.value) if hasattr(self.rport, 'value') else int(self.rport)
+		rport_val = int(self.rport)
 		data = data.replace("RPORT_PLACEHOLDER", str(rport_val))
 		
 		# Execute PHP code to start bind shell

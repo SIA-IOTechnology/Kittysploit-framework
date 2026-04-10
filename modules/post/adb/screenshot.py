@@ -2,7 +2,7 @@ from kittysploit import *
 import os
 import time
 from typing import Any, Optional
-from modules.post.adb.adb_session_utils import get_adb_device_info
+from core.lib.adb_session_utils import get_adb_device_info
 
 class Module(Post):
     __info__ = {
@@ -14,7 +14,7 @@ class Module(Post):
 
     def run(self):
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             device, serial, _, _ = get_adb_device_info(self.framework, session_id_value)
             if not device:
                 print_error("Could not resolve ADB device from session. Is the Android listener still running?")

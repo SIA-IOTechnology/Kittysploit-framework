@@ -40,7 +40,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # List functions
-            if self.list_functions.value:
+            if self.list_functions:
                 print_info("\n[1] Listing Lambda functions...")
                 functions = self._list_functions()
                 if functions:
@@ -63,7 +63,7 @@ class Module(Post):
                     print_info("No Lambda functions found or access denied")
             
             # Get detailed configurations
-            if self.get_configurations.value and results.get('functions'):
+            if self.get_configurations and results.get('functions'):
                 print_info("\n[2] Getting function configurations...")
                 for func in results['functions']:
                     func_name = func.get('FunctionName')
@@ -77,7 +77,7 @@ class Module(Post):
                         
                         # Show interesting details
                         env_vars = config.get('Environment', {}).get('Variables', {})
-                        if env_vars and self.get_environment.value:
+                        if env_vars and self.get_environment:
                             print_warning(f"    ⚠️  Environment variables found:")
                             for key, value in list(env_vars.items())[:5]:
                                 # Mask sensitive values
@@ -90,7 +90,7 @@ class Module(Post):
                                 print_info(f"      ... and {len(env_vars) - 5} more")
             
             # Get function code
-            if self.get_code.value and results.get('functions'):
+            if self.get_code and results.get('functions'):
                 print_info("\n[3] Downloading function code...")
                 for func in results['functions'][:5]:  # Limit to first 5
                     func_name = func.get('FunctionName')
@@ -104,7 +104,7 @@ class Module(Post):
                         print_info(f"    Code size: {code_info.get('CodeSize', 0)} bytes")
             
             # Check triggers
-            if self.check_triggers.value and results.get('functions'):
+            if self.check_triggers and results.get('functions'):
                 print_info("\n[4] Checking function triggers...")
                 for func in results['functions']:
                     func_name = func.get('FunctionName')
@@ -139,11 +139,11 @@ class Module(Post):
                 print_warning("⚠️  Functions with potentially sensitive environment variables found!")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

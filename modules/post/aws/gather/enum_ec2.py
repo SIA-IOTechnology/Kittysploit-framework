@@ -41,7 +41,7 @@ class Module(Post):
             print_info("=" * 80)
             
             # Enumerate instances
-            if self.enum_instances.value:
+            if self.enum_instances:
                 print_info("\n[1] Enumerating EC2 instances...")
                 instances = self._enum_instances()
                 if instances:
@@ -58,13 +58,13 @@ class Module(Post):
                         print_info(f"  - {instance_id} ({state})")
                         print_info(f"    Type: {instance_type}, Private IP: {private_ip}, Public IP: {public_ip}")
                         
-                        if public_ip and public_ip != 'N/A' and self.check_public_ips.value:
+                        if public_ip and public_ip != 'N/A' and self.check_public_ips:
                             print_warning(f"    ⚠️  Public IP: {public_ip}")
                 else:
                     print_info("No instances found or access denied")
             
             # Enumerate security groups
-            if self.enum_security_groups.value:
+            if self.enum_security_groups:
                 print_info("\n[2] Enumerating security groups...")
                 security_groups = self._enum_security_groups()
                 if security_groups:
@@ -90,7 +90,7 @@ class Module(Post):
                     print_info("No security groups found or access denied")
             
             # Enumerate key pairs
-            if self.enum_key_pairs.value:
+            if self.enum_key_pairs:
                 print_info("\n[3] Enumerating key pairs...")
                 key_pairs = self._enum_key_pairs()
                 if key_pairs:
@@ -102,7 +102,7 @@ class Module(Post):
                     print_info("No key pairs found or access denied")
             
             # Enumerate images
-            if self.enum_images.value:
+            if self.enum_images:
                 print_info("\n[4] Enumerating AMI images...")
                 images = self._enum_images()
                 if images:
@@ -116,7 +116,7 @@ class Module(Post):
                     print_info("No images found or access denied")
             
             # Enumerate snapshots
-            if self.enum_snapshots.value:
+            if self.enum_snapshots:
                 print_info("\n[5] Enumerating EBS snapshots...")
                 snapshots = self._enum_snapshots()
                 if snapshots:
@@ -137,17 +137,17 @@ class Module(Post):
             print_info(f"  - Instances: {len(results.get('instances', []))}")
             print_info(f"  - Security Groups: {len(results.get('security_groups', []))}")
             print_info(f"  - Key Pairs: {len(results.get('key_pairs', []))}")
-            if self.enum_images.value:
+            if self.enum_images:
                 print_info(f"  - Images: {len(results.get('images', []))}")
-            if self.enum_snapshots.value:
+            if self.enum_snapshots:
                 print_info(f"  - Snapshots: {len(results.get('snapshots', []))}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Results saved to {self.output_file.value}")
+                    print_success(f"Results saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save results: {e}")
             

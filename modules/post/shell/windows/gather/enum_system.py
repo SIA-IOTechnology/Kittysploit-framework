@@ -18,14 +18,10 @@ class Module(Post):
 
     def _get_session_id_value(self) -> str:
         """Return the current session_id option value as a string."""
-        value = ""
         try:
-            value = getattr(self, 'session_id', '') or ""
+            return str(getattr(self, "session_id", "") or "").strip()
         except Exception:
-            value = ""
-        if hasattr(value, 'value'):
-            value = value.value
-        return str(value or "").strip()
+            return ""
     
     def _ensure_cache_fields(self):
         """Ensure per-instance cache attributes exist."""
@@ -479,7 +475,7 @@ class Module(Post):
     def run(self):
         """Run the enumeration module"""
         try:
-            session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+            session_id_value = str(self.session_id)
             
             print_info("")
             print_success("Starting Windows System Enumeration...")

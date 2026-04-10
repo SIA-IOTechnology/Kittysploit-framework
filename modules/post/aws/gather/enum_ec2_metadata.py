@@ -58,7 +58,7 @@ class Module(Post):
                     print_info(f"  {key}: {value}")
             
             # Get IAM role credentials
-            if self.get_credentials.value:
+            if self.get_credentials:
                 print_info("\n[3] Retrieving IAM role credentials...")
                 credentials = self._get_iam_credentials()
                 if credentials:
@@ -71,7 +71,7 @@ class Module(Post):
                     print_info("No IAM role attached or access denied")
             
             # Get user-data
-            if self.get_user_data.value:
+            if self.get_user_data:
                 print_info("\n[4] Retrieving user-data...")
                 user_data = self._get_user_data()
                 if user_data:
@@ -87,7 +87,7 @@ class Module(Post):
                     print_info("No user-data found")
             
             # Get all metadata
-            if self.get_all_metadata.value:
+            if self.get_all_metadata:
                 print_info("\n[5] Retrieving all available metadata...")
                 all_metadata = self._get_all_metadata()
                 if all_metadata:
@@ -104,11 +104,11 @@ class Module(Post):
                 print_warning("⚠️  IAM credentials found - these can be used to access AWS services")
             
             # Save to file if requested
-            if self.output_file.value:
+            if self.output_file:
                 try:
-                    with open(self.output_file.value, 'w') as f:
+                    with open(self.output_file, 'w') as f:
                         json.dump(results, f, indent=2, default=str)
-                    print_success(f"Metadata saved to {self.output_file.value}")
+                    print_success(f"Metadata saved to {self.output_file}")
                 except Exception as e:
                     print_error(f"Failed to save metadata: {e}")
             

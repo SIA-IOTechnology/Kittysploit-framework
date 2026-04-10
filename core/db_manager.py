@@ -27,7 +27,7 @@ class DatabaseManager:
             bool: True if database was initialized successfully, False otherwise
         """
         try:
-            db_path = os.path.join("database", "database.db")
+            db_path = self._resolve_db_path()
             
             # Create database directory if it doesn't exist
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -72,6 +72,28 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error initializing database for workspace {workspace}: {str(e)}")
             return False
+
+    def _resolve_db_path(self) -> str:
+        """Resolve a writable SQLite path for current runtime."""
+        env_db_path = os.environ.get("KITTYSPLOIT_DB_PATH")
+        if env_db_path:
+            return os.path.abspath(os.path.expanduser(env_db_path))
+
+        default_db_path = os.path.join("database", "database.db")
+        default_db_dir = os.path.dirname(default_db_path) or "."
+
+        # Keep legacy behavior when local project directory is writable.
+        if os.access(default_db_dir, os.W_OK):
+            return default_db_path
+
+        # Installed package fallback: use per-user data directory.
+        xdg_data_home = os.environ.get("XDG_DATA_HOME")
+        if xdg_data_home:
+            user_data_dir = os.path.join(xdg_data_home, "kittysploit", "database")
+        else:
+            user_data_dir = os.path.join(os.path.expanduser("~/.local/share"), "kittysploit", "database")
+
+        return os.path.join(user_data_dir, "database.db")
     
     def _setup_encryption_for_models(self):
         """Setup encryption manager for all encrypted fields in models"""

@@ -5139,7 +5139,11 @@ class AgentWorkflowCore:
             except Exception:
                 current_lhost = ""
             if self._is_loopback_or_unspecified_host(current_lhost):
-                resolved_lhost = self._resolve_routable_lhost(hostname)
+                resolved_lhost = ""
+                if self._is_loopback_or_unspecified_host(hostname):
+                    resolved_lhost = self._resolve_docker_gateway_lhost(hostname, port)
+                if not resolved_lhost:
+                    resolved_lhost = self._resolve_routable_lhost(hostname)
                 if resolved_lhost:
                     module_instance.set_option("lhost", resolved_lhost)
 
@@ -5172,6 +5176,97 @@ class AgentWorkflowCore:
                 return local_ip
         return ""
 
+    def _resolve_docker_gateway_lhost(self, target_host: Any, target_port: Any) -> str:
+        target = str(target_host or "").strip()
+        if not self._is_loopback_or_unspecified_host(target):
+            return ""
+
+        try:
+            port = int(target_port)
+        except Exception:
+            return ""
+
+        try:
+            import docker  # type: ignore
+        except Exception:
+            return ""
+
+        try:
+            client = docker.from_env()
+            containers = client.containers.list()
+        except Exception:
+            return ""
+
+        for container in containers:
+            try:
+                container.reload()
+                ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+            except Exception:
+                continue
+
+            matched_binding = False
+            for _container_port, bindings in ports.items():
+                if not bindings:
+                    continue
+                for binding in bindings:
+                    if not isinstance(binding, dict):
+                        continue
+                    host_port = str(binding.get("HostPort") or "").strip()
+                    host_ip = str(binding.get("HostIp") or "").strip()
+                    if host_port != str(port):
+                        continue
+                    if host_ip in ("", "0.0.0.0", "::", "127.0.0.1", "::1", "localhost"):
+                        matched_binding = True
+                        break
+                if matched_binding:
+                    break
+
+            if not matched_binding:
+                continue
+
+            try:
+                networks = container.attrs.get("NetworkSettings", {}).get("Networks", {}) or {}
+            except Exception:
+                networks = {}
+
+            for _network_name, network in networks.items():
+                if not isinstance(network, dict):
+                    continue
+                gateway = str(network.get("Gateway") or "").strip()
+                if gateway and not self._is_loopback_or_unspecified_host(gateway):
+                    return gateway
+
+        return ""
+
+    def _reverse_callback_diagnostic(self, module_instance, target_info: Optional[Dict[str, Any]]) -> str:
+        if getattr(module_instance, "payload_type", None) != "reverse":
+            return ""
+        if not hasattr(module_instance, "lhost"):
+            return ""
+
+        try:
+            lhost = str(getattr(module_instance, "lhost", "") or "").strip()
+        except Exception:
+            lhost = ""
+        if not self._is_loopback_or_unspecified_host(lhost):
+            return ""
+
+        info = target_info or {}
+        scheme = str(info.get("scheme", "http") or "http").strip().lower()
+        hostname = str(info.get("hostname", "") or "").strip()
+        port = info.get("port")
+        port_label = ""
+        if port not in (None, ""):
+            port_label = f":{port}"
+        target_label = f"{scheme}://{hostname}{port_label}" if hostname else "the current target"
+
+        return (
+            "Reverse payload still points to a loopback lhost "
+            f"({lhost or '127.0.0.1'}) for {target_label}. "
+            "If the service is exposed from Docker, WSL, a VM, or another network namespace, "
+            "the callback will loop back inside the target instead of reaching Kittysploit."
+        )
+
     def _apply_safe_module_options(self, module_instance, options):
         if not isinstance(options, dict):
             return
@@ -5186,6 +5281,14 @@ class AgentWorkflowCore:
     def _safe_option_value(self, module_instance, option_name: str) -> Any:
         if not hasattr(module_instance, option_name):
             return None
+        if option_name == "payload":
+            try:
+                option_descriptor = getattr(type(module_instance), option_name, None)
+                if option_descriptor and hasattr(option_descriptor, "to_dict"):
+                    payload_info = option_descriptor.to_dict(module_instance)
+                    return payload_info.get("display_value") or payload_info.get("value")
+            except Exception:
+                return None
         try:
             value = getattr(module_instance, option_name)
         except Exception:
@@ -5322,6 +5425,7 @@ class AgentWorkflowCore:
                     browser_after = set(self.framework.session_manager.browser_sessions.keys())
                 new_standard = sorted(sessions_after - sessions_before)
                 new_browser = sorted(browser_after - browser_before)
+                reverse_callback_missing = False
                 set_thread_output_quiet(False)
                 if new_standard or new_browser:
                     print_info(
@@ -5349,8 +5453,20 @@ class AgentWorkflowCore:
                             f"Exploit reverse callback not observed [{exploit_path}] "
                             f"(listener_connections={listener_connections})"
                         )
+                        diagnostic = self._reverse_callback_diagnostic(
+                            exploit_instance,
+                            target_info,
+                        )
+                        if diagnostic:
+                            print_warning(diagnostic)
+                        reverse_callback_missing = True
                 set_thread_output_quiet(False)
-                if success:
+                if success and reverse_callback_missing:
+                    failed_paths.add(exploit_path)
+                    print_warning(
+                        f"Exploit completed but no reverse session was established: {exploit_path}"
+                    )
+                elif success:
                     print_success(f"Exploit succeeded: {exploit_path}")
                 else:
                     failed_paths.add(exploit_path)

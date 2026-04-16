@@ -198,22 +198,37 @@ def _wrap_cell_text(cell_value: str, col_width: int) -> list:
     return wrapped_lines if wrapped_lines else [""]
 
 
-def print_table(headers, rows, max_width=80, **kwargs):
-    """Print a formatted table with proper column alignment"""
+def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
+    """Print a formatted table with proper column alignment.
+
+    Args:
+        headers: Column titles.
+        rows: Table body.
+        max_width: Target total width for layout (column sizing and separators).
+        expand_to_terminal: If True, widen max_width up to the TTY (capped) when the terminal
+            is wider — good for large data tables. If False, keep max_width exactly (e.g. module
+            options framed with '=' lines must match the table and inner rule width).
+        column_min_widths: Optional ``{header_label: int}`` minimum widths after measuring cells.
+        column_max_widths: Optional ``{header_label: int}`` maximum widths (e.g. cap ``Path``).
+        protect_full_width_headers: Optional iterable of header names (case-insensitive) that
+            keep natural width during shrink (default: ``name``, ``path``). Pass e.g. ``("name",)``
+            so long paths can share space with other columns.
+        wrap_extra_headers: Optional iterable of header names to word-wrap like ``Description``.
+    """
     if is_thread_output_quiet():
         return
     if not headers or not rows:
         return
-    
-    # Use terminal width when available: never narrower than requested max_width.
-    # Callers often pass max_width=120 for separator alignment; still grow if the TTY is wider.
-    try:
-        if _stream_isatty(sys.stdout):
-            terminal_cols = _terminal_size().columns
-            if terminal_cols > max_width:
-                max_width = min(terminal_cols, 260)
-    except (OSError, AttributeError):
-        pass
+
+    if expand_to_terminal:
+        # Use terminal width when available: never narrower than requested max_width.
+        try:
+            if _stream_isatty(sys.stdout):
+                terminal_cols = _terminal_size().columns
+                if terminal_cols > max_width:
+                    max_width = min(max(terminal_cols - 2, max_width), 400)
+        except (OSError, AttributeError):
+            pass
     
     # Calculate optimal column widths
     # Reserve space for separators (3 chars per separator: " | ")
@@ -233,14 +248,28 @@ def print_table(headers, rows, max_width=80, **kwargs):
                 max_width_col = max(max_width_col, cell_len)
         
         col_widths.append(max_width_col)
-    
-    # Special handling: "Name" and "Path" columns should never be truncated (needed for 'set' and 'use' commands)
+
+    column_min_widths = kwargs.get("column_min_widths") or {}
+    column_max_widths = kwargs.get("column_max_widths") or {}
+    for i, header in enumerate(headers):
+        hs = str(header)
+        if hs in column_min_widths:
+            col_widths[i] = max(col_widths[i], int(column_min_widths[hs]))
+        if hs in column_max_widths:
+            col_widths[i] = min(col_widths[i], int(column_max_widths[hs]))
+
+    # Columns that get "reserve natural width" treatment when shrinking (default: name + path)
+    protect = kwargs.get("protect_full_width_headers", None)
+    if protect is None:
+        protect_set = {"name", "path"}
+    else:
+        protect_set = {str(x).strip().lower() for x in protect if str(x).strip()}
     name_column_index = None
     for i, header in enumerate(headers):
-        if str(header).lower() in ("name", "path"):
+        if str(header).strip().lower() in protect_set:
             name_column_index = i
             break
-    
+
     # Special handling: "Description" column should get priority for extra space
     desc_column_index = None
     for i, header in enumerate(headers):
@@ -254,6 +283,12 @@ def print_table(headers, rows, max_width=80, **kwargs):
         h = str(header).lower().strip()
         if h in ("description", "current setting", "value", "setting", "details"):
             wrap_column_indices.add(i)
+    for h in kwargs.get("wrap_extra_headers") or ():
+        hl = str(h).strip().lower()
+        for i, header in enumerate(headers):
+            if str(header).strip().lower() == hl:
+                wrap_column_indices.add(i)
+                break
     
     # Distribute available width proportionally
     total_min_width = sum(col_widths)
@@ -353,6 +388,35 @@ def print_table(headers, rows, max_width=80, **kwargs):
         # Cap columns at reasonable maximum
         max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
         col_widths = [min(w, max_col_width) for w in col_widths]
+
+    # Re-apply minimum widths (scaling can drive columns below column_min_widths) then fit by shrinking Description first.
+    if column_min_widths:
+        for i, header in enumerate(headers):
+            hs = str(header)
+            if hs in column_min_widths:
+                col_widths[i] = max(col_widths[i], int(column_min_widths[hs]))
+        desc_floor = 18
+        if desc_column_index is not None:
+            desc_floor = max(desc_floor, len(str(headers[desc_column_index])))
+        while sum(col_widths) + separator_width > max_width and desc_column_index is not None:
+            if col_widths[desc_column_index] <= desc_floor:
+                break
+            col_widths[desc_column_index] -= 1
+        guard = 0
+        while sum(col_widths) + separator_width > max_width and guard < max_width + 50:
+            guard += 1
+            progressed = False
+            for i in range(len(col_widths)):
+                hs = str(headers[i])
+                floor = len(str(headers[i]))
+                if column_min_widths and hs in column_min_widths:
+                    floor = max(floor, int(column_min_widths[hs]))
+                if col_widths[i] > floor:
+                    col_widths[i] -= 1
+                    progressed = True
+                    break
+            if not progressed:
+                break
     
     # Build header line
     header_parts = []
@@ -362,9 +426,10 @@ def print_table(headers, rows, max_width=80, **kwargs):
     
     # Print header with compact separator
     print_info(header_line)
-    # Separator same length as table width (or max_width) so "-" matches "=" lines from caller
+    # Separator must match the rendered table width only. Using max_width here breaks layout
+    # because max_width is often expanded to terminal width while column content stays compact.
     separator_char = "─" if _stream_isatty(sys.stdout) else "-"
-    separator_len = max(len(header_line), max_width)
+    separator_len = len(header_line)
     print_info(separator_char * separator_len)
     
     # Print rows with word wrapping for long descriptions
@@ -383,8 +448,8 @@ def print_table(headers, rows, max_width=80, **kwargs):
         for i in range(len(headers)):
             cell_value = str(row[i] if i < len(row) else "")
             
-            if i == name_column_index:
-                # Name column: never truncate, use full value (single logical line)
+            if i == name_column_index and i not in wrap_column_indices:
+                # Protected title column: one line, no truncation (e.g. module option names)
                 cell_lines.append([cell_value])
                 max_lines = max(max_lines, 1)
             elif i in wrap_column_indices or i == desc_column_index:

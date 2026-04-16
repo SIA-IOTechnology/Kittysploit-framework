@@ -377,7 +377,7 @@ Examples:
         print_info()
         print_info("Module options:")
         print_info("=" * self.SEP_WIDTH)
-        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
         print_info("=" * self.SEP_WIDTH)
         
         if advanced_count > 0 and not show_advanced:
@@ -451,7 +451,7 @@ Examples:
         print_info("")
         print_info("Advanced module options:")
         print_info("=" * self.SEP_WIDTH)
-        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
         print_info("=" * self.SEP_WIDTH)
         print_info("")
         print_info("Use 'set <option> <value>' to set option values")
@@ -659,7 +659,7 @@ Examples:
         headers = ["Path", "Description"]
         total = len(rows)
         print_status(f"Available listeners ({total})")
-        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
         print_empty()
         print_info(f"  Use 'use <path>' to select a listener.")
     
@@ -713,7 +713,7 @@ Examples:
         # Use print_table which handles terminal width and description truncation
         # Compact display: heading with status color, minimal spacing
         print_status(heading)
-        print_table(headers, rows, max_width=self.SEP_WIDTH)
+        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
     
     def _normalize_module_type(self, module_type: str):
         if not module_type:

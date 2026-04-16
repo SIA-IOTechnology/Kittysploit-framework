@@ -13,10 +13,12 @@ from interfaces.command_system.base_command import BaseCommand
 from interfaces.command_system.builtin.agent import AgentServices
 from interfaces.command_system.builtin.agent.state import AgentMetrics, AgentState
 from interfaces.command_system.builtin.scanner_command import ScannerCommand
+from interfaces.command_system.builtin.sessions_command import SessionsCommand
 from core.output_handler import (
     print_error,
     print_info,
     print_success,
+    print_warning,
 )
 
 
@@ -59,6 +61,51 @@ Examples:
         super().__init__(framework, session, output_handler)
         self.parser = self._create_parser()
         self._agent = AgentServices(framework)
+
+    def _pick_auto_session(self, session_ids):
+        candidates = []
+        session_manager = getattr(self.framework, "session_manager", None)
+        if not session_manager:
+            return None
+
+        metadata = getattr(session_manager, "_session_metadata", {}) or {}
+        for session_id in session_ids or []:
+            session = session_manager.get_session(str(session_id))
+            if not session:
+                continue
+            created_at = 0.0
+            if isinstance(metadata.get(session.id), dict):
+                try:
+                    created_at = float(metadata[session.id].get("created_at") or 0.0)
+                except Exception:
+                    created_at = 0.0
+            candidates.append((created_at, session.id))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda row: (row[0], row[1]))
+        return candidates[-1][1]
+
+    def _open_interactive_session(self, final_state: AgentState) -> bool:
+        session_id = self._pick_auto_session(final_state.new_sessions)
+        if not session_id:
+            return True
+
+        if len(final_state.new_sessions) > 1:
+            print_info(
+                f"Multiple new sessions detected; opening the most recent standard session: {session_id}"
+            )
+        else:
+            print_info(f"Opening interactive session: {session_id}")
+
+        sessions_command = SessionsCommand(self.framework, self.session, self.output_handler)
+        if sessions_command._interact_session(session_id):
+            return True
+
+        print_warning(
+            f"Interactive shell could not be opened automatically. Fallback: sessions interact {session_id}"
+        )
+        return False
 
     def _create_parser(self) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(add_help=False)
@@ -149,5 +196,7 @@ Examples:
 
         if report_path:
             print_success(f"Report generated: {report_path}")
+            if final_state.new_sessions:
+                self._open_interactive_session(final_state)
             return True
         return False

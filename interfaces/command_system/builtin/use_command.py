@@ -151,7 +151,7 @@ Examples:
                     print_info("")
                     print_info("Module options:")
                     print_info("=" * self.SEP_WIDTH)
-                    print_table(headers, rows, max_width=self.SEP_WIDTH)
+                    print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
                     print_info("=" * self.SEP_WIDTH)
                 
                 if advanced_count > 0:

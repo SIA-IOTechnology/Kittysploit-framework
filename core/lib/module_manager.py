@@ -84,7 +84,9 @@ class ModuleManager:
     def search_modules(self, query: str = "", module_type: str = "", 
                       author: str = "", cve: str = "", limit: int = 100) -> List[Dict]:
         """Search for modules"""
-        return self.module_loader.search_modules_db(query, module_type, author, cve, limit)
+        return self.module_loader.search_modules_db(
+            query, module_type, author, cve, tags="", limit=limit
+        )
     
     def get_all_modules(self) -> Dict[str, Any]:
         """Get all available modules organized by type"""

@@ -1,6 +1,6 @@
 from kittysploit import *
 from lib.post.linux.system import System
-qsw²import re
+import re
 
 class Module(Post, System):
 

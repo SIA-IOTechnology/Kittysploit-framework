@@ -1419,7 +1419,9 @@ class Framework:
     def search_modules_db(self, query: str = "", module_type: str = "", 
                          author: str = "", cve: str = "", limit: int = 100) -> List[Dict]:
         """Search modules in database (faster than filesystem search)"""
-        return self.module_loader.search_modules_db(query, module_type, author, cve, limit)
+        return self.module_loader.search_modules_db(
+            query, module_type, author, cve, tags="", limit=limit
+        )
     
     def get_module_stats_db(self) -> Dict[str, int]:
         """Get module statistics from database"""

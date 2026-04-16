@@ -6,6 +6,7 @@ Module Sync Manager - Handles synchronization of modules between filesystem and 
 """
 
 import os
+import re
 import json
 import hashlib
 import threading
@@ -22,6 +23,7 @@ from core.db_manager import DatabaseManager
 from core.models.models import Module
 from core.output_handler import print_info, print_success, print_error, print_warning
 from core.utils.exceptions import KittyException
+from core.utils.module_static_metadata import extract_module_sync_metadata
 
 
 class ModuleSyncManager:
@@ -170,7 +172,7 @@ class ModuleSyncManager:
                 self.is_syncing = False
     
     def _get_filesystem_modules(self) -> Dict[str, Dict]:
-        """Get all modules from filesystem"""
+        """Build module list from disk via static __info__ parsing (no Python imports)."""
         modules = {}
         
         try:
@@ -179,39 +181,52 @@ class ModuleSyncManager:
             
             for module_path, file_path in discovered_modules.items():
                 try:
-                    # Get detailed module information (silent mode to avoid error spam during sync)
-                    detailed_info = self._get_module_loader().get_module_info(module_path, silent=True)
-                    
-                    # Skip if module couldn't be loaded
-                    if not detailed_info:
-                        continue
-                    
+                    # Static parse __info__ only — no import (avoids payload / dependency init spam)
+                    meta = extract_module_sync_metadata(file_path)
+                    default_name = module_path.split("/")[-1].replace("_", " ")
+                    name = self._normalize_to_string(meta.get("name") or "") or default_name
+                    if not name.strip():
+                        name = default_name
+
                     # Calculate file hash for change detection
                     file_hash = self._calculate_file_hash(file_path)
-                    
+
                     # Convert file modification time to datetime
                     file_mtime_timestamp = os.path.getmtime(file_path)
                     file_mtime = datetime.fromtimestamp(file_mtime_timestamp)
-                    
-                    # Detect module type from path if not provided
-                    module_type = detailed_info.get('type', '')
-                    if not module_type:
-                        module_type = self._detect_module_type_from_path(module_path)
-                    
-                    # Normalize fields that can be either list or string
+
+                    module_type = self._detect_module_type_from_path(module_path)
+
+                    cve_raw = self._normalize_to_string(meta.get("cve", ""))
+                    cve_val = cve_raw if (cve_raw and re.match(r"^CVE-\d{4}-\d{4,}$", cve_raw)) else ""
+
+                    tags_list = meta.get("tags") or []
+                    if not isinstance(tags_list, list):
+                        tags_list = []
+                    refs_list = meta.get("references") or []
+                    if not isinstance(refs_list, list):
+                        refs_list = []
+                    opts_dict = meta.get("options") or {}
+                    if not isinstance(opts_dict, dict):
+                        opts_dict = {}
+                    try:
+                        opts_json = json.dumps(opts_dict)
+                    except (TypeError, ValueError):
+                        opts_json = "{}"
+
                     modules[module_path] = {
-                        'path': module_path,
-                        'name': self._normalize_to_string(detailed_info.get('name', '')),
-                        'description': self._normalize_to_string(detailed_info.get('description', '')),
-                        'type': module_type,
-                        'author': self._normalize_to_string(detailed_info.get('author', '')),
-                        'version': self._normalize_to_string(detailed_info.get('version', '')),
-                        'cve': self._normalize_to_string(detailed_info.get('cve', '')),
-                        'tags': json.dumps(detailed_info.get('tags', [])),
-                        'references': json.dumps(detailed_info.get('references', [])),
-                        'options': json.dumps(detailed_info.get('options', {})),
-                        'file_hash': file_hash,
-                        'file_mtime': file_mtime
+                        "path": module_path,
+                        "name": name,
+                        "description": self._normalize_to_string(meta.get("description", "")),
+                        "type": module_type,
+                        "author": self._normalize_to_string(meta.get("author", "")),
+                        "version": self._normalize_to_string(meta.get("version", "")),
+                        "cve": cve_val,
+                        "tags": json.dumps(tags_list),
+                        "references": json.dumps(refs_list),
+                        "options": opts_json,
+                        "file_hash": file_hash,
+                        "file_mtime": file_mtime,
                     }
                     
                 except Exception as e:
@@ -482,14 +497,21 @@ class ModuleSyncManager:
             with self.db_manager.session_scope(self.workspace) as session:
                 query_obj = session.query(Module).filter(Module.is_active == True)
                 
-                # Apply filters
+                # Free-text: each token must match at least one of name, description, path, tags (SQL only).
                 if query:
-                    query_obj = query_obj.filter(
-                        or_(
-                            Module.name.ilike(f"%{query}%"),
-                            Module.description.ilike(f"%{query}%")
+                    for raw_token in query.replace(",", " ").split():
+                        token = raw_token.strip()
+                        if not token:
+                            continue
+                        pattern = f"%{token}%"
+                        query_obj = query_obj.filter(
+                            or_(
+                                Module.name.ilike(pattern),
+                                Module.description.ilike(pattern),
+                                Module.path.ilike(pattern),
+                                Module.tags.ilike(pattern),
+                            )
                         )
-                    )
                 
                 if module_type:
                     query_obj = query_obj.filter(Module.type == module_type)

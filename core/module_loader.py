@@ -7,6 +7,11 @@ import importlib
 import logging
 from typing import List, Dict, Any, Optional
 from core.framework.base_module import BaseModule
+from core.utils.module_static_metadata import (
+    extract_module_search_metadata,
+    infer_module_type_from_path,
+    search_text_matches_title_description,
+)
 
 # Import du PolicyEngine pour la validation
 try:
@@ -502,12 +507,21 @@ class ModuleLoader:
     
     def search_modules_db(self, query: str = "", module_type: str = "", 
                          author: str = "", cve: str = "", tags: str = "", limit: int = 100) -> List[Dict]:
-        """Search modules in database (faster than filesystem search)"""
+        """Search modules: use the workspace DB when configured, else static filesystem scan.
+
+        When a sync manager is present, results come only from the database (no disk walk).
+        Run ``sync`` / ``sync now`` to refresh the index after adding modules.
+        """
         if not self.sync_manager:
-            # Fallback to filesystem search
             return self._search_modules_filesystem(query, module_type, author, cve, tags, limit)
-        
-        return self.sync_manager.search_modules(query, module_type, author, cve, tags, limit)
+
+        try:
+            return self.sync_manager.search_modules(
+                query, module_type, author, cve, tags, limit
+            )
+        except Exception as e:
+            logging.debug(f"search_modules_db: database search failed: {e}")
+            return []
     
     def get_module_by_path_db(self, path: str) -> Optional[Dict]:
         """Get module by path from database"""
@@ -525,52 +539,53 @@ class ModuleLoader:
     
     def _search_modules_filesystem(self, query: str = "", module_type: str = "", 
                                   author: str = "", cve: str = "", tags: str = "", limit: int = 100) -> List[Dict]:
-        """Fallback filesystem search (slower)"""
+        """Filesystem search: parse __info__ from source only (no import / no payload init)."""
         results = []
         discovered_modules = self.discover_modules()
-        
-        for module_path in discovered_modules:
+
+        for module_path, file_path in discovered_modules.items():
             try:
-                module_info = self.get_module_info(module_path)
-                if not module_info:
+                meta = extract_module_search_metadata(file_path)
+                name = str(meta.get("name") or "")
+                description = str(meta.get("description") or "")
+                if query and not search_text_matches_title_description(name, description, query):
                     continue
-                
-                # Apply filters
-                if query and query.lower() not in module_info.get('name', '').lower():
-                    if query.lower() not in module_info.get('description', '').lower():
-                        continue
-                
-                if module_type and module_info.get('type', '') != module_type:
+
+                mtype = infer_module_type_from_path(module_path)
+                if module_type and mtype != module_type:
                     continue
-                
-                if author and author.lower() not in module_info.get('author', '').lower():
+
+                meta_author = str(meta.get("author") or "")
+                if author and author.lower() not in meta_author.lower():
                     continue
-                
-                if cve and cve.lower() not in module_info.get('cve', '').lower():
+
+                meta_cve = str(meta.get("cve") or "")
+                if cve and cve.lower() not in meta_cve.lower():
                     continue
-                
+
+                meta_tags = meta.get("tags") or []
                 if tags:
-                    module_tags = module_info.get('tags', [])
-                    if tags.lower() not in [t.lower() for t in module_tags]:
+                    lowered = [str(t).lower() for t in meta_tags]
+                    if tags.lower() not in lowered:
                         continue
-                
+
                 results.append({
-                    'name': module_info.get('name', ''),
-                    'description': module_info.get('description', ''),
-                    'type': module_info.get('type', ''),
+                    'name': name,
+                    'description': description,
+                    'type': mtype,
                     'path': module_path,
-                    'author': module_info.get('author', ''),
-                    'version': module_info.get('version', ''),
-                    'cve': module_info.get('cve', ''),
-                    'tags': module_info.get('tags', []),
-                    'references': module_info.get('references', [])
+                    'author': meta_author,
+                    'version': '',
+                    'cve': meta_cve,
+                    'tags': meta_tags if isinstance(meta_tags, list) else [],
+                    'references': [],
                 })
-                
+
                 if len(results) >= limit:
                     break
-                    
+
             except Exception as e:
-                logging.warning(f"Error processing module {module_path}: {e}")
+                logging.debug(f"Static search skip {module_path}: {e}")
                 continue
-        
+
         return results

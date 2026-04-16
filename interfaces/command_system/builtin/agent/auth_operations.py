@@ -38,6 +38,23 @@ class AuthContextOperations:
             cookies[name[:80]] = cookie_value[:512]
         return cookies
 
+    def _parse_cookie_header(self, raw: Any) -> Dict[str, str]:
+        header = str(raw or "").strip()
+        if not header:
+            return {}
+        cookies: Dict[str, str] = {}
+        for chunk in header.split(";"):
+            part = str(chunk or "").strip()
+            if not part or "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            name = str(name or "").strip()
+            value = str(value or "").strip()
+            if not name or not value:
+                continue
+            cookies[name[:80]] = value[:512]
+        return cookies
+
     def extract_auth_context_from_details(
         self, module_path: str, details: Any
     ) -> Optional[Dict[str, Any]]:
@@ -240,14 +257,31 @@ class AuthContextOperations:
         if not context:
             return
         cookies = context.get("cookies") or {}
-        if isinstance(cookies, dict) and cookies and hasattr(module_instance, "set_cookie"):
-            for name, value in cookies.items():
+        merged_cookies = self.sanitize_cookie_map(cookies)
+        cookie_header = str(context.get("cookie_header") or "").strip()
+        has_cookie_jar = bool(
+            hasattr(module_instance, "session")
+            and getattr(module_instance, "session", None) is not None
+            and hasattr(getattr(module_instance, "session", None), "cookies")
+        )
+
+        if cookie_header and has_cookie_jar:
+            for name, value in self._parse_cookie_header(cookie_header).items():
+                merged_cookies.setdefault(name, value)
+
+        if merged_cookies and hasattr(module_instance, "set_cookie"):
+            if hasattr(module_instance, "remove_header"):
+                try:
+                    module_instance.remove_header("Cookie")
+                except Exception:
+                    pass
+            for name, value in merged_cookies.items():
                 try:
                     module_instance.set_cookie(str(name), str(value))
                 except Exception:
                     continue
-        cookie_header = str(context.get("cookie_header") or "").strip()
-        if cookie_header and hasattr(module_instance, "set_header"):
+
+        if cookie_header and hasattr(module_instance, "set_header") and not has_cookie_jar:
             try:
                 module_instance.set_header("Cookie", cookie_header)
             except Exception:

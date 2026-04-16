@@ -152,12 +152,36 @@ class Scanner(BaseModule):
     
     def _exploit(self):
         """
-        Execute the scan (scanner modules don't exploit, they only scan)
+        Execute the scan (scanner modules don't exploit, they only scan).
+        Prints a clear positive/negative outcome; sets ``_scan_error`` on failure
+        so the console can distinguish a completed negative scan from an error.
         """
+        info = getattr(self, '__info__', {}) or {}
+        label = info.get('name', self.__class__.__name__)
+        self._scan_error = False
         try:
-            return self.run()
+            raw = self.run()
+            detected = bool(raw) if raw is not None else False
+
+            if detected:
+                print_success(f"{label}: positive match (indicators detected).")
+            else:
+                print_error(f"{label}: no match")
+                return False
+
+            vi = getattr(self, 'vulnerability_info', None) or {}
+            if vi:
+                parts = [f"{k}={v}" for k, v in vi.items()]
+                print_info("Details: " + ", ".join(parts))
+
+            if raw is None:
+                return False
+            return bool(raw)
         except ProcedureError as e:
+            self._scan_error = True
+            print_error(f"{label}: {e}")
             return False
         except Exception as e:
-            print_error(f"Scan error: {e}")
+            self._scan_error = True
+            print_error(f"Scan error ({label}): {e}")
             return False

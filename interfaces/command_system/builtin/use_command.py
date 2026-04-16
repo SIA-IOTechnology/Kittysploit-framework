@@ -13,6 +13,8 @@ import os
 
 class UseCommand(BaseCommand):
     """Command to select and use a module"""
+
+    SEP_WIDTH = 80
     
     @property
     def name(self) -> str:
@@ -148,10 +150,9 @@ Examples:
                     # Display table
                     print_info("")
                     print_info("Module options:")
-                    print_info("=" * 120)
-                    # Use larger max_width to allow full descriptions to be displayed
-                    print_table(headers, rows, max_width=120)
-                    print_info("=" * 120)
+                    print_info("=" * self.SEP_WIDTH)
+                    print_table(headers, rows, max_width=self.SEP_WIDTH)
+                    print_info("=" * self.SEP_WIDTH)
                 
                 if advanced_count > 0:
                     print_info("")

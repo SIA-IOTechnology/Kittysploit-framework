@@ -13,6 +13,8 @@ from .collaboration_manager import collaboration_manager, Collaborator
 from .tech_detector import tech_detector
 from mitmproxy.http import HTTPFlow, Request, Response
 from mitmproxy import connection
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteHttpResponse
 import os
 from typing import Dict, List, Optional
 import requests
@@ -3176,6 +3178,20 @@ def get_favicon():
     if os.path.exists(favicon_path):
         return FileResponse(favicon_path, media_type="image/x-icon")
     raise HTTPException(status_code=404, detail="Favicon not found")
+
+
+@app.get("/kittyproxy-config.js")
+def kittyproxy_client_config(request: StarletteRequest):
+    """Expose the real public API base URL for static app.js (file://, opaque origins, port != 8443)."""
+    base = str(request.base_url).rstrip("/")
+    api_base = f"{base}/api"
+    body = f"window.__KITTYPROXY_API_BASE__={json.dumps(api_base)};"
+    return StarletteHttpResponse(
+        content=body,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 # Serve browser icons from core/browser_static/icons/browsers/
 browser_icons_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "core", "browser_static", "icons", "browsers")

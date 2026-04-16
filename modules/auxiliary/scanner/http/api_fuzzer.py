@@ -257,11 +257,21 @@ class Module(Auxiliary, Http_client):
 
         for method in self.HTTP_METHODS:
             result = self.fuzz_endpoint(endpoint, method=method)
-            if result.get('status_code') not in [405, 501]:  # Method not allowed / not implemented
+            status_code = result.get('status_code')
+            indicators = result.get('indicators', [])
+            if status_code is None:
+                continue
+            if status_code in [405, 501]:
+                continue
+            # Keep only methods that returned something meaningfully different
+            # from a blind/empty probe to avoid flooding the console.
+            if status_code >= 400 and not indicators:
+                continue
+            if status_code in [200, 201, 202, 401, 403, 500, 502, 503] or indicators:
                 allowed_methods.append({
                     'method': method,
-                    'status_code': result.get('status_code'),
-                    'indicators': result.get('indicators', [])
+                    'status_code': status_code,
+                    'indicators': indicators
                 })
 
         return allowed_methods
@@ -325,12 +335,16 @@ class Module(Auxiliary, Http_client):
             print_status("Testing HTTP methods on discovered endpoints...")
             for endpoint_info in self.discovered_endpoints[:5]:  # Test first 5
                 endpoint = endpoint_info['endpoint']
-                print_info(f"Testing methods on: {endpoint}")
                 methods = self.test_http_methods(endpoint)
                 if methods:
-                    for method_info in methods:
-                        print_success(f"  {method_info['method']}: Status {method_info['status_code']}")
-                print_info("")
+                    summary = ", ".join(
+                        f"{method_info['method']}={method_info['status_code']}"
+                        for method_info in methods[:6]
+                    )
+                    print_info(f"  Methods on {endpoint}: {summary}")
+                    if len(methods) > 6:
+                        print_info(f"    +{len(methods) - 6} other method result(s)")
+            print_info("")
 
         # Fuzz parameters
         if self.discovered_endpoints:

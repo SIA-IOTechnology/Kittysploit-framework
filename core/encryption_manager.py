@@ -249,12 +249,13 @@ class EncryptionManager:
             print_error(f"Error encrypting data: {e}")
             raise
     
-    def decrypt_data(self, encrypted_data: str) -> Union[str, dict, list]:
+    def decrypt_data(self, encrypted_data: str, *, log_errors: bool = True) -> Union[str, dict, list]:
         """
         Decrypt sensitive data
         
         Args:
             encrypted_data: Base64 encoded encrypted data
+            log_errors: If False, do not print on failure (e.g. ORM probing plaintext legacy rows)
             
         Returns:
             Decrypted data (original type)
@@ -276,7 +277,8 @@ class EncryptionManager:
                 return decrypted_bytes.decode('utf-8')
                 
         except Exception as e:
-            print_error(f"Error decrypting data: {e}")
+            if log_errors:
+                print_error(f"Error decrypting data: {e}")
             raise
     
     def encrypt_field(self, field_value: Any) -> str:
@@ -294,12 +296,13 @@ class EncryptionManager:
         
         return self.encrypt_data(field_value)
     
-    def decrypt_field(self, encrypted_value: str) -> Any:
+    def decrypt_field(self, encrypted_value: str, *, log_errors: bool = True) -> Any:
         """
         Decrypt a single field value
         
         Args:
             encrypted_value: Encrypted value
+            log_errors: Passed to decrypt_data
             
         Returns:
             Decrypted field value
@@ -307,7 +310,7 @@ class EncryptionManager:
         if not encrypted_value or encrypted_value == "":
             return ""
         
-        return self.decrypt_data(encrypted_value)
+        return self.decrypt_data(encrypted_value, log_errors=log_errors)
     
     def change_password(self, old_password: str, new_password: str) -> bool:
         """

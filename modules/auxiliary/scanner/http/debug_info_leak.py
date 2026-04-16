@@ -181,10 +181,20 @@ class Module(Auxiliary, Http_client):
         """
         if not response:
             return None
-        
+
         leaks = []
         content = response.text if hasattr(response, 'text') else str(response.content)
         headers = response.headers if hasattr(response, 'headers') else {}
+
+        # Avoid false positives when tested paths are transparently redirected to a login wall.
+        # Typical case: /phpinfo.php -> /login.php (200) with generic Server header disclosure.
+        if self._is_login_wall_response(response, path, content):
+            return {
+                'path': path,
+                'status_code': response.status_code,
+                'leaks': [],
+                'has_leaks': False
+            }
         
         # Analyser le contenu avec les patterns
         for leak_type, patterns in self.DEBUG_PATTERNS.items():
@@ -245,6 +255,58 @@ class Module(Auxiliary, Http_client):
             'leaks': leaks,
             'has_leaks': len(leaks) > 0
         }
+
+    def _normalize_path(self, value):
+        raw = (value or "").strip()
+        if not raw:
+            return "/"
+        parsed = urllib.parse.urlparse(raw)
+        normalized = parsed.path or raw
+        if not normalized.startswith("/"):
+            normalized = f"/{normalized}"
+        return normalized
+
+    def _is_login_like_path(self, value):
+        low = self._normalize_path(value).lower()
+        return any(token in low for token in (
+            "/login",
+            "signin",
+            "/auth",
+            "/session",
+            "/account/login",
+            "/wp-login.php",
+        ))
+
+    def _looks_like_login_page(self, content):
+        text = (content or "").lower()
+        return (
+            ('type="password"' in text or "type='password'" in text)
+            and any(token in text for token in (
+                "login",
+                "sign in",
+                "connexion",
+                "username",
+                "user",
+                "email",
+                "mot de passe",
+                "password",
+            ))
+        )
+
+    def _is_login_wall_response(self, response, tested_path, content):
+        # If we are explicitly testing a login path, keep analysis enabled.
+        if self._is_login_like_path(tested_path):
+            return False
+
+        final_path = self._normalize_path(getattr(response, "url", "") or "")
+        if self._is_login_like_path(final_path):
+            return True
+
+        # Defensive fallback: some clients keep final URL unchanged but return login body.
+        if self._looks_like_login_page(content):
+            return True
+
+        return False
 
     def _get_severity(self, leak_type):
         """

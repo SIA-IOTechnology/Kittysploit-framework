@@ -15,7 +15,7 @@ class HelpCommand(BaseCommand):
     # Command categories for better organization
     COMMAND_CATEGORIES = {
         'Core Commands': [
-            'help', 'clear', 'exit', 'banner', 'tuto', 'status', 'interpreter'
+            'help', 'clear', 'exit', 'banner', 'agent', 'tuto', 'status', 'interpreter'
         ],
         'Module Management': [
             'use', 'search', 'show', 'set', 'run', 'back', 'check', 'reload'

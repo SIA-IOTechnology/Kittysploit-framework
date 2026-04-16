@@ -23,6 +23,18 @@ init(autoreset=True)
 USE_COLORS = True
 _DEBUG_MANAGER = None  # Global reference to debug manager
 
+# When True on the current thread, suppress noisy console helpers (used by agent/scanner non-verbose runs).
+_thread_output = threading.local()
+
+
+def set_thread_output_quiet(enabled: bool) -> None:
+    """Enable/disable quiet output for the current thread only (print_info / print_status / print_table)."""
+    _thread_output.quiet = bool(enabled)
+
+
+def is_thread_output_quiet() -> bool:
+    return bool(getattr(_thread_output, "quiet", False))
+
 def _stream_isatty(stream) -> bool:
     """Safely determine whether a stream is a TTY.
     
@@ -117,13 +129,19 @@ def color_blue(text):
     return f"{Fore.BLUE}{text}{Style.RESET_ALL}"
     
 def print_empty():
+    if is_thread_output_quiet():
+        return
     print_info("")
 
 def print_info(message="", **kwargs):
+    if is_thread_output_quiet():
+        return
     print(message, **kwargs)
 
 def print_status(message="", **kwargs):
     """Print an information message"""
+    if is_thread_output_quiet():
+        return
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.BLUE}*{Style.RESET_ALL}] {message}", **kwargs)
     else:
@@ -145,23 +163,55 @@ def print_success(message="", **kwargs):
 
 def print_warning(message="", **kwargs):
     """Affiche un message d'avertissement"""
+    if is_thread_output_quiet():
+        return
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.YELLOW}~{Style.RESET_ALL}] {message}", **kwargs)
     else:
         print(f"[~] {message}", **kwargs)
 
+def _wrap_cell_text(cell_value: str, col_width: int) -> list:
+    """Wrap cell text to col_width; long tokens are hard-split (no ellipsis)."""
+    if col_width <= 0:
+        return [cell_value]
+    wrapped_lines = []
+    words = cell_value.split()
+    current_line = ""
+    for word in words:
+        test_line = current_line + (" " if current_line else "") + word
+        if len(test_line) <= col_width:
+            current_line = test_line
+        else:
+            if current_line:
+                wrapped_lines.append(current_line)
+            if len(word) > col_width:
+                # Break very long tokens across lines
+                rest = word
+                while len(rest) > col_width:
+                    wrapped_lines.append(rest[:col_width])
+                    rest = rest[col_width:]
+                current_line = rest
+            else:
+                current_line = word
+    if current_line:
+        wrapped_lines.append(current_line)
+    return wrapped_lines if wrapped_lines else [""]
+
+
 def print_table(headers, rows, max_width=80, **kwargs):
     """Print a formatted table with proper column alignment"""
+    if is_thread_output_quiet():
+        return
     if not headers or not rows:
         return
     
-    # Detect terminal width if available and max_width is default (80) only
-    # When max_width is explicitly set (e.g. 120), keep it so separators match caller's "=" lines
+    # Use terminal width when available: never narrower than requested max_width.
+    # Callers often pass max_width=120 for separator alignment; still grow if the TTY is wider.
     try:
-        if max_width == 80 and _stream_isatty(sys.stdout):
+        if _stream_isatty(sys.stdout):
             terminal_cols = _terminal_size().columns
             if terminal_cols > max_width:
-                max_width = min(terminal_cols, 200)
+                max_width = min(terminal_cols, 260)
     except (OSError, AttributeError):
         pass
     
@@ -197,6 +247,13 @@ def print_table(headers, rows, max_width=80, **kwargs):
         if str(header).lower() == "description":
             desc_column_index = i
             break
+
+    # Columns that should wrap (not truncate) so paths and long values stay readable
+    wrap_column_indices = set()
+    for i, header in enumerate(headers):
+        h = str(header).lower().strip()
+        if h in ("description", "current setting", "value", "setting", "details"):
+            wrap_column_indices.add(i)
     
     # Distribute available width proportionally
     total_min_width = sum(col_widths)
@@ -326,41 +383,19 @@ def print_table(headers, rows, max_width=80, **kwargs):
         for i in range(len(headers)):
             cell_value = str(row[i] if i < len(row) else "")
             
-            # For Description column, allow wrapping instead of truncating
-            if i == desc_column_index:
-                # Wrap description text to fit column width
-                wrapped_lines = []
-                words = cell_value.split()
-                current_line = ""
-                
-                for word in words:
-                    test_line = current_line + (" " if current_line else "") + word
-                    if len(test_line) <= col_widths[i]:
-                        current_line = test_line
-                    else:
-                        if current_line:
-                            wrapped_lines.append(current_line)
-                        # If single word is longer than column, truncate it
-                        if len(word) > col_widths[i]:
-                            current_line = word[:col_widths[i] - 3] + "..."
-                        else:
-                            current_line = word
-                
-                if current_line:
-                    wrapped_lines.append(current_line)
-                
-                cell_lines.append(wrapped_lines if wrapped_lines else [""])
-                max_lines = max(max_lines, len(wrapped_lines) if wrapped_lines else 1)
+            if i == name_column_index:
+                # Name column: never truncate, use full value (single logical line)
+                cell_lines.append([cell_value])
+                max_lines = max(max_lines, 1)
+            elif i in wrap_column_indices or i == desc_column_index:
+                wrapped = _wrap_cell_text(cell_value, col_widths[i])
+                cell_lines.append(wrapped)
+                max_lines = max(max_lines, len(wrapped))
             else:
-                # For other columns, truncate if too long (except Name)
-                if i == name_column_index:
-                    # Name column: never truncate, use full value
-                    cell_lines.append([cell_value])
-                else:
-                    # Other columns: truncate if too long (with ellipsis)
-                    if len(cell_value) > col_widths[i]:
-                        cell_value = cell_value[:col_widths[i] - 3] + "..."
-                    cell_lines.append([cell_value])
+                # Other columns: truncate if too long (with ellipsis)
+                if len(cell_value) > col_widths[i]:
+                    cell_value = cell_value[:col_widths[i] - 3] + "..."
+                cell_lines.append([cell_value])
         
         # Print all lines for this row
         for line_num in range(max_lines):

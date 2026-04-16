@@ -15,17 +15,20 @@ class ProcedureError(Exception):
     def __init__(self, failure_or_message, message: str = None) -> None:
         if isinstance(failure_or_message, FailureType):
             self.failure_type = failure_or_message
-            self.message = message or failure_or_message.value
+            if message is None:
+                self.message = failure_or_message.value
+            else:
+                self.message = str(message)
         else:
             # Allow plain string / exception as first argument
             self.failure_type = None
             base = str(failure_or_message)
-            self.message = f"{base}: {message}" if message else base
+            self.message = f"{base}: {str(message)}" if message else base
 
         super().__init__(self.message)
 
     def __str__(self) -> str:
-        return self.message
+        return str(self.message)
 
 class ErrorDescription(ProcedureError):
     """Error description that can be set as an attribute on fail object"""
@@ -70,12 +73,23 @@ class FailureType(Enum):
     CSRFPostFailed = "Failed to send CSRF POST request"
 
 class Fail:
-    
+    def Message(self, message: str, raise_exception: bool = False):
+        """
+        Print a custom failure message (used by several exploit modules).
+
+        Must be a real method: ``__getattr__('Message')`` would return a handler that
+        treats the first argument as ``raise_exception``, producing bogus errors.
+        """
+        print_error(str(message))
+        if raise_exception:
+            raise ErrorDescription(str(message))
+        return False
+
     def _split_camel_case(self, name: str) -> list:
         """Split camelCase or PascalCase into words"""
         import re
         return re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)', name)
-    
+
     def __getattr__(self, name: str):
         try:
             failure = FailureType[name]

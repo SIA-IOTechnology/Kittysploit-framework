@@ -6,7 +6,15 @@ Scanner command implementation - Execute all scanner modules against a target UR
 """
 
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_warning, print_table, print_empty
+from core.output_handler import (
+    print_info,
+    print_success,
+    print_error,
+    print_warning,
+    print_table,
+    print_empty,
+    set_thread_output_quiet,
+)
 from urllib.parse import urlparse
 import threading
 import socket
@@ -506,71 +514,98 @@ Examples:
             try:
                 if verbose:
                     print_info(f"[*] Executing: {module_path}")
-                
-                # Load module
-                module_instance = self.framework.module_loader.load_module(
-                    module_path, 
-                    load_only=False, 
-                    framework=self.framework
-                )
-                
-                if not module_instance:
-                    result['message'] = 'Failed to load module'
-                    return result
-                
-                # Set target options
-                hostname = target_info['hostname']
-                port = target_info['port']
-                scheme = target_info['scheme']
-                
-                # Set target (hostname or full URL) using set_option
-                if hasattr(module_instance, 'target'):
-                    module_instance.set_option('target', hostname)
-                elif hasattr(module_instance, 'rhost'):
-                    module_instance.set_option('rhost', hostname)
-                elif hasattr(module_instance, 'rhosts'):
-                    module_instance.set_option('rhosts', hostname)
-                
-                # Set port
-                if hasattr(module_instance, 'port'):
-                    module_instance.set_option('port', port)
-                elif hasattr(module_instance, 'rport'):
-                    module_instance.set_option('rport', port)
-                
-                # Set SSL based on scheme
-                if hasattr(module_instance, 'ssl'):
-                    module_instance.set_option('ssl', (scheme == 'https'))
-                
-                # Set path if specified
-                if target_info.get('path') and hasattr(module_instance, 'path'):
-                    module_instance.set_option('path', target_info['path'])
-                
-                # Execute run() (returns True/False)
-                result['vulnerable'] = module_instance.run()
-                result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
-                
-                # Get info from __info__ (static) and vulnerability_info (dynamic)
-                module_info = getattr(module_instance, '__info__', {})
-                dynamic_info = module_instance.vulnerability_info
-                
-                # Reason: dynamic first, then from __info__ description
-                result['message'] = dynamic_info.get('reason') or module_info.get('description', '')
-                
-                # Severity: from __info__ or dynamic (for detection/vuln level)
-                result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
-                
-                # Version and other dynamic details
-                if dynamic_info.get('version'):
-                    result['version'] = dynamic_info['version']
-                
-                # Associated exploit/auxiliary module (from __info__)
-                if module_info.get('module'):
-                    result['exploit_module'] = module_info['module']
-                
-                # Other dynamic details (excluding reason, version, severity)
-                result['details'] = {k: v for k, v in dynamic_info.items() 
-                                   if k not in ['reason', 'version', 'severity']}
-                
+                set_thread_output_quiet(not verbose)
+                try:
+                    # Load module
+                    module_instance = self.framework.module_loader.load_module(
+                        module_path,
+                        load_only=False,
+                        framework=self.framework,
+                    )
+
+                    if not module_instance:
+                        result['message'] = 'Failed to load module'
+                        return result
+
+                    # Set target options
+                    hostname = target_info['hostname']
+                    port = target_info['port']
+                    scheme = target_info['scheme']
+
+                    # Set target (hostname or full URL) using set_option
+                    if hasattr(module_instance, 'target'):
+                        module_instance.set_option('target', hostname)
+                    elif hasattr(module_instance, 'rhost'):
+                        module_instance.set_option('rhost', hostname)
+                    elif hasattr(module_instance, 'rhosts'):
+                        module_instance.set_option('rhosts', hostname)
+
+                    # Set port
+                    if hasattr(module_instance, 'port'):
+                        module_instance.set_option('port', port)
+                    elif hasattr(module_instance, 'rport'):
+                        module_instance.set_option('rport', port)
+
+                    # Set SSL based on scheme
+                    if hasattr(module_instance, 'ssl'):
+                        module_instance.set_option('ssl', (scheme == 'https'))
+
+                    # Set path if specified
+                    if target_info.get('path') and hasattr(module_instance, 'path'):
+                        module_instance.set_option('path', target_info['path'])
+
+                    # Execute run() (returns True/False)
+                    result['vulnerable'] = module_instance.run()
+                    result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
+
+                    # Get info from __info__ (static) and vulnerability_info (dynamic)
+                    module_info = getattr(module_instance, '__info__', {})
+                    dynamic_info = getattr(module_instance, 'vulnerability_info', {}) or {}
+                    if not isinstance(dynamic_info, dict):
+                        dynamic_info = {}
+
+                    # Reason: dynamic first, then from __info__ description
+                    result['message'] = dynamic_info.get('reason') or module_info.get('description', '')
+
+                    # Severity: from __info__ or dynamic (for detection/vuln level)
+                    result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
+
+                    # Version and other dynamic details
+                    if dynamic_info.get('version'):
+                        result['version'] = dynamic_info['version']
+
+                    # Associated exploit/auxiliary module (from __info__)
+                    if module_info.get('module'):
+                        result['exploit_module'] = module_info['module']
+
+                    # Chained follow-up modules (e.g. admin_panel_detect -> bruteforce); used by agent.
+                    raw_linked = module_info.get('modules') or []
+                    if isinstance(raw_linked, (list, tuple)):
+                        linked = []
+                        seen = set()
+                        for item in raw_linked:
+                            if not isinstance(item, str):
+                                continue
+                            cleaned = item.strip()
+                            if not cleaned or cleaned in seen:
+                                continue
+                            if not cleaned.startswith((
+                                'scanner/', 'auxiliary/scanner/', 'exploit/', 'exploits/',
+                            )):
+                                continue
+                            seen.add(cleaned)
+                            linked.append(cleaned)
+                        if linked:
+                            result['linked_modules'] = linked
+
+                    # Other dynamic details (excluding reason, version, severity)
+                    result['details'] = {
+                        k: v for k, v in dynamic_info.items()
+                        if k not in ['reason', 'version', 'severity']
+                    }
+                finally:
+                    set_thread_output_quiet(False)
+
             except Exception as e:
                 result['message'] = f"Error: {str(e)}"
                 if verbose:

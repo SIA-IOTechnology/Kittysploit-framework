@@ -5,7 +5,7 @@ from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
 
-ADMIN_PATHS = ["/admin", "/administrator", "/login", "/user/login", "/wp-admin", "/wp-login.php", "/manager", "/admin.php", "/backend", "/panel"]
+ADMIN_PATHS = ["/admin", "/administrator", "/login", "/user/login", "/wp-admin", "/wp-login.php", "/manager", "/admin.php", "/backend", "/panel", "/login.php"]
 
 
 class Module(Scanner, Http_client):
@@ -15,7 +15,7 @@ class Module(Scanner, Http_client):
         'description': 'Detects exposed admin or login panels.',
         'author': 'KittySploit Team',
         'severity': 'info',
-        'modules': [],
+        'modules': ['auxiliary/scanner/http/login/admin_login_bruteforce'],
         'tags': ['web', 'scanner', 'admin', 'login', 'panel'],
     }
 

@@ -111,7 +111,33 @@ class Http_client(BaseModule):
         
         # Configure redirects
         self.session.max_redirects = 10 if follow_redirects else 0
-    
+
+    def _to_bool(self, value: Any) -> bool:
+        """Safely convert framework option values to boolean."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ('true', 'yes', 'y', '1', 'on')
+        return bool(value)
+
+    def response_effective_path(self, requested_path: str, response: Any) -> str:
+        """
+        Path (and query string) of the final URL after redirects.
+
+        ``requests`` sets ``response.url`` to the last URL in the chain; use this when
+        reporting where the page body came from (e.g. GET ``/`` → 302 → ``/login.php``).
+        """
+        if not response or not getattr(response, "url", None):
+            return requested_path
+        try:
+            parsed = urlparse(str(response.url))
+            out = parsed.path or "/"
+            if parsed.query:
+                out = f"{out}?{parsed.query}"
+            return out[:500]
+        except Exception:
+            return requested_path
+
     def get(self, url: str, **kwargs) -> requests.Response:
         """Perform GET request"""
         return self._request('GET', url, **kwargs)
@@ -190,7 +216,7 @@ class Http_client(BaseModule):
         
         # Determine protocol based on ssl option or port
         if hasattr(self, 'ssl'):
-            ssl_enabled = get_option_value(self.ssl)
+            ssl_enabled = self._to_bool(get_option_value(self.ssl))
             protocol = 'https' if ssl_enabled else 'http'
         else:
             # Fallback: determine protocol based on port
@@ -199,7 +225,7 @@ class Http_client(BaseModule):
         
         # Auto-enable SSL for port 443 if not explicitly set
         if protocol == 'https' and hasattr(self, 'ssl'):
-            ssl_enabled = get_option_value(self.ssl)
+            ssl_enabled = self._to_bool(get_option_value(self.ssl))
             if not ssl_enabled and int(port) == 443:
                 # Auto-enable SSL for port 443
                 if hasattr(self.ssl, 'value'):
@@ -211,8 +237,14 @@ class Http_client(BaseModule):
                         pass
                     else:
                         self.verify_ssl.value = False
-        
-        url = f"{protocol}://{target}:{port}{path}"
+
+        # Path must start with ``/`` so values like ``%2fadmin`` (403 bypass encoded segments)
+        # do not get concatenated as ``:80%2fadmin``, which breaks URL parsing.
+        path_str = "/" if path in (None, "") else str(path)
+        if not path_str.startswith("/"):
+            path_str = "/" + path_str
+
+        url = f"{protocol}://{target}:{port}{path_str}"
         
         # Prepare request parameters
         request_kwargs = kwargs.copy()
@@ -333,18 +365,13 @@ class Http_client(BaseModule):
                 self.logger.debug(f"Headers: {dict(self.session.headers)}")
                         
             response = self.session.request(method, url, **kwargs)
-            
-            # Log response status if not 200 (but not for Scanner modules to avoid spam)
-            # Scanner modules expect 404/301/etc. as normal responses during scanning
+
+            # Non-2xx (404, 301, 403, …) is normal during probing; never spam WARNING to the console.
             if response.status_code != 200:
-                # Only log if not a Scanner module
-                from core.framework.scanner import Scanner
-                if not isinstance(self, Scanner):
-                    self.logger.warning(f"HTTP {method} {url} returned status {response.status_code}")
-                else:
-                    # For Scanner modules, only log at DEBUG level
-                    self.logger.debug(f"HTTP {method} {url} returned status {response.status_code}")
-                        
+                self.logger.debug(
+                    "HTTP %s %s returned status %s", method, url, response.status_code
+                )
+
             return response
             
         except requests.exceptions.RequestException as e:

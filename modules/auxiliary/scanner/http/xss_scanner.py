@@ -107,6 +107,26 @@ class Module(Auxiliary, Http_client):
         except Exception as e:
             return False
 
+    def _format_request_url(self, path: str) -> str:
+        """Absolute URL for console output (works when thread output hides print_info)."""
+        try:
+            def _gv(opt):
+                if hasattr(opt, "value"):
+                    return opt.value
+                return opt
+
+            target = _gv(self.target)
+            port = int(_gv(self.port))
+            protocol = "http"
+            if hasattr(self, "ssl"):
+                protocol = "https" if self._to_bool(_gv(self.ssl)) else "http"
+            elif port == 443:
+                protocol = "https"
+            p = path if str(path).startswith("/") else f"/{path}"
+            return f"{protocol}://{target}:{port}{p}"
+        except Exception:
+            return str(path or "/")
+
     def test_xss_payload(self, payload, param_name='q', method='GET'):
         """
         Test an XSS payload
@@ -120,9 +140,10 @@ class Module(Auxiliary, Http_client):
             dict: Test results
         """
         try:
+            encoded_payload = urllib.parse.quote(payload, safe="")
+            encoded_plus = urllib.parse.quote_plus(payload)
+            test_path = "/"
             if method == 'GET':
-                # URL encode the payload
-                encoded_payload = urllib.parse.quote(payload)
                 test_path = f"/?{param_name}={encoded_payload}"
                 response = self.http_request(
                     method="GET",
@@ -130,8 +151,8 @@ class Module(Auxiliary, Http_client):
                     allow_redirects=False
                 )
             else:
-                # POST request
                 post_data = {param_name: payload}
+                test_path = "/"
                 response = self.http_request(
                     method="POST",
                     path="/",
@@ -142,58 +163,48 @@ class Module(Auxiliary, Http_client):
             if not response:
                 return {'payload': payload, 'vulnerable': False, 'error': 'No response'}
             
-            # Analyze response for XSS indicators
+            text = response.text or ""
             is_vulnerable = False
             indicators = []
             xss_type = None
             
-            # Check if payload is reflected
-            is_reflected = payload in response.text or encoded_payload in response.text
-            
-            # Check for HTML-encoded payload
+            # Reflection: only flag when the probe string appears in the response (avoids FP from static <script> on every page).
+            is_reflected = (
+                payload in text
+                or encoded_payload in text
+                or encoded_plus in text
+            )
             html_encoded = html.escape(payload)
-            is_html_encoded = html_encoded in response.text
+            is_html_encoded = html_encoded in text
             
-            # Check for JavaScript execution indicators
             js_indicators = ['<script', 'javascript:', 'onerror=', 'onload=', 'alert(']
-            has_js_indicators = any(indicator in response.text.lower() for indicator in js_indicators)
-            
-            # Check for event handlers
+            has_js_indicators = any(indicator in text.lower() for indicator in js_indicators)
             event_handlers = ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus']
-            has_event_handlers = any(handler in response.text.lower() for handler in event_handlers)
+            has_event_handlers = any(handler in text.lower() for handler in event_handlers)
             
-            # Determine XSS type
             if is_reflected and not is_html_encoded:
                 is_vulnerable = True
                 if has_js_indicators or has_event_handlers:
                     xss_type = 'Reflected XSS'
                 else:
                     xss_type = 'Potential Reflected XSS'
-                indicators.append('Payload reflected in response')
+                indicators.append('Payload reflected in response (not HTML-escaped)')
+            elif is_reflected and is_html_encoded:
+                indicators.append('Payload reflected but HTML-escaped (lower risk)')
             
-            if has_js_indicators:
-                is_vulnerable = True
-                if not xss_type:
-                    xss_type = 'Reflected XSS (JavaScript detected)'
-                indicators.append('JavaScript code detected in response')
-            
-            if has_event_handlers:
-                is_vulnerable = True
-                if not xss_type:
-                    xss_type = 'Reflected XSS (Event handler detected)'
-                indicators.append('Event handler detected in response')
-            
-            # Check for DOM-based XSS indicators
-            if '#' in payload or '?' in payload:
-                if payload.split('#')[0] in response.text or payload.split('?')[0] in response.text:
-                    indicators.append('Possible DOM-based XSS')
-                    if not xss_type:
-                        xss_type = 'Potential DOM-based XSS'
+            base = self._format_request_url("/")
+            if method == "GET":
+                request_url = self._format_request_url(test_path)
+            else:
+                pl_show = payload.replace("\n", "\\n")[:80]
+                request_url = f"{base} [POST {param_name}={pl_show!r}]"
             
             return {
                 'payload': payload,
                 'param': param_name,
                 'method': method,
+                'request_path': test_path,
+                'request_url': request_url,
                 'vulnerable': is_vulnerable,
                 'xss_type': xss_type,
                 'is_reflected': is_reflected,
@@ -202,7 +213,7 @@ class Module(Auxiliary, Http_client):
                 'has_event_handlers': has_event_handlers,
                 'indicators': indicators,
                 'status_code': response.status_code,
-                'response_length': len(response.text)
+                'response_length': len(text)
             }
             
         except Exception as e:
@@ -228,6 +239,10 @@ class Module(Auxiliary, Http_client):
         print_status("Testing GET parameters for XSS vulnerabilities...")
         print_info("")
         
+        xss_print_keys = set()
+        xss_live_cap = 48
+        xss_live_printed = 0
+        
         for param in self.COMMON_PARAMS:
             print_info(f"Testing parameter: {param}")
             
@@ -236,15 +251,18 @@ class Module(Auxiliary, Http_client):
                 self.test_results.append(result)
                 
                 if result.get('vulnerable'):
-                    print_success(f"  [!] Potential XSS found!")
-                    print_info(f"      Parameter: {param}")
-                    print_info(f"      Payload: {payload[:60]}...")
-                    print_info(f"      Type: {result.get('xss_type', 'Unknown')}")
-                    print_info(f"      Reflected: {result.get('is_reflected', False)}")
-                    print_info(f"      Indicators: {', '.join(result.get('indicators', []))}")
-                    print_info(f"      Status Code: {result.get('status_code')}")
-                    print_info("")
                     self.vulnerabilities.append(result)
+                    key = ("GET", param)
+                    if key in xss_print_keys or xss_live_printed >= xss_live_cap:
+                        continue
+                    xss_print_keys.add(key)
+                    xss_live_printed += 1
+                    pl_show = payload if len(payload) <= 100 else (payload[:97] + "…")
+                    print_success(
+                        f"[!] Potential XSS | GET {result.get('request_url', '')} "
+                        f"| param={param} | {result.get('xss_type', 'Unknown')} "
+                        f"| payload={pl_show!r}"
+                    )
         
         print_info("")
         
@@ -260,13 +278,18 @@ class Module(Auxiliary, Http_client):
                 self.test_results.append(result)
                 
                 if result.get('vulnerable'):
-                    print_success(f"  [!] Potential XSS found (POST)!")
-                    print_info(f"      Parameter: {param}")
-                    print_info(f"      Payload: {payload[:60]}...")
-                    print_info(f"      Type: {result.get('xss_type', 'Unknown')}")
-                    print_info(f"      Indicators: {', '.join(result.get('indicators', []))}")
-                    print_info("")
                     self.vulnerabilities.append(result)
+                    key = ("POST", param)
+                    if key in xss_print_keys or xss_live_printed >= xss_live_cap:
+                        continue
+                    xss_print_keys.add(key)
+                    xss_live_printed += 1
+                    pl_show = payload if len(payload) <= 100 else (payload[:97] + "…")
+                    print_success(
+                        f"[!] Potential XSS | POST {result.get('request_url', '')} "
+                        f"| param={param} | {result.get('xss_type', 'Unknown')} "
+                        f"| payload={pl_show!r}"
+                    )
         
         print_info("")
         
@@ -298,15 +321,17 @@ class Module(Auxiliary, Http_client):
                 for vuln in vulns[:10]:  # Show first 10 per type
                     payload_short = vuln['payload'][:40] + '...' if len(vuln['payload']) > 40 else vuln['payload']
                     indicators = ', '.join(vuln.get('indicators', [])[:1])
+                    req = str(vuln.get('request_url') or '')[:96]
                     table_data.append([
                         vuln.get('param', 'N/A'),
                         vuln.get('method', 'GET'),
+                        req,
                         payload_short,
                         indicators
                     ])
                 
                 if table_data:
-                    print_table(['Parameter', 'Method', 'Payload', 'Indicators'], table_data)
+                    print_table(['Parameter', 'Method', 'URL', 'Payload', 'Indicators'], table_data)
                 print_info("")
             
             print_warning("IMPORTANT: These are potential XSS vulnerabilities. Manual verification in a browser is required.")

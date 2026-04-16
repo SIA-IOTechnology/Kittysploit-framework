@@ -45,7 +45,7 @@ class EncryptedString(TypeDecorator):
             return value
         
         try:
-            return self._encryption_manager.decrypt_data(value)
+            return self._encryption_manager.decrypt_data(value, log_errors=False)
         except Exception:
             # If decryption fails, return as is (might be plain text)
             return value
@@ -89,7 +89,7 @@ class EncryptedText(TypeDecorator):
             return value
         
         try:
-            return self._encryption_manager.decrypt_data(value)
+            return self._encryption_manager.decrypt_data(value, log_errors=False)
         except Exception:
             # If decryption fails, return as is (might be plain text)
             return value
@@ -136,7 +136,7 @@ class EncryptedJSON(TypeDecorator):
                 return value
         
         try:
-            return self._encryption_manager.decrypt_data(value)
+            return self._encryption_manager.decrypt_data(value, log_errors=False)
         except Exception:
             # If decryption fails, try to parse as JSON
             try:

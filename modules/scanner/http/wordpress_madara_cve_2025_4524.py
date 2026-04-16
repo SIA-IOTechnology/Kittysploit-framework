@@ -52,7 +52,9 @@ class Module(Scanner, Http_client):
         ),
         "author": "KittySploit Team",
         "severity": "high",
-        "modules": [],
+        "modules": [
+            "auxiliary/scanner/http/wordpress_madara_cve_2025_4524_lfi",
+        ],
         "tags": [
             "web",
             "scanner",

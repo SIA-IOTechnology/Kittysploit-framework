@@ -34,6 +34,27 @@ class DockerEnvironment(BaseModule):
         self.environment_vars = {}
         self.volumes = {}
         self.network_mode = "bridge"
+
+    def _is_docker_permission_error(self, error):
+        """Return True when Docker access fails due to socket permissions."""
+        error_text = str(error).lower()
+        return (
+            "permission denied" in error_text
+            or "errno 13" in error_text
+            or "got permission denied" in error_text
+            or "docker.sock" in error_text and "denied" in error_text
+        )
+
+    def _print_linux_docker_help(self, permission_issue=False):
+        """Print Linux-specific Docker troubleshooting tips."""
+        if permission_issue:
+            print_error("Docker socket permission denied.")
+            print_info("Add your user to the docker group and reconnect:")
+            print_info("  sudo usermod -aG docker $USER")
+            print_info("Then re-login (or run: newgrp docker) and retry.")
+        else:
+            print_error("Ensure Docker is installed and the Docker daemon is running.")
+        print_info("On Linux, you may need to start Docker with: sudo systemctl start docker")
         
     def check_docker(self):
         """Check if Docker is installed and accessible"""
@@ -65,16 +86,18 @@ class DockerEnvironment(BaseModule):
                             return False
                         raise pipe_error
                 else:
-                    print_info("On Linux, you may need to start Docker with: sudo systemctl start docker")
-                    raise e
+                    if self._is_docker_permission_error(e):
+                        self._print_linux_docker_help(permission_issue=True)
+                    else:
+                        self._print_linux_docker_help(permission_issue=False)
+                    return False
         except docker.errors.DockerException as e:
             print_error(f"Docker error: {str(e)}")
             if os.name == 'nt':
                 print_error("Ensure Docker Desktop is installed and running.")
                 print_info("You can download Docker Desktop from: https://www.docker.com/products/docker-desktop")
             else:
-                print_error("Ensure Docker is installed and the Docker daemon is running.")
-                print_info("On Linux, you may need to start Docker with: sudo systemctl start docker")
+                self._print_linux_docker_help(permission_issue=self._is_docker_permission_error(e))
             return False
         except Exception as e:
             print_error(f"Unexpected error connecting to Docker: {str(e)}")

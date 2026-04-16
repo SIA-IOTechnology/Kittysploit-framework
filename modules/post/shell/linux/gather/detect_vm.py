@@ -1,5 +1,6 @@
 from kittysploit import *
 from lib.post.linux.system import System
+qsw²import re
 
 class Module(Post, System):
 
@@ -11,6 +12,34 @@ class Module(Post, System):
         "session_type": [SessionType.SHELL, 
                         SessionType.METERPRETER,
                         SessionType.SSH],
+    }
+
+    SYSTEMD_VIRT_MAPPING = {
+        'vmware': 'VMware',
+        'kvm': 'QEMU/KVM',
+        'qemu': 'QEMU/KVM',
+        'xen': 'Xen',
+        'microsoft': 'Hyper-V',
+        'oracle': 'VirtualBox',
+        'parallels': 'Parallels',
+        'amazon': 'Amazon EC2',
+        'google': 'Google Cloud',
+        'azure': 'Azure',
+        'openvz': 'OpenVZ',
+        'lxc': 'LXC',
+        'lxc-libvirt': 'LXC',
+        'systemd-nspawn': 'systemd-nspawn',
+        'docker': 'Docker',
+        'podman': 'Podman',
+        'rkt': 'rkt',
+        'bochs': 'Bochs',
+        'uml': 'User-mode Linux',
+        'chroot': 'chroot',
+        'bhyve': 'bhyve',
+        'qnx': 'QNX hypervisor',
+        'acrn': 'ACRN',
+        'powervm': 'PowerVM',
+        'zvm': 'z/VM',
     }
 
     def run(self):
@@ -263,32 +292,34 @@ class Module(Post, System):
     def _check_systemd_detect_virt(self):
         """Check using systemd-detect-virt command"""
         try:
-            result = self.cmd_exec("systemd-detect-virt 2>/dev/null").strip().lower()
-            if result and result != 'none' and 'error' not in result:
-                # Map systemd output to common VM types
-                vm_mapping = {
-                    'vmware': 'VMware',
-                    'kvm': 'QEMU/KVM',
-                    'qemu': 'QEMU/KVM',
-                    'xen': 'Xen',
-                    'microsoft': 'Hyper-V',
-                    'oracle': 'VirtualBox',
-                    'parallels': 'Parallels',
-                    'amazon': 'Amazon EC2',
-                    'google': 'Google Cloud',
-                    'azure': 'Azure',
-                    'openvz': 'OpenVZ',
-                    'lxc': 'LXC',
-                    'lxc-libvirt': 'LXC',
-                    'systemd-nspawn': 'systemd-nspawn',
-                    'docker': 'Docker',
-                    'podman': 'Podman',
-                    'rkt': 'rkt',
-                    'bochs': 'Bochs',
-                    'uml': 'User-mode Linux',
-                    'chroot': 'chroot',
-                }
-                return vm_mapping.get(result, result.capitalize())
+            raw_output = self.cmd_exec("systemd-detect-virt 2>/dev/null")
+            if not raw_output:
+                return None
+
+            # Remove ANSI escape sequences that can appear in interactive prompts.
+            sanitized_output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", raw_output)
+
+            # Keep only clean tokens from output lines to avoid prompt/command echo artifacts.
+            tokens = []
+            for line in sanitized_output.splitlines():
+                token = line.strip().lower()
+                if re.fullmatch(r"[a-z0-9-]+", token):
+                    tokens.append(token)
+
+            if not tokens:
+                return None
+
+            # `none` is authoritative: bare metal, even when noisy lines are present.
+            if 'none' in tokens:
+                return None
+
+            # Return only if we have an explicit known virtualization id.
+            for token in reversed(tokens):
+                if token in self.SYSTEMD_VIRT_MAPPING:
+                    return self.SYSTEMD_VIRT_MAPPING[token]
+
+            # Unknown token(s): ignore to avoid false positives from shell noise.
+            return None
         except Exception as e:
             print_warning(f"Error checking systemd-detect-virt: {e}")
         

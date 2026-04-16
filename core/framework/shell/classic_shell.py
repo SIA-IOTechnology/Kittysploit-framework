@@ -214,6 +214,40 @@ class ClassicShell(BaseShell):
             return ""
         return os.path.normpath(lines[-1])
 
+    def _looks_like_remote_prompt_line(self, line: str) -> bool:
+        """Return True when a line is just a remote shell prompt."""
+        if not line:
+            return False
+        # Remove ANSI/OSC control sequences and normalize whitespace/control chars.
+        cleaned = str(line)
+        cleaned = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', cleaned)  # OSC
+        cleaned = re.sub(r'\x1b\[[0-9;?]*[A-Za-z]', '', cleaned)  # CSI
+        cleaned = cleaned.replace('\r', '').replace('\x00', '').replace('\x07', '')
+        line_stripped = cleaned.strip()
+        if not line_stripped:
+            return False
+
+        # PowerShell/CMD prompt variants: "PS C:\path>" or "C:\path>"
+        if re.match(r'^\s*(?:PS\s+)+[A-Za-z]:\\.*>{1,2}\s*$', line_stripped, re.IGNORECASE):
+            return True
+        if re.match(r'^\s*[A-Za-z]:\\.*>\s*$', line_stripped):
+            return True
+
+        # Unix prompt variants: "user@host:/path$" / "#"
+        unix_prompt_pattern = r'^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\n]*[#$]\s*$'
+        if re.match(unix_prompt_pattern, line_stripped):
+            return True
+
+        # zsh/oh-my-zsh style prompts can include a trailing ">" marker.
+        if re.match(r'^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\n]*[#$]\s*>\s*$', line_stripped):
+            return True
+
+        # Some payloads prepend virtualenv-like context e.g. "(venv) user@host:~$"
+        if re.match(r'^\([^)]+\)\s+[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:[^\n]*[#$]\s*$', line_stripped):
+            return True
+
+        return False
+
     def _fetch_remote_cwd(self, timeout: float = 2.0) -> Optional[str]:
         """Try multiple commands to retrieve the remote current directory."""
         if not self.connection:
@@ -248,6 +282,47 @@ class ClassicShell(BaseShell):
         if self.is_windows:
             self._windows_cwd_strategy = None
         return None
+
+    def _looks_like_unix_target(self) -> bool:
+        """Best-effort check to avoid false Windows detection on Unix targets."""
+        if not self.connection:
+            return False
+        try:
+            uname_result = self._send_command_raw('uname -s', timeout=1.5)
+            if uname_result:
+                uname_lower = uname_result.strip().lower()
+                if any(x in uname_lower for x in ('linux', 'darwin', 'freebsd', 'openbsd', 'netbsd')):
+                    return True
+
+            pwd_result = self._send_command_raw('pwd', timeout=1.5)
+            if pwd_result:
+                cleaned = pwd_result.strip()
+                # Typical Unix absolute path; excludes "C:\..." style paths.
+                if cleaned.startswith('/') and ':\\' not in cleaned:
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _looks_like_windows_target(self) -> bool:
+        """Best-effort check to confirm Windows before enabling Windows shell mode."""
+        if not self.connection:
+            return False
+        try:
+            os_result = self._send_command_raw('echo %OS%', timeout=1.5)
+            if os_result:
+                os_lower = os_result.strip().lower()
+                if 'windows' in os_lower or 'windows_nt' in os_lower:
+                    return True
+
+            ver_result = self._send_command_raw('ver', timeout=1.5)
+            if ver_result:
+                ver_lower = ver_result.strip().lower()
+                if 'microsoft windows' in ver_lower or 'windows' in ver_lower:
+                    return True
+        except Exception:
+            return False
+        return False
     
     def _initialize_connection(self):
         """Initialize connection from framework/listener"""
@@ -282,7 +357,8 @@ class ClassicShell(BaseShell):
                     # Use platform from session (set by listener from payload) to avoid sending detection commands
                     if self.connection and hasattr(session, 'data') and session.data.get('platform'):
                         pl = session.data['platform']
-                        if isinstance(pl, str) and pl.lower() == 'windows':
+                        pl_normalized = pl.lower().strip() if isinstance(pl, str) else str(pl).lower().strip()
+                        if pl_normalized == 'windows':
                             self.is_windows = True
                             self.platform_detected = True
                             self._set_current_directory("C:\\Users\\user")
@@ -298,7 +374,7 @@ class ClassicShell(BaseShell):
                             remote_cwd = self._fetch_remote_cwd()
                             if remote_cwd:
                                 self._set_current_directory(remote_cwd)
-                        elif isinstance(pl, str) and pl.lower() == 'linux':
+                        elif pl_normalized in {'linux', 'unix', 'darwin', 'macos', 'android', 'ios'}:
                             self.is_windows = False
                             self.platform_detected = True
                             self.hostname = "localhost"
@@ -322,6 +398,16 @@ class ClassicShell(BaseShell):
                 result_clean = result.strip()
                 # Check for Windows path indicators (C:\, D:\, etc.)
                 if ':\\' in result_clean or (len(result_clean) > 1 and result_clean[1] == ':'):
+                    # Some payloads prepend a fake "PS C:\...>" prompt while executing on Linux.
+                    # Confirm it's really Windows before locking prompt style.
+                    if self._looks_like_unix_target():
+                        self.is_windows = False
+                        self.platform_detected = True
+                        return
+                    if not self._looks_like_windows_target():
+                        self.is_windows = False
+                        self.platform_detected = True
+                        return
                     self.is_windows = True
                     self.platform_detected = True
                     # Extract path only: result may be "C:\path>cd" or "C:\path>" or banner+path; take first C:\... line
@@ -460,6 +546,9 @@ class ClassicShell(BaseShell):
                     line_stripped = line.strip()
                     # Skip empty lines
                     if not line_stripped:
+                        continue
+                    # Skip remote prompt-only lines to avoid double prompt in interactive shell.
+                    if self._looks_like_remote_prompt_line(line_stripped):
                         continue
                     line_lower = line_stripped.lower()
                     # Skip Windows CMD banner lines (so they never appear in command output)

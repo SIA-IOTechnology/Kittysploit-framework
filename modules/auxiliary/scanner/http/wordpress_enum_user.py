@@ -6,7 +6,8 @@ class Module(Auxiliary, Http_client):
 
     __info__ = {
         'name': 'Wordpress user enumeration',
-        'description': "Try to extract wordpress user enumeration"
+        'description': "Try to extract wordpress user enumeration",
+        'tags': ['web', 'scanner', 'wordpress', 'enum'],
     }
     
     def check(self):
@@ -28,6 +29,14 @@ class Module(Auxiliary, Http_client):
             users = response.json()
             for user in users:
                 print_success(f"ID: {user['id']}, Name: {user['name']}, Username: {user['slug']}")
+            self.vulnerability_info = {
+                'reason': f"Enumerated {len(users)} WordPress user(s)",
+                'severity': 'Info',
+            }
+            return True
         else:
-            fail.NotVulnerable()
-        return True
+            self.vulnerability_info = {
+                'reason': "WordPress user enumeration endpoint not exposed",
+                'severity': 'Info',
+            }
+            return False

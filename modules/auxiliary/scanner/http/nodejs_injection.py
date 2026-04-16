@@ -4,6 +4,7 @@
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 import json
+import re
 import urllib.parse
 import time
 
@@ -97,65 +98,86 @@ class Module(Auxiliary, Http_client):
         'template', 'view', 'page',
     ]
 
+    # Avoid matching the word "express" inside "expression", etc.
+    _RE_EXPRESS_NOT_EXPRESSION = re.compile(r"\bexpress(?!ion\b)", re.IGNORECASE)
+
+    def _php_stack_likely(self, response) -> bool:
+        """True if headers/body strongly suggest PHP — do not report a Node.js stack."""
+        if not response:
+            return False
+        xpb = (response.headers.get("X-Powered-By") or "").lower()
+        if any(
+            p in xpb
+            for p in ("php", "laravel", "symfony", "cakephp", "zend", "yii", "wordpress")
+        ):
+            return True
+        hdr = str(response.headers).lower()
+        if "phpsessid" in hdr or "php_sess" in hdr:
+            return True
+        snippet = (response.text or "")[:20000]
+        if "<?php" in snippet:
+            return True
+        return False
+
+    def _evidence_nodejs_framework(self, response):
+        """
+        Return a short label only when there is credible evidence of a Node.js HTTP stack.
+        """
+        if not response or self._php_stack_likely(response):
+            return None
+
+        powered = (response.headers.get("X-Powered-By") or "").lower()
+        body = response.text or ""
+        body_lower = body.lower()
+        hdr_blob = str(response.headers).lower()
+
+        if "express" in powered:
+            return "Express.js"
+        if "fastify" in powered:
+            return "Fastify"
+        if "koa" in powered:
+            return "Koa.js"
+        if "hapi" in powered:
+            return "Hapi.js"
+        if "next.js" in powered or "nextjs" in powered:
+            return "Next.js"
+        if "node.js" in powered or powered.strip() in ("node",) or powered.startswith("node/"):
+            return "Node.js"
+
+        if "__next_data__" in body_lower or "__next_f" in body_lower:
+            return "Next.js"
+        if "__nuxt__" in body_lower or "window.__nuxt" in body_lower:
+            return "Nuxt.js"
+
+        if "connect.sid" in hdr_blob:
+            return "Express.js (connect.sid session)"
+
+        if self._RE_EXPRESS_NOT_EXPRESSION.search(body):
+            return "Express.js (keyword in page)"
+
+        return None
+
     def check(self):
         """
-        Check if the target is accessible and might be using Node.js
+        Check if the target is accessible and shows credible Node.js stack signals.
         """
         try:
             response = self.http_request(method="GET", path="/")
-            if response:
-                # Check for Node.js indicators
-                content = response.text.lower()
-                headers = str(response.headers).lower()
-                
-                nodejs_indicators = [
-                    'node', 'node.js', 'express', 'koa', 'hapi',
-                    'x-powered-by.*express', 'x-powered-by.*node',
-                    'connect.sid', 'sessionid',
-                ]
-                
-                if any(indicator in content or indicator in headers for indicator in nodejs_indicators):
-                    return True
-                
-                # Check X-Powered-By header
-                powered_by = response.headers.get('X-Powered-By', '').lower()
-                if 'express' in powered_by or 'node' in powered_by:
-                    return True
-                
-                # Even if not detected, continue scanning
-                return True
-            return False
-        except Exception as e:
+            if not response:
+                return False
+            return self._evidence_nodejs_framework(response) is not None
+        except Exception:
             return False
 
     def detect_nodejs_framework(self):
         """
-        Detect Node.js framework
+        Detect Node.js framework (returns None if not evidenced — never a generic guess).
         """
         try:
             response = self.http_request(method="GET", path="/")
             if not response:
                 return None
-            
-            powered_by = response.headers.get('X-Powered-By', '')
-            content = response.text.lower()
-            
-            if 'express' in powered_by.lower():
-                return "Express.js"
-            
-            if 'koa' in powered_by.lower() or 'koa' in content:
-                return "Koa.js"
-            
-            if 'hapi' in powered_by.lower() or 'hapi' in content:
-                return "Hapi.js"
-            
-            if 'node' in powered_by.lower():
-                return "Node.js"
-            
-            if 'express' in content:
-                return "Express.js (detected in content)"
-            
-            return "Node.js Application (unknown framework)"
+            return self._evidence_nodejs_framework(response)
         except Exception as e:
             print_debug(f"Error detecting Node.js framework: {str(e)}")
             return None

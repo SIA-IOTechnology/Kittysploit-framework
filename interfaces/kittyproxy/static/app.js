@@ -1,4 +1,12 @@
-const API_BASE = 'http://127.0.0.1:8443/api';
+/**
+ * API base: (1) kittyproxy-config.js sets __KITTYPROXY_API_BASE__ to this server's /api;
+ * (2) else same-origin /api; (3) else localhost — use 8000 (Cosmic / proxy_manager default), not CLI 8443.
+ */
+const API_BASE = (typeof window !== 'undefined' && window.__KITTYPROXY_API_BASE__)
+    ? String(window.__KITTYPROXY_API_BASE__).replace(/\/$/, '')
+    : ((typeof window !== 'undefined' && window.location && window.location.protocol && window.location.protocol !== 'file:')
+        ? '/api'
+        : 'http://127.0.0.1:8000/api');
 let currentFlowId = null;
 let currentTab = 'request';
 /** Response body view: 'raw' | 'preview' | 'pretty' | 'hex' */

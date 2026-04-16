@@ -218,6 +218,11 @@ pip install -r install/requirements.txt
 python kittyconsole.py
 ```
 
+**CLI Mode + Integrated Proxy:**
+```bash
+python kittyconsole.py --proxy --proxy-port 8888 --proxy-mode http
+```
+
 **REST API Server:**
 ```bash
 python kittyapi.py -H 0.0.0.0 -p 5000 -m "master_key"

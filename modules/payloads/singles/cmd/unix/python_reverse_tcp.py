@@ -10,6 +10,7 @@ class Module(Payload):
 			'description': 'Connect back and create a command shell via Python (Linux/Unix only; use singles/cmd/windows/python_reverse_tcp on Windows)',
 			'category': 'singles',
 			'arch': Arch.PYTHON,
+			'platform': Platform.UNIX,
 			'listener': 'listeners/multi/reverse_tcp',
 			'handler': Handler.REVERSE
 		}

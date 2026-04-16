@@ -313,7 +313,20 @@ Examples:
                     
                     # Convert result to boolean for command history
                     success = bool(result) if result is not None else False
-                    
+
+                    # Scanner modules return False for "not detected"; that is not a run failure.
+                    is_scanner = getattr(module, 'TYPE_MODULE', None) == 'scanner'
+                    if is_scanner:
+                        if getattr(module, '_scan_error', False):
+                            print_error("Module execution failed.")
+                            return False
+                        if success:
+                            print_success("Module execution completed successfully.")
+                        else:
+                            print_success("Module execution completed (scan finished).")
+                        # Negative detection is not a CLI/command failure; only _scan_error is.
+                        return True
+
                     if success:
                         print_success("Module execution completed successfully")
                     else:

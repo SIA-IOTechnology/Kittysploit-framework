@@ -20,3 +20,4 @@ class Module(Scanner, Http_client):
         r = self.http_request(method="GET", path="/phpmyadmin", allow_redirects=True)
         if r and ("phpmyadmin" in r.text.lower() or "pma" in r.text.lower()):
             return True
+        return False

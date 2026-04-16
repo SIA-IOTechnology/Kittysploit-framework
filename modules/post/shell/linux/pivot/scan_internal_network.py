@@ -19,6 +19,8 @@ class Module(Post, System):
     ports = OptString("22,80,443,3389,8080", "TCP ports to scan (comma-separated)", required=False)
     timeout = OptInteger(1, "Timeout per host in seconds", required=False)
 
+    IPV4_REGEX = re.compile(r"\b((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})\b")
+
     def run(self):
         """Scan internal network from compromised machine"""
         
@@ -118,6 +120,13 @@ class Module(Post, System):
         except Exception as e:
             print_warning(f"Error detecting network: {e}")
             return None
+
+    def _extract_ipv4(self, value):
+        """Extract first valid IPv4 address from a string."""
+        if not value:
+            return None
+        match = self.IPV4_REGEX.search(str(value))
+        return match.group(1) if match else None
     
     def _arp_scan(self):
         """Perform ARP scan"""
@@ -142,7 +151,9 @@ class Module(Post, System):
                             if line.strip():
                                 parts = line.split()
                                 if len(parts) >= 2:
-                                    ip = parts[0]
+                                    ip = self._extract_ipv4(parts[0])
+                                    if not ip:
+                                        continue
                                     mac = parts[1]
                                     results[ip] = {
                                         'ip': ip,
@@ -157,9 +168,8 @@ class Module(Post, System):
                         for line in arp_output.strip().split('\n'):
                             if line.strip():
                                 # Parse ARP entry
-                                match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
-                                if match:
-                                    ip = match.group(1)
+                                ip = self._extract_ipv4(line)
+                                if ip:
                                     mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', line)
                                     mac = mac_match.group(0) if mac_match else "unknown"
                                     results[ip] = {
@@ -191,10 +201,11 @@ class Module(Post, System):
                     fping_cmd = f"fping -a -g {base}.0 {base}.255 -q 2>/dev/null"
                     output = self.cmd_exec(fping_cmd)
                     if output:
-                        for ip in output.strip().split('\n'):
-                            if ip.strip():
-                                results[ip.strip()] = {
-                                    'ip': ip.strip(),
+                        for line in output.strip().split('\n'):
+                            ip = self._extract_ipv4(line)
+                            if ip:
+                                results[ip] = {
+                                    'ip': ip,
                                     'method': 'ping',
                                     'alive': True
                                 }
@@ -238,13 +249,24 @@ class Module(Post, System):
                     nmap_cmd = f"nmap -sn {self.network_range} 2>/dev/null | grep -E '^Nmap scan report' | awk '{{print $5}}'"
                     hosts_output = self.cmd_exec(nmap_cmd)
                     if hosts_output:
-                        alive_hosts = [h.strip() for h in hosts_output.strip().split('\n') if h.strip()]
+                        alive_hosts = []
+                        for line in hosts_output.strip().split('\n'):
+                            host_ip = self._extract_ipv4(line)
+                            if host_ip:
+                                alive_hosts.append(host_ip)
                 else:
                     # Use fping or ping
                     if self.command_exists('fping'):
                         fping_output = self.cmd_exec(f"fping -a -g {base}.0 {base}.255 -q 2>/dev/null")
                         if fping_output:
-                            alive_hosts = [h.strip() for h in fping_output.strip().split('\n') if h.strip()]
+                            alive_hosts = []
+                            for line in fping_output.strip().split('\n'):
+                                host_ip = self._extract_ipv4(line)
+                                if host_ip:
+                                    alive_hosts.append(host_ip)
+
+                # Deduplicate while keeping order
+                alive_hosts = list(dict.fromkeys(alive_hosts))
                 
                 # Scan ports on alive hosts
                 ports_list = [p.strip() for p in self.ports.split(',') if p.strip()]

@@ -186,7 +186,7 @@ class Module(Auxiliary, Http_client):
             
             if plugin_info:
                 self.plugin_info.append(plugin_info)
-                print_success(f"  [!] Plugin found: {plugin_name}")
+                print_info(f"    - Plugin found: {plugin_name}")
                 if plugin_info.get('version'):
                     print_info(f"      Version: {plugin_info['version']}")
                 else:
@@ -221,7 +221,6 @@ class Module(Auxiliary, Http_client):
             
             print_table(['Plugin Name', 'Version', 'Path'], table_data)
             print_info("")
-            print_info("Note: Check for known vulnerabilities in these plugins using tools like WPScan.")
         else:
             print_info("No WordPress plugins detected.")
             print_info("Note: Plugins may be hidden or not in the common list.")

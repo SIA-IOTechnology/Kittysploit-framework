@@ -17,6 +17,7 @@ build/
 *.db
 *.sqlite
 config.toml
+/reports/
 
 # Output files
 output/

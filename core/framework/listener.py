@@ -506,7 +506,7 @@ class Listener(BaseModule):
             return False
 
     def stop(self):
-        """Stop the listener"""
+        """Stop the listener without dropping established sessions."""
         try:
             if not self.running:
                 print_warning("Listener is not running")
@@ -522,8 +522,16 @@ class Listener(BaseModule):
             if self.listener_thread and self.listener_thread.is_alive():
                 self.listener_thread.join(timeout=5)
             
-            # Close all connections
-            self._close_all_connections()
+            # Stop listening sockets/resources exposed by concrete listeners.
+            # This should not close session sockets already promoted to active sessions.
+            if hasattr(self, "shutdown") and callable(getattr(self, "shutdown")):
+                try:
+                    self.shutdown()
+                except Exception as shutdown_error:
+                    print_warning(f"Error during listener shutdown: {shutdown_error}")
+            
+            # Keep active session connections alive when stopping the listener.
+            self._close_all_connections(close_session_connections=False)
             
             print_success(f"{self.name} listener stopped")
             return True
@@ -685,18 +693,47 @@ class Listener(BaseModule):
             print_error(f"Failed to create session: {e}")
             return None
 
-    def _close_all_connections(self):
-        """Close all active connections"""
+    def _close_all_connections(self, close_session_connections: bool = True):
+        """Close tracked connections, optionally preserving session sockets."""
         try:
-            for conn_id, connection in self.connections.items():
+            if close_session_connections:
+                for conn_id, connection in self.connections.items():
+                    try:
+                        if hasattr(connection, 'close'):
+                            connection.close()
+                    except:
+                        pass
+                
+                self.connections.clear()
+                self._session_connections.clear()
+                print_info("All connections closed")
+                return
+
+            # Listener stop mode: keep sockets bound to active sessions.
+            session_bound = set(self._session_connections.values())
+            to_remove = []
+            preserved = 0
+            closed = 0
+
+            for conn_id, connection in list(self.connections.items()):
+                if connection in session_bound:
+                    preserved += 1
+                    continue
                 try:
                     if hasattr(connection, 'close'):
                         connection.close()
+                    closed += 1
                 except:
                     pass
-            
-            self.connections.clear()
-            print_info("All connections closed")
+                finally:
+                    to_remove.append(conn_id)
+
+            for conn_id in to_remove:
+                self.connections.pop(conn_id, None)
+
+            print_info(
+                f"Listener stopped: preserved {preserved} session connection(s), closed {closed} non-session connection(s)"
+            )
             
         except Exception as e:
             print_error(f"Error closing connections: {e}")

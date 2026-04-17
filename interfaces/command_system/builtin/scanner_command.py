@@ -14,16 +14,42 @@ from core.output_handler import (
     print_table,
     print_empty,
     set_thread_output_quiet,
+    color_red,
+    color_yellow,
+    color_blue,
+    color_green,
 )
 from urllib.parse import urlparse
 import threading
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Tuple
+import errno
 
 
 class ScannerCommand(BaseCommand):
     """Command to execute all scanner modules against a target URL"""
+
+    def _format_severity(self, severity: Optional[str]) -> str:
+        """Return a colorized severity label for quick visual scanning."""
+        if not severity:
+            return ""
+
+        sev = str(severity).strip()
+        sev_lower = sev.lower()
+
+        if sev_lower in ("critical", "crit"):
+            return color_red(sev)
+        if sev_lower == "high":
+            return color_red(sev)
+        if sev_lower in ("medium", "moderate"):
+            return color_yellow(sev)
+        if sev_lower == "low":
+            return color_blue(sev)
+        if sev_lower == "info":
+            return color_green(sev)
+
+        return sev
     
     @property
     def name(self) -> str:
@@ -137,16 +163,27 @@ Examples:
                 # Auto-scan ports by default (unless explicitly disabled with --no-scan-ports)
                 if options.get('scan_ports', True):  # Default to True if not explicitly set
                     print_info("Scanning ports to detect services...")
-                    open_ports = self._scan_ports(target_info['hostname'], target_info.get('port'))
+                    scan_result = self._scan_ports(target_info['hostname'], target_info.get('port'))
+                    open_ports = scan_result.get("open_ports", [])
                     if open_ports:
                         print_info(f"Open ports detected: {', '.join(map(str, open_ports))}")
+                        target_info['open_ports'] = open_ports
                         # Filter modules based on detected ports
                         modules = self._filter_modules_by_ports(modules, open_ports)
                         if not modules:
                             print_warning("No modules available for detected ports")
                             return False
                     else:
-                        print_warning("No open ports detected")
+                        if scan_result.get("resolution_error"):
+                            print_warning(
+                                f"Host does not respond (name resolution failed): {scan_result['resolution_error']}"
+                            )
+                        elif not scan_result.get("host_responsive", False):
+                            print_warning(
+                                "Host does not respond on scanned ports (timeout/unreachable)."
+                            )
+                        else:
+                            print_warning("No open ports detected")
                         return False
                 elif target_info.get('port'):
                     # If scan disabled but port specified, use that port
@@ -437,35 +474,68 @@ Examples:
         
         return filtered
     
-    def _scan_ports(self, hostname: str, default_port: Optional[int] = None, timeout: float = 1.0) -> List[int]:
-        """Scan common ports on target hostname"""
+    def _scan_ports(
+        self,
+        hostname: str,
+        default_port: Optional[int] = None,
+        timeout: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Scan common ports on target hostname and infer basic host responsiveness."""
         common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 389, 443, 445, 636, 993, 995, 2123, 2152, 3306, 3389, 3868, 5432, 5900, 8080, 8443, 8805, 2222]
-        
+
         # If default_port specified, prioritize it
         if default_port and default_port not in common_ports:
             common_ports.insert(0, default_port)
-        
-        open_ports = []
-        
-        def check_port(port):
+
+        try:
+            socket.getaddrinfo(hostname, None)
+        except socket.gaierror as exc:
+            return {
+                "open_ports": [],
+                "host_responsive": False,
+                "resolution_error": str(exc),
+            }
+
+        open_ports: List[int] = []
+        responded = {"value": False}
+        lock = threading.Lock()
+
+        refused_codes = {
+            getattr(errno, "ECONNREFUSED", 111),
+            61,     # macOS fallback
+            10061,  # Windows fallback
+        }
+
+        def check_port(port: int) -> Tuple[bool, bool]:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(timeout)
                 result = sock.connect_ex((hostname, port))
                 sock.close()
-                return result == 0
+                is_open = result == 0
+                # Connection refused means host responded, even if port is closed.
+                host_responded = is_open or result in refused_codes
+                return is_open, host_responded
             except:
-                return False
-        
+                return False, False
+
         # Quick scan with threading
         with ThreadPoolExecutor(max_workers=20) as executor:
             futures = {executor.submit(check_port, port): port for port in common_ports}
             for future in as_completed(futures):
                 port = futures[future]
-                if future.result():
+                is_open, host_responded = future.result()
+                if is_open:
                     open_ports.append(port)
-        
-        return sorted(open_ports)
+                if host_responded:
+                    with lock:
+                        responded["value"] = True
+
+        return {
+            "open_ports": sorted(open_ports),
+            "host_responsive": responded["value"],
+            "resolution_error": None,
+        }
     
     def _discover_modules(self) -> List[Dict[str, Any]]:
         """Discover all scanner modules"""
@@ -495,6 +565,63 @@ Examples:
         
         return sorted(modules, key=lambda x: x['path'])
     
+    def _choose_port_for_module(self, module_path: str, target_info: Dict[str, Any]) -> int:
+        """
+        Choose the most appropriate port for a scanner module.
+
+        Before this, modules were filtered by detected ports but all of them were still
+        executed against ``target_info['port']`` (often 80 by default), which breaks
+        non-HTTP scanners like MySQL/Redis/SMB.
+        """
+        open_ports = target_info.get('open_ports') or []
+        configured_port = target_info.get('port')
+        if not open_ports:
+            return configured_port
+
+        parts = (module_path or "").split("/")
+        family = parts[1] if len(parts) > 1 else ""
+
+        # If user explicitly targeted a port and it matches the module family, keep it.
+        if configured_port in open_ports:
+            proto = self._port_to_protocol(configured_port)
+            if proto == family:
+                return configured_port
+            if family in ("http", "cloud") and configured_port in (80, 443, 8080, 8443, 8000, 8888):
+                return configured_port
+
+        if family in ("http", "cloud"):
+            preferred = [80, 443, 8080, 8443, 8000, 8888]
+        elif family == "mysql":
+            preferred = [3306]
+        elif family == "redis":
+            preferred = [6379]
+        elif family == "smb":
+            preferred = [445, 139]
+        elif family == "ldap":
+            preferred = [389, 636]
+        elif family == "telecom":
+            preferred = [3868, 2123, 2152, 8805, 8080, 8443, 80, 443]
+        elif family == "ftp":
+            preferred = [21, 2121]
+        elif family == "ssh":
+            preferred = [22, 2222]
+        else:
+            preferred = []
+
+        for port in preferred:
+            if port in open_ports:
+                return port
+
+        # Fallback: first open port whose inferred protocol matches the module family.
+        for port in open_ports:
+            proto = self._port_to_protocol(port)
+            if proto == family:
+                return port
+            if family in ("http", "cloud") and port in (80, 443, 8080, 8443, 8000, 8888):
+                return port
+
+        return configured_port
+
     def _execute_modules(self, modules: List[Dict], target_info: Dict[str, Any], threads: int, verbose: bool) -> List[Dict]:
         """Execute scanner modules against target"""
         results = []
@@ -529,8 +656,8 @@ Examples:
 
                     # Set target options
                     hostname = target_info['hostname']
-                    port = target_info['port']
-                    scheme = target_info['scheme']
+                    port = self._choose_port_for_module(module_path, target_info)
+                    scheme = 'https' if port == 443 else 'http'
 
                     # Set target (hostname or full URL) using set_option
                     if hasattr(module_instance, 'target'):
@@ -665,7 +792,7 @@ Examples:
                 if 'version' in result:
                     print_info(f"    Version: {result['version']}")
                 if result.get('severity'):
-                    print_info(f"    Severity: {result['severity']}")
+                    print_info(f"    Severity: {self._format_severity(result['severity'])}")
                 if result['details']:
                     for key, value in result['details'].items():
                         print_info(f"    {key}: {value}")

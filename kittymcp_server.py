@@ -19,7 +19,10 @@ Cursor example (`~/.cursor/mcp.json`). Prefer secrets in `env`, not in `args`:
       ],
       "env": {
         "KITTYSPLOIT_MASTER_KEY": "your-master-password",
-        "KITTYSPLOIT_MCP_ACCEPT_CHARTER": "1"
+        "KITTYSPLOIT_MCP_ACCEPT_CHARTER": "1",
+        "KITTYMCP_OLLAMA_ENABLED": "1",
+        "KITTYMCP_OLLAMA_MODEL": "llama3.1:8b",
+        "KITTYMCP_OLLAMA_ENDPOINT": "http://127.0.0.1:11434/api/chat"
       }
     }
 
@@ -76,6 +79,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Non-interactive: record Terms of Use acceptance (stdio / automation). Or set KITTYSPLOIT_MCP_ACCEPT_CHARTER=1.",
     )
+    p.add_argument(
+        "--ollama",
+        action="store_true",
+        help="Enable Ollama-assisted natural-language planning (or set KITTYMCP_OLLAMA_ENABLED=1).",
+    )
+    p.add_argument(
+        "--ollama-endpoint",
+        help="Ollama-compatible chat endpoint (or set KITTYMCP_OLLAMA_ENDPOINT).",
+    )
+    p.add_argument(
+        "--ollama-model",
+        help="Ollama model name for natural-language planning (or set KITTYMCP_OLLAMA_MODEL).",
+    )
+    p.add_argument(
+        "--ollama-timeout",
+        type=int,
+        help="Timeout in seconds for Ollama requests (or set KITTYMCP_OLLAMA_TIMEOUT).",
+    )
     p.add_argument("-d", "--debug", action="store_true", help="Enable debug logging")
     return p.parse_args()
 
@@ -90,9 +111,21 @@ def _resolve_master_key(args: argparse.Namespace) -> Optional[str]:
     return os.environ.get("KITTYSPLOIT_MASTER_KEY") or None
 
 
+def _configure_ollama_env(args: argparse.Namespace) -> None:
+    if args.ollama:
+        os.environ["KITTYMCP_OLLAMA_ENABLED"] = "1"
+    if args.ollama_endpoint:
+        os.environ["KITTYMCP_OLLAMA_ENDPOINT"] = args.ollama_endpoint
+    if args.ollama_model:
+        os.environ["KITTYMCP_OLLAMA_MODEL"] = args.ollama_model
+    if args.ollama_timeout is not None:
+        os.environ["KITTYMCP_OLLAMA_TIMEOUT"] = str(args.ollama_timeout)
+
+
 def main() -> int:
     args = parse_args()
     setup_logging(args.debug)
+    _configure_ollama_env(args)
 
     real_stdout = sys.stdout
     use_stdio_mcp = args.transport == "stdio"

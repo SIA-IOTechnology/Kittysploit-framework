@@ -3,9 +3,8 @@
 """
 KittySploit MCP (Model Context Protocol) server.
 
-Exposes structured tools so LLMs can drive the framework via explicit calls (list modules,
-read options, run). Natural-language requests are interpreted by the model, which maps
-them to tools and parameters.
+Exposes structured tools so LLMs can drive the framework via explicit calls, native
+framework commands, and a natural-language planning layer.
 """
 
 from __future__ import annotations
@@ -15,11 +14,11 @@ import functools
 import json
 import logging
 import sys
-import time
 from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar
 
 from mcp.server.fastmcp import FastMCP
 
+from interfaces.mcp_kittysploit_bridge import MCPCommandBridge, NaturalLanguagePlanner
 from interfaces.rpc_server import RpcServer
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,12 @@ KittySploit MCP — remote control for the penetration testing framework.
 
 Rules:
 - Use only against systems and networks you are explicitly authorized to test.
-- Typical flow: search or list a module → read its options → set RHOST/target/port/etc. → run → poll logs with the returned client_id.
+- For free-form user requests, start with `ks_plan_natural_request` to extract intent,
+  targets, module candidates, and native command/tool suggestions.
+- Typical flow: search or plan → inspect a module → set RHOST/target/port/etc. → run →
+  poll logs with the returned client_id.
+- `ks_execute_command` can drive the framework through its native CLI commands when that
+  is more natural than raw module RPC calls.
 - The "discreet" operation profile adjusts common options (timeout, threads, verbose) when they exist on the module.
 - The interpreter tool runs Python inside KittySploit's context — use with extreme care.
 """
@@ -151,105 +155,89 @@ def create_mcp_server(
     )
 
     safe = _stdio_safe(stdio_transport)
-    module_cache: Dict[str, Any] = {"expires_at": 0.0, "data": None}
+    command_bridge = MCPCommandBridge(rpc.framework)
+    natural_bridge = NaturalLanguagePlanner(rpc.framework, command_bridge=command_bridge)
     module_info_cache: Dict[str, Dict[str, Any]] = {}
     module_options_cache: Dict[str, Dict[str, Any]] = {}
-    cache_ttl = 20.0
 
     def _invalidate_module_caches() -> None:
-        module_cache["expires_at"] = 0.0
-        module_cache["data"] = None
+        natural_bridge.invalidate_caches()
         module_info_cache.clear()
         module_options_cache.clear()
-
-    def _get_modules_cached() -> Dict[str, Any]:
-        now = time.monotonic()
-        if module_cache["data"] is not None and now < float(module_cache["expires_at"]):
-            cached = module_cache["data"]
-            return cached if isinstance(cached, dict) else {}
-        all_modules = rpc.get_modules()
-        if not isinstance(all_modules, dict):
-            return {}
-        module_cache["data"] = all_modules
-        module_cache["expires_at"] = now + cache_ttl
-        return all_modules
 
     @mcp.tool()
     @safe
     def ks_health() -> Dict[str, Any]:
         """Framework status and capabilities (interpreter, runtime kernel)."""
-        return _safe_json(rpc.health())
+        raw_health = rpc.health()
+        health = dict(raw_health) if isinstance(raw_health, dict) else {"raw": raw_health}
+        health["state"] = command_bridge.get_state()
+        return _safe_json(health)
+
+    @mcp.tool()
+    @safe
+    def ks_framework_state() -> Dict[str, Any]:
+        """Current workspace, current module, and session counters."""
+        return _safe_json(command_bridge.get_state())
+
+    @mcp.tool()
+    @safe
+    def ks_ollama_status() -> Dict[str, Any]:
+        """Show whether Ollama-assisted planning is enabled for kittymcp."""
+        return _safe_json(natural_bridge.ollama_status())
 
     @mcp.tool()
     @safe
     def ks_list_modules(query: Optional[str] = None, limit: int = 200) -> Dict[str, Any]:
         """
-        List available modules with name and description.
-        Optional `query` filters by substring (case-insensitive) on path, name, or description.
+        Ranked module search.
+
+        When `query` is provided, this uses the natural-language planner to score modules from
+        path/name/description/tags/type hints instead of a raw substring filter.
         """
-        all_modules = _get_modules_cached()
-        if not isinstance(all_modules, dict):
-            return {"error": "get_modules_failed", "raw": str(all_modules)}
-
-        q = (query or "").strip().lower()
-        items: List[Dict[str, Any]] = []
-        for path, meta in all_modules.items():
-            if not isinstance(meta, dict):
-                meta = {"name": path, "description": ""}
-            name = str(meta.get("name", path))
-            desc = str(meta.get("description", ""))
-            if q:
-                blob = f"{path} {name} {desc}".lower()
-                if q not in blob:
-                    continue
-            items.append({"path": path, "name": name, "description": desc})
-            if len(items) >= max(1, min(limit, 500)):
-                break
-
-        return {"count": len(items), "modules": items}
+        if query and query.strip():
+            return _safe_json(
+                natural_bridge.search_modules(
+                    query,
+                    max_candidates=max(1, min(limit, 500)),
+                )
+            )
+        return _safe_json(
+            natural_bridge.list_modules(limit=max(1, min(limit, 500)))
+        )
 
     @mcp.tool()
     @safe
     def ks_get_module_info(module_path: str) -> Dict[str, Any]:
-        """Module metadata and options (path e.g. 'scanner/http/wordpress_detect')."""
+        """Rich module metadata with normalized options and inferred option hints."""
         if module_path in module_info_cache:
             return _safe_json(module_info_cache[module_path])
-        module = rpc.framework.module_loader.load_module(module_path)
-        if not module:
-            return {"error": "Module not found", "module_path": module_path}
-        if hasattr(module, "get_info"):
-            info = _safe_json(module.get_info())
-            if isinstance(info, dict):
-                module_info_cache[module_path] = info
-            return info
-        info = {
-            "name": getattr(module, "name", module_path),
-            "description": getattr(module, "description", ""),
-            "options": getattr(module, "exploit_attributes", {}),
-        }
-        module_info_cache[module_path] = info
-        return info
+        info = natural_bridge.get_module_details(module_path)
+        if isinstance(info, dict) and "error" not in info:
+            module_info_cache[module_path] = info
+        return _safe_json(info)
 
     @mcp.tool()
     @safe
     def ks_get_module_options(module_path: str) -> Dict[str, Any]:
-        """Module option schema (names, defaults, required flags, descriptions)."""
+        """Normalized module option schema with required/missing sets and semantic roles."""
         if module_path in module_options_cache:
             return _safe_json(module_options_cache[module_path])
-        module = rpc.framework.module_loader.load_module(module_path)
-        if not module:
-            return {"error": "Module not found", "module_path": module_path}
-        opts = getattr(module, "get_options", lambda: {})()
-        data = _safe_json(
-            {
-                "name": getattr(module, "name", module_path),
-                "module_path": module_path,
-                "options": opts,
-            }
-        )
+        details = natural_bridge.get_module_details(module_path)
+        if "error" in details:
+            return _safe_json(details)
+        data = {
+            "module_path": details.get("module_path"),
+            "name": details.get("name"),
+            "type": details.get("type"),
+            "options": details.get("options"),
+            "required_options": details.get("required_options"),
+            "missing_options": details.get("missing_options"),
+            "option_hints": details.get("option_hints"),
+        }
         if isinstance(data, dict):
             module_options_cache[module_path] = data
-        return data
+        return _safe_json(data)
 
     @mcp.tool()
     @safe
@@ -269,7 +257,6 @@ def create_mcp_server(
         merged = _merge_operation_profile(rpc, module_path, options, operation_profile)
         result = rpc.run_module(module_path, merged, use_runtime_kernel=use_runtime_kernel)
         out = _safe_json(result)
-        # Running modules can modify framework state/options; keep caches fresh.
         _invalidate_module_caches()
         if isinstance(out, dict) and operation_profile:
             out["resolved_options"] = merged
@@ -295,15 +282,102 @@ def create_mcp_server(
 
     @mcp.tool()
     @safe
+    def ks_list_commands() -> Dict[str, Any]:
+        """List native framework commands with usage, help text, and safety classification."""
+        return _safe_json(command_bridge.list_commands())
+
+    @mcp.tool()
+    @safe
+    def ks_get_command_help(command_name: str) -> Dict[str, Any]:
+        """Detailed help for a native framework command."""
+        return _safe_json(command_bridge.get_command_help(command_name))
+
+    @mcp.tool()
+    @safe
+    def ks_execute_command(command_line: str, allow_dangerous: bool = False) -> Dict[str, Any]:
+        """
+        Execute a native KittySploit command line.
+
+        Dangerous or interactive commands are blocked unless `allow_dangerous=true`, and some
+        interactive commands stay blocked entirely from MCP.
+        """
+        result = command_bridge.execute_command(
+            command_line,
+            allow_dangerous=allow_dangerous,
+        )
+        if result.get("status") in ("ok", "failed"):
+            _invalidate_module_caches()
+        return _safe_json(result)
+
+    @mcp.tool()
+    @safe
+    def ks_plan_natural_request(
+        request: str,
+        execute_safe_command: bool = False,
+        max_candidates: int = 6,
+        prefer_ollama: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Parse a free-form user request into intent, target, ranked modules, native commands,
+        and recommended MCP tool calls.
+        """
+        result = natural_bridge.plan_request(
+            request,
+            max_candidates=max_candidates,
+            execute_safe_command=execute_safe_command,
+            prefer_ollama=prefer_ollama,
+        )
+        if result.get("executed_command"):
+            _invalidate_module_caches()
+        return _safe_json(result)
+
+    @mcp.tool()
+    @safe
+    def ks_execute_natural_request(
+        request: str,
+        allow_dangerous: bool = False,
+        prefer_ollama: bool = True,
+        dry_run: bool = False,
+        max_candidates: int = 6,
+    ) -> Dict[str, Any]:
+        """
+        Translate a natural-language request into KittySploit commands, then optionally
+        execute the first recommended command.
+        """
+        result = natural_bridge.plan_request(
+            request,
+            max_candidates=max_candidates,
+            execute_recommended=not dry_run,
+            allow_dangerous=allow_dangerous,
+            prefer_ollama=prefer_ollama,
+        )
+        if result.get("executed_command"):
+            _invalidate_module_caches()
+        return _safe_json(result)
+
+    @mcp.tool()
+    @safe
     def ks_list_workspaces() -> Any:
-        """List framework workspaces."""
-        return _safe_json(rpc.list_workspaces())
+        """List framework workspaces and identify the current one."""
+        return _safe_json(
+            {
+                "current": command_bridge.get_state().get("workspace"),
+                "workspaces": rpc.list_workspaces(),
+            }
+        )
 
     @mcp.tool()
     @safe
     def ks_switch_workspace(name: str) -> Any:
         """Switch the active workspace."""
-        return _safe_json(rpc.switch_workspace(name))
+        result = rpc.switch_workspace(name)
+        _invalidate_module_caches()
+        return _safe_json(
+            {
+                "result": result,
+                "current": command_bridge.get_state().get("workspace"),
+            }
+        )
 
     return mcp
 

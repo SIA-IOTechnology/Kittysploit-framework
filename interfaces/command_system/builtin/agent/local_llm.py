@@ -15,20 +15,15 @@ class LocalLLMService:
     def __init__(self) -> None:
         self.last_error: Optional[str] = None
 
-    def query_local_llm(
-        self, endpoint: str, model: str, payload: Dict[str, Any], timeout: int = 20
+    def query_json(
+        self,
+        endpoint: str,
+        model: str,
+        instruction: str,
+        payload: Dict[str, Any],
+        timeout: int = 20,
     ) -> Optional[Dict[str, Any]]:
         self.last_error = None
-        instruction = (
-            "You are a pentest planning assistant. "
-            "Reply ONLY a valid JSON object. "
-            "Required keys: selected_paths (array), rationale (string). "
-            "Optional keys: next_actions (array of {type,path,priority,options}), "
-            "max_requests_next_phase (int), stop_conditions (array), reasoning_confidence (0..1)."
-            "Allowed next_actions.type values: prioritize, run_followup, run_exploit, skip. "
-            "Use run_followup when manual verification is needed for potential vulnerabilities."
-        )
-
         fallback_endpoint = endpoint
         if endpoint.endswith("/api/chat"):
             fallback_endpoint = endpoint.replace("/api/chat", "/api/generate")
@@ -128,3 +123,23 @@ class LocalLLMService:
                 continue
 
         return None
+
+    def query_local_llm(
+        self, endpoint: str, model: str, payload: Dict[str, Any], timeout: int = 20
+    ) -> Optional[Dict[str, Any]]:
+        instruction = (
+            "You are a pentest planning assistant. "
+            "Reply ONLY a valid JSON object. "
+            "Required keys: selected_paths (array), rationale (string). "
+            "Optional keys: next_actions (array of {type,path,priority,options}), "
+            "max_requests_next_phase (int), stop_conditions (array), reasoning_confidence (0..1)."
+            "Allowed next_actions.type values: prioritize, run_followup, run_exploit, skip. "
+            "Use run_followup when manual verification is needed for potential vulnerabilities."
+        )
+        return self.query_json(
+            endpoint=endpoint,
+            model=model,
+            instruction=instruction,
+            payload=payload,
+            timeout=timeout,
+        )

@@ -71,7 +71,7 @@ class Scanner(BaseModule):
             return self._detector_cache[name]
         
         # Liste des protocoles à chercher (dans l'ordre de priorité)
-        protocols = ['http', 'ftp', 'ssh', 'router', 'smtp', 'dns', 'ldap']  # Extensible
+        protocols = ['http', 'ftp', 'ssh', 'router', 'smtp', 'dns', 'ldap', 'redis', 'mysql']  # Extensible
         
         # Extraire le nom du détecteur (enlever le préfixe "if_")
         if name.startswith('if_'):

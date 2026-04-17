@@ -137,7 +137,7 @@ python kittyconsole.py
 
 ### KittyProxy Web Interface
 ![KittyProxy](docs/screenshots/kittyproxy-1.png)
-*Analyse technologies, endpoints,...*
+*Analyze technologies, endpoints, and more*
 
 ![KittyProxy](docs/screenshots/kittyproxy-2.png)
 *AI-powered web proxy with real-time collaboration*
@@ -148,11 +148,11 @@ python kittyconsole.py
 
 ### KittyOsint
 ![KittyOsint](docs/screenshots/kittyosint.png)
-*Osint - Intelligent graph mapping*
+*OSINT — intelligent graph mapping*
 
 ### Module Marketplace
 ![Marketplace](docs/screenshots/marketplace.png)
-*Interface for kittysploit framework available on a marketplace*
+*KittySploit module marketplace*
 
 </div>
 
@@ -231,6 +231,87 @@ python kittyapi.py -H 0.0.0.0 -p 5000 -m "master_key"
 **RPC Server:**
 ```bash
 python kittyrpc.py -H 0.0.0.0 -p 8888 -m "master_key"
+```
+
+### Autonomous agent
+
+The built-in **agent** command runs an autonomous reconnaissance, scanning, optional exploitation, and reporting workflow against a target. It uses the module catalog and can optionally call a **local LLM** (Ollama-compatible) to plan which modules to run next.
+
+**From an installed `kittysploit` command:**
+```bash
+kittysploit agent example.com
+kittysploit agent https://example.com --threads 10
+kittysploit agent example.com --protocol http
+kittysploit agent example.com --no-exploit
+```
+
+**From a source checkout:**
+```bash
+python kittyconsole.py agent example.com
+```
+
+**Local LLM-assisted planning** (default chat endpoint `http://127.0.0.1:11434/api/chat`):
+```bash
+kittysploit agent example.com --llm-local --llm-model llama3.1:8b
+kittysploit agent example.com --llm-local --llm-model llama3.1:8b --llm-endpoint http://127.0.0.1:11434/api/chat
+```
+
+**Tune catalog breadth:**
+```bash
+kittysploit agent example.com --max-modules 40 --recon-modules 12
+```
+
+When the run finishes successfully, a report path is printed (under `reports/agent/` by default). If new sessions were opened, the agent may drop you into an interactive session on the most recent one.
+
+Use `kittysploit agent -h` (or `agent` with no target inside the console) for the full usage text.
+
+### Natural Language Client
+
+`kittymcp_client.py` lets you control KittySploit in natural language without using an external MCP client.
+
+**Interactive mode:**
+```bash
+python3 kittymcp_client.py \
+  --master-key "master_key" \
+  --accept-charter \
+  --ollama \
+  --ollama-model mistral:7b-instruct-q4_0
+```
+
+Then type requests directly:
+```text
+kittymcp> search for a WordPress module
+kittymcp> explain the KittySploit framework
+kittymcp> /run use a WordPress module and show the options
+```
+
+**One-shot mode:**
+```bash
+python3 kittymcp_client.py \
+  --master-key "master_key" \
+  --accept-charter \
+  --ollama \
+  --ollama-model mistral:7b-instruct-q4_0 \
+  "search for a WordPress module"
+```
+
+**Plan and execute the first recommended command:**
+```bash
+python3 kittymcp_client.py \
+  --master-key "master_key" \
+  --accept-charter \
+  --ollama \
+  --ollama-model mistral:7b-instruct-q4_0 \
+  --run \
+  "use a WordPress module and prepare the scan"
+```
+
+If you prefer using environment variables:
+```bash
+export KITTYSPLOIT_MASTER_KEY="master_key"
+export KITTYMCP_OLLAMA_ENABLED=1
+export KITTYMCP_OLLAMA_MODEL="mistral:7b-instruct-q4_0"
+python3 kittymcp_client.py
 ```
 
 ### Start Components

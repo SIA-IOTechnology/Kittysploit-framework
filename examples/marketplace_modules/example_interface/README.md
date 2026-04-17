@@ -11,13 +11,17 @@ This module demonstrates how to create a user interface compatible with the Kitt
 - Access extension resources
 - Configure a web interface
 
+This example interface is meant to be installed from the KittySploit marketplace, not copied manually into the project root.
+
 ## Installation
+
+Install it directly from the KittySploit console:
 
 ```bash
 kittysploit> market install example-web-ui
 ```
 
-After installation, a launcher is automatically created at the project root:
+The marketplace installer downloads the interface into `extensions/example-web-ui/latest/` and automatically creates a launcher at the project root:
 ```
 launch_example_web_ui.py
 ```
@@ -25,6 +29,8 @@ launch_example_web_ui.py
 ## Usage
 
 ### Launch the interface
+
+Once the interface has been installed from the market, start it with the generated launcher:
 
 ```bash
 python launch_example_web_ui.py

@@ -510,4 +510,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   <strong>Made with ❤️ by the KittySploit Team</strong>
   
   [🌐 Website](https://kittysploit.com)
+  
+  [![Donate using Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/KittySploit/donate)
 </div>

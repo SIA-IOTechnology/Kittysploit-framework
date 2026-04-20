@@ -44,7 +44,7 @@ KittySploit is a **next-generation penetration testing framework** that combines
 
 ## Quick Start
 
-### Installation (30 seconds)
+### Installation
 
 **One-line install (Linux / macOS) — clone + install in one command:**
 ```bash

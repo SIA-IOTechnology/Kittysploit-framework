@@ -11,6 +11,7 @@
   [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
   [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
   [![Version](https://img.shields.io/badge/Version-1.0.2-orange.svg)](https://github.com/your-username/kittysploit-framework)
+  [![Donate using Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/KittySploit/donate)
   
   *Modular • Extensible • Powerful*
   

@@ -140,11 +140,21 @@ Examples:
         """Execute the market command"""
         try:
             if not args:
-                # If no arguments and no account, prompt for registration/login
-                if not self.api_key:
+                # If no arguments and no account, prompt for registration/login.
+                # A valid session can come from either legacy api_key or Bearer token.
+                if not self.token and not self.api_key:
                     self._prompt_account_setup()
-                self.parser.print_help()
-                return True
+                    self.parser.print_help()
+                    return True
+
+                # When already authenticated, "market" should directly show modules.
+                parsed_args = argparse.Namespace(
+                    action='list',
+                    category=None,
+                    page=1,
+                    limit=20,
+                )
+                return self._browse_modules(parsed_args)
             
             parsed_args = self.parser.parse_args(args)
             

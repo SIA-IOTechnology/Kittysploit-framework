@@ -192,6 +192,7 @@ def infer_module_type_from_path(module_path: str) -> str:
     """Map filesystem path prefix to a module type string (aligned with DB / filters)."""
     path = (module_path or "").lower()
     ordered = (
+        ("analysis/", "auxiliary"),
         ("auxiliary/scanner/", "auxiliary"),
         ("auxiliary/", "auxiliary"),
         ("browser_exploits/", "browser_exploits"),

@@ -433,6 +433,7 @@ class ModuleSyncManager:
         
         # Module path prefixes mapping (must match valid types in CHECK constraint)
         type_mapping = {
+            'analysis/': 'auxiliary',
             'exploits/': 'exploits',
             'auxiliary/': 'auxiliary',
             'scanner/': 'scanner',  # Some scanners are in auxiliary/scanner/ but standalone scanner/ exists

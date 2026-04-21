@@ -29,12 +29,12 @@ While traditional tools struggle with modern web architectures and automated def
 
 ## Key Features
 
-- ** Autonomous Agent**: Feed a target, and the AI handles reconnaissance and suggests exploitation paths.
-- ** Ultra-Fast Core**: Dependency-free x64 polymorphic encoders and a high-performance Python core.
-- ** Evasion-First**: Advanced obfuscation and multi-protocol session handling to bypass modern EDR/WAF.
-- ** KittyProxy**: Intelligent web proxy that auto-discovers REST APIs, GraphQL, and WebSockets.
-- ** Modern Web UI**: Beautiful and intuitive graphical interfaces for proxy analysis and collaborative editing.
-- ** Marketplace**: Easily install or share new modules through our community-driven marketplace.
+- **Autonomous Agent**: Feed a target, and the AI handles reconnaissance and suggests exploitation paths.
+- **Ultra-Fast Core**: Dependency-free x64 polymorphic encoders and a high-performance Python core.
+- **Evasion-First**: Advanced obfuscation and multi-protocol session handling to bypass modern EDR/WAF.
+- **KittyProxy**: Intelligent web proxy that auto-discovers REST APIs, GraphQL, and WebSockets.
+- **Modern Web UI**: Beautiful and intuitive graphical interfaces for proxy analysis and collaborative editing.
+- **Marketplace**: Easily install or share new modules through our community-driven marketplace.
 
 ---
 

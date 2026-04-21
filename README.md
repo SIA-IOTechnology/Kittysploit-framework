@@ -17,17 +17,17 @@
 
 ---
 
-## ⚡ Why KittySploit?
+## Why KittySploit?
 
 While traditional tools struggle with modern web architectures and automated defense, KittySploit redefines the offensive landscape with cutting-edge tech:
 
-| 🧠 **Autonomous AI** | 🛠️ **Zig Payloads** | 👥 **Live Collab** | 🌐 **Smart Proxy** |
+| **Autonomous AI** | **Zig Payloads** | **Live Collab** | **Smart Proxy** |
 | :--- | :--- | :--- | :--- |
 | AI agents that plan attacks via local LLMs (Ollama). | Stealthy payloads compiled with integrated Zig 0.16. | Real-time shared editor for seamless team operations. | Auto-detects tech and runs modules directly from traffic. |
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - ** Autonomous Agent**: Feed a target, and the AI handles reconnaissance and suggests exploitation paths.
 - ** Ultra-Fast Core**: Dependency-free x64 polymorphic encoders and a high-performance Python core.
@@ -38,7 +38,7 @@ While traditional tools struggle with modern web architectures and automated def
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 <div align="center">
   <img src="docs/screenshots/banner.png" alt="Banner" width="100%">
@@ -50,7 +50,7 @@ While traditional tools struggle with modern web architectures and automated def
     </tr>
     <tr>
       <td align="center"><i>Interactive CLI</i></td>
-      <td align="center"><i>AI-Powered Proxy</i></td>
+      <td align="center"><i>Traffic Analysis Detail</i></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/kittycollab.png" alt="KittyCollab"></td>
@@ -65,15 +65,15 @@ While traditional tools struggle with modern web architectures and automated def
       <td width="50%"><img src="docs/screenshots/kittyproxy-2.png" alt="KittyProxy Detail"></td>
     </tr>
     <tr>
-      <td align="center"><i>Module Marketplace</i></td>
-      <td align="center"><i>Traffic Analysis Detail</i></td>
+      <td align="center"><i>GUI interface</i></td>
+      <td align="center"><i>AI-Powered Proxy</i></td>
     </tr>
   </table>
 </div>
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 **Linux / macOS One-Liner:**
 ```bash
@@ -96,7 +96,7 @@ python kittyproxy.py  # Accessible at http://localhost:8000
 
 ---
 
-## 🤖 Example: AI-Assisted Planning
+## Example: AI-Assisted Planning
 
 Let the framework plan your attack using a local LLM:
 
@@ -107,7 +107,7 @@ kittysploit agent target.com --llm-local --llm-model llama3.1:8b
 
 ---
 
-## 📊 How We Compare
+## How We Compare
 
 | Feature | KittySploit | Metasploit | Cobalt Strike |
 | :--- | :---: | :---: | :---: |

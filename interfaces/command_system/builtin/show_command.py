@@ -142,6 +142,26 @@ Examples:
     def execute(self, args, **kwargs) -> bool:
         """Execute the show command"""
         show_type = args[0] if args else "info"
+
+        plugin_manager = getattr(self.framework, 'plugin_manager', None)
+        metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+        if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+            show_map = {
+                "options": "show options",
+                "advanced": "show advanced",
+                "payload": "show payloads",
+                "payloads": "show payloads",
+            }
+            lowered_show = show_type.lower()
+            if lowered_show == "info":
+                module_name = args[1] if len(args) > 1 else None
+                metasploit_plugin.msf_info(module_name)
+                return True
+            if lowered_show in ("exploit", "exploits", "aux", "auxiliary", "payload", "payloads"):
+                return self._show_federated_modules(lowered_show, metasploit_plugin)
+            command = show_map.get(lowered_show)
+            if command:
+                return metasploit_plugin.msf_show(command)
         
         try:
             show_type = show_type.lower()
@@ -486,6 +506,30 @@ Examples:
         
         heading = f"{label} modules ({len(modules)})"
         self._print_module_table(modules, heading, include_type=False)
+
+    def _show_federated_modules(self, show_type: str, metasploit_plugin) -> bool:
+        module_type_map = {
+            "exploit": ("Exploit", "exploit"),
+            "exploits": ("Exploit", "exploit"),
+            "aux": ("Auxiliary", "auxiliary"),
+            "auxiliary": ("Auxiliary", "auxiliary"),
+            "payload": ("Payload", "payload"),
+            "payloads": ("Payload", "payload"),
+        }
+        label, normalized_type = module_type_map[show_type]
+        kitty_modules = self._get_modules(normalized_type)
+        msf_modules = metasploit_plugin.get_cached_msf_modules(normalized_type)
+
+        if not kitty_modules and not msf_modules:
+            print_info(f"No {label.lower()} modules found")
+            return True
+
+        if kitty_modules:
+            self._print_module_table(kitty_modules, f"KittySploit {label} modules ({len(kitty_modules)})", include_type=False)
+            print_empty()
+        if msf_modules:
+            self._print_module_table(msf_modules, f"Metasploit {label} modules ({len(msf_modules)})", include_type=False)
+        return True
     
     def _get_modules(self, module_type: str = None):
         """Retrieve modules from DB or filesystem with optional type filtering"""

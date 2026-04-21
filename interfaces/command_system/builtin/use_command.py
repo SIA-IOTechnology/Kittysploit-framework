@@ -50,6 +50,11 @@ Examples:
             print_error("Usage: use <module_path>")
             print_info("Use 'search' to find available modules")
             return False
+
+        plugin_manager = getattr(self.framework, 'plugin_manager', None)
+        metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+        if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+            return metasploit_plugin.msf_use(args[0])
         
         module_path = args[0]
         

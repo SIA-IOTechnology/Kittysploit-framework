@@ -144,6 +144,17 @@ Session Types:
             print_info(f"\nTotal: {len(standard_sessions) + len(browser_sessions)} sessions")
             print_info("Use 'sessions access <id>' to interact with a session")
             print_info("Use 'sessions kill <id>' to terminate a session")
+
+            plugin_manager = getattr(self.framework, 'plugin_manager', None)
+            metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+            if metasploit_plugin and getattr(metasploit_plugin, "_console_alive", lambda: False)():
+                print_info("\n[METASPLOIT SESSIONS]")
+                print_info("-" * 80)
+                msf_output = metasploit_plugin.list_msf_sessions()
+                if not msf_output.strip():
+                    print_info("No active Metasploit sessions")
+                else:
+                    print_info("Prefix Metasploit ids with `msf:` for access/kill, e.g. `sessions access msf:1`")
             
             return True
             
@@ -159,6 +170,18 @@ Session Types:
                 return False
             
             session_manager = self.framework.session_manager
+
+            if session_id.startswith("msf:"):
+                plugin_manager = getattr(self.framework, 'plugin_manager', None)
+                metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+                if metasploit_plugin is None:
+                    print_error("Metasploit plugin not available")
+                    return False
+                target_id = session_id.split(":", 1)[1]
+                output = metasploit_plugin.access_msf_session(target_id)
+                if not output.strip():
+                    print_warning(f"No output for Metasploit session {target_id}")
+                return True
             
             # Check if it's a standard session
             standard_session = session_manager.get_session(session_id)
@@ -200,6 +223,17 @@ Session Types:
             if not hasattr(self.framework, 'shell_manager'):
                 print_error("Shell manager not available")
                 return False
+
+            if session_id.startswith("msf:"):
+                plugin_manager = getattr(self.framework, 'plugin_manager', None)
+                metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+                if metasploit_plugin is None:
+                    print_error("Metasploit plugin not available")
+                    return False
+                target_id = session_id.split(":", 1)[1]
+                print_info("Switching interaction to the integrated Metasploit console")
+                metasploit_plugin.access_msf_session(target_id)
+                return metasploit_plugin._cmd_mode([], resume_only=True)
             
             # Check if session exists
             session = self.framework.session_manager.get_session(session_id)
@@ -465,6 +499,19 @@ Session Types:
                 return False
             
             session_manager = self.framework.session_manager
+
+            if session_id.lower().startswith("msf:"):
+                plugin_manager = getattr(self.framework, 'plugin_manager', None)
+                metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+                if metasploit_plugin is None:
+                    print_error("Metasploit plugin not available")
+                    return False
+                target_id = session_id.split(":", 1)[1]
+                if metasploit_plugin.kill_msf_session(target_id):
+                    print_success(f"Metasploit session killed: {target_id}")
+                    return True
+                print_error(f"Failed to kill Metasploit session: {target_id}")
+                return False
             
             if session_id.lower() == "all":
                 return self._kill_all_sessions(session_manager)

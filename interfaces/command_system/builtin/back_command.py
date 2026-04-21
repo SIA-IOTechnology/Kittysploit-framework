@@ -41,6 +41,11 @@ Examples:
     def execute(self, args, **kwargs) -> bool:
         """Execute the back command"""
         try:
+            plugin_manager = getattr(self.framework, 'plugin_manager', None)
+            metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+            if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+                return metasploit_plugin.msf_back()
+
             # Check if we have a current module
             if hasattr(self.framework, 'current_module') and self.framework.current_module:
                 module_name = self.framework.current_module.name

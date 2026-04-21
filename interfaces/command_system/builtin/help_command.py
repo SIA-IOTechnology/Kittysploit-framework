@@ -24,7 +24,7 @@ class HelpCommand(BaseCommand):
             'workspace', 'sync', 'host', 'vuln', 'history', 'portal'
         ],
         'Sessions & Shells': [
-            'sessions', 'shell'
+            'sessions', 'shell', 'msf'
         ],
         'Docker Environments': [
             'environments'

@@ -87,6 +87,7 @@ class CommandRegistry:
             'host',
             'vuln',
             'jobs',
+            'msf',
             'check',
             'sound',
             'pattern',

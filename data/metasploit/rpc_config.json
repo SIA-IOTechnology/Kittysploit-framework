@@ -1,0 +1,10 @@
+{
+  "host": "127.0.0.1",
+  "port": 55552,
+  "username": "msf",
+  "password": "secret",
+  "use_ssl": false,
+  "verify_ssl": false,
+  "uri": "/api/",
+  "timeout": 10
+}

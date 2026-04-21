@@ -46,6 +46,12 @@ Note: This command only works when an exploit module is selected.
     def execute(self, args, **kwargs) -> bool:
         """Execute the compatible payloads command"""
         try:
+            plugin_manager = getattr(self.framework, 'plugin_manager', None)
+            metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+            if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+                if getattr(metasploit_plugin, "current_msf_module", None):
+                    return metasploit_plugin.msf_show("show payloads")
+
             # Check if an exploit is selected
             if not hasattr(self.framework, 'current_module') or not self.framework.current_module:
                 print_error("No module selected. Use 'use <exploit>' first.")
@@ -84,6 +90,7 @@ Note: This command only works when an exploit module is selected.
             if not compatible_payloads:
                 print_warning("No compatible payloads found for this exploit.")
                 self._show_compatibility_info()
+                print_info("Metasploit payloads are also available with: set payload msf/<payload_name>")
                 return True
             
             # Display compatible payloads
@@ -129,6 +136,7 @@ Note: This command only works when an exploit module is selected.
         
         print_info("")
         print_info("Use 'set payload <path>' to select a payload")
+        print_info("You can also use Metasploit payloads with: set payload msf/<payload_name>")
         print_info("Use 'compatible_payloads --detailed' for detailed information")
     
     def _show_compatibility_info(self):

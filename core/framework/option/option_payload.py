@@ -68,6 +68,16 @@ class OptPayload(Option):
         
         if not payload_path_value:
             return None
+
+        if isinstance(payload_path_value, str) and payload_path_value.startswith("msf/"):
+            if instance and hasattr(instance, 'framework') and instance.framework and hasattr(instance.framework, 'plugin_manager'):
+                metasploit_plugin = instance.framework.plugin_manager.get_plugin("metasploit")
+                if metasploit_plugin is None:
+                    instance.framework.plugin_manager.load_plugin("metasploit")
+                    metasploit_plugin = instance.framework.plugin_manager.get_plugin("metasploit")
+                if metasploit_plugin is not None:
+                    return metasploit_plugin.generate_payload_for_exploit(instance, payload_path_value)
+            raise OptionValidationError("Metasploit plugin is required to generate msf payloads")
         
         try:
             # Load payload module

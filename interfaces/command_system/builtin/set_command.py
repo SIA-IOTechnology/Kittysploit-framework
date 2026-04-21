@@ -43,6 +43,13 @@ Examples:
         if len(args) < 2:
             print_error("Usage: set <option> <value>")
             return False
+
+        plugin_manager = getattr(self.framework, 'plugin_manager', None)
+        metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+        if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+            option_name = args[0]
+            option_value = " ".join(args[1:])
+            return metasploit_plugin.msf_set(option_name, option_value)
         
         if not hasattr(self.framework, 'current_module') or not self.framework.current_module:
             print_error("No module selected. Use 'use <module>' first.")

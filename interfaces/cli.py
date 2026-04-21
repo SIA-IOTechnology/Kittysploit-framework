@@ -102,6 +102,18 @@ class CLI:
             prompt_name = framework_config.get('prompt', 'kittysploit')
         except Exception:
             prompt_name = 'kittysploit'
+
+        metasploit_suffix = ""
+        try:
+            plugin_manager = getattr(self.framework, 'plugin_manager', None)
+            if plugin_manager:
+                metasploit_plugin = plugin_manager.get_plugin("metasploit")
+                if metasploit_plugin and hasattr(metasploit_plugin, "get_prompt_suffix"):
+                    metasploit_suffix = metasploit_plugin.get_prompt_suffix()
+        except Exception:
+            metasploit_suffix = ""
+        if metasploit_suffix:
+            prompt_name = f"{prompt_name}:{metasploit_suffix}"
         
         # Get the number of active sessions (standard + browser)
         if hasattr(self.framework, 'session_manager') and self.framework.session_manager:

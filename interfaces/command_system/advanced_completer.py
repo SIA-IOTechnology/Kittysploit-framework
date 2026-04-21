@@ -126,7 +126,14 @@ class AdvancedCompleter(Completer):
             yield Completion(subcommand, start_position=-len(partial), display_meta="Subcommand")
 
     def _iter_module_completions(self, partial: str) -> Iterable[Completion]:
-        for module_path in self._filter_items(self._get_modules(), partial, limit=40):
+        suggestions = list(self._get_modules())
+        metasploit_plugin = self._get_metasploit_plugin()
+        if metasploit_plugin and getattr(metasploit_plugin, "is_integrated_mode_active", lambda: False)():
+            try:
+                suggestions.extend(metasploit_plugin.complete_msf_modules(partial))
+            except Exception:
+                pass
+        for module_path in self._filter_items(suggestions, partial, limit=40):
             yield Completion(module_path, start_position=-len(partial), display_meta="Module")
 
     def _iter_set_option_completions(self, partial: str) -> Iterable[Completion]:
@@ -150,6 +157,12 @@ class AdvancedCompleter(Completer):
             suggestions = self._local_ip_candidates()
         elif option_lower == "payload":
             suggestions = self._collect_payload_paths()
+            metasploit_plugin = self._get_metasploit_plugin()
+            if metasploit_plugin:
+                try:
+                    suggestions.extend(metasploit_plugin.complete_msf_payloads(partial))
+                except Exception:
+                    pass
         elif option_lower == "obfuscator":
             suggestions = self._collect_obfuscator_paths()
 
@@ -320,6 +333,13 @@ class AdvancedCompleter(Completer):
         except Exception:
             pass
 
+        metasploit_plugin = self._get_metasploit_plugin()
+        if metasploit_plugin:
+            try:
+                identifiers.extend(metasploit_plugin.complete_msf_session_ids())
+            except Exception:
+                pass
+
         return sorted(set(filter(None, identifiers)))
 
     def _local_ip_candidates(self) -> List[str]:
@@ -349,8 +369,17 @@ class AdvancedCompleter(Completer):
                     payload_paths.append(module_path)
         except Exception:
             pass
-        
+
         return sorted(set(filter(None, payload_paths)))
+
+    def _get_metasploit_plugin(self):
+        plugin_manager = getattr(self.framework, "plugin_manager", None)
+        if not plugin_manager:
+            return None
+        try:
+            return plugin_manager.get_plugin("metasploit")
+        except Exception:
+            return None
 
     def _collect_obfuscator_paths(self) -> List[str]:
         """Collect all available obfuscator module paths"""

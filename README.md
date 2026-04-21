@@ -1,7 +1,7 @@
 <div align="center">
   <img src="static/logo.jpg" alt="KittySploit Logo" width="160">
 
-  # 🐱 KittySploit Framework
+  # KittySploit Framework
   ### *The Next-Gen Exploitation Engine for Modern Red Teams*
 
   [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
@@ -57,12 +57,16 @@ While traditional tools struggle with modern web architectures and automated def
 
 ---
 
-## 🚀 Quick Start (30s)
+## 🚀 Quick Start
 
 **Linux / macOS One-Liner:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
 ```
+or 
+```bash
+git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && install\install.sh
+``` 
 
 **Windows:**
 ```batch

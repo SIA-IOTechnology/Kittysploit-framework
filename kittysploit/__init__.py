@@ -31,6 +31,7 @@ from core.framework import (
     Workflow,
     Scanner,
     Shortcut,
+    Analysis,
     fail)
 
 from core.framework.encoder import Encoder
@@ -110,6 +111,7 @@ __all__ = [
     'Workflow',
     'Scanner',
     'Shortcut',
+    'Analysis',
     'fail',
     'Fail',
     'ProcedureError',

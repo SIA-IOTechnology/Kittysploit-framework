@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kittysploit"
-version = "1.0.2"
+version = "1.0.4"
 description = "KittySploit - A modular penetration testing framework"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -93,7 +93,8 @@ windows = [
 kittysploit = "kittysploit.__main__:main"
 kittyproxy = "interfaces.kittyproxy.__main__:main"
 kittyosint = "interfaces.kittyosint:main"
-kittymcp = "kittymcp:main"
+kittyprotocol = "interfaces.kittyprotocol:main"
+kittymcp-server = "kittymcp_server:main"
 kittymcp-client = "kittymcp_client:main"
 
 [tool.setuptools]

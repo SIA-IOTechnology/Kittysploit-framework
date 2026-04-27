@@ -13,6 +13,7 @@ from core.framework.plugin import Plugin, ModuleArgumentParser
 from core.framework.workflow import Workflow
 from core.framework.scanner import Scanner
 from core.framework.shortcut import Shortcut
+from core.framework.analysis import Analysis
 from core.framework.failure import fail, Fail, ProcedureError, ErrorDescription
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     'Workflow',
     'Scanner',
     'Shortcut',
+    'Analysis',
     'Fail',
     'ProcedureError',
     'fail',

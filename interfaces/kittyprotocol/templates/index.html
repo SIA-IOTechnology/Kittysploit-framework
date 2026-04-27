@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KittyProtocol</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fira+Code:wght@400;500&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+</head>
+<body>
+    <aside class="sidebar" aria-label="Navigation">
+        <div class="logo-icon" title="KittyProtocol">
+            <img src="/logo.png" alt="">
+            <span class="logo-title">KittyProtocol</span>
+        </div>
+        <nav class="main-nav">
+            <button type="button" class="nav-item active" data-view="overview" data-label="Home" title="Home">
+                <span class="material-symbols-outlined" aria-hidden="true">analytics</span>
+                <span class="nav-label">Home</span>
+            </button>
+            <button type="button" class="nav-item" data-view="flows" data-label="Analysis" title="Flow and frame analysis">
+                <span class="material-symbols-outlined" aria-hidden="true">hub</span>
+                <span class="nav-label">Analysis</span>
+            </button>
+            <button type="button" class="nav-item" data-view="capture" data-label="Live" title="Live capture">
+                <span class="material-symbols-outlined" aria-hidden="true">satellite_alt</span>
+                <span class="nav-label">Live</span>
+            </button>
+            <button type="button" class="nav-item" data-view="findings" data-label="Findings" title="Findings">
+                <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+                <span class="nav-label">Findings</span>
+                <span class="nav-badge" id="navFindingCount">0</span>
+            </button>
+            <button type="button" class="nav-item" data-view="decryption" data-label="Decryption" title="Decryption inputs and status">
+                <span class="material-symbols-outlined" aria-hidden="true">vpn_key</span>
+                <span class="nav-label">Decryption</span>
+            </button>
+            <button type="button" class="nav-item" data-view="investigation" data-label="Investigation" title="Investigation">
+                <span class="material-symbols-outlined" aria-hidden="true">manage_search</span>
+                <span class="nav-label">Investigation</span>
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <button id="sidebarToggleBtn" class="nav-item nav-item-toggle" data-label="Collapse menu" type="button" title="Toggle menu">
+                <span class="material-symbols-outlined" id="sidebarToggleIcon" aria-hidden="true">menu</span>
+                <span class="nav-label">Menu</span>
+            </button>
+        </div>
+    </aside>
+
+    <div class="content-wrapper">
+        <header class="top-bar">
+            <div class="topbar-badges" role="list">
+                <span class="header-badge" role="listitem">Packets <strong id="packetCount">0</strong></span>
+                <span class="header-badge" role="listitem">Flows <strong id="flowCount">0</strong></span>
+                <span class="header-badge" role="listitem">Findings <strong id="patternCount">0</strong></span>
+            </div>
+            <div class="topbar-tools" role="search">
+                <div class="global-search">
+                    <input id="globalSearchInput" type="text" placeholder="Global search… (proto:tls risk:>=5 ip:10.0.0.5)" autocomplete="off">
+                    <div id="globalSearchResults" class="global-search-results hidden"></div>
+                </div>
+            </div>
+        </header>
+
+        <main class="view-section">
+            <!-- HOME -->
+            <section class="view-panel active" data-view-panel="overview">
+                <div class="view-scroll">
+                    <div class="home-layout">
+                        <div class="home-col">
+                        <article class="panel panel-tight">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">description</span>
+                                <div>
+                                    <h3>Analysis offline</h3>
+                                    <p>PCAP/PCAPNG path on the machine running KittyProtocol.</p>
+                                </div>
+                            </div>
+                            <div class="form-stack">
+                                <div class="field">
+                                    <label for="pcapInput">Capture file</label>
+                                    <input id="pcapInput" type="file" accept=".pcap,.pcapng,.cap,application/vnd.tcpdump.pcap,application/octet-stream">
+                                    <div id="pcapSelectedName" class="meta">No file selected.</div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field field-grow">
+                                        <label for="filterInput">Display filter (text)</label>
+                                        <input id="filterInput" type="text" placeholder="tcp, http, dns…" autocomplete="off">
+                                    </div>
+                                    <div class="field field-narrow">
+                                        <label for="maxPacketsInput">Max packets</label>
+                                        <input id="maxPacketsInput" type="number" value="2000" min="1">
+                                    </div>
+                                </div>
+                                <div class="field">
+                                    <label for="bpfInput">BPF filter (tcpdump / libpcap)</label>
+                                    <input id="bpfInput" type="text" placeholder="ex. tcp port 443 and host 10.0.0.5" autocomplete="off">
+                                </div>
+                                <label class="check" for="ftsIndexInput">
+                                    <input id="ftsIndexInput" type="checkbox">
+                                    <span>Index payloads (FTS) for full-text search</span>
+                                </label>
+                                <label class="check" for="includeRawInput">
+                                    <input id="includeRawInput" type="checkbox">
+                                    <span>Include raw excerpts in API responses</span>
+                                </label>
+                                <div class="button-row">
+                                    <button id="analyzeBtn" class="btn btn-primary" type="button">Run analysis</button>
+                                </div>
+                                <div class="button-row button-row-split">
+                                    <button id="exportJsonBtn" class="btn btn-secondary" type="button">Export JSON</button>
+                                    <button id="exportHtmlBtn" class="btn btn-secondary" type="button">Export HTML</button>
+                                </div>
+                                <div id="statusBox" class="status idle" role="status">Ready</div>
+                            </div>
+                            <details class="filter-details">
+                                <summary>Server-side filters (pagination / API)</summary>
+                                <div class="filter-grid">
+                                    <div class="field">
+                                        <label for="protocolFilterInput">Protocols</label>
+                                        <input id="protocolFilterInput" type="text" placeholder="http, dns, mqtt" autocomplete="off">
+                                    </div>
+                                    <div class="field">
+                                        <label for="severityFilterInput">Severities</label>
+                                        <input id="severityFilterInput" type="text" placeholder="high, medium, low" autocomplete="off">
+                                    </div>
+                                    <div class="field">
+                                        <label for="hostFilterInput">Host</label>
+                                        <input id="hostFilterInput" type="text" placeholder="192.168.1.10" autocomplete="off">
+                                    </div>
+                                    <div class="field">
+                                        <label for="portFilterInput">Port</label>
+                                        <input id="portFilterInput" type="number" min="1" max="65535" placeholder="443">
+                                    </div>
+                                    <div class="field field-span-2">
+                                        <label for="searchInput">Search (flows / findings)</label>
+                                        <input id="searchInput" type="text" placeholder="login, token, admin…" autocomplete="off">
+                                    </div>
+                                    <div class="field field-span-2 filter-doc-hint">
+                                        <a href="/api/docs/filters" target="_blank" rel="noopener">Docs: BPF vs display filter</a>
+                                    </div>
+                                </div>
+                            </details>
+                        </article>
+                        <article class="panel panel-tight">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">save</span>
+                                <div>
+                                    <h3>Saved sessions</h3>
+                                </div>
+                            </div>
+                            <div class="toolbar-inline">
+                                <button id="refreshRecordingsBtn" class="btn btn-secondary" type="button">Refresh</button>
+                            </div>
+                            <div id="recordingsContainer" class="scroll-cards scroll-cards--compact empty">No session.</div>
+                        </article>
+                        <article class="panel panel-tight onboarding-panel">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">school</span>
+                                <div>
+                                    <h3>Guided onboarding</h3>
+                                    <p>Fast-track path for demos and first-time analysts.</p>
+                                </div>
+                            </div>
+                            <div id="onboardingChecklist" class="onboarding-checklist empty">No onboarding data yet.</div>
+                            <div class="button-row button-row-split">
+                                <button id="onboardingStartBtn" class="btn btn-primary" type="button">Start guided mode</button>
+                                <button id="onboardingDemoBtn" class="btn btn-secondary" type="button">Load demo context</button>
+                            </div>
+                            <div class="button-row">
+                                <button id="onboardingInstantDemoBtn" class="btn btn-secondary" type="button">Run instant product demo</button>
+                            </div>
+                        </article>
+                        </div>
+                        <div class="home-col">
+                        <article class="panel panel-tight summary-panel">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">dashboard</span>
+                                <div>
+                                    <h3>Summary</h3>
+                                    <p>Server-side pagination.</p>
+                                </div>
+                            </div>
+                            <p id="datasetHint" class="dataset-hint">Run an analysis to display stats. Flow/finding pagination is handled in the Analysis and Findings tabs.</p>
+                            <div id="protocolStats" class="protocol-stats" aria-live="polite">No protocol stats.</div>
+                            <pre id="errorBox" class="error-box hidden" aria-live="assertive"></pre>
+                        </article>
+                        <article class="panel panel-tight mission-panel">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">rocket_launch</span>
+                                <div>
+                                    <h3>Mission control</h3>
+                                    <p>Prioritized actions to move from detection to decision.</p>
+                                </div>
+                            </div>
+                            <div id="missionScore" class="mission-score">No active session.</div>
+                            <div id="missionHighlights" class="mission-highlights empty">Run an analysis to generate a triage plan.</div>
+                            <div class="button-row button-row-split">
+                                <button id="missionFocusHighRiskBtn" class="btn btn-secondary" type="button">Focus high-risk flows</button>
+                                <button id="missionOpenTopFindingBtn" class="btn btn-secondary" type="button">Open top finding</button>
+                            </div>
+                            <div class="button-row button-row-split">
+                                <button id="missionJumpInvestigationBtn" class="btn btn-secondary" type="button">Open investigation</button>
+                                <button id="missionExportCaseBtn" class="btn btn-secondary" type="button">Export case bundle</button>
+                            </div>
+                            <div class="button-row button-row-split">
+                                <button id="missionCopyExecBtn" class="btn btn-secondary" type="button">Copy executive summary</button>
+                                <button id="missionExportExecBtn" class="btn btn-secondary" type="button">Export executive HTML</button>
+                            </div>
+                        </article>
+                        <article class="panel panel-tight">
+                            <div class="panel-header">
+                                <span class="material-symbols-outlined" aria-hidden="true">play_circle</span>
+                                <div>
+                                    <h3>Replay</h3>
+                                </div>
+                            </div>
+                            <div class="form-stack">
+                                <div class="field">
+                                    <label for="recordingNameInput">Recording name</label>
+                                    <input id="recordingNameInput" type="text" placeholder="session-login" autocomplete="off">
+                                </div>
+                                <div class="button-row">
+                                    <button id="saveRecordingBtn" class="btn btn-secondary" type="button">Save analysis</button>
+                                </div>
+                                <div class="field">
+                                    <label for="replayRecordingSelect">Session</label>
+                                    <select id="replayRecordingSelect"></select>
+                                </div>
+                                <div class="field">
+                                    <label for="replayFlowSelect">Flows</label>
+                                    <select id="replayFlowSelect"></select>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field field-grow">
+                                        <label for="replayDirectionSelect">Direction</label>
+                                        <select id="replayDirectionSelect">
+                                            <option value="">All</option>
+                                            <option value="request">Requests</option>
+                                            <option value="response">Responses</option>
+                                        </select>
+                                    </div>
+                                    <div class="field field-narrow">
+                                        <label for="replaySpeedInput">Speed</label>
+                                        <input id="replaySpeedInput" type="number" min="0.25" max="5" step="0.25" value="1">
+                                    </div>
+                                </div>
+                                <div class="button-row button-row-split">
+                                    <button id="loadReplayBtn" class="btn btn-secondary" type="button">Load</button>
+                                    <button id="replayNextBtn" class="btn btn-primary" type="button">Next events</button>
+                                </div>
+                                <div class="button-row button-row-split">
+                                    <button id="replayPlayBtn" class="btn btn-secondary" type="button">Play</button>
+                                    <button id="replayPauseBtn" class="btn btn-secondary" type="button">Pause</button>
+                                </div>
+                                <div id="replayStatusBox" class="status idle" role="status">Idle</div>
+                            </div>
+                            <div id="replayEventsContainer" class="scroll-cards scroll-cards--compact empty">No replay.</div>
+                        </article>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ANALYSIS: flows + inspector + frames -->
+            <section class="view-panel" data-view-panel="flows">
+                <div class="flows-workspace">
+                    <div class="flows-analysis-grid">
+                        <div class="pane pane-list">
+                            <header class="pane-header">
+                                <div>
+                                    <h3>Flows</h3>
+                                    <p class="pane-desc">Select a flow, then inspect each frame on the right.</p>
+                                </div>
+                            </header>
+                            <div class="flows-toolbar">
+                                <div id="quickFilterBar" class="quick-filter-bar" aria-label="Quick filters"></div>
+                                <div id="pinnedFlowsBar" class="pinned-flows-bar empty">No pinned flows.</div>
+                                <div class="field">
+                                    <label for="flowsQuickSearchInput">Filter list</label>
+                                    <input id="flowsQuickSearchInput" type="text" placeholder="host, protocol, preview..." autocomplete="off">
+                                </div>
+                                <div class="field-row">
+                                    <div class="field field-grow">
+                                        <label for="flowsSortSelect">Sort</label>
+                                        <select id="flowsSortSelect">
+                                            <option value="risk_desc">Risk (descending)</option>
+                                            <option value="packets_desc">Packets (descending)</option>
+                                            <option value="latest_desc">Latest seen</option>
+                                            <option value="protocol_asc">Protocol (A-Z)</option>
+                                        </select>
+                                    </div>
+                                    <div class="field field-narrow">
+                                        <label for="flowsRiskMinSelect">Risk min</label>
+                                        <select id="flowsRiskMinSelect">
+                                            <option value="all">All</option>
+                                            <option value="1">≥ 1</option>
+                                            <option value="3">≥ 3</option>
+                                            <option value="5">≥ 5</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="flowsContainer" class="scroll-cards empty">No analysis yet.</div>
+                            <div class="list-footer flows-list-footer">
+                                <button id="flowPrevBtn" class="btn btn-secondary btn-compact" type="button">Prev flow</button>
+                                <span id="flowPagerMeta" class="pager-meta">1 / 1</span>
+                                <button id="flowNextBtn" class="btn btn-secondary btn-compact" type="button">Next flows</button>
+                            </div>
+                        </div>
+                        <div id="flowGridHandle" class="grid-resizer" role="separator" aria-orientation="vertical" title="Resize panels"></div>
+                        <div class="pane pane-analyzer">
+                            <header class="pane-header pane-header--row">
+                                <div>
+                                    <h3>Analyzer</h3>
+                                    <p class="pane-desc">Scroll this column to browse everything; a single scroll area (avoids nested blocked panes).</p>
+                                </div>
+                            </header>
+                            <div id="flowCompareTray" class="compare-tray hidden"></div>
+                            <div id="flowInspector" class="analyzer-body inspector-empty" role="region" aria-label="Flow analyzer">
+                                Select a flow from the left list.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- LIVE -->
+            <section class="view-panel" data-view-panel="capture">
+                <div class="view-scroll view-scroll--tight">
+                    <article class="panel panel-tight">
+                        <div class="panel-header">
+                            <span class="material-symbols-outlined" aria-hidden="true">satellite_alt</span>
+                            <div>
+                                <h3>Live capture</h3>
+                                <p>Root or CAP_NET_RAW permissions are often required.</p>
+                            </div>
+                        </div>
+                        <div class="capture-grid">
+                            <div class="field">
+                                <label for="interfaceSelect">Interface</label>
+                                <div class="field-row field-row--iface">
+                                    <select id="interfaceSelect" class="select-grow"></select>
+                                    <button id="refreshInterfacesBtn" class="btn btn-secondary btn-icon" type="button" title="Refresh">
+                                        <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="field">
+                                <label for="liveFilterInput">Display filter</label>
+                                <input id="liveFilterInput" type="text" placeholder="tcp, http…" autocomplete="off">
+                            </div>
+                            <div class="field">
+                                <label for="liveBpfInput">BPF filter</label>
+                                <input id="liveBpfInput" type="text" placeholder="udp port 53" autocomplete="off">
+                            </div>
+                            <div class="field field-narrow">
+                                <label for="liveMaxPacketsInput">Max packets</label>
+                                <input id="liveMaxPacketsInput" type="number" value="0" min="0" title="0 = unlimited">
+                            </div>
+                        </div>
+                        <input type="hidden" id="liveProtocolFilterInput" value="">
+                        <input type="hidden" id="liveSearchInput" value="">
+                        <div class="button-row button-row-split capture-actions">
+                            <button id="startLiveBtn" class="btn btn-primary" type="button">Start</button>
+                            <button id="stopLiveBtn" class="btn btn-danger" type="button">Stop</button>
+                        </div>
+                        <div id="liveStatusBox" class="status idle" role="status">Idle</div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- FINDINGS -->
+            <section class="view-panel" data-view-panel="findings">
+                <div class="view-scroll view-scroll--flex">
+                    <article class="panel panel-stack">
+                        <div class="panel-header panel-header--sticky">
+                            <span class="material-symbols-outlined" aria-hidden="true">warning</span>
+                            <div>
+                                <h3>Findings</h3>
+                            </div>
+                        </div>
+                        <div id="patternsContainer" class="scroll-cards empty">No signal.</div>
+                        <div class="list-footer">
+                            <button id="findingPrevBtn" class="btn btn-secondary btn-compact" type="button">Prev</button>
+                            <span id="findingPagerMeta" class="pager-meta">1 / 1</span>
+                            <button id="findingNextBtn" class="btn btn-secondary btn-compact" type="button">Next</button>
+                        </div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- DECRYPTION -->
+            <section class="view-panel" data-view-panel="decryption">
+                <div class="view-scroll view-scroll--flex">
+                    <article class="panel panel-tight">
+                        <div class="panel-header">
+                            <span class="material-symbols-outlined" aria-hidden="true">vpn_key</span>
+                            <div>
+                                <h3>Secrets & Decryption</h3>
+                                <p>Session-scoped inputs used to attempt protocol decryption workflows.</p>
+                            </div>
+                        </div>
+                        <div class="form-stack">
+                            <div class="field">
+                                <label for="decTlsKeylogInput">TLS keylog file path (SSLKEYLOGFILE)</label>
+                                <input id="decTlsKeylogInput" type="text" placeholder="/tmp/sslkeys.log" autocomplete="off">
+                            </div>
+                            <label class="check" for="decPersistSecretsInput">
+                                <input id="decPersistSecretsInput" type="checkbox">
+                                <span>Allow secret persistence (default off)</span>
+                            </label>
+                            <div class="button-row button-row-split">
+                                <button id="decSaveBtn" class="btn btn-primary" type="button">Save config</button>
+                                <button id="decClearBtn" class="btn btn-secondary" type="button">Clear secrets</button>
+                            </div>
+                            <div id="decStatusBox" class="status idle" role="status">Not configured</div>
+                        </div>
+                    </article>
+                    <article class="panel panel-tight panel-flex-grow">
+                        <div class="panel-header">
+                            <span class="material-symbols-outlined" aria-hidden="true">shield_lock</span>
+                            <div>
+                                <h3>Decryption candidate status</h3>
+                                <p>Flows likely decryptable when compatible secrets are available.</p>
+                            </div>
+                        </div>
+                        <div id="decSummaryMeta" class="meta">—</div>
+                        <div id="decItemsContainer" class="scroll-cards empty">No decryption candidates yet.</div>
+                    </article>
+                </div>
+            </section>
+
+            <!-- INVESTIGATION -->
+            <section class="view-panel" data-view-panel="investigation">
+                <div class="investigation-workspace">
+                    <header class="inv-topbar">
+                        <div>
+                            <h2 class="inv-title">Investigation</h2>
+                            <p class="inv-lead">Provenance, timeline, saved views, PCAP comparison, FTS, annotations.</p>
+                        </div>
+                        <div id="invSessionBadge" class="inv-session-badge" aria-live="polite">—</div>
+                    </header>
+                    <div class="inv-split">
+                        <div class="inv-column inv-column--scroll">
+                            <article class="panel panel-tight">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">verified</span>
+                                    <div><h3>Provenance</h3></div>
+                                </div>
+                                <pre id="invProvenancePre" class="inv-json-pre empty-block">—</pre>
+                                <div class="button-row button-row-split">
+                                    <button id="invCopySessionBtn" class="btn btn-secondary btn-compact" type="button">Copy session_id</button>
+                                    <button id="invCopyProvBtn" class="btn btn-secondary btn-compact" type="button">Copy JSON</button>
+                                </div>
+                            </article>
+                            <article class="panel panel-tight">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">bookmark</span>
+                                    <div><h3>Views</h3></div>
+                                </div>
+                                <button id="invRefreshViewsBtn" class="btn btn-secondary" type="button">Refresh</button>
+                                <div id="invViewsList" class="scroll-cards scroll-cards--compact empty">—</div>
+                                <details class="filter-details inv-save-details">
+                                    <summary>Save current view</summary>
+                                    <div class="form-stack">
+                                        <div class="field">
+                                            <label for="invViewNameInput">Name</label>
+                                            <input id="invViewNameInput" type="text" placeholder="phase-login" autocomplete="off">
+                                        </div>
+                                        <div class="field">
+                                            <label for="invViewDescInput">Description</label>
+                                            <textarea id="invViewDescInput" rows="2"></textarea>
+                                        </div>
+                                        <button id="invSaveViewBtn" class="btn btn-primary" type="button">Save</button>
+                                    </div>
+                                </details>
+                            </article>
+                            <article class="panel panel-tight">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">compare_arrows</span>
+                                    <div><h3>Compare two PCAP files</h3></div>
+                                </div>
+                                <div class="field"><label for="invCompareAInput">PCAP A</label><input id="invCompareAInput" type="text" autocomplete="off"></div>
+                                <div class="field"><label for="invCompareBInput">PCAP B</label><input id="invCompareBInput" type="text" autocomplete="off"></div>
+                                <button id="invCompareRunBtn" class="btn btn-primary" type="button">Compare</button>
+                                <div id="invComparePre" class="inv-json-pre inv-compare-pre empty-block">—</div>
+                            </article>
+                        </div>
+                        <div class="inv-column inv-column--scroll">
+                            <article class="panel panel-tight panel-flex-grow">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
+                                    <div><h3>Global timeline</h3></div>
+                                </div>
+                                <div id="invTimelineList" class="scroll-cards timeline-cards empty">—</div>
+                            </article>
+                            <article class="panel panel-tight">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">search</span>
+                                    <div><h3>FTS search</h3></div>
+                                </div>
+                                <div class="field-row">
+                                    <div class="field field-grow">
+                                        <label for="invFtsQueryInput">Query</label>
+                                        <input id="invFtsQueryInput" type="text" placeholder="token OR password" autocomplete="off">
+                                    </div>
+                                    <div class="field field-actions">
+                                        <span class="field-spacer-label" aria-hidden="true">&nbsp;</span>
+                                        <button id="invFtsRunBtn" class="btn btn-secondary" type="button">OK</button>
+                                    </div>
+                                </div>
+                                <div id="invFtsHits" class="inv-fts-hits empty-block">—</div>
+                            </article>
+                            <article class="panel panel-tight">
+                                <div class="panel-header">
+                                    <span class="material-symbols-outlined" aria-hidden="true">label</span>
+                                    <div><h3>Annotations</h3></div>
+                                </div>
+                                <div class="field"><label for="invAnnFlowInput">flow_id</label><input id="invAnnFlowInput" type="text" autocomplete="off"></div>
+                                <div class="field"><label for="invAnnNoteInput">Note</label><textarea id="invAnnNoteInput" rows="2"></textarea></div>
+                                <div class="field"><label for="invAnnAssigneeInput">Assignee</label><input id="invAnnAssigneeInput" type="text" placeholder="soc-analyst-1" autocomplete="off"></div>
+                                <div class="field"><label for="invAnnTicketInput">Ticket URL</label><input id="invAnnTicketInput" type="url" placeholder="https://…" autocomplete="off"></div>
+                                <div class="field"><label for="invAnnTagsInput">Tags (comma-separated)</label><input id="invAnnTagsInput" type="text" autocomplete="off"></div>
+                                <div class="field">
+                                    <label for="invAnnStatusSelect">Status</label>
+                                    <select id="invAnnStatusSelect">
+                                        <option value="to verify">To verify</option>
+                                        <option value="confirmed">Confirmed</option>
+                                        <option value="false positive">False positive</option>
+                                    </select>
+                                </div>
+                                <div class="button-row button-row-split">
+                                    <button id="invAnnSaveBtn" class="btn btn-primary" type="button">Add</button>
+                                    <button id="invAnnRefreshBtn" class="btn btn-secondary" type="button">Refresh</button>
+                                </div>
+                                <div class="button-row button-row-split">
+                                    <button id="invExportIocJsonBtn" class="btn btn-secondary" type="button">Export IOC JSON</button>
+                                    <button id="invExportIocCsvBtn" class="btn btn-secondary" type="button">Export IOC CSV</button>
+                                </div>
+                                <div class="button-row">
+                                    <button id="invExportCaseBundleBtn" class="btn btn-secondary" type="button">Export case bundle</button>
+                                </div>
+                                <div id="invAnnList" class="scroll-cards scroll-cards--compact empty">—</div>
+                            </article>
+                        </div>
+                    </div>
+                    <div id="invToast" class="inv-toast hidden" role="status"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+</body>
+</html>

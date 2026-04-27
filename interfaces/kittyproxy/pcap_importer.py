@@ -56,7 +56,7 @@ def _headers_from_scapy(pkt) -> Dict[str, str]:
 # -----------------------------------------------------------------------------
 
 # Request line: match anywhere in blob (no ^) for fragmented / prefixed data
-_REQ_LINE = re.compile(rb"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT)\s+(\S+)\s+HTTP/[\d.]+\r?\n", re.I)
+_REQ_LINE = re.compile(rb"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT)\s+(\S+)(\s+HTTP/[\d.]+)?\r?\n", re.I)
 _HOST = re.compile(rb"\r?\nhost:\s*([^\r\n]+)", re.I)
 _STATUS = re.compile(rb"HTTP/[\d.]+\s+(\d{3})\s+([^\r\n]*)\r?\n")
 
@@ -121,6 +121,14 @@ def _get_ip_layer(pkt):
     if pkt.haslayer("IPv6"):
         L = pkt["IPv6"]
         return (str(L.src), str(L.dst))
+    # Fallback for nested layers
+    for name in ["IP", "IPv6"]:
+        try:
+            L = pkt.getlayer(name)
+            if L:
+                return (str(L.src), str(L.dst))
+        except Exception:
+            pass
     return (None, None)
 
 

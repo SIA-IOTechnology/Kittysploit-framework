@@ -162,7 +162,8 @@ class DatabaseManager:
         """
         if workspace is None:
             workspace = "default"
-        return self.session_scope(workspace)
+        with self.session_scope(workspace) as session:
+            yield session
     
     def close_workspace_db(self, workspace: str) -> bool:
         """Close database connection for a workspace

@@ -51,9 +51,11 @@ def create_app(tool: KittyOSINT = None) -> Flask:
         tool: KittyOSINT = app.config["tool"]
         if tool is None:
             return jsonify({"error": "KittyOSINT not initialized"}), 503
+        target = str(request.args.get("target") or "").strip()
         result = []
         for k, m in tool.modules.items():
             info = tool._module_info(m)
+            compatibility = tool.module_compatibility(k, target, module=m) if target else None
             result.append(
                 {
                     "id": k,
@@ -61,6 +63,10 @@ def create_app(tool: KittyOSINT = None) -> Flask:
                     "desc": info.get("Description"),
                     "type": info.get("Type", "core"),
                     "icon": info.get("Icon", ""),
+                    "supported_target_types": tool.module_supported_target_types(k, module=m),
+                    "compatible": compatibility["compatible"] if compatibility else True,
+                    "compatibility_reason": compatibility["reason"] if compatibility else "",
+                    "effective_target_kind": compatibility.get("effective_target_kind") if compatibility else "",
                 }
             )
         return jsonify(result)
@@ -130,7 +136,9 @@ def _run_cli_scan(target: str) -> None:
     for mod_id in cli_tool.modules:
         print_info(f"Running transform: {mod_id}...")
         res = cli_tool.execute_module(mod_id, target)
-        if "error" not in res:
+        if res.get("skipped"):
+            print_warning(f" -> Skipped ({res.get('reason', 'not applicable')})")
+        elif "error" not in res:
             print_success(" -> Execution complete")
         else:
             print_error(f" -> {res['error']}")

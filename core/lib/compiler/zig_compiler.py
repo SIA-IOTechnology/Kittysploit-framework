@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import List, Dict, Any, Optional
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 
@@ -175,7 +175,8 @@ class ZigCompiler:
                 optimization: str = 'ReleaseSmall',
                 strip: bool = True,
                 static: bool = True,
-                windows_subsystem: Optional[str] = None) -> bool:
+                windows_subsystem: Optional[str] = None,
+                extra_args: Optional[List[str]] = None) -> bool:
         """
         Compile Zig source code to executable
 
@@ -259,9 +260,11 @@ class ZigCompiler:
                 # Note: Zig handles optimization through -O flag
                 # Additional GCC/Clang-style flags are not supported by Zig
 
-            # Windows: hide console window (no black window when exe runs)
             if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
                 cmd.extend(['--subsystem', 'windows'])
+
+            if extra_args:
+                cmd.extend(extra_args)
 
             # Remove existing output file - lld-link on Windows often fails with "Permission denied"
             # when trying to overwrite an existing .exe (e.g. from a previous run)
@@ -287,7 +290,7 @@ class ZigCompiler:
                 print_error(f"Compilation failed: {error_msg}")
                 
                 # Check for antivirus-related errors
-                if 'virus' in error_msg.lower() or 'logiciel potentiellement indésirable' in error_msg.lower() or 'cannot open' in error_msg.lower():
+                if 'virus' in error_msg.lower() or 'software' in error_msg.lower() or 'cannot open' in error_msg.lower():
                     print_warning("Antivirus detected! The compilation was blocked.")
                     print_info("Solutions:")
                     print_info("1. Add exclusion for: " + workspace_cache)

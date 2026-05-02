@@ -44,9 +44,15 @@ class AgentState:
     target_info: Dict[str, Any]
     scanner: Any
     protocol: Optional[str] = None
+    expanded_surface: bool = False
     threads: int = 5
     verbose: bool = False
     no_exploit: bool = False
+    safety_profile: str = "normal"
+    user_agent: str = ""
+    request_delay_min: float = 0.0
+    request_delay_max: float = 0.0
+    async_probes: bool = False
     llm_local: bool = False
     llm_model: str = "llama3.1:8b"
     llm_endpoint: str = "http://127.0.0.1:11434/api/chat"
@@ -76,6 +82,7 @@ class AgentState:
     target_reachable: Optional[bool] = None
     reachability_reason: Optional[str] = None
     decision_timeline: List[Any] = field(default_factory=list)
+    compressed_context_summary: str = ""
 
 
 def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
@@ -86,9 +93,15 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "target_info": state.target_info,
         "scanner": state.scanner,
         "protocol": state.protocol,
+        "expanded_surface": state.expanded_surface,
         "threads": state.threads,
         "verbose": state.verbose,
         "no_exploit": state.no_exploit,
+        "safety_profile": state.safety_profile,
+        "user_agent": state.user_agent,
+        "request_delay_min": state.request_delay_min,
+        "request_delay_max": state.request_delay_max,
+        "async_probes": state.async_probes,
         "llm_local": state.llm_local,
         "llm_model": state.llm_model,
         "llm_endpoint": state.llm_endpoint,
@@ -125,6 +138,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "target_reachable": state.target_reachable,
         "reachability_reason": state.reachability_reason,
         "decision_timeline": state.decision_timeline,
+        "compressed_context_summary": state.compressed_context_summary,
     }
 
 
@@ -163,9 +177,15 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         target_info=dict(d.get("target_info") or {}),
         scanner=d.get("scanner"),
         protocol=d.get("protocol"),
+        expanded_surface=bool(d.get("expanded_surface", False)),
         threads=int(d.get("threads", 5)),
         verbose=bool(d.get("verbose", False)),
         no_exploit=bool(d.get("no_exploit", False)),
+        safety_profile=str(d.get("safety_profile", "normal") or "normal"),
+        user_agent=str(d.get("user_agent", "") or ""),
+        request_delay_min=float(d.get("request_delay_min", 0.0) or 0.0),
+        request_delay_max=float(d.get("request_delay_max", 0.0) or 0.0),
+        async_probes=bool(d.get("async_probes", False)),
         llm_local=bool(d.get("llm_local", False)),
         llm_model=str(d.get("llm_model", "llama3.1:8b")),
         llm_endpoint=str(d.get("llm_endpoint", "http://127.0.0.1:11434/api/chat")),
@@ -195,4 +215,5 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         target_reachable=d.get("target_reachable"),
         reachability_reason=d.get("reachability_reason"),
         decision_timeline=list(d.get("decision_timeline") or []),
+        compressed_context_summary=str(d.get("compressed_context_summary", "") or ""),
     )

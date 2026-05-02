@@ -16,9 +16,11 @@ class Auxiliary(BaseModule):
     
     def _exploit(self):
         try:
-            self.run()
-            return True
-        except ProcedureError as e:
+            result = self.run()
+            if result is None:
+                return True
+            return bool(result)
+        except ProcedureError:
             return False
-        except Exception as e:
+        except Exception:
             return False

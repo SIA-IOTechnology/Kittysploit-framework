@@ -20,6 +20,10 @@ from core.output_handler import (
     print_success,
     print_warning,
 )
+from interfaces.command_system.builtin.agent.agent_constants import (
+    DEFAULT_AGENT_USER_AGENT,
+    SAFETY_PROFILE_NAMES,
+)
 
 
 class AgentCommand(BaseCommand):
@@ -37,7 +41,9 @@ class AgentCommand(BaseCommand):
     def usage(self) -> str:
         return (
             "agent <target> [--threads N] [--protocol PROTO] [--no-exploit] "
-            "[--llm-local] [--max-modules N] [--recon-modules N]"
+            "[--llm-local] [--max-modules N] [--recon-modules N] "
+            "[--safety-profile safe|normal|aggressive] [--request-delay-min S] "
+            "[--request-delay-max S] [--async-probes] [--all]"
         )
 
     @property
@@ -55,6 +61,9 @@ Examples:
     agent target.com --llm-local --llm-model llama3.1:8b
     agent target.com --llm-local
     agent target.com --max-modules 40 --recon-modules 12
+    agent target.com --safety-profile safe --request-delay-min 0.5 --request-delay-max 2
+    agent target.com --async-probes
+    agent target.com --all
         """
 
     def __init__(self, framework, session, output_handler):
@@ -119,6 +128,44 @@ Examples:
         parser.add_argument("--llm-endpoint", type=str, default="http://127.0.0.1:11434/api/chat")
         parser.add_argument("--max-modules", type=int, default=40)
         parser.add_argument("--recon-modules", type=int, default=12)
+        parser.add_argument(
+            "--safety-profile",
+            choices=SAFETY_PROFILE_NAMES,
+            default="normal",
+            help="Execution guardrails: safe blocks noisy modules, normal preserves defaults, aggressive removes guardrails.",
+        )
+        parser.add_argument(
+            "--user-agent",
+            default=DEFAULT_AGENT_USER_AGENT,
+            help="Explicit User-Agent for agent-owned HTTP probes.",
+        )
+        parser.add_argument(
+            "--request-delay-min",
+            type=float,
+            default=0.0,
+            help="Minimum delay in seconds before agent-controlled HTTP/module batches.",
+        )
+        parser.add_argument(
+            "--request-delay-max",
+            type=float,
+            default=0.0,
+            help="Maximum delay in seconds before agent-controlled HTTP/module batches.",
+        )
+        parser.add_argument(
+            "--async-probes",
+            action="store_true",
+            help="Use async HTTP for agent-owned probes when aiohttp is available.",
+        )
+        parser.add_argument(
+            "--all",
+            dest="expanded_surface",
+            action="store_true",
+            help=(
+                "Expanded surface: include OSINT / cloud / passive aux modules alongside web scanners; "
+                "after the main pass, run a bounded HTTP scan on same-organization hostnames "
+                "harvested from results (e.g. subdomains)."
+            ),
+        )
         parser.add_argument("--help", "-h", action="store_true")
         return parser
 
@@ -139,15 +186,28 @@ Examples:
             print_error(f"Invalid target: {parsed.target}")
             return False
         module_capability_catalog = self._agent.module_catalog.build_module_capability_catalog()
+        delay_min = max(0.0, float(parsed.request_delay_min))
+        delay_max = max(0.0, float(parsed.request_delay_max))
+        if delay_max < delay_min:
+            delay_max = delay_min
+        threads = max(1, int(parsed.threads))
+        if parsed.safety_profile == "safe":
+            threads = 1
 
         state = AgentState(
             raw_target=parsed.target,
             target_info=target_info,
             scanner=scanner,
             protocol=parsed.protocol,
-            threads=parsed.threads,
+            expanded_surface=bool(getattr(parsed, "expanded_surface", False)),
+            threads=threads,
             verbose=parsed.verbose,
             no_exploit=parsed.no_exploit,
+            safety_profile=parsed.safety_profile,
+            user_agent=str(parsed.user_agent or DEFAULT_AGENT_USER_AGENT),
+            request_delay_min=delay_min,
+            request_delay_max=delay_max,
+            async_probes=bool(parsed.async_probes),
             llm_local=parsed.llm_local,
             llm_model=parsed.llm_model,
             llm_endpoint=parsed.llm_endpoint,

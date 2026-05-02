@@ -69,7 +69,7 @@ class Websocket_client(BaseModule):
         
         sslopt = {}
         if not verify_ssl:
-            sslopt = {"cert_reqs": ssl.CERT_NONE}
+            sslopt = {"cert_reqs": ssl.CERT_NONE, "check_hostname": False}
             
         formatted_headers = []
         if headers:

@@ -13,7 +13,13 @@ class Module(Scanner, Http_client):
         "description": "Detects S3 bucket or S3-style API (ListBucketResult, NoSuchKey, AccessDenied XML).",
         "author": "KittySploit Team",
         "severity": "medium",
-        "modules": [],
+        "modules": [
+            "auxiliary/aws/s3_bucket_access_check",
+            "auxiliary/aws/s3_bucket_file_list",
+            "auxiliary/aws/s3_sensitive_pattern_scan",
+            "auxiliary/aws/s3_file_download",
+            "auxiliary/aws/aws_s3_exposure_path_prioritizer",
+        ],
         "tags": ["cloud", "scanner", "aws", "s3", "bucket", "storage"],
     }
 

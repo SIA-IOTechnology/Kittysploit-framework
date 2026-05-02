@@ -2,10 +2,11 @@
 from kittysploit import *
 import sys
 import os
-import requests
 import re
+from urllib.parse import urlparse
+from lib.protocols.http.http_client import Http_client
 
-class Module(Auxiliary):
+class Module(Auxiliary, Http_client):
 
     __info__ = {
         'name': 'Crt.sh Enumeration',
@@ -16,6 +17,32 @@ class Module(Auxiliary):
         
     target = OptString("", "The target domain name", required=True)
 
+    def _http_get_url(self, url, timeout_seconds):
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return None
+        scheme = (parsed.scheme or "https").lower()
+        port = parsed.port or (443 if scheme == "https" else 80)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        old_target = self.target
+        old_port = getattr(self, "port", 443)
+        old_ssl = getattr(self, "ssl", True)
+        try:
+            self.target = host
+            self.port = int(port)
+            self.ssl = (scheme == "https")
+            return self.http_request(method="GET", path=path, allow_redirects=True, timeout=timeout_seconds)
+        except Exception:
+            return None
+        finally:
+            self.target = old_target
+            self.port = old_port
+            self.ssl = old_ssl
+
     def run(self):
         target = self.target
         subdomains = set()
@@ -23,7 +50,9 @@ class Module(Auxiliary):
         
         try:
             url = f"https://crt.sh/?q=%25.{target}&output=json"
-            resp = requests.get(url, timeout=10)
+            resp = self._http_get_url(url, 10)
+            if not resp:
+                raise Exception("HTTP request failed")
             if resp.status_code == 200:
                 results = resp.json()
                 for entry in results:

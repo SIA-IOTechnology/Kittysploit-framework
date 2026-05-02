@@ -366,6 +366,35 @@
             z-index: 100;
         }
 
+        .layout-controls {
+            position: absolute;
+            bottom: 78px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(13, 19, 31, 0.82);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 8px 10px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .layout-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-family: var(--font-mono);
+        }
+
+        .layout-control input[type="range"] {
+            width: 110px;
+        }
+
         .tool-btn {
             height: 34px;
             padding: 0 14px;
@@ -386,6 +415,17 @@
             color: var(--text-main);
             background: rgba(49, 198, 255, 0.1);
             border-color: var(--border-active);
+        }
+
+        .tool-btn:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+        }
+
+        .tool-btn:disabled:hover {
+            color: var(--text-muted);
+            background: rgba(255, 255, 255, 0.03);
+            border-color: var(--border);
         }
 
         /* --- Right Inspector --- */
@@ -426,6 +466,58 @@
             font-size: 13px;
             color: var(--text-main);
             word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        .category-list {
+            display: grid;
+            gap: 6px;
+            max-height: 320px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+
+        .category-row {
+            width: 100%;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+            color: var(--text-main);
+            border-radius: 8px;
+            padding: 9px 10px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            text-align: left;
+            cursor: pointer;
+            font-family: var(--font-main);
+        }
+
+        .category-row:hover {
+            border-color: var(--border-active);
+            background: rgba(49, 198, 255, 0.09);
+        }
+
+        .category-row.is-muted {
+            cursor: default;
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .category-row-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+        }
+
+        .category-row-meta {
+            color: var(--text-dim);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            text-transform: uppercase;
         }
 
         .feed {
@@ -608,8 +700,24 @@
                 <div class="center-tools">
                     <button id="focusBtn" class="tool-btn">Focus All</button>
                     <button id="clearBtn" class="tool-btn">Purge Graph</button>
+                    <button id="clusterBtn" class="tool-btn">Show All</button>
+                    <button id="densityBtn" class="tool-btn">Compact</button>
+                    <button id="radialBtn" class="tool-btn">Radial</button>
                     <button id="physicsBtn" class="tool-btn">Freeze</button>
                     <button id="exportBtn" class="tool-btn">Export</button>
+                </div>
+
+                <div id="layoutControls" class="layout-controls">
+                    <label class="layout-control">
+                        Arc spacing
+                        <input id="arcSpacingRange" type="range" min="40" max="150" step="2" value="74" />
+                        <span id="arcSpacingValue">74</span>
+                    </label>
+                    <label class="layout-control">
+                        Ring spacing
+                        <input id="ringSpacingRange" type="range" min="110" max="320" step="5" value="180" />
+                        <span id="ringSpacingValue">180</span>
+                    </label>
                 </div>
             </section>
         </main>
@@ -627,6 +735,29 @@
                 </div>
 
                 <div id="inspectorEmpty" class="empty" style="margin-top: 50px;">Select an entity on the neural mesh to see data properties.</div>
+
+                <div id="categorySection" class="node-info-grid" style="display:none;">
+                    <div class="mod-card" style="background: rgba(49,198,255,0.08); border-color: var(--border-active);">
+                        <div style="font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 800; margin-bottom: 4px;">Category</div>
+                        <div id="categoryLabel" style="font-size: 18px; font-weight: 700; color: #fff;"></div>
+                    </div>
+
+                    <div class="inspect-card">
+                        <div class="info-row">
+                            <span class="info-label">Summary</span>
+                            <span id="categorySummary" class="info-value"></span>
+                        </div>
+                        <div class="info-row" style="margin-top: 12px;">
+                            <span class="info-label">Visible Members</span>
+                            <div id="categoryMembers" class="category-list"></div>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                        <button id="expandCategoryBtn" class="cyber-btn">Expand Category</button>
+                        <button id="collapseCategoryBtn" class="cyber-btn btn-outline" disabled>Collapse</button>
+                    </div>
+                </div>
 
                 <div id="nodeSection" class="node-info-grid" style="display:none;">
                     <div class="mod-card" style="background: var(--accent-dim); border-color: var(--accent);">
@@ -677,9 +808,24 @@
                             <span class="info-label">Terminal (To)</span>
                             <span id="edgeTo" class="info-value"></span>
                         </div>
+                        <div class="info-row" style="margin-top: 12px;">
+                            <span class="info-label">Extended Metadata</span>
+                            <span id="edgeMeta" class="info-value"></span>
+                        </div>
                     </div>
 
                     <button id="deleteEdgeBtn" class="cyber-btn btn-outline btn-danger">Delete Relation</button>
+                </div>
+
+                <div class="inspect-card" style="margin-top: 14px;">
+                    <div class="info-row">
+                        <span class="info-label">Last Module Output</span>
+                        <span id="rawModuleMeta" class="info-value">No module output yet</span>
+                    </div>
+                    <div class="info-row" style="margin-top: 12px;">
+                        <span class="info-label">Raw Data</span>
+                        <span id="rawModuleBody" class="info-value"></span>
+                    </div>
                 </div>
             </div>
 

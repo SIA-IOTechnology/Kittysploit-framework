@@ -5,9 +5,11 @@
 
 import ast
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from interfaces.command_system.builtin.agent.agent_constants import (
+    EXPANDED_SURFACE_MODULE_PREFIXES,
     NOTABLE_CATALOG_KEYWORDS,
     PURE_DETECTION_PATH_MARKERS,
     STRONG_VULN_SIGNAL_PHRASES,
@@ -115,15 +117,19 @@ class ModuleCatalogService:
             self._agent_meta_cache[key] = None
             return None
 
-    def discover_campaign_modules(self) -> List[Dict[str, Any]]:
+    def discover_campaign_modules(self, expanded: bool = False) -> List[Dict[str, Any]]:
         modules = []
         try:
             discovered = self._get_module_catalog()
             for module_path, file_path in discovered.items():
-                if not (
+                in_core = (
                     module_path.startswith("scanner/")
                     or module_path.startswith("auxiliary/scanner/")
-                ):
+                )
+                in_expanded = bool(expanded) and any(
+                    module_path.startswith(p) for p in EXPANDED_SURFACE_MODULE_PREFIXES
+                )
+                if not (in_core or in_expanded):
                     continue
                 static_meta = self.extract_static_module_metadata(file_path)
                 modules.append({
@@ -147,6 +153,7 @@ class ModuleCatalogService:
             "by_family": {},
             "notable_modules": [],
             "all_paths": [],
+            "semantic_index": [],
         }
         try:
             discovered = self._get_module_catalog()
@@ -156,6 +163,18 @@ class ModuleCatalogService:
                 static_meta = self.extract_static_module_metadata(file_path)
                 catalog["by_family"][family] = int(catalog["by_family"].get(family, 0)) + 1
                 catalog["all_paths"].append(module_path)
+                semantic_text = " ".join([
+                    str(module_path),
+                    str(static_meta.get("name", "")),
+                    str(static_meta.get("description", "")),
+                    " ".join([str(tag) for tag in static_meta.get("tags", [])]),
+                    str(static_meta.get("severity", "")),
+                ])
+                catalog["semantic_index"].append({
+                    "path": module_path,
+                    "family": family,
+                    "tokens": self._semantic_tokens(semantic_text)[:80],
+                })
 
                 is_notable = False
                 path_blob = " ".join([
@@ -179,6 +198,10 @@ class ModuleCatalogService:
                         "module_link": (static_meta.get("modules", []) or [None])[0],
                     })
             catalog["all_paths"] = sorted(list(set(catalog["all_paths"])))
+            catalog["semantic_index"] = sorted(
+                catalog["semantic_index"],
+                key=lambda row: row.get("path", ""),
+            )[:1200]
             catalog["notable_modules"] = sorted(
                 catalog["notable_modules"],
                 key=lambda row: (
@@ -190,6 +213,23 @@ class ModuleCatalogService:
         except Exception:
             pass
         return catalog
+
+    def _semantic_tokens(self, text: str) -> List[str]:
+        stop = {
+            "the", "and", "for", "with", "from", "this", "that", "module", "scanner",
+            "detect", "detected", "target", "http", "https", "auxiliary", "exploit",
+            "exploits", "vulnerability", "vulnerabilities", "check", "checks",
+        }
+        raw = re.findall(r"[a-zA-Z0-9_./-]{3,}", str(text or "").lower().replace("-", "_"))
+        out: List[str] = []
+        seen = set()
+        for token in raw:
+            for part in re.split(r"[/._]", token):
+                if len(part) < 3 or part in stop or part.isdigit() or part in seen:
+                    continue
+                seen.add(part)
+                out.append(part)
+        return out
 
     def normalize_exploit_module_path(self, value: Any) -> str:
         if isinstance(value, str):

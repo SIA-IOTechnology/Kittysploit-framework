@@ -205,7 +205,17 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
             NotImplementedError: If the method is not implemented
         """
         raise NotImplementedError("Modules must implement the run() method")
-    
+
+    def vulnerable(self):
+        """Hook when a module confirms the target is vulnerable (same messaging as ExploitBase)."""
+        print_success("The target is vulnerable")
+
+    def not_vulnerable(self):
+        """Hook when the target is not vulnerable; prints the standard failure line."""
+        from core.framework.failure import fail
+
+        fail.NotVulnerable()
+
     def _exploit(self):
 
         try:

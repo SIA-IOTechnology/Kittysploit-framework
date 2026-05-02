@@ -11,6 +11,40 @@ from __future__ import annotations
 
 from typing import Dict, Final, FrozenSet, Tuple
 
+DEFAULT_AGENT_USER_AGENT: Final[str] = "KittysploitAgent/1.0 (+authorized-testing)"
+
+SAFETY_PROFILE_NAMES: Final[Tuple[str, ...]] = ("safe", "normal", "aggressive")
+
+SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
+    "admin_login_bruteforce",
+    "bruteforce",
+    "credential",
+    "password",
+    "fuzzer",
+    "write_access",
+    "file_download",
+)
+
+WAF_RISK_HTTP_STATUS_CODES: Final[Tuple[int, ...]] = (403, 406, 429)
+
+WAF_BODY_MARKERS: Final[Tuple[str, ...]] = (
+    "captcha",
+    "recaptcha",
+    "hcaptcha",
+    "access denied",
+    "request blocked",
+    "not acceptable",
+    "too many requests",
+    "rate limit",
+    "cloudflare",
+    "cf-chl",
+    "akamai",
+    "imperva",
+    "incapsula",
+    "sucuri",
+    "bot detection",
+)
+
 # --- CMS & stack hints (blobs, specialization corpus, catalog notability) ---
 
 CMS_HINT_TOKENS: Final[Tuple[str, ...]] = (
@@ -201,6 +235,27 @@ STRONG_VULN_SIGNAL_PHRASES: Final[Tuple[str, ...]] = (
 )
 
 CMS_LOCK_NAMES: Final[Tuple[str, ...]] = ("wordpress", "drupal", "joomla")
+
+# ``agent --all``: extra module trees (beyond ``scanner/http`` + ``auxiliary/scanner/http``).
+EXPANDED_SURFACE_MODULE_PREFIXES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/",
+    "scanner/cloud/",
+    "auxiliary/aws/",
+    "auxiliary/azure/",
+    "auxiliary/gcp/",
+)
+
+# Expanded recon: skip obviously invasive / follow-up modules in the first recon pass.
+EXPANDED_SURFACE_RECON_SKIP_SUBSTR: Final[Tuple[str, ...]] = (
+    "bruteforce",
+    "_write_access",
+    "file_download",
+    "hop_proxy_generator",
+)
+
+# After OSINT / expanded modules: scan a bounded set of same-family hostnames (subdomains).
+DERIVED_HOST_SCAN_MAX_HOSTS: Final[int] = 10
+DERIVED_HOST_SCAN_MODULES_PER_HOST: Final[int] = 8
 
 # Cookie name substrings preferred when seeding session from auth_context["cookies"]
 SESSION_COOKIE_NAME_MARKERS: Final[Tuple[str, ...]] = (

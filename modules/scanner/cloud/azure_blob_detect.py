@@ -13,7 +13,14 @@ class Module(Scanner, Http_client):
         "description": "Detects Azure Blob Storage REST API (x-ms-* headers or Azure error body).",
         "author": "KittySploit Team",
         "severity": "medium",
-        "modules": [],
+        "modules": [
+            "auxiliary/azure/blob_acl_misconfig_hint",
+            "auxiliary/azure/blob_exposure_audit",
+            "auxiliary/azure/blob_container_file_list",
+            "auxiliary/azure/blob_sensitive_pattern_scan",
+            "auxiliary/azure/blob_file_download",
+            "auxiliary/azure/azure_exposure_path_prioritizer",
+        ],
         "tags": ["cloud", "scanner", "azure", "blob", "storage"],
     }
 

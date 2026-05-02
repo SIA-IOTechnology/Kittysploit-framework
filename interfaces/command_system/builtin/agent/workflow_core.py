@@ -3,14 +3,28 @@
 """Agent workflow implementation (scan, knowledge, exploit, reasoning)."""
 
 import ast
+import asyncio
 import json
 import os
+import random
+import re
 import socket
+
+import ssl
+import random
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import aiohttp
+    HAS_AIOHTTP = True
+except Exception:
+    aiohttp = None
+    HAS_AIOHTTP = False
 
 from interfaces.command_system.builtin.agent.state import (
     AgentState,
@@ -47,15 +61,23 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     CMS_HINT_TOKENS,
     CMS_LOCK_NAMES,
     CMS_SPECIALIZATION_BLOB_TOKENS,
+    DEFAULT_AGENT_USER_AGENT,
     DISALLOWED_POST_AUTH_TOKENS,
     DRUPAL_BLOB_MARKERS,
+    DERIVED_HOST_SCAN_MAX_HOSTS,
+    DERIVED_HOST_SCAN_MODULES_PER_HOST,
+    EXPANDED_SURFACE_MODULE_PREFIXES,
+    EXPANDED_SURFACE_RECON_SKIP_SUBSTR,
     HTTP_REDIRECT_STATUSES,
     HTTP_STATUS_RISK_SIGNALS,
     JOOMLA_BLOB_MARKERS,
     NEGATIVE_EVIDENCE_MARKERS,
     POSITIVE_EVIDENCE_MARKERS,
     POSITIVE_SCAN_MESSAGE_MARKERS,
+    SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS,
     SAFE_FOLLOWUP_ACTION_TYPES,
+    WAF_BODY_MARKERS,
+    WAF_RISK_HTTP_STATUS_CODES,
     WORDPRESS_BODY_FINGERPRINT_TOKENS,
     WORDPRESS_FORM_FIELD_TOKENS,
     WORDPRESS_LANDING_PATH_MARKERS,
@@ -131,6 +153,328 @@ class AgentWorkflowCore:
             "connection aborted",
             "remote end closed connection",
         )
+
+    def _agent_user_agent(self, state: AgentState) -> str:
+        value = str(getattr(state, "user_agent", "") or "").strip()
+        if value:
+            return value
+        
+        # Spoofed user agents list
+        chrome_uas = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ]
+        return random.choice(chrome_uas)
+
+
+    def _create_spoofed_ssl_context(self) -> Any:
+        ctx = ssl.create_default_context()
+        # Chrome JA3-like ciphers
+        ctx.set_ciphers('TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA:AES256-SHA')
+        try:
+            ctx.set_ecdh_curve('prime256v1')
+        except Exception:
+            pass
+        return ctx
+
+    def _agent_http_headers(self, state: AgentState) -> Dict[str, str]:
+        return {"User-Agent": self._agent_user_agent(state)}
+
+    async def _async_http_probe_one(
+        self,
+        session: Any,
+        url: str,
+        timeout_s: float,
+        read_bytes: int,
+    ) -> Dict[str, Any]:
+        try:
+            async with session.get(url, timeout=timeout_s, allow_redirects=True) as response:
+                raw = await response.content.read(read_bytes)
+                return {
+                    "url": url,
+                    "status": int(response.status or 0),
+                    "headers": {str(k).lower(): str(v) for k, v in response.headers.items()},
+                    "body": raw.decode("utf-8", errors="ignore"),
+                    "final_url": str(response.url),
+                    "error": "",
+                }
+        except Exception as exc:
+            return {"url": url, "status": 0, "headers": {}, "body": "", "final_url": "", "error": str(exc)}
+
+    async def _async_http_probe_many(
+        self,
+        state: AgentState,
+        urls: List[str],
+        timeout_s: float = 4.0,
+        read_bytes: int = 8192,
+    ) -> List[Dict[str, Any]]:
+        timeout = aiohttp.ClientTimeout(total=timeout_s) if HAS_AIOHTTP else None
+        headers = self._agent_http_headers(state)
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            tasks = [self._async_http_probe_one(session, url, timeout_s, read_bytes) for url in urls]
+            return list(await asyncio.gather(*tasks))
+
+    def _run_async_http_probe_many(
+        self,
+        state: AgentState,
+        urls: List[str],
+        timeout_s: float = 4.0,
+        read_bytes: int = 8192,
+    ) -> Optional[List[Dict[str, Any]]]:
+        if not getattr(state, "async_probes", False) or not HAS_AIOHTTP or not urls:
+            return None
+        try:
+            return asyncio.run(self._async_http_probe_many(state, urls, timeout_s, read_bytes))
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(self._async_http_probe_many(state, urls, timeout_s, read_bytes))
+            finally:
+                loop.close()
+        except Exception as exc:
+            if getattr(state, "verbose", False):
+                print_warning(f"Async probe failed, falling back to urllib: {exc}")
+            return None
+
+    def _sync_http_probe_one(
+        self,
+        state: AgentState,
+        url: str,
+        timeout_s: float = 4.0,
+        read_bytes: int = 8192,
+    ) -> Dict[str, Any]:
+        request = urllib.request.Request(
+            url,
+            headers=self._agent_http_headers(state),
+            method="GET",
+        )
+        try:
+            if url.startswith("https://"):
+                ctx = self._create_spoofed_ssl_context()
+                with urllib.request.urlopen(request, timeout=timeout_s, context=ctx) as response:
+                    body = response.read(read_bytes).decode("utf-8", errors="ignore")
+                    return {
+                        "url": url,
+                        "status": int(getattr(response, "status", 0) or response.getcode() or 0),
+                        "headers": {k.lower(): str(v) for k, v in response.headers.items()},
+                        "body": body,
+                        "final_url": str(response.geturl() or ""),
+                        "error": "",
+                    }
+            else:
+                with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                    body = response.read(read_bytes).decode("utf-8", errors="ignore")
+                    return {
+                        "url": url,
+                        "status": int(getattr(response, "status", 0) or response.getcode() or 0),
+                        "headers": {k.lower(): str(v) for k, v in response.headers.items()},
+                        "body": body,
+                        "final_url": str(response.geturl() or ""),
+                        "error": "",
+                    }
+        except urllib.error.HTTPError as exc:
+            try:
+                body = exc.read(read_bytes).decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            return {
+                "url": url,
+                "status": int(exc.code or 0),
+                "headers": {k.lower(): str(v) for k, v in (exc.headers.items() if exc.headers else [])},
+                "body": body,
+                "final_url": str(getattr(exc, "url", "") or ""),
+                "error": "",
+            }
+        except Exception as exc:
+            return {"url": url, "status": 0, "headers": {}, "body": "", "final_url": "", "error": str(exc)}
+
+    def _http_probe_many(
+        self,
+        state: AgentState,
+        urls: List[str],
+        timeout_s: float = 4.0,
+        read_bytes: int = 8192,
+    ) -> List[Dict[str, Any]]:
+        async_rows = self._run_async_http_probe_many(state, urls, timeout_s, read_bytes)
+        if async_rows is not None:
+            return async_rows
+        rows = []
+        for url in urls:
+            self._sleep_between_agent_actions(state, f"http-probe:{url}")
+            rows.append(self._sync_http_probe_one(state, url, timeout_s, read_bytes))
+        return rows
+
+    def _normalized_safety_profile(self, state: AgentState) -> str:
+        profile = str(getattr(state, "safety_profile", "normal") or "normal").strip().lower()
+        if profile not in {"safe", "normal", "aggressive"}:
+            return "normal"
+        return profile
+
+    def _action_delay_bounds(self, state: AgentState) -> Tuple[float, float]:
+        try:
+            delay_min = max(0.0, float(getattr(state, "request_delay_min", 0.0) or 0.0))
+        except Exception:
+            delay_min = 0.0
+        try:
+            delay_max = max(0.0, float(getattr(state, "request_delay_max", 0.0) or 0.0))
+        except Exception:
+            delay_max = 0.0
+        if delay_max < delay_min:
+            delay_max = delay_min
+        return delay_min, delay_max
+
+    def _sleep_between_agent_actions(self, state: AgentState, context: str = "") -> None:
+        delay_min, delay_max = self._action_delay_bounds(state)
+        if delay_max <= 0:
+            return
+        delay = random.uniform(delay_min, delay_max)
+        if delay <= 0:
+            return
+        if getattr(state, "verbose", False):
+            suffix = f" before {context}" if context else ""
+            print_info(f"Rate limit: sleeping {delay:.2f}s{suffix}")
+        time.sleep(delay)
+
+    def _module_block_reason_for_profile(self, state: AgentState, module_path: Any) -> str:
+        if self._normalized_safety_profile(state) != "safe":
+            return ""
+        low = str(module_path or "").lower()
+        for token in SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
+            if token in low:
+                return f"safe profile blocks noisy module token `{token}`"
+        return ""
+
+    def _filter_modules_for_safety_profile(
+        self,
+        state: AgentState,
+        modules: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        allowed: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        for module in modules or []:
+            path = module.get("path") if isinstance(module, dict) else ""
+            reason = self._module_block_reason_for_profile(state, path)
+            if reason:
+                skipped.append({
+                    "module": module.get("name", path) if isinstance(module, dict) else str(path),
+                    "path": path,
+                    "status": "skipped",
+                    "vulnerable": False,
+                    "message": reason,
+                    "details": {"safety_profile": self._normalized_safety_profile(state)},
+                })
+                continue
+            allowed.append(module)
+        if skipped and getattr(state, "verbose", False):
+            print_warning(f"Safety profile skipped {len(skipped)} noisy module(s)")
+        return allowed, skipped
+
+    def _adapt_rate_limit_from_results(self, state: AgentState, results: List[Any]) -> None:
+        if self._normalized_safety_profile(state) == "aggressive":
+            return
+        saw_rate_limit = False
+        for result in results or []:
+            if not isinstance(result, dict):
+                continue
+            blob = " ".join([
+                str(result.get("status", "")),
+                str(result.get("message", "")),
+                str(result.get("details", "")),
+            ]).lower()
+            if "429" in blob or "rate limit" in blob or "too many requests" in blob:
+                saw_rate_limit = True
+                break
+        if not saw_rate_limit:
+            return
+        delay_min, delay_max = self._action_delay_bounds(state)
+        state.request_delay_min = max(delay_min, 2.0)
+        state.request_delay_max = max(delay_max, 6.0)
+        if getattr(state, "verbose", False):
+            print_warning("Rate limit signal detected; increasing agent delay window")
+
+    def _result_waf_signal(self, result: Any) -> bool:
+        if not isinstance(result, dict):
+            return False
+        status_values = []
+        for key in ("status_code", "http_status", "code"):
+            try:
+                if key in result:
+                    status_values.append(int(result.get(key) or 0))
+            except Exception:
+                pass
+        blob = " ".join([
+            str(result.get("status", "")),
+            str(result.get("message", "")),
+            str(result.get("details", "")),
+            str(result.get("body", ""))[:4096],
+        ]).lower()
+        status_values.extend([int(code) for code in HTTP_STATUS_IN_TEXT_RE.findall(blob)])
+        if any(code in WAF_RISK_HTTP_STATUS_CODES for code in status_values):
+            return True
+        return any(marker in blob for marker in WAF_BODY_MARKERS)
+
+    def _record_waf_signals_from_results(self, state: AgentState, results: List[Any], phase_name: str) -> bool:
+        if self._normalized_safety_profile(state) == "aggressive":
+            return False
+        signals = [row for row in (results or []) if self._result_waf_signal(row)]
+        if not signals:
+            return False
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        risk = set(kb.get("risk_signals", []) or [])
+        risk.add("waf_or_blocking_detected")
+        kb["risk_signals"] = sorted(risk)
+        kb["waf_signal_count"] = int(kb.get("waf_signal_count", 0) or 0) + len(signals)
+        state.knowledge_base = kb
+        threshold = 1 if self._normalized_safety_profile(state) == "safe" else 3
+        if int(kb.get("waf_signal_count", 0) or 0) >= threshold:
+            state.campaign_stop_reason = (
+                f"{phase_name}: blocking/WAF signals detected; pausing campaign to avoid target overload"
+            )
+            delay_min, delay_max = self._action_delay_bounds(state)
+            state.request_delay_min = max(delay_min, 5.0)
+            state.request_delay_max = max(delay_max, 15.0)
+            if getattr(state, "verbose", False):
+                print_warning(state.campaign_stop_reason)
+            return True
+        return False
+
+    def _execute_agent_modules(
+        self,
+        state: AgentState,
+        scanner,
+        modules: List[Dict[str, Any]],
+        target_info: Dict[str, Any],
+        threads: int,
+        verbose: bool,
+        phase_name: str = "phase",
+    ) -> List[Dict[str, Any]]:
+        allowed, skipped = self._filter_modules_for_safety_profile(state, modules)
+        if not allowed:
+            return skipped
+
+        profile = self._normalized_safety_profile(state)
+        effective_threads = 1 if profile == "safe" else max(1, int(threads or 1))
+        results: List[Dict[str, Any]] = list(skipped)
+
+        if profile == "safe":
+            for module in allowed:
+                self._sleep_between_agent_actions(state, f"{phase_name}:{module.get('path', '')}")
+                batch_results = scanner._execute_modules([module], target_info, 1, verbose)
+                results.extend(batch_results)
+                self._adapt_rate_limit_from_results(state, batch_results)
+                if self._record_waf_signals_from_results(state, batch_results, phase_name):
+                    break
+            return results
+
+        self._sleep_between_agent_actions(state, phase_name)
+        batch_results = scanner._execute_modules(allowed, target_info, effective_threads, verbose)
+        results.extend(batch_results)
+        self._adapt_rate_limit_from_results(state, batch_results)
+        self._record_waf_signals_from_results(state, batch_results, phase_name)
+        return results
 
     def _append_timeline_event(
         self,
@@ -227,19 +571,21 @@ class AgentWorkflowCore:
             return True, f"TCP port {port} reachable."
 
         url = f"{scheme}://{host}:{port}{path if path.startswith('/') else '/' + path}"
-        request = urllib.request.Request(
-            url,
-            headers={"User-Agent": "KittysploitAgent/1.0"},
-            method="GET",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=4) as response:
-                status = int(getattr(response, "status", 0) or response.getcode() or 0)
-            return True, f"HTTP probe succeeded with status {status}."
-        except urllib.error.HTTPError as exc:
-            return True, f"HTTP probe reached target and returned status {int(exc.code or 0)}."
-        except Exception as exc:
-            return False, f"HTTP probe failed for {url}: {exc}"
+        row = self._http_probe_many(state, [url], timeout_s=4, read_bytes=2048)[0]
+        if row.get("error"):
+            return False, f"HTTP probe failed for {url}: {row.get('error')}"
+        status = int(row.get("status") or 0)
+        if self._result_waf_signal({
+            "status_code": status,
+            "body": row.get("body", ""),
+            "details": row.get("headers", {}),
+        }):
+            self._record_waf_signals_from_results(state, [{
+                "status_code": status,
+                "body": row.get("body", ""),
+                "details": row.get("headers", {}),
+            }], "reachability-probe")
+        return True, f"HTTP probe reached target and returned status {status}."
 
     def _result_has_exploit_link(self, result: dict) -> bool:
         if not isinstance(result, dict):
@@ -558,6 +904,37 @@ class AgentWorkflowCore:
                 break
         return out
 
+    def _semantic_catalog_paths_from_text(self, knowledge_base, text: str, max_paths: int = 25) -> List[str]:
+        if not text or not isinstance(knowledge_base, dict):
+            return []
+        semantic_index = (
+            knowledge_base.get("module_capability_catalog", {}).get("semantic_index", []) or []
+        )
+        if not semantic_index:
+            return []
+        query_tokens = set(self._extract_post_auth_lexical_tokens(text))
+        query_tokens.update(self._extract_adaptive_keywords(text))
+        query_tokens = {tok for tok in query_tokens if len(str(tok)) >= 3}
+        if not query_tokens:
+            return []
+
+        scored: List[Tuple[float, str]] = []
+        for row in semantic_index:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path", "") or "").strip()
+            tokens = {str(tok).lower() for tok in (row.get("tokens") or []) if str(tok).strip()}
+            if not path or not tokens:
+                continue
+            overlap = query_tokens.intersection(tokens)
+            if not overlap:
+                continue
+            score = len(overlap) / max(1.0, (len(query_tokens) * len(tokens)) ** 0.5)
+            if score > 0:
+                scored.append((score, path))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [path for _, path in scored[:max_paths]]
+
     def _resolve_catalog_paths_from_text(self, knowledge_base, text, max_paths=25):
         if not text or not isinstance(knowledge_base, dict):
             return []
@@ -567,6 +944,12 @@ class AgentWorkflowCore:
         tokens = sorted(set(self._extract_post_auth_lexical_tokens(text)), key=len, reverse=True)
         matched = []
         seen = set()
+        for path in self._semantic_catalog_paths_from_text(knowledge_base, text, max_paths=max_paths):
+            if path not in seen:
+                matched.append(path)
+                seen.add(path)
+            if len(matched) >= max_paths:
+                return matched
         for tok in tokens:
             if len(tok) < 4:
                 continue
@@ -983,7 +1366,7 @@ class AgentWorkflowCore:
         lpd = "auxiliary/scanner/http/login_page_detector"
 
         if goal == CAMPAIGN_GOAL_OBTAIN_AUTH:
-            if self._login_surface_wants_bruteforce(kb, findings, False):
+            if self._login_surface_wants_bruteforce(kb, findings, False) and not self._module_block_reason_for_profile(state, bf):
                 return {
                     "type": "run_followup",
                     "path": bf,
@@ -1118,6 +1501,8 @@ class AgentWorkflowCore:
         True when login is evidenced + at least one ``/`` login path exists, no session yet,
         no CMS lock from scan specializations, and bruteforce is not exhausted for all paths.
         """
+        if self._module_block_reason_for_profile(state, "auxiliary/scanner/http/login/admin_login_bruteforce"):
+            return False
         kb = state.knowledge_base
         if self._has_authenticated_session(kb):
             return False
@@ -1155,6 +1540,16 @@ class AgentWorkflowCore:
         self._sync_campaign_goal(state)
         out = dict(plan or {})
         out["campaign_goal"] = state.campaign_goal
+        if self._module_block_reason_for_profile(state, "auxiliary/scanner/http/login/admin_login_bruteforce"):
+            out["auth_first_mode"] = False
+            out["next_actions"] = [
+                a for a in (out.get("next_actions") or [])
+                if not (
+                    isinstance(a, dict)
+                    and "admin_login_bruteforce" in str(a.get("path", "")).lower()
+                )
+            ]
+            return out
         if not self._auth_first_mode(state):
             out["auth_first_mode"] = False
             return out
@@ -1389,41 +1784,21 @@ class AgentWorkflowCore:
         risk_signals = set(kb.get("risk_signals", []))
         fingerprint_blobs = []
 
-        for path in probe_paths[:10]:
-            url = f"{base_url}{path}"
-            request = urllib.request.Request(
-                url,
-                headers={"User-Agent": "KittysploitAgent/1.0"},
-                method="GET",
-            )
-            status = 0
-            headers = {}
-            body = ""
-            final_url_path = ""
-            try:
-                with urllib.request.urlopen(request, timeout=4) as response:
-                    status = int(getattr(response, "status", 0) or response.getcode() or 0)
-                    headers = {k.lower(): str(v) for k, v in response.headers.items()}
-                    body = response.read(8192).decode("utf-8", errors="ignore")
-                    try:
-                        final_url = str(response.geturl() or "").strip()
-                        final_url_path = urllib.parse.urlparse(final_url).path or ""
-                    except Exception:
-                        final_url_path = ""
-            except urllib.error.HTTPError as exc:
-                status = int(exc.code or 0)
-                headers = {k.lower(): str(v) for k, v in (exc.headers.items() if exc.headers else [])}
-                try:
-                    body = exc.read(4096).decode("utf-8", errors="ignore")
-                except Exception:
-                    body = ""
-                try:
-                    final_url = str(getattr(exc, "url", "") or "").strip()
-                    final_url_path = urllib.parse.urlparse(final_url).path or ""
-                except Exception:
-                    final_url_path = ""
-            except Exception:
+        urls = [f"{base_url}{path}" for path in probe_paths[:10]]
+        probe_rows = self._http_probe_many(state, urls, timeout_s=4, read_bytes=8192)
+        for path, row in zip(probe_paths[:10], probe_rows):
+            if row.get("error"):
                 continue
+            status = int(row.get("status") or 0)
+            headers = row.get("headers", {}) if isinstance(row.get("headers"), dict) else {}
+            body = str(row.get("body", "") or "")
+            try:
+                final_url_path = urllib.parse.urlparse(str(row.get("final_url", "") or "")).path or ""
+            except Exception:
+                final_url_path = ""
+
+            if self._result_waf_signal({"status_code": status, "body": body, "details": headers}):
+                risk_signals.add("waf_or_blocking_detected")
 
             blob = f"{path} {headers} {body}".lower()
             fingerprint_blobs.append(blob)
@@ -1494,6 +1869,19 @@ class AgentWorkflowCore:
 
         if probe_results:
             kb["fingerprint_trace"] = probe_results
+            self._record_waf_signals_from_results(
+                state,
+                [
+                    {
+                        "status_code": row.get("status"),
+                        "body": row.get("body", ""),
+                        "details": row.get("headers", {}),
+                    }
+                    for row in probe_rows
+                    if isinstance(row, dict)
+                ],
+                "ultra-fingerprint",
+            )
         dynamic_keywords = self._extract_adaptive_keywords(" ".join(fingerprint_blobs))
         for keyword in self._match_keywords_to_catalog(kb, dynamic_keywords):
             tech_hints.add(keyword)
@@ -1564,35 +1952,57 @@ class AgentWorkflowCore:
             kind="probe",
         )
         if not reachable:
-            state.results = []
-            state.vulnerable_results = []
-            state.contextual_findings = []
-            state.sql_findings = []
-            state.potential_findings = []
-            state.execution_plan = {
-                "next_actions": [],
-                "max_requests_next_phase": 0,
-                "stop_conditions": ["target_unreachable"],
-                "reasoning_confidence": 1.0,
-                "skip_exploitation": True,
-            }
-            state.llm_plan = {
-                "selected_paths": [],
-                "rationale": f"Target unreachable: {reason}",
-                "next_best_action": None,
-            }
-            state.campaign_stop_reason = "target_unreachable"
-            print_warning(f"Target unreachable, stopping early: {reason}")
-            return state
+            if getattr(state, "expanded_surface", False):
+                print_warning(
+                    f"Primary target unreachable ({reason}); continuing expanded-surface campaign "
+                    "(OSINT / cloud / passive modules may still run)."
+                )
+            else:
+                state.results = []
+                state.vulnerable_results = []
+                state.contextual_findings = []
+                state.sql_findings = []
+                state.potential_findings = []
+                state.execution_plan = {
+                    "next_actions": [],
+                    "max_requests_next_phase": 0,
+                    "stop_conditions": ["target_unreachable"],
+                    "reasoning_confidence": 1.0,
+                    "skip_exploitation": True,
+                }
+                state.llm_plan = {
+                    "selected_paths": [],
+                    "rationale": f"Target unreachable: {reason}",
+                    "next_best_action": None,
+                }
+                state.campaign_stop_reason = "target_unreachable"
+                print_warning(f"Target unreachable, stopping early: {reason}")
+                return state
         self._append_timeline_event(
             state,
             "scan",
             "Starting ultra-fingerprint and multi-phase scan campaign.",
             extra={"max_modules": state.max_modules, "threads": state.threads},
         )
+        if getattr(state, "expanded_surface", False):
+            print_info(
+                "Expanded surface (--all): including OSINT / cloud / passive aux modules with web scanners."
+            )
         self._run_ultra_fingerprint_pass(state)
+        if state.campaign_stop_reason:
+            print_warning(f"Campaign paused: {state.campaign_stop_reason}")
+            state.execution_plan = {
+                "next_actions": [],
+                "max_requests_next_phase": 0,
+                "stop_conditions": ["waf_or_blocking_detected"],
+                "reasoning_confidence": 1.0,
+                "skip_exploitation": True,
+            }
+            return state
         scanner = state.scanner
-        all_modules = self._catalog.discover_campaign_modules()
+        all_modules = self._catalog.discover_campaign_modules(
+            expanded=bool(getattr(state, "expanded_surface", False)),
+        )
         modules = self._select_modules_for_target(state, all_modules)
         if not modules:
             state.error = "No scanner modules available for this target/filter."
@@ -1602,6 +2012,9 @@ class AgentWorkflowCore:
         if not results:
             state.error = "No relevant modules selected after intelligent scan campaign."
             return state
+
+        if getattr(state, "expanded_surface", False):
+            results = self._run_derived_host_surface_scans(state, scanner, all_modules, results)
 
         state.results = results
         state.vulnerable_results = [
@@ -1652,7 +2065,15 @@ class AgentWorkflowCore:
             selected = modules[:max_modules]
             if verbose:
                 print_info(f"Scan campaign: bounded single-pass ({len(selected)} modules).")
-            single_pass_results = scanner._execute_modules(selected, state.target_info, threads, verbose)
+            single_pass_results = self._execute_agent_modules(
+                state,
+                scanner,
+                selected,
+                state.target_info,
+                threads,
+                verbose,
+                "single-pass",
+            )
             self._update_knowledge_base_from_results(
                 state.knowledge_base,
                 single_pass_results,
@@ -1689,11 +2110,14 @@ class AgentWorkflowCore:
             self._log_opportunistic_pick("cms-probe", cms_probe_modules, state, tech_hints, set(executed_paths))
             if verbose:
                 print_status(f"Phase cms-probe: executing {len(cms_probe_modules)} module(s)")
-            cms_probe_results = scanner._execute_modules(
+            cms_probe_results = self._execute_agent_modules(
+                state,
+                scanner,
                 cms_probe_modules,
                 state.target_info,
                 1 if verbose else max(2, min(threads, 6)),
                 False,
+                "cms-probe",
             )
             all_results.extend(cms_probe_results)
             selected_paths = [m.get("path") for m in cms_probe_modules if m.get("path")]
@@ -1719,6 +2143,10 @@ class AgentWorkflowCore:
                 results=cms_probe_results,
                 extra={"tech_hints": sorted(tech_hints)[:8]},
             )
+            if state.campaign_stop_reason:
+                state.scan_tech_hints = sorted(tech_hints)
+                state.scan_modules_executed = len(executed_paths)
+                return all_results
             if self._credential_milestone_reached(state.knowledge_base):
                 return self._pivot_scan_campaign_after_credentials(
                     state,
@@ -1771,7 +2199,7 @@ class AgentWorkflowCore:
                 )
 
         phase_specs = [
-            ("recon", self._pick_recon_modules(modules), recon_budget),
+            ("recon", self._pick_recon_modules(modules, state), recon_budget),
             ("crawl", self._pick_crawler_modules(modules), crawl_budget),
         ]
 
@@ -1804,11 +2232,14 @@ class AgentWorkflowCore:
             snapshot_before = self._snapshot_campaign_state(state, all_results)
             if verbose:
                 print_status(f"Phase {phase_name}: executing {len(selected)} module(s)")
-            phase_results = scanner._execute_modules(
+            phase_results = self._execute_agent_modules(
+                state,
+                scanner,
                 selected,
                 state.target_info,
                 phase_threads,
                 False,
+                phase_name,
             )
             all_results.extend(phase_results)
             selected_paths = [m.get("path") for m in selected if m.get("path")]
@@ -1833,6 +2264,10 @@ class AgentWorkflowCore:
                 modules=selected,
                 results=phase_results,
             )
+            if state.campaign_stop_reason:
+                state.scan_tech_hints = sorted(tech_hints)
+                state.scan_modules_executed = len(executed_paths)
+                return all_results
             if self._credential_milestone_reached(state.knowledge_base):
                 return self._pivot_scan_campaign_after_credentials(
                     state,
@@ -1989,11 +2424,14 @@ class AgentWorkflowCore:
                         f"Phase adaptive: executing {len(specialized_selected)} specialized module(s) "
                         f"for {', '.join(specializations)}"
                     )
-                specialized_results = scanner._execute_modules(
+                specialized_results = self._execute_agent_modules(
+                    state,
+                    scanner,
                     specialized_selected,
                     state.target_info,
                     phase_threads,
                     verbose,
+                    "adaptive",
                 )
                 all_results.extend(specialized_results)
                 selected_paths = [m.get("path") for m in specialized_selected if m.get("path")]
@@ -2202,7 +2640,15 @@ class AgentWorkflowCore:
                 if verbose:
                     hints_display = ", ".join(sorted(tech_hints)) if tech_hints else "none"
                     print_status(f"Phase targeted: {len(targeted)} module(s), hints={hints_display}")
-                targeted_results = scanner._execute_modules(targeted, state.target_info, phase_threads, verbose)
+                targeted_results = self._execute_agent_modules(
+                    state,
+                    scanner,
+                    targeted,
+                    state.target_info,
+                    phase_threads,
+                    verbose,
+                    "targeted",
+                )
                 all_results.extend(targeted_results)
                 selected_paths = [m.get("path") for m in targeted if m.get("path")]
                 for module in targeted:
@@ -2463,12 +2909,15 @@ class AgentWorkflowCore:
             no_novelty_streak = 0
 
         status_codes = []
+        waf_markers = 0
         for row in phase_results or []:
             blob = " ".join([
                 str(row.get("message", "")),
                 str(row.get("details", "")),
-            ])
+            ]).lower()
             status_codes.extend([int(code) for code in HTTP_STATUS_IN_TEXT_RE.findall(blob)])
+            if any(marker in blob for marker in WAF_BODY_MARKERS):
+                waf_markers += 1
 
         if no_novelty_streak >= 2:
             return True, no_novelty_streak, f"{phase_name}: low novelty for 2 consecutive phases"
@@ -2479,6 +2928,11 @@ class AgentWorkflowCore:
             if len(status_codes) >= 20 and noisy_ratio >= 0.85:
                 return True, no_novelty_streak, (
                     f"{phase_name}: excessive redirect/forbidden/rate-limit noise ({len(noisy)}/{len(status_codes)})"
+                )
+            waf_codes = [c for c in status_codes if c in WAF_RISK_HTTP_STATUS_CODES]
+            if len(waf_codes) >= 3 or waf_markers >= 2:
+                return True, no_novelty_streak, (
+                    f"{phase_name}: repeated blocking/WAF signals ({len(waf_codes)} status, {waf_markers} marker)"
                 )
 
         return False, no_novelty_streak, ""
@@ -3084,6 +3538,15 @@ class AgentWorkflowCore:
                 "message": "",
                 "details": {},
             }
+            block_reason = self._module_block_reason_for_profile(state, module_path)
+            if block_reason:
+                result["status"] = "skipped"
+                result["message"] = block_reason
+                result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
+                results.append(result)
+                continue
+
+            self._sleep_between_agent_actions(state, f"targeted:{module_path}")
             announced_bruteforce = False
             if "admin_login_bruteforce" in str(module_path).lower():
                 login_path = (
@@ -3174,6 +3637,8 @@ class AgentWorkflowCore:
             finally:
                 set_thread_output_quiet(False)
             results.append(result)
+            if self._record_waf_signals_from_results(state, [result], "targeted"):
+                break
             if verbose:
                 status_icon = "[+]" if result["vulnerable"] else "[-]"
                 print_info(f"{status_icon} {result['path']}: {result.get('message', '')}")
@@ -3395,7 +3860,7 @@ class AgentWorkflowCore:
         if forced_protocol and forced_protocol not in ("http", "https"):
             return modules[:max_modules]
 
-        recon_candidates = self._pick_recon_modules(modules)
+        recon_candidates = self._pick_recon_modules(modules, state)
         recon_candidates = recon_candidates[:recon_budget]
 
         if verbose:
@@ -3406,11 +3871,14 @@ class AgentWorkflowCore:
 
         tech_hints = set()
         if recon_candidates:
-            recon_results = scanner._execute_modules(
+            recon_results = self._execute_agent_modules(
+                state,
+                scanner,
                 recon_candidates,
                 state.target_info,
                 max(2, min(6, int(state.threads))),
                 False,
+                "smart-recon",
             )
             tech_hints = self._extract_tech_hints(recon_results)
 
@@ -3438,7 +3906,7 @@ class AgentWorkflowCore:
             filtered = self._filter_modules_by_protocol(modules, protocol=protocol)
             if verbose:
                 print_info(f"Module profile: forced protocol '{protocol}' ({len(filtered)} modules)")
-            return filtered
+            return self._merge_expanded_surface_if(state, filtered, modules)
 
         # Web-first profile for domains/URLs (avoid smb/ldap/etc by default).
         scheme = str(target_info.get("scheme", "")).lower()
@@ -3448,7 +3916,7 @@ class AgentWorkflowCore:
             filtered = self._filter_modules_by_protocol(modules, protocol="http")
             if verbose:
                 print_info(f"Module profile: web-only default ({len(filtered)} modules)")
-            return filtered
+            return self._merge_expanded_surface_if(state, filtered, modules)
 
         # For explicit host:port targets, keep scanner's port-aware behavior.
         port = target_info.get("port")
@@ -3459,9 +3927,231 @@ class AgentWorkflowCore:
                 if filtered:
                     if verbose:
                         print_info(f"Module profile: port-aware ({port}) ({len(filtered)} modules)")
-                    return filtered
+                    return self._merge_expanded_surface_if(state, filtered, modules)
 
+        if getattr(state, "expanded_surface", False) and isinstance(state.knowledge_base, dict):
+            state.knowledge_base["expanded_surface"] = True
         return modules
+
+    def _is_expanded_surface_module_path(self, path: str) -> bool:
+        pl = (path or "").lower().replace("\\", "/")
+        return any(pl.startswith(p) for p in EXPANDED_SURFACE_MODULE_PREFIXES)
+
+    def _merge_expanded_surface_modules(self, filtered: List[Any], full_modules: List[Any]) -> List[Any]:
+        seen: set = set()
+        out: List[Any] = []
+        for m in full_modules:
+            p = str(m.get("path") or "").strip()
+            if not p or p in seen:
+                continue
+            if not self._is_expanded_surface_module_path(p):
+                continue
+            seen.add(p)
+            out.append(m)
+        for m in filtered:
+            p = str(m.get("path") or "").strip()
+            if not p or p in seen:
+                continue
+            seen.add(p)
+            out.append(m)
+        return out
+
+    def _merge_expanded_surface_if(self, state: AgentState, filtered: List[Any], full_modules: List[Any]) -> List[Any]:
+        if not getattr(state, "expanded_surface", False):
+            return filtered
+        kb = state.knowledge_base
+        if isinstance(kb, dict):
+            kb["expanded_surface"] = True
+        return self._merge_expanded_surface_modules(filtered, full_modules)
+
+    def _organization_root_domain(self, hostname: str) -> str:
+        h = (hostname or "").lower().strip(".")
+        if h.startswith("www."):
+            return h[4:]
+        return h
+
+    def _hostname_in_seed_family(self, seed: str, candidate: str) -> bool:
+        s = self._organization_root_domain(seed)
+        c = self._organization_root_domain(candidate)
+        if not s or not c or "." not in c:
+            return False
+        if len(c) > 200:
+            return False
+        if c == s:
+            return True
+        return c.endswith("." + s)
+
+    def _collect_strings_from_details_object(self, obj: Any, sink: List[str], depth: int = 0) -> None:
+        if depth > 14 or len(sink) > 4000:
+            return
+        if isinstance(obj, dict):
+            for v in obj.values():
+                self._collect_strings_from_details_object(v, sink, depth + 1)
+        elif isinstance(obj, (list, tuple, set)):
+            for v in list(obj)[:900]:
+                self._collect_strings_from_details_object(v, sink, depth + 1)
+        elif isinstance(obj, (str, int, float, bool)):
+            sink.append(str(obj))
+
+    def _hostname_looks_valid(self, host: str) -> bool:
+        h = (host or "").strip().lower().strip(".")
+        if not h or len(h) > 200 or ".." in h or "/" in h or " " in h or "*" in h:
+            return False
+        if h in ("localhost", "127.0.0.1", "::1"):
+            return False
+        if h.endswith((".arpa", ".local")):
+            return False
+        parts = h.split(".")
+        if len(parts) < 2:
+            return False
+        for p in parts:
+            if not p or len(p) > 63:
+                return False
+            if not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", p, re.I):
+                return False
+        return True
+
+    def _extract_hosts_from_free_text(self, text: str, sink: set) -> None:
+        if not text:
+            return
+        for m in ABSOLUTE_URL_RE.finditer(text):
+            try:
+                parsed = urllib.parse.urlparse(m.group(0))
+                if parsed.hostname:
+                    sink.add(parsed.hostname.lower())
+            except Exception:
+                continue
+        for m in re.finditer(
+            r"@([a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\.(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63})",
+            text,
+            re.I,
+        ):
+            sink.add(m.group(1).lower())
+        for token in re.findall(
+            r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
+            text.lower(),
+        ):
+            sink.add(token)
+
+    def _hosts_from_scan_result(self, result: Dict[str, Any]) -> List[str]:
+        sink: set = set()
+        strings: List[str] = []
+        details = result.get("details") if isinstance(result, dict) else None
+        if isinstance(details, dict):
+            self._collect_strings_from_details_object(details, strings)
+        if isinstance(result, dict):
+            strings.append(str(result.get("message", "") or ""))
+        blob = " ".join(strings)
+        self._extract_hosts_from_free_text(blob, sink)
+        return [h for h in sink if self._hostname_looks_valid(h)]
+
+    def _harvest_derived_hosts(self, seed_hostname: str, results: List[Any]) -> List[str]:
+        ordered: List[str] = []
+        seen: set = set()
+        seed_l = (seed_hostname or "").lower().strip(".")
+        for row in results or []:
+            if not isinstance(row, dict):
+                continue
+            for h in self._hosts_from_scan_result(row):
+                hl = h.lower()
+                if hl == seed_l or hl in seen:
+                    continue
+                if not self._hostname_in_seed_family(seed_hostname, h):
+                    continue
+                seen.add(hl)
+                ordered.append(hl)
+        return ordered
+
+    def _derived_scan_limits(self, state: AgentState) -> Tuple[int, int]:
+        max_h = min(
+            DERIVED_HOST_SCAN_MAX_HOSTS,
+            max(2, int(state.max_modules) // 4),
+        )
+        per = min(
+            DERIVED_HOST_SCAN_MODULES_PER_HOST,
+            max(4, int(state.max_modules) // 5),
+        )
+        return max_h, per
+
+    def _run_derived_host_surface_scans(
+        self,
+        state: AgentState,
+        scanner: ScannerCommand,
+        all_modules: List[Dict[str, Any]],
+        primary_results: List[Any],
+    ) -> List[Any]:
+        seed = str((state.target_info or {}).get("hostname", "") or "").strip()
+        if not seed:
+            return primary_results
+        hosts = self._harvest_derived_hosts(seed, primary_results)
+        kb = state.knowledge_base
+        if isinstance(kb, dict):
+            kb["derived_target_candidates"] = list(hosts)
+            kb.setdefault("derived_host_scans", [])
+        if not hosts:
+            return primary_results
+        max_hosts, per_host = self._derived_scan_limits(state)
+        http_pool = self._filter_modules_by_protocol(all_modules, "http")
+        if not http_pool:
+            return primary_results
+        aggregated = list(primary_results)
+        visited = {seed.lower()}
+        self._append_timeline_event(
+            state,
+            "scan",
+            f"Derived host scans: up to {max_hosts} hostname(s), {per_host} HTTP module(s) each.",
+            extra={"candidates": len(hosts)},
+        )
+        ran = 0
+        for host in hosts:
+            if ran >= max_hosts:
+                break
+            hl = host.lower()
+            if hl in visited:
+                continue
+            visited.add(hl)
+            sub_target = scanner._parse_target(f"https://{host}/")
+            if not sub_target:
+                continue
+            if bool(state.verbose):
+                print_info(f"Derived HTTP scan ({ran + 1}/{max_hosts}): {host}")
+            hints = list(kb.get("tech_hints", []) or []) if isinstance(kb, dict) else []
+            specs = list(state.scan_specializations or [])
+            batch = self._rank_targeted_modules(
+                http_pool,
+                hints,
+                per_host,
+                specializations=specs,
+                knowledge_base=kb if isinstance(kb, dict) else {},
+            )
+            if not batch:
+                continue
+            sub_results = self._execute_agent_modules(
+                state,
+                scanner,
+                batch,
+                sub_target,
+                max(2, min(int(state.threads), 6)),
+                bool(state.verbose),
+                f"derived-host:{host}",
+            )
+            aggregated.extend(sub_results)
+            if isinstance(kb, dict):
+                paths = [m.get("path") for m in batch if m.get("path")]
+                self._update_knowledge_base_from_results(
+                    kb,
+                    sub_results,
+                    paths,
+                    hints,
+                    specs,
+                )
+                kb["derived_host_scans"].append({
+                    "host": host,
+                    "modules": [m.get("path") for m in batch],
+                    "count": len(sub_results),
+                })
+            ran += 1
+        return aggregated
 
     def _filter_modules_by_protocol(self, modules, protocol):
         protocol = str(protocol or "").strip().lower()
@@ -3484,12 +4174,17 @@ class AgentWorkflowCore:
         }
         return mapping.get(int(port))
 
-    def _pick_recon_modules(self, modules):
+    def _pick_recon_modules(self, modules, state: Optional[AgentState] = None):
         recon = []
         cms_detect_tokens = ("wordpress_detect", "drupal_detect", "joomla_detect")
+        expanded = bool(state and getattr(state, "expanded_surface", False))
         for module in modules:
             path = module_path_lower(module)
             blob = module_blob_lower(module)
+            is_surface_recon = False
+            if expanded and self._is_expanded_surface_module_path(path):
+                if not any(skip in path for skip in EXPANDED_SURFACE_RECON_SKIP_SUBSTR):
+                    is_surface_recon = True
             # Keep recon lightweight: favor detection/fingerprint modules, avoid heavy vuln scanners.
             is_light_detect = (
                 path.startswith("scanner/http/")
@@ -3502,12 +4197,16 @@ class AgentWorkflowCore:
                 path.startswith("auxiliary/scanner/")
                 and any(token in path for token in ("wordpress_scanner", "drupal_scanner", "joomla_scanner"))
             )
-            if (is_light_detect or is_discovery_aux or is_auth_recon) and not is_heavy_scanner:
+            if (is_light_detect or is_discovery_aux or is_auth_recon or is_surface_recon) and not is_heavy_scanner:
                 recon.append(module)
-        # Favor quick CMS detectors first so campaign pivots earlier.
+        # Favor quick CMS detectors first so campaign pivots earlier; then expanded-surface modules.
         recon.sort(
             key=lambda m: (
                 0 if any(t in module_path_lower(m) for t in cms_detect_tokens) else 1,
+                0 if (
+                    expanded
+                    and self._is_expanded_surface_module_path(str(m.get("path", "")))
+                ) else 1,
                 str(m.get("path", "")),
             )
         )
@@ -3594,6 +4293,11 @@ class AgentWorkflowCore:
             score += score_rules(blob, generic_rules)
             score += score_rules(blob, core_rules)
             score += score_rules(blob, detect_fingerprint_rules)
+
+            kb = knowledge_base or {}
+            if isinstance(kb, dict) and kb.get("expanded_surface"):
+                if self._is_expanded_surface_module_path(path):
+                    score += 2
 
             if cms_tokens:
                 is_cms_module = any(token in blob for token in cms_tokens)
@@ -4029,6 +4733,37 @@ class AgentWorkflowCore:
         if rationale:
             print_info(f"Rationale: {self._shorten_text(rationale, 180)}")
 
+    def _refresh_compressed_context_summary(self, state: AgentState) -> str:
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        timeline = state.decision_timeline if isinstance(state.decision_timeline, list) else []
+        findings = state.vulnerable_results or state.contextual_findings or []
+        top_findings = []
+        for item in findings[:8]:
+            if not isinstance(item, dict):
+                continue
+            top_findings.append(
+                f"{item.get('path', '')}: {self._shorten_text(item.get('message', ''), 90)}"
+            )
+        recent_events = []
+        for row in timeline[-8:]:
+            if isinstance(row, dict):
+                recent_events.append(
+                    f"{row.get('phase', '?')}: {self._shorten_text(row.get('summary', ''), 100)}"
+                )
+        summary = {
+            "goal": state.campaign_goal,
+            "stop_reason": state.campaign_stop_reason,
+            "tech": kb.get("tech_hints", [])[:12],
+            "risk": kb.get("risk_signals", [])[:12],
+            "login_paths": kb.get("login_paths", [])[:6],
+            "endpoints": len(kb.get("discovered_endpoints", []) or []),
+            "params": len(kb.get("discovered_params", []) or []),
+            "top_findings": top_findings,
+            "recent_events": recent_events,
+        }
+        state.compressed_context_summary = self._shorten_text(json.dumps(summary, ensure_ascii=False), 3000)
+        return state.compressed_context_summary
+
     def _node_reason(self, state: AgentState) -> AgentState:
         if state.target_reachable is False:
             state.metrics.deterministic_steps += 1
@@ -4041,6 +4776,23 @@ class AgentWorkflowCore:
         self._sync_campaign_goal(state)
         if state.verbose and state.campaign_goal:
             print_info(f"Campaign goal: {state.campaign_goal}")
+
+        if state.campaign_stop_reason and "blocking/WAF" in str(state.campaign_stop_reason):
+            state.llm_plan = {
+                "selected_paths": [],
+                "rationale": state.campaign_stop_reason,
+                "next_best_action": {"type": "skip", "path": "", "reason": state.campaign_stop_reason},
+            }
+            state.execution_plan = {
+                "next_actions": [],
+                "max_requests_next_phase": 0,
+                "stop_conditions": ["waf_or_blocking_detected"],
+                "reasoning_confidence": 1.0,
+                "skip_exploitation": True,
+                "campaign_goal": state.campaign_goal,
+            }
+            state.decision_source = "heuristic"
+            return state
 
         if state.campaign_goal == CAMPAIGN_GOAL_SHELL_STOP:
             state.llm_plan = {
@@ -4174,6 +4926,7 @@ class AgentWorkflowCore:
         auth_session = "authenticated_session" in [str(x).lower() for x in risk_signals_list]
         auth_context = self._get_active_auth_context(knowledge_base)
         auth_first = self._auth_first_mode(state)
+        compressed_context = self._refresh_compressed_context_summary(state)
         prompt_payload = {
             "target": state.raw_target,
             "strategy": {
@@ -4181,6 +4934,7 @@ class AgentWorkflowCore:
                 "auth_first_mode": auth_first,
             },
             "knowledge_context": {
+                "compressed_summary": compressed_context,
                 "tech_hints": knowledge_base.get("tech_hints", []),
                 "specializations": knowledge_base.get("specializations", []),
                 "risk_signals": risk_signals_list,
@@ -4202,7 +4956,7 @@ class AgentWorkflowCore:
                 "landing_path": auth_context.get("final_path", ""),
                 "has_session_cookie": bool((auth_context.get("cookies") or {})),
                 "matched_catalog_paths_from_landing_html": knowledge_base.get("post_auth_catalog_paths", [])[:20],
-                "landing_html_excerpt": (knowledge_base.get("authenticated_page_excerpt") or "")[:8000],
+                "landing_html_excerpt": (knowledge_base.get("authenticated_page_excerpt") or "")[:2500],
             },
             "potential_findings": [
                 {
@@ -4929,17 +5683,24 @@ class AgentWorkflowCore:
             path = str(action.get("path", "")).strip()
             if not path:
                 continue
-            if not (
-                path.startswith("scanner/")
-                or path.startswith("auxiliary/scanner/")
-            ):
+            ok_prefix = path.startswith("scanner/") or path.startswith("auxiliary/scanner/")
+            if not ok_prefix and getattr(state, "expanded_surface", False):
+                ok_prefix = self._is_expanded_surface_module_path(path) and path.startswith(
+                    ("auxiliary/osint/", "auxiliary/aws/", "auxiliary/azure/", "auxiliary/gcp/")
+                )
+            if not ok_prefix:
                 continue
             followup_paths.append(path)
 
         if not followup_paths:
             return []
 
-        available = {m.get("path"): m for m in self._catalog.discover_campaign_modules()}
+        available = {
+            m.get("path"): m
+            for m in self._catalog.discover_campaign_modules(
+                expanded=bool(getattr(state, "expanded_surface", False)),
+            )
+        }
         max_req = int(execution_plan.get("max_requests_next_phase", 10) or 10)
         budget = max(1, min(max_req, 10))
 

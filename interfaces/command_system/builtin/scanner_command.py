@@ -681,15 +681,28 @@ Examples:
                     if target_info.get('path') and hasattr(module_instance, 'path'):
                         module_instance.set_option('path', target_info['path'])
 
-                    # Execute run() (returns True/False)
-                    result['vulnerable'] = module_instance.run()
-                    result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
+                    # Execute run(); merge dict returns (common for OSINT/aux) into dynamic details.
+                    run_return = module_instance.run()
 
                     # Get info from __info__ (static) and vulnerability_info (dynamic)
                     module_info = getattr(module_instance, '__info__', {})
                     dynamic_info = getattr(module_instance, 'vulnerability_info', {}) or {}
                     if not isinstance(dynamic_info, dict):
                         dynamic_info = {}
+
+                    if isinstance(run_return, dict):
+                        for k, v in run_return.items():
+                            if k in ('reason', 'version', 'severity'):
+                                continue
+                            dynamic_info.setdefault(k, v)
+
+                    if isinstance(run_return, bool):
+                        result['vulnerable'] = run_return
+                    elif isinstance(run_return, dict):
+                        result['vulnerable'] = bool(run_return.get('vulnerable') or run_return.get('vuln'))
+                    else:
+                        result['vulnerable'] = bool(run_return)
+                    result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
 
                     # Reason: dynamic first, then from __info__ description
                     result['message'] = dynamic_info.get('reason') or module_info.get('description', '')

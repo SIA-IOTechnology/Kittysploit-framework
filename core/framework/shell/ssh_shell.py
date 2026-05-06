@@ -73,8 +73,12 @@ class SSHShell(BaseShell):
             directory=self.current_directory or "/"
         )
     
-    def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the SSH shell"""
+    def execute_command(self, command: str, pty: bool = False) -> Dict[str, Any]:
+        """Execute a command in the SSH shell.
+
+        ``pty=True`` allocates a pseudo-terminal for this exec channel (closer to a real
+        SSH -t session). Some exploits / PAM stacks require a TTY; plain exec_command does not.
+        """
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -100,7 +104,7 @@ class SSHShell(BaseShell):
         # Try to execute via SSH connection
         if self.is_connected and self.connection:
             try:
-                return self._execute_remote_command(command)
+                return self._execute_remote_command(command, get_pty=pty)
             except Exception as e:
                 # Connection might have been lost, try to reinitialize
                 self.is_connected = False
@@ -108,7 +112,7 @@ class SSHShell(BaseShell):
                 self._initialize_ssh_connection()
                 if self.is_connected and self.connection:
                     try:
-                        return self._execute_remote_command(command)
+                        return self._execute_remote_command(command, get_pty=pty)
                     except Exception as e2:
                         return {'output': '', 'status': 1, 'error': f'SSH execution error: {str(e2)}'}
                 return {'output': '', 'status': 1, 'error': f'SSH execution error: {str(e)}'}
@@ -238,7 +242,40 @@ class SSHShell(BaseShell):
         self.environment_vars['PWD'] = self.current_directory
         
         print_info(f"SSH connection initialized from session {self.session_id}")
-    
+        self._sync_remote_pwd()
+
+    @staticmethod
+    def _shell_single_quote(path: str) -> str:
+        """Wrap path for POSIX sh single-quoted string (escape embedded quotes)."""
+        return (path or "").replace("'", "'\"'\"'")
+
+    def _wrap_exec_in_tracked_cwd(self, command: str) -> str:
+        """
+        exec_command() has no persistent working directory; each invocation starts fresh
+        (usually in the remote user's home). Prefix with cd to the path we track locally.
+        """
+        cmd = (command or "").strip()
+        if not cmd:
+            return cmd
+        cwd = (self.current_directory or "").strip()
+        if not cwd:
+            return command
+        q = self._shell_single_quote(cwd)
+        return f"cd '{q}' && {command}"
+
+    def _sync_remote_pwd(self):
+        """Align current_directory with the remote default cwd for a new exec channel (usually $HOME)."""
+        if not self.connection:
+            return
+        try:
+            _, stdout, _ = self.connection.exec_command("pwd")
+            out = stdout.read().decode("utf-8", errors="ignore").strip()
+            if out and out[0] == "/":
+                self.current_directory = out
+                self.environment_vars["PWD"] = out
+        except Exception:
+            pass
+
     def connect(self, host: str, port: int = 22, username: str = "user", password: str = "", private_key: str = None) -> bool:
         """Connect to SSH server"""
         try:
@@ -260,10 +297,11 @@ class SSHShell(BaseShell):
             self.environment_vars['SSH_CLIENT'] = f"{host} {port} 22"
             self.environment_vars['SSH_CONNECTION'] = f"{host} {port} {host} 22"
             self.environment_vars['USER'] = username
-            self.environment_vars['HOME'] = f"/home/{username}"
+            self.environment_vars["HOME"] = f"/home/{username}"
             self.current_directory = f"/home/{username}"
-            self.environment_vars['PWD'] = self.current_directory
-            
+            self.environment_vars["PWD"] = self.current_directory
+            self._sync_remote_pwd()
+
             return True
         except Exception as e:
             print_error(f"SSH connection failed: {str(e)}")
@@ -272,10 +310,120 @@ class SSHShell(BaseShell):
     def disconnect(self):
         """Disconnect from SSH server"""
         self.is_connected = False
+        try:
+            if self.channel:
+                self.channel.close()
+        except Exception:
+            pass
         self.connection = None
         self.channel = None
+
+    def _ensure_interactive_channel(self) -> bool:
+        """Create (or reuse) an SSH interactive PTY channel."""
+        if not self.connection:
+            return False
+        try:
+            if self.channel is not None and not self.channel.closed:
+                return True
+        except Exception:
+            self.channel = None
+        try:
+            self.channel = self.connection.invoke_shell(term="xterm", width=120, height=40)
+            self.channel.settimeout(0.2)
+            return True
+        except Exception as e:
+            print_error(f"Unable to open SSH interactive channel: {e}")
+            self.channel = None
+            return False
+
+    def _drain_interactive_output(self, max_wait: float = 0.5, idle_grace: float = 0.15) -> str:
+        """
+        Read available data from interactive channel without blocking forever.
+        """
+        if not self.channel:
+            return ""
+        chunks = []
+        deadline = time.monotonic() + max(0.05, float(max_wait))
+        last_data = 0.0
+        while time.monotonic() < deadline:
+            try:
+                if self.channel.recv_ready():
+                    data = self.channel.recv(65535)
+                    if not data:
+                        break
+                    chunks.append(data.decode("utf-8", errors="ignore"))
+                    last_data = time.monotonic()
+                    continue
+            except Exception:
+                break
+            if chunks and last_data and (time.monotonic() - last_data) >= max(0.05, float(idle_grace)):
+                break
+            time.sleep(0.03)
+        return "".join(chunks)
+
+    def start_interactive_shell_loop(self) -> bool:
+        """
+        Start a true persistent SSH PTY interactive loop.
+
+        Unlike exec_command() per-line execution, this keeps shell state across commands
+        (cwd, exported vars, su/sudo context), which is required for many privilege workflows.
+        """
+        if not self.is_connected or not self.connection:
+            self._initialize_ssh_connection()
+        if not self.is_connected or not self.connection:
+            print_error("SSH connection not available for interactive mode.")
+            return False
+        if not self._ensure_interactive_channel():
+            return False
+
+        print_info("SSH persistent PTY mode enabled (stateful shell).")
+        print_info("Type 'background', 'back' or 'exit' to return to KittySploit.")
+
+        banner = self._drain_interactive_output(max_wait=0.9, idle_grace=0.2)
+        if banner:
+            print(banner, end="", flush=True)
+
+        while True:
+            try:
+                output = self._drain_interactive_output(max_wait=0.3, idle_grace=0.12)
+                if output:
+                    print(output, end="", flush=True)
+
+                line = input("")
+                command = (line or "").strip()
+                if not command:
+                    continue
+                if command.lower() in ("background", "back", "exit"):
+                    print_info("Returning to main shell (session remains active)...")
+                    break
+
+                self.add_to_history(command)
+                self.channel.send(command + "\n")
+
+            except KeyboardInterrupt:
+                try:
+                    self.channel.send("\x03")
+                except Exception:
+                    pass
+                print_info("^C")
+                continue
+            except EOFError:
+                print_info("Returning to main shell (session remains active)...")
+                break
+            except Exception as e:
+                print_error(f"Interactive SSH loop error: {e}")
+                break
+
+        try:
+            if self.channel:
+                self.channel.close()
+        except Exception:
+            pass
+        self.channel = None
+        self._sync_remote_pwd()
+        return True
     
-    def _execute_remote_command(self, command: str) -> Dict[str, Any]:
+    def _execute_remote_command(self, command: str, get_pty: bool = False) -> Dict[str, Any]:
         """Execute command on remote SSH server using paramiko"""
         if not self.connection:
             self.is_connected = False
@@ -293,25 +441,16 @@ class SSHShell(BaseShell):
                     self.connection = None
                     return {'output': '', 'status': 1, 'error': 'SSH connection is closed'}
             
-            # Execute command via SSH
-            stdin, stdout, stderr = self.connection.exec_command(command)
-            
+            to_run = self._wrap_exec_in_tracked_cwd(command)
+            stdin, stdout, stderr = self.connection.exec_command(to_run, get_pty=get_pty)
+
             # Read output
-            output = stdout.read().decode('utf-8', errors='ignore')
-            error = stderr.read().decode('utf-8', errors='ignore')
-            
+            output = stdout.read().decode("utf-8", errors="ignore")
+            error = stderr.read().decode("utf-8", errors="ignore")
+
             # Get exit status
             exit_status = stdout.channel.recv_exit_status()
-            
-            # Update current directory if command was 'cd'
-            if command.strip().startswith('cd '):
-                # Execute pwd to get new directory
-                stdin_pwd, stdout_pwd, _ = self.connection.exec_command('pwd')
-                new_dir = stdout_pwd.read().decode('utf-8', errors='ignore').strip()
-                if new_dir:
-                    self.current_directory = new_dir
-                    self.environment_vars['PWD'] = new_dir
-            
+
             return {
                 'output': output,
                 'status': exit_status,
@@ -425,10 +564,11 @@ SSH Connection:
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         if not args:
-            target_dir = self.environment_vars.get('HOME', f'/home/{self.username}')
+            target_dir = self.environment_vars.get("HOME", f"/home/{self.username}")
         else:
-            target_dir = args
-        result = self._execute_remote_command(f"cd {target_dir} && pwd")
+            target_dir = args.strip()
+        q = self._shell_single_quote(target_dir)
+        result = self._execute_remote_command(f"cd '{q}' && pwd")
         if result['status'] == 0 and result['output']:
             self.current_directory = result['output'].strip()
             self.environment_vars['PWD'] = self.current_directory

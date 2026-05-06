@@ -8,7 +8,9 @@ The plugin now uses a staged workflow:
 - crawl and normalize endpoints
 - run passive HTTP detectors already present in the framework
 - perform targeted active probes on discovered parameters
-- recommend and optionally verify follow-up modules with safer checks
+- run deep active probes (SQLi, XSS, LFI, SSRF, optional RCE) on discovered parameters
+- automatically execute ranked auxiliary/scanner HTTP follow-up modules (exploits only in --aggressive)
+- optional --stealth / --request-budget / --max-probes-per-endpoint for low-noise scans (adaptive crawl backoff on 429/503/403)
 """
 
 from kittysploit import *
@@ -21,6 +23,7 @@ import shlex
 import time
 import warnings
 from collections import defaultdict, deque
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -159,19 +162,32 @@ PASSIVE_SCANNERS = [
 SQLI_ERRORS = [
     "you have an error in your sql syntax",
     "warning: mysql",
+    "mysqli_",
     "mysqli_sql_exception",
     "mysql_fetch",
     "sql syntax",
+    "syntax error near",
     "quoted string not properly terminated",
     "unclosed quotation mark",
     "sqlite error",
     "sqlite3.operationalerror",
+    "sqlite exception",
     "pg_query(",
+    "pg_exec(",
+    "warning: pg_",
     "postgresql query failed",
     "sqlstate[",
     "ora-01756",
+    "ora-0",
+    "oracle error",
     "odbc sql server driver",
     "microsoft ole db provider for sql server",
+    "microsoft ole db provider for odbc",
+    "odbc driver manager",
+    "sql server",
+    "unclosed quotation",
+    "django.db.utils",
+    "operationalerror",
 ]
 
 LINUX_LFI_MARKERS = [
@@ -201,6 +217,8 @@ WAF_SIGNATURES = {
     "Wordfence": ["wordfence"],
 }
 
+# WordPress: multiple markers required (see _detect_technologies) to avoid false positives
+# from a single substring in unrelated JS or third-party widgets.
 TECH_BODY_SIGNATURES = {
     "wordpress": ["wp-content", "wp-includes", "wp-json", "wp-login.php"],
     "drupal": ["drupal.js", "sites/all", "drupalsettings"],
@@ -214,7 +232,8 @@ TECH_BODY_SIGNATURES = {
     "angular": ["ng-version", "angular"],
     "phpmyadmin": ["phpmyadmin", "pma_"],
     "swagger": ["swagger-ui", "openapi"],
-    "graphql": ["graphql", "__schema"],
+    # GraphQL stack hint only when API-like signals exist (word "graphql" alone is too noisy).
+    "graphql": ["__schema", "graphql/query", "application/graphql", "graphiql", "graphql playground"],
     "grafana": ["grafana"],
     "kibana": ["kibana"],
     "tomcat": ["apache tomcat", "jsessionid"],
@@ -237,14 +256,47 @@ SEVERITY_ORDER = {
     "info": 1,
 }
 
+# Base confidence per detection class (tuned with WAF / profile in _tuned_confidence).
+DETECTION_CONFIDENCE_BASE = {
+    "sqli_error": 91,
+    "sqli_boolean": 74,
+    "sqli_boolean_numeric": 71,
+    "sqli_time": 82,
+    "xss_reflected": 88,
+    "xss_reflected_escaped": 78,
+    "lfi_linux_passwd": 94,
+    "lfi_linux_marker": 84,
+    "lfi_windows_ini": 90,
+    "ssrf_cloud_metadata": 83,
+    "ssrf_backend_error": 64,
+    "rce_cmd_injection": 97,
+}
+
+# Lower value = stronger / more reliable signal for secondary sort.
+DETECTION_RELIABILITY_RANK = {
+    "sqli_error": 0,
+    "rce_cmd_injection": 0,
+    "lfi_linux_passwd": 1,
+    "lfi_windows_ini": 2,
+    "ssrf_cloud_metadata": 2,
+    "sqli_time": 3,
+    "sqli_boolean": 4,
+    "sqli_boolean_numeric": 4,
+    "xss_reflected": 3,
+    "xss_reflected_escaped": 8,
+    "lfi_linux_marker": 5,
+    "ssrf_backend_error": 6,
+    "generic": 9,
+}
+
 
 class WebVulnScannerPlugin(Plugin):
     """Web vulnerability scanner plugin."""
 
     __info__ = {
         "name": "web_vuln_scanner",
-        "description": "Crawl, fingerprint and actively probe web targets with passive detectors and targeted payloads",
-        "version": "2.0.0",
+        "description": "Crawl targets, fingerprint stack, run passive detectors, deep active SQLi/XSS/LFI probes on parameters, and auto-run ranked HTTP scanner modules",
+        "version": "3.2.0",
         "author": "KittySploit Team",
         "dependencies": ["requests", "beautifulsoup4"],
     }
@@ -257,7 +309,7 @@ class WebVulnScannerPlugin(Plugin):
         self.verbose = False
         self.aggressive = False
         self.min_confidence = 70
-        self.max_modules = 3
+        self.max_modules = 12
         self.max_urls = 150
         self.target_url = ""
         self.base_url = ""
@@ -278,6 +330,18 @@ class WebVulnScannerPlugin(Plugin):
         self.endpoint_inventory: List[Dict[str, Any]] = []
         self.followup_candidates: List[Dict[str, Any]] = []
         self.scan_started_at = 0.0
+        self.wordpress_confirmed = False
+        self._wordpress_body_evidence = 0
+        self.active_param_limit = 80
+        self.show_module_suggestions = False
+        self.stealth_mode = False
+        self.request_budget_total: Optional[int] = None
+        self._requests_spent = 0
+        self._budget_lock = Lock()
+        self.max_probes_per_endpoint: Optional[int] = None
+        self._probe_local = threading.local()
+        self._stealth_backoff = 1.0
+        self._http_failures = 0
 
     def check_dependencies(self):
         if not REQUESTS_AVAILABLE:
@@ -298,11 +362,59 @@ class WebVulnScannerPlugin(Plugin):
         parser.add_argument("--user-agent", dest="user_agent", help="Custom User-Agent string", metavar="<ua>", type=str, default="Mozilla/5.0 (KittySploit Scanner)")
         parser.add_argument("--cookie", dest="cookie", help="Cookie string for authenticated requests", metavar="<cookie>", type=str, default="")
         parser.add_argument("--min-confidence", dest="min_confidence", help="Minimum confidence 0-100 (default: 70)", metavar="<confidence>", type=int, default=70)
-        parser.add_argument("--max-modules", dest="max_modules", help="Maximum follow-up modules to verify (default: 3)", metavar="<count>", type=int, default=3)
+        parser.add_argument(
+            "--max-modules",
+            dest="max_modules",
+            help="Maximum follow-up HTTP modules to run automatically (default: 12)",
+            metavar="<count>",
+            type=int,
+            default=12,
+        )
+        parser.add_argument(
+            "--active-limit",
+            dest="active_limit",
+            help="Max parameterized endpoints for active SQLi/XSS/LFI probes (default: 80)",
+            metavar="<count>",
+            type=int,
+            default=80,
+        )
+        parser.add_argument(
+            "--suggest-modules",
+            dest="suggest_modules",
+            help="Print extra module ideas at the end (off by default; scanners run automatically)",
+            action="store_true",
+        )
         parser.add_argument("--max-urls", dest="max_urls", help="Maximum URLs/endpoints to keep (default: 150)", metavar="<count>", type=int, default=150)
         parser.add_argument("--report-json", dest="report_json", help="Write a JSON report to the given path", metavar="<file>", type=str, default="")
-        parser.add_argument("--passive-only", dest="passive_only", help="Run only crawl, passive detectors and follow-up recommendations", action="store_true")
+        parser.add_argument(
+            "--passive-only",
+            dest="passive_only",
+            help="Crawl + passive detectors only (no active SQLi/XSS/LFI or follow-up modules)",
+            action="store_true",
+        )
         parser.add_argument("--aggressive", dest="aggressive", help="Enable deeper probes and follow-up checks", action="store_true")
+        parser.add_argument(
+            "--stealth",
+            dest="stealth",
+            help="Discrete / CI-friendly profile: caps concurrency and probes, optional request budget, adaptive backoff on throttling",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--request-budget",
+            dest="request_budget",
+            help="Max plugin HTTP requests (0=unlimited). With --stealth, default is 520 if unset.",
+            metavar="<n>",
+            type=int,
+            default=0,
+        )
+        parser.add_argument(
+            "--max-probes-per-endpoint",
+            dest="max_probes_per_endpoint",
+            help="Cap _send_entry_request calls per parameterized endpoint (0=unlimited). With --stealth, default 28 if unset.",
+            metavar="<n>",
+            type=int,
+            default=0,
+        )
         parser.add_argument("-v", "--verbose", dest="verbose", help="Verbose output", action="store_true")
 
         if not args or not args[0]:
@@ -340,6 +452,11 @@ class WebVulnScannerPlugin(Plugin):
                 report_json=pargs.report_json,
                 passive_only=pargs.passive_only,
                 aggressive=pargs.aggressive,
+                active_limit=max(5, pargs.active_limit),
+                show_module_suggestions=pargs.suggest_modules,
+                stealth=bool(getattr(pargs, "stealth", False)),
+                request_budget=max(0, int(getattr(pargs, "request_budget", 0) or 0)),
+                max_probes_per_endpoint=max(0, int(getattr(pargs, "max_probes_per_endpoint", 0) or 0)),
             )
         except Exception as exc:
             print_error(f"An error occurred: {exc}")
@@ -367,6 +484,11 @@ class WebVulnScannerPlugin(Plugin):
         report_json: str,
         passive_only: bool,
         aggressive: bool,
+        active_limit: int,
+        show_module_suggestions: bool,
+        stealth: bool,
+        request_budget: int,
+        max_probes_per_endpoint: int,
     ) -> bool:
         try:
             self._reset_state()
@@ -377,9 +499,28 @@ class WebVulnScannerPlugin(Plugin):
             self.verbose = verbose
             self.aggressive = aggressive
             self.min_confidence = max(0, min(100, int(min_confidence)))
-            self.max_modules = max(1, int(max_modules))
+            self.max_modules = max(0, int(max_modules))
             self.max_urls = max(10, int(max_urls))
             self.threads = max(1, int(threads))
+            self.active_param_limit = max(5, int(active_limit))
+            self.show_module_suggestions = bool(show_module_suggestions)
+            self.stealth_mode = bool(stealth)
+            rb = int(request_budget)
+            mpe = int(max_probes_per_endpoint)
+            if self.stealth_mode:
+                if rb == 0:
+                    rb = 520
+                if mpe == 0:
+                    mpe = 28
+                self.crawl_delay = max(float(self.crawl_delay), 0.55)
+                self.threads = min(self.threads, 4)
+                self.active_param_limit = min(self.active_param_limit, 40)
+                if self.max_modules > 0:
+                    self.max_modules = min(self.max_modules, 6)
+            self.request_budget_total = rb if rb > 0 else None
+            self.max_probes_per_endpoint = mpe if mpe > 0 else None
+            self._requests_spent = 0
+            self._stealth_backoff = 1.0
             self.scan_started_at = time.time()
 
             self._init_session(user_agent, cookie)
@@ -387,11 +528,24 @@ class WebVulnScannerPlugin(Plugin):
             print_success("Starting Web Vulnerability Scanner")
             print_info(f"Target: {self.target_url}")
             print_info(f"Depth: {depth} | Threads: {self.threads} | Max URLs: {self.max_urls}")
-            print_info(f"Min confidence: {self.min_confidence}% | Follow-up modules: {self.max_modules}")
+            follow_txt = str(self.max_modules) if self.max_modules else "off"
+            print_info(
+                f"Min confidence: {self.min_confidence}% | "
+                f"Auto follow-up modules: {follow_txt} | Active endpoint cap: {self.active_param_limit}"
+            )
             if passive_only:
                 print_info("Mode: passive-only")
             if aggressive:
-                print_warning("Aggressive mode enabled: command injection and heavier timing probes may run.")
+                print_warning(
+                    "Aggressive mode enabled (scan_profile=aggressive): command injection and heavier timing probes may run."
+                )
+            if self.stealth_mode:
+                print_info(
+                    "Stealth / low-noise (scan_profile=safe): "
+                    f"budget={self.request_budget_total or 'unlimited'}, "
+                    f"max_probes/endpoint={self.max_probes_per_endpoint or 'unlimited'}, "
+                    f"threads={self.threads}, crawl_delay>={self.crawl_delay:.2f}s"
+                )
 
             print_status("Step 0: Detecting WAF or blocking middleware...")
             self._detect_waf(self.target_url)
@@ -430,6 +584,7 @@ class WebVulnScannerPlugin(Plugin):
             print_status("Step 4: Running passive HTTP detectors...")
             passive_hits = self._run_passive_scanners()
             print_success(f"Passive detectors produced {passive_hits} positive matches")
+            self._finalize_cms_fingerprints()
 
             active_hits = 0
             if passive_only:
@@ -439,18 +594,33 @@ class WebVulnScannerPlugin(Plugin):
                 active_hits = self._run_active_scans()
                 print_success(f"Active probes recorded {active_hits} findings")
 
-            print_status("Step 6: Selecting follow-up modules...")
-            self.followup_candidates = self._select_followup_modules(module_patterns)
-            if self.followup_candidates:
-                print_success(
-                    f"Prepared {len(self.followup_candidates)} follow-up candidates; verifying top {self.max_modules}"
-                )
-                self._run_followup_checks(self.followup_candidates[: self.max_modules])
+            if passive_only:
+                print_status("Step 6: Skipping follow-up modules (--passive-only)")
+                self.followup_candidates = self._select_followup_modules(module_patterns)
+            elif self.max_modules == 0:
+                print_status("Step 6: Skipping follow-up modules (--max-modules 0)")
+                self.followup_candidates = self._select_followup_modules(module_patterns)
             else:
-                print_warning("No relevant follow-up module identified")
+                print_status("Step 6: Running framework follow-up scanners...")
+                self.followup_candidates = self._select_followup_modules(module_patterns)
+                if self.followup_candidates:
+                    run_n = min(len(self.followup_candidates), self.max_modules)
+                    print_success(f"Launching up to {run_n} follow-up modules (ranked by stack + findings)")
+                    self._run_followup_checks(self.followup_candidates[:run_n])
+                else:
+                    print_warning("No follow-up modules matched filters for this target")
 
             print_status("Step 7: Results Summary")
             self._display_results()
+            if self.request_budget_total is not None or self.stealth_mode:
+                print_info(
+                    f"Plugin HTTP request accounting: {self._requests_spent} issued"
+                    + (
+                        f" (budget {self.request_budget_total})"
+                        if self.request_budget_total is not None
+                        else ""
+                    )
+                )
 
             if report_json:
                 self._write_json_report(report_json)
@@ -479,6 +649,12 @@ class WebVulnScannerPlugin(Plugin):
         self.passive_scanner_paths = set()
         self.endpoint_inventory = []
         self.followup_candidates = []
+        self.wordpress_confirmed = False
+        self._wordpress_body_evidence = 0
+        self._requests_spent = 0
+        self._stealth_backoff = 1.0
+        self._budget_warned = False
+        self._http_failures = 0
 
     def _init_session(self, user_agent: str, cookie: str):
         if urllib3 is not None:
@@ -558,12 +734,134 @@ class WebVulnScannerPlugin(Plugin):
             return False
         return True
 
+    def _reserve_plugin_request(self, cost: int = 1) -> bool:
+        with self._budget_lock:
+            if self.request_budget_total is not None and self._requests_spent + cost > self.request_budget_total:
+                if not self._budget_warned:
+                    print_warning(
+                        f"Request budget exhausted ({self._requests_spent}/{self.request_budget_total}); "
+                        "skipping further plugin HTTP traffic (passive modules still run)."
+                    )
+                    self._budget_warned = True
+                return False
+            self._requests_spent += cost
+            return True
+
+    def _stealth_on_status(self, status_code: int):
+        if not (self.stealth_mode or self.request_budget_total is not None):
+            return
+        if status_code == 429:
+            self._stealth_backoff = min(6.5, self._stealth_backoff * 1.55)
+            time.sleep(min(12.0, 0.35 + self.crawl_delay * self._stealth_backoff))
+        elif status_code in (503, 502, 504):
+            self._stealth_backoff = min(5.5, self._stealth_backoff * 1.38)
+            time.sleep(min(8.0, self.crawl_delay * self._stealth_backoff))
+        elif status_code == 200:
+            self._stealth_backoff = max(1.0, self._stealth_backoff * 0.94)
+        elif self.stealth_mode and status_code == 403:
+            self._stealth_backoff = min(4.5, self._stealth_backoff * 1.1)
+            time.sleep(min(3.5, self.crawl_delay * 0.45 * self._stealth_backoff))
+
+    def _crawl_throttle_sleep(self):
+        delay = float(self.crawl_delay)
+        if self.stealth_mode:
+            delay *= self._stealth_backoff
+        if delay > 0:
+            time.sleep(delay)
+
+    def _note_http_failure(self):
+        with self._budget_lock:
+            self._http_failures += 1
+
+    def _scan_profile_label(self) -> str:
+        """Dashboard-friendly coarse profile: aggressive vs safe (non-aggressive)."""
+        return "aggressive" if self.aggressive else "safe"
+
+    def _error_rate(self) -> float:
+        total = max(1, int(self._requests_spent))
+        return round(self._http_failures / total, 4)
+
+    def _false_positive_risk(self) -> str:
+        if not self.results:
+            return "low"
+        n = len(self.results)
+        info_n = sum(1 for r in self.results if r.get("severity") == "info")
+        weak_sqli = sum(
+            1
+            for r in self.results
+            if (r.get("detection_kind") or "").startswith("sqli_boolean") or (r.get("detection_kind") or "") == "sqli_time"
+        )
+        xss_esc = sum(1 for r in self.results if (r.get("detection_kind") or "") == "xss_reflected_escaped")
+        if self.waf_detected and (weak_sqli >= 2 or xss_esc >= 2):
+            return "high"
+        if info_n / n > 0.55 and n >= 4:
+            return "medium"
+        if weak_sqli >= 1 and self.waf_detected:
+            return "medium"
+        return "low"
+
+    def _detection_sort_rank(self, detection_kind: str) -> int:
+        return DETECTION_RELIABILITY_RANK.get(detection_kind or "", DETECTION_RELIABILITY_RANK["generic"])
+
+    def _infer_detection_kind(self, name: str, signal: str) -> str:
+        n = (name or "").lower()
+        if "error-based" in n or "(error-based)" in n:
+            return "sqli_error"
+        if "boolean-based" in n and "numeric" in n:
+            return "sqli_boolean_numeric"
+        if "boolean-based" in n:
+            return "sqli_boolean"
+        if "time-based" in n:
+            return "sqli_time"
+        if "reflected xss" in n:
+            return "xss_reflected"
+        if "escaped" in n or "filtered reflection" in n:
+            return "xss_reflected_escaped"
+        if "local file inclusion" in n or "lfi" == n.strip():
+            return "lfi_linux_marker"
+        if "ssrf" in n and "metadata" in n:
+            return "ssrf_cloud_metadata"
+        if "ssrf" in n:
+            return "ssrf_backend_error"
+        if "command injection" in n or "rce" in n:
+            return "rce_cmd_injection"
+        return (signal or "generic").strip() or "generic"
+
+    def _tuned_confidence(self, detection_kind: str) -> int:
+        base = int(DETECTION_CONFIDENCE_BASE.get(detection_kind, 78))
+        adj = 0
+        if self.waf_detected:
+            if detection_kind.startswith("sqli_boolean") or detection_kind == "sqli_time":
+                adj -= 10
+            elif detection_kind == "sqli_error":
+                adj -= 6
+            elif detection_kind.startswith("xss"):
+                adj -= 5
+            elif detection_kind.startswith("lfi"):
+                adj -= 4
+            elif detection_kind.startswith("ssrf"):
+                adj -= 6
+        if self.stealth_mode:
+            if detection_kind.startswith("sqli_boolean"):
+                adj -= 4
+            elif detection_kind == "sqli_time":
+                adj -= 5
+        if self.aggressive:
+            if detection_kind == "sqli_time":
+                adj += 4
+            elif detection_kind == "xss_reflected":
+                adj += 2
+        return max(50, min(99, base + adj))
+
     def _get_page(self, url: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
         if use_cache:
             with self.cache_lock:
                 cached = self.page_cache.get(url)
             if cached:
                 return cached
+
+        if not self._reserve_plugin_request(1):
+            return None
 
         try:
             response = self.session.get(
@@ -572,6 +870,7 @@ class WebVulnScannerPlugin(Plugin):
                 allow_redirects=True,
                 verify=False,
             )
+            self._stealth_on_status(response.status_code)
             page = {
                 "status_code": response.status_code,
                 "text": response.text or "",
@@ -585,6 +884,7 @@ class WebVulnScannerPlugin(Plugin):
                         self.page_cache[url] = page
             return page
         except Exception as exc:
+            self._note_http_failure()
             self._verbose(f"GET failed for {url}: {exc}")
             return None
 
@@ -671,8 +971,7 @@ class WebVulnScannerPlugin(Plugin):
                 if candidate not in visited:
                     queue.append((candidate, depth + 1))
 
-            if self.crawl_delay:
-                time.sleep(self.crawl_delay)
+            self._crawl_throttle_sleep()
 
     def _extract_candidate_links(self, current_url: str, text: str, content_type: str = "") -> Set[str]:
         candidates = set()
@@ -913,7 +1212,8 @@ class WebVulnScannerPlugin(Plugin):
                 continue
 
             headers = {str(key).lower(): str(value).lower() for key, value in page["headers"].items()}
-            body = (page["text"] or "").lower()
+            raw_body = page["text"] or ""
+            body = raw_body.lower()
 
             for header_name in ["server", "x-powered-by", "x-generator", "via"]:
                 value = headers.get(header_name)
@@ -940,9 +1240,26 @@ class WebVulnScannerPlugin(Plugin):
                 if "win" in value:
                     self._register_technology("windows", url)
 
+            if re.search(r'content\s*=\s*["\']WordPress\s+[\d.]+', raw_body, re.I) or re.search(
+                r'<meta[^>]+name\s*=\s*["\']generator["\'][^>]+WordPress', raw_body, re.I
+            ):
+                self._wordpress_body_evidence = max(self._wordpress_body_evidence, 2)
+                self._register_technology("wordpress", url)
+
             for tech, signatures in TECH_BODY_SIGNATURES.items():
+                if tech == "wordpress":
+                    hits = sum(1 for sig in signatures if sig in body)
+                    self._wordpress_body_evidence = max(self._wordpress_body_evidence, hits)
+                    if hits >= 2:
+                        self._register_technology(tech, url)
+                    continue
                 if any(signature in body for signature in signatures):
                     self._register_technology(tech, url)
+
+        for entry in self.endpoint_inventory:
+            path_lower = (entry.get("path") or "").lower()
+            if "graphql" in path_lower:
+                self._register_technology("graphql", entry.get("url") or self.target_url)
 
     def _register_technology(self, tech: str, url: str):
         normalized = re.sub(r"[^a-z0-9.+_-]", "", tech.lower()).strip()
@@ -950,6 +1267,20 @@ class WebVulnScannerPlugin(Plugin):
             return
         self.tech_tokens.add(normalized)
         self.technologies[normalized].add(url)
+
+    def _finalize_cms_fingerprints(self):
+        """
+        Drop weak WordPress hints from the working stack unless we have strong evidence.
+        Prevents follow-up modules from targeting WordPress on a single stray substring.
+        """
+        passive_wp = any(
+            r.get("module") == "scanner/http/wordpress_detect" and r.get("source") == "passive"
+            for r in self.results
+        )
+        self.wordpress_confirmed = bool(passive_wp or self._wordpress_body_evidence >= 2)
+        if not self.wordpress_confirmed:
+            self.tech_tokens.discard("wordpress")
+            self.technologies.pop("wordpress", None)
 
     def _run_passive_scanners(self) -> int:
         scanner_paths = self._passive_scanner_paths()
@@ -1040,11 +1371,16 @@ class WebVulnScannerPlugin(Plugin):
             print_warning("No parameterized endpoints found for active probing")
             return 0
 
-        limit = 60 if self.aggressive else 25
-        selected = targets[:limit]
+        cap = self.active_param_limit
+        if self.aggressive:
+            cap = max(cap, 120)
+        selected = targets[:cap]
         hits = 0
 
-        with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
+        pool = min(self.threads, 8)
+        if self.stealth_mode:
+            pool = min(pool, 3)
+        with ThreadPoolExecutor(max_workers=max(1, pool)) as executor:
             futures = {executor.submit(self._scan_endpoint, entry): entry for entry in selected}
             for future in as_completed(futures):
                 try:
@@ -1055,6 +1391,8 @@ class WebVulnScannerPlugin(Plugin):
 
     def _scan_endpoint(self, entry: Dict[str, Any]) -> int:
         hits = 0
+        self._probe_local.limit = self.max_probes_per_endpoint
+        self._probe_local.count = 0
         baseline_resp, baseline_time = self._send_entry_request(entry, dict(entry["params"]))
         if not baseline_resp:
             return 0
@@ -1086,18 +1424,22 @@ class WebVulnScannerPlugin(Plugin):
 
     def _candidate_attacks(self, param: str, entry: Dict[str, Any]) -> List[str]:
         name = param.lower()
-        attacks = []
+        attacks = ["sqli"]
         for attack, hints in ACTIVE_PARAM_HINTS.items():
+            if attack == "sqli":
+                continue
             if any(name == hint or hint in name for hint in hints):
                 attacks.append(attack)
 
-        if not attacks:
-            attacks.extend(["xss", "sqli"])
+        if "xss" not in attacks:
+            attacks.append("xss")
+        if "lfi" not in attacks:
+            attacks.append("lfi")
 
         if "xml" in entry["path"].lower() and "xxe" not in attacks:
             attacks.append("xxe")
 
-        if "php" in self.tech_tokens and ("lfi" in attacks or "rce" in attacks):
+        if "php" in self.tech_tokens and "rce" not in attacks:
             attacks.append("rce")
 
         deduped = []
@@ -1109,22 +1451,34 @@ class WebVulnScannerPlugin(Plugin):
     def _probe_sqli(self, entry: Dict[str, Any], param: str, baseline_resp, baseline_time: float) -> int:
         hits = 0
         original = entry["params"].get(param, "") or "1"
-        error_payload = f"{original}'"
-        error_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, error_payload))
-        if error_resp and self._contains_sqli_error(error_resp.text):
-            hits += self._record_result(
-                source="active",
-                name="SQL Injection (error-based)",
-                url=entry["url"],
-                method=entry["method"],
-                parameter=param,
-                severity="high",
-                confidence=92,
-                evidence="Database error signature appeared after a quote-based payload",
-                payload=error_payload,
-                repro=self._build_repro_command(entry, param, error_payload),
-                signal="sqli",
-            )
+        quote_tests = [
+            (f"{original}'", "single-quote"),
+            (f'{original}"', "double-quote"),
+            (f"{original}`", "backtick"),
+            (f"{original}' OR '1'='1", "OR tautology"),
+            (f"{original}' OR '1'='1'--", "OR tautology comment"),
+            (f"{original}' OR 1=1--", "numeric OR comment"),
+            (f"{original}) OR ('1'='1", "paren OR"),
+            (f"{original}' AND '1'='2", "AND false (error probe)"),
+        ]
+        for error_payload, label in quote_tests:
+            error_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, error_payload))
+            if error_resp and self._contains_sqli_error(error_resp.text):
+                hits += self._record_result(
+                    source="active",
+                    name="SQL Injection (error-based)",
+                    url=entry["url"],
+                    method=entry["method"],
+                    parameter=param,
+                    severity="high",
+                    confidence=0,
+                    evidence=f"Database error after {label} payload",
+                    payload=error_payload,
+                    repro=self._build_repro_command(entry, param, error_payload),
+                    signal="sqli",
+                    detection_kind="sqli_error",
+                )
+                break
 
         true_payload = f"{original} AND 1=1"
         false_payload = f"{original} AND 1=2"
@@ -1139,21 +1493,47 @@ class WebVulnScannerPlugin(Plugin):
                 method=entry["method"],
                 parameter=param,
                 severity="high",
-                confidence=78,
+                confidence=0,
                 evidence=boolean_evidence,
                 payload=false_payload,
                 repro=self._build_repro_command(entry, param, false_payload),
                 signal="sqli",
+                detection_kind="sqli_boolean",
             )
 
-        if self.aggressive and not self.waf_detected:
-            time_payload = f"{original}' AND SLEEP(5)-- "
+        numeric_base = original.strip() if original.strip().isdigit() else "1"
+        n_true = f"{numeric_base} AND 1=1"
+        n_false = f"{numeric_base} AND 1=2"
+        n_base_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, numeric_base))
+        nt_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, n_true))
+        nf_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, n_false))
+        alt_bool = self._boolean_sqli_evidence(n_base_resp or baseline_resp, nt_resp, nf_resp)
+        if alt_bool:
+            hits += self._record_result(
+                source="active",
+                name="SQL Injection (boolean-based, numeric context)",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="high",
+                confidence=0,
+                evidence=alt_bool,
+                payload=n_false,
+                repro=self._build_repro_command(entry, param, n_false),
+                signal="sqli",
+                detection_kind="sqli_boolean_numeric",
+            )
+
+        if not self.waf_detected:
+            delay_s = 5 if self.aggressive else 3
+            time_payload = f"{original}' AND SLEEP({delay_s})-- "
             _, elapsed = self._send_entry_request(
                 entry,
                 self._mutated_params(entry, param, time_payload),
-                timeout=max(self.timeout + 5, 8),
+                timeout=max(self.timeout + delay_s + 2, delay_s + 6),
             )
-            if elapsed and elapsed >= max(baseline_time + 3.5, 4.8):
+            threshold = max(baseline_time + (2.5 if not self.aggressive else 3.5), 3.2 if not self.aggressive else 4.8)
+            if elapsed and elapsed >= threshold:
                 hits += self._record_result(
                     source="active",
                     name="SQL Injection (time-based)",
@@ -1161,11 +1541,12 @@ class WebVulnScannerPlugin(Plugin):
                     method=entry["method"],
                     parameter=param,
                     severity="high",
-                    confidence=86,
-                    evidence=f"Delayed response observed ({elapsed:.2f}s vs baseline {baseline_time:.2f}s)",
+                    confidence=0,
+                    evidence=f"Delayed response ({elapsed:.2f}s vs baseline {baseline_time:.2f}s)",
                     payload=time_payload,
                     repro=self._build_repro_command(entry, param, time_payload),
                     signal="sqli",
+                    detection_kind="sqli_time",
                 )
         return hits
 
@@ -1187,11 +1568,27 @@ class WebVulnScannerPlugin(Plugin):
                 method=entry["method"],
                 parameter=param,
                 severity="high",
-                confidence=88,
+                confidence=0,
                 evidence="Payload reflected in the response without HTML escaping",
                 payload=payload,
                 repro=self._build_repro_command(entry, param, payload),
                 signal="xss",
+                detection_kind="xss_reflected",
+            )
+        if marker in body and (escaped or "&lt;" in body or "&#x3c;" in body.lower()):
+            return self._record_result(
+                source="active",
+                name="XSS (escaped or filtered reflection)",
+                url=entry["url"],
+                method=entry["method"],
+                parameter=param,
+                severity="low",
+                confidence=0,
+                evidence="Marker present but HTML appears encoded or filtered",
+                payload=payload,
+                repro=self._build_repro_command(entry, param, payload),
+                signal="xss",
+                detection_kind="xss_reflected_escaped",
             )
         return 0
 
@@ -1204,7 +1601,7 @@ class WebVulnScannerPlugin(Plugin):
             response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
             if not response:
                 continue
-            evidence = self._lfi_evidence(response.text or "")
+            kind, evidence = self._lfi_evidence(response.text or "")
             if evidence:
                 return self._record_result(
                     source="active",
@@ -1213,11 +1610,12 @@ class WebVulnScannerPlugin(Plugin):
                     method=entry["method"],
                     parameter=param,
                     severity="high",
-                    confidence=95,
+                    confidence=0,
                     evidence=evidence,
                     payload=payload,
                     repro=self._build_repro_command(entry, param, payload),
                     signal="lfi",
+                    detection_kind=kind or "lfi_linux_marker",
                 )
         return 0
 
@@ -1251,11 +1649,12 @@ class WebVulnScannerPlugin(Plugin):
                 method=entry["method"],
                 parameter=param,
                 severity="high",
-                confidence=84,
+                confidence=0,
                 evidence="Response contains cloud metadata keywords after an internal URL probe",
                 payload=payload,
                 repro=self._build_repro_command(entry, param, payload),
                 signal="ssrf",
+                detection_kind="ssrf_cloud_metadata",
             )
 
         if self.aggressive and any(indicator in body for indicator in error_indicators):
@@ -1266,11 +1665,12 @@ class WebVulnScannerPlugin(Plugin):
                 method=entry["method"],
                 parameter=param,
                 severity="medium",
-                confidence=66,
+                confidence=0,
                 evidence="Backend-side connection error surfaced after an internal URL probe",
                 payload=payload,
                 repro=self._build_repro_command(entry, param, payload),
                 signal="ssrf",
+                detection_kind="ssrf_backend_error",
             )
         return 0
 
@@ -1287,11 +1687,12 @@ class WebVulnScannerPlugin(Plugin):
                     method=entry["method"],
                     parameter=param,
                     severity="critical",
-                    confidence=99,
+                    confidence=0,
                     evidence="Command marker echoed back in the server response",
                     payload=payload,
                     repro=self._build_repro_command(entry, param, payload),
                     signal="rce",
+                    detection_kind="rce_cmd_injection",
                 )
         return 0
 
@@ -1301,6 +1702,19 @@ class WebVulnScannerPlugin(Plugin):
         params: Dict[str, Any],
         timeout: Optional[int] = None,
     ) -> Tuple[Optional[Any], float]:
+        lim = getattr(self._probe_local, "limit", None)
+        if lim is not None:
+            used = getattr(self._probe_local, "count", 0)
+            if used >= lim:
+                self._verbose(f"Per-endpoint probe cap reached ({lim}) for {entry.get('url')}")
+                return None, 0.0
+
+        if not self._reserve_plugin_request(1):
+            return None, 0.0
+
+        if lim is not None:
+            self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
+
         try:
             started = time.monotonic()
             timeout = timeout or self.timeout
@@ -1320,8 +1734,10 @@ class WebVulnScannerPlugin(Plugin):
                     allow_redirects=True,
                     verify=False,
                 )
+            self._stealth_on_status(response.status_code)
             return response, time.monotonic() - started
         except Exception as exc:
+            self._note_http_failure()
             self._verbose(f"Probe failed for {entry['url']} ({entry['method']}): {exc}")
             return None, 0.0
 
@@ -1356,13 +1772,16 @@ class WebVulnScannerPlugin(Plugin):
             )
         return ""
 
-    def _lfi_evidence(self, text: str) -> str:
+    def _lfi_evidence(self, text: str) -> Tuple[str, str]:
+        """Return (detection_kind, human evidence) or ("", "")."""
         lowered = (text or "").lower()
-        if any(marker in lowered for marker in (marker.lower() for marker in LINUX_LFI_MARKERS)):
-            return "Response looks like /etc/passwd content"
-        if any(marker in lowered for marker in (marker.lower() for marker in WINDOWS_LFI_MARKERS)):
-            return "Response looks like win.ini content"
-        return ""
+        if "root:x:0:0" in lowered and ("/bin/" in lowered or "nologin" in lowered):
+            return ("lfi_linux_passwd", "Response matches /etc/passwd (root line + shell)")
+        if any(marker.lower() in lowered for marker in LINUX_LFI_MARKERS):
+            return ("lfi_linux_marker", "Response looks like /etc/passwd-like content")
+        if any(marker.lower() in lowered for marker in WINDOWS_LFI_MARKERS):
+            return ("lfi_windows_ini", "Response looks like win.ini content")
+        return ("", "")
 
     def _select_followup_modules(self, module_patterns: List[str]) -> List[Dict[str, Any]]:
         if not self.framework or not hasattr(self.framework, "module_loader"):
@@ -1376,6 +1795,10 @@ class WebVulnScannerPlugin(Plugin):
         for mod_path in sorted(discovered.keys()):
             lower = mod_path.lower()
             if not self._is_http_followup_module(lower):
+                continue
+            if mod_path.startswith("exploits/") and not self.aggressive:
+                continue
+            if "wordpress" in lower and not self.wordpress_confirmed:
                 continue
             if mod_path in self.passive_scanner_paths or mod_path in self.executed_modules:
                 continue
@@ -1402,6 +1825,15 @@ class WebVulnScannerPlugin(Plugin):
 
             if "http" in lower:
                 score += 10
+
+            if "sql_injection" in lower or "sqli" in lower:
+                score += 38
+            if "php_injection" in lower and "php" in self.tech_tokens:
+                score += 28
+            if "xss" in lower or "cross_site" in lower:
+                score += 18
+            if "lfi" in lower or "traversal" in lower or "path_traversal" in lower:
+                score += 18
 
             if score >= 35:
                 candidates.append({"path": mod_path, "score": score})
@@ -1437,17 +1869,23 @@ class WebVulnScannerPlugin(Plugin):
             return
 
         result = None
-        if hasattr(module, "check"):
+        if mod_path.startswith("auxiliary/scanner/http/") and hasattr(module, "run"):
             try:
-                result = module.check()
+                result = module.run()
             except Exception as exc:
-                self._verbose(f"{mod_path}.check() failed: {exc}")
+                self._verbose(f"{mod_path}.run() failed: {exc}")
                 return
         elif mod_path.startswith("scanner/http/") and hasattr(module, "run"):
             try:
                 result = module.run()
             except Exception as exc:
                 self._verbose(f"{mod_path}.run() failed: {exc}")
+                return
+        elif hasattr(module, "check"):
+            try:
+                result = module.check()
+            except Exception as exc:
+                self._verbose(f"{mod_path}.check() failed: {exc}")
                 return
         else:
             return
@@ -1597,9 +2035,13 @@ class WebVulnScannerPlugin(Plugin):
         module: str = "",
         metadata: Optional[Dict[str, Any]] = None,
         signal: str = "",
+        detection_kind: str = "",
     ) -> int:
         severity = self._normalize_severity(severity)
-        confidence = self._normalize_confidence(confidence)
+        if detection_kind:
+            confidence = self._tuned_confidence(detection_kind)
+        else:
+            confidence = self._normalize_confidence(confidence)
         if confidence < self.min_confidence:
             return 0
 
@@ -1624,6 +2066,7 @@ class WebVulnScannerPlugin(Plugin):
                 "parameter": parameter,
                 "severity": severity,
                 "confidence": confidence,
+                "detection_kind": detection_kind or self._infer_detection_kind(name, signal),
                 "evidence": evidence,
                 "payload": payload,
                 "repro": repro,
@@ -1643,8 +2086,8 @@ class WebVulnScannerPlugin(Plugin):
     def _display_results(self):
         if not self.results:
             print_warning("No vulnerability reached the configured confidence threshold.")
-            if self.followup_candidates:
-                print_info("Suggested follow-up modules:")
+            if self.show_module_suggestions and self.followup_candidates:
+                print_info("Suggested follow-up modules (use framework modules or --suggest-modules):")
                 for candidate in self.followup_candidates[:8]:
                     print_info(f"  - {candidate['path']} (score={candidate['score']})")
             return
@@ -1654,6 +2097,7 @@ class WebVulnScannerPlugin(Plugin):
             key=lambda result: (
                 -SEVERITY_ORDER.get(result["severity"], 0),
                 -result["confidence"],
+                self._detection_sort_rank(result.get("detection_kind") or ""),
                 result["name"],
                 result["url"],
             ),
@@ -1682,6 +2126,8 @@ class WebVulnScannerPlugin(Plugin):
             )
             if result.get("parameter"):
                 line += f" | parameter={result['parameter']}"
+            if result.get("detection_kind"):
+                line += f" | kind={result['detection_kind']}"
             print_info(line)
             if result.get("module"):
                 print_info(f"  module: {result['module']}")
@@ -1695,9 +2141,9 @@ class WebVulnScannerPlugin(Plugin):
         if len(ordered) > 20:
             print_info(f"... {len(ordered) - 20} additional findings omitted from console summary")
 
-        if self.followup_candidates:
-            print_info("Recommended follow-up modules:")
-            for candidate in self.followup_candidates[:10]:
+        if self.show_module_suggestions and self.followup_candidates:
+            print_info("Additional module ideas (--suggest-modules):")
+            for candidate in self.followup_candidates[:12]:
                 print_info(f"  - {candidate['path']} (score={candidate['score']})")
 
     def _write_json_report(self, report_path: str):
@@ -1711,6 +2157,16 @@ class WebVulnScannerPlugin(Plugin):
             "base_url": self.base_url,
             "started_at": self.scan_started_at,
             "finished_at": time.time(),
+            "scan_profile": self._scan_profile_label(),
+            "aggressive": self.aggressive,
+            "stealth_mode": self.stealth_mode,
+            "request_budget_total": self.request_budget_total,
+            "plugin_http_requests": self._requests_spent,
+            "request_count": self._requests_spent,
+            "http_failure_count": self._http_failures,
+            "error_rate": self._error_rate(),
+            "false_positive_risk": self._false_positive_risk(),
+            "max_probes_per_endpoint": self.max_probes_per_endpoint,
             "waf_detected": self.waf_detected,
             "technologies": {tech: sorted(urls) for tech, urls in sorted(self.technologies.items())},
             "crawled_urls": sorted(self.crawled_urls),

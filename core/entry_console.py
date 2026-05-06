@@ -7,6 +7,7 @@ pip-installed 'kittysploit' command.
 """
 
 import argparse
+import os
 import sys
 from core.framework.framework import Framework
 from interfaces.cli import CLI
@@ -38,7 +39,10 @@ def parse_arguments():
     parser.add_argument('-a', '--api', action='store_true', help='Start the API server')
     parser.add_argument('--api-port', type=int, default=5000, help='Port for the API server (default: 5000)')
     parser.add_argument('--api-host', default='127.0.0.1', help='Host for the API server (default: 127.0.0.1)')
-    parser.add_argument('--api-key', help='API key for authentication (optional)')
+    parser.add_argument(
+        '--api-key',
+        help='API key for RPC/API servers (or set KITTYSPLOIT_API_KEY)',
+    )
 
     # Embedded proxy options for kittyconsole
     parser.add_argument('--proxy', action='store_true', help='Start integrated proxy with interactive CLI')
@@ -55,6 +59,13 @@ def parse_arguments():
         # Forward unparsed command-specific arguments (e.g. agent --llm-local).
         args.command_args = list(getattr(args, 'command_args', [])) + unknown_args
     return args
+
+
+def _resolve_server_api_key(cli_value):
+    k = (cli_value or "").strip()
+    if k:
+        return k
+    return (os.environ.get("KITTYSPLOIT_API_KEY") or "").strip() or None
 
 
 def main():
@@ -109,8 +120,12 @@ def main():
     # Start the RPC server if requested
     if args.rpc:
         try:
+            api_key = _resolve_server_api_key(getattr(args, "api_key", None))
+            if not api_key:
+                print_error("RPC server requires --api-key or KITTYSPLOIT_API_KEY environment variable.")
+                return
             print_info(f"Starting RPC server on {args.rpc_host}:{args.rpc_port}...")
-            rpc_server = RpcServer(framework, host=args.rpc_host, port=args.rpc_port)
+            rpc_server = RpcServer(framework, host=args.rpc_host, port=args.rpc_port, api_key=api_key)
             rpc_server.start()
             return
         except ImportError:
@@ -123,8 +138,12 @@ def main():
     # Start the API server if requested
     if args.api:
         try:
+            api_key = _resolve_server_api_key(getattr(args, "api_key", None))
+            if not api_key:
+                print_error("API server requires --api-key or KITTYSPLOIT_API_KEY environment variable.")
+                return
             print_info(f"Starting API server on {args.api_host}:{args.api_port}...")
-            api_server = ApiServer(framework, host=args.api_host, port=args.api_port, api_key=args.api_key)
+            api_server = ApiServer(framework, host=args.api_host, port=args.api_port, api_key=api_key)
             api_server.start()
             return
         except ImportError:

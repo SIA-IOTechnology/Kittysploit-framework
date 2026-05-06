@@ -1,5 +1,5 @@
 from core.framework.base_module import BaseModule
-from core.framework.option import OptString, OptPort, OptInt, OptChoice, OptBool
+from core.framework.option import OptString, OptPort, OptInteger, OptChoice, OptBool
 from core.output_handler import print_success, print_status, print_error, print_info, print_warning
 import base64
 import os
@@ -44,6 +44,8 @@ class ExeCompiler(BaseModule):
         if not compiler.is_available():
             print_error("Zig compiler not available; cannot generate ELF.")
             return False
+        # Link libc so @cImport("unistd.h") and similar C headers resolve (otherwise Zig reports
+        # "libc headers not available; compilation does not link against libc").
         return compiler.compile(
             source_code=source_code,
             output_path=output_path,
@@ -52,6 +54,7 @@ class ExeCompiler(BaseModule):
             optimization="ReleaseSmall",
             strip=True,
             static=True,
+            extra_args=["-lc"],
         )
 
     def generate_exe(self, source_code: str, output_path: str, target_arch: str = "x86_64"):

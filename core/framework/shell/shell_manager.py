@@ -137,8 +137,11 @@ class ShellManager:
             return self.shells[self.active_shell]
         return None
     
-    def execute_command(self, session_id: str, command: str, framework=None) -> Dict[str, Any]:
-        """Execute command in specific shell"""
+    def execute_command(self, session_id: str, command: str, framework=None, pty: bool = False) -> Dict[str, Any]:
+        """Execute command in specific shell.
+
+        ``pty`` is honored by SSH shells (pseudo-TTY); other shell types ignore it.
+        """
         shell = self.get_shell(session_id)
         
         # If no shell exists, try to create one automatically
@@ -205,6 +208,11 @@ class ShellManager:
             shell.activate()
         
         try:
+            if pty:
+                try:
+                    return shell.execute_command(command, pty=True)
+                except TypeError:
+                    pass
             return shell.execute_command(command)
         except Exception as e:
             return {'output': '', 'status': 1, 'error': f'Command execution error: {str(e)}'}

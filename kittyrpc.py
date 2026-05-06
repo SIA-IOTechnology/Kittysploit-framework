@@ -18,6 +18,14 @@ from core.framework.framework import Framework
 from interfaces.rpc_server import RpcServer
 from core.output_handler import print_info, print_success, print_error, print_warning, print_debug, print_status
 
+
+def _resolve_api_key(cli_key):
+    k = (cli_key or "").strip()
+    if k:
+        return k
+    return (os.environ.get("KITTYSPLOIT_API_KEY") or "").strip() or None
+
+
 def setup_logging(debug=False):
     level = logging.DEBUG if debug else logging.INFO
     logging.basicConfig(
@@ -29,7 +37,11 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='KittySploit RPC Server')
     parser.add_argument('-H', '--host', default='127.0.0.1', help='Host to bind the RPC server (default: 127.0.0.1)')
     parser.add_argument('-p', '--port', type=int, default=8888, help='Port for the RPC server (default: 8888)')
-    parser.add_argument('-k', '--api-key', help='API key for authentication (optional)')
+    parser.add_argument(
+        '-k',
+        '--api-key',
+        help='API key (or set environment variable KITTYSPLOIT_API_KEY)',
+    )
     parser.add_argument('-m', '--master-key', help='Master key to unlock the database (optional, will prompt if not provided)')
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug mode')
     return parser.parse_args()
@@ -71,19 +83,23 @@ def main():
                 print_error("Failed to load encryption. Database remains locked. Stopping framework.")
                 return 1
         
+        api_key = _resolve_api_key(args.api_key)
+        if not api_key:
+            print_error("API key required: use -k/--api-key or set KITTYSPLOIT_API_KEY.")
+            return 1
+
         print_success(f"Starting RPC server on {args.host}:{args.port}...")
-        if args.api_key:
-            print_success("RPC authentication enabled")
-        
+        print_success("RPC authentication enabled (Authorization: Bearer <key>)")
+
         print_info("Press Ctrl+C to stop the server")
-            
+
         rpc_server = RpcServer(
             framework=framework,
             host=args.host,
             port=args.port,
-            api_key=args.api_key
+            api_key=api_key,
         )
-        
+
         rpc_server.start()
         
         # Keep the main thread alive and responsive to interrupts

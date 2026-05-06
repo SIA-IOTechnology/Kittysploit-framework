@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
 from core.framework.base_module import BaseModule
-from core.framework.option import OptString, OptPort, OptInt, OptChoice, OptBool
+from core.framework.option import OptString, OptPort, OptInteger, OptChoice, OptBool
 from core.output_handler import print_success, print_status, print_error, print_info, print_warning
 
 from smb.SMBConnection import SMBConnection
@@ -212,7 +212,7 @@ class SMBModule(BaseModule):
     smb_client_name = OptString("kittysploit", "Local client name", False)
     smb_server_name = OptString("", "Server NetBIOS name (optional)", False)
 
-    smb_timeout = OptInt(10, "SMB timeout (seconds)", True)
+    smb_timeout = OptInteger(10, "SMB timeout (seconds)", True)
     smb_ntlmv2 = OptBool(True, "Use NTLMv2 (true/false)", False)
 
     def __init__(self, framework=None):

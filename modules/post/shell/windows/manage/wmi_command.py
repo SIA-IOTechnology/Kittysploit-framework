@@ -21,8 +21,8 @@ class Module(Post):
     registry_result_value = OptString("Value", "Registry value name for result", False)
     computer_name = OptString("localhost", "Target computer name(s), comma separated", False)
     credential = OptString("", "Credential (Domain\\User) to use - prompt will appear or script will need manual adaptation for password", False)
-    impersonation = OptInt(0, "Impersonation level (0-4)", False)
-    authentication = OptInt(0, "Authentication level (-1 to 6)", False)
+    impersonation = OptInteger(0, "Impersonation level (0-4)", False)
+    authentication = OptInteger(0, "Authentication level (-1 to 6)", False)
     enable_all_privileges = OptBool(False, "Enable all privileges", False)
     authority = OptString("", "Authority for WMI connection", False)
 

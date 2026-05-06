@@ -361,6 +361,11 @@ Session Types:
             print_info("Starting interactive session...")
             print_info("Type 'exit', 'back' or 'background' to return to main shell (session remains active), 'help' for shell commands")
             print_info("-" * 50)
+
+            # SSH needs a persistent PTY channel for stateful workflows (su/sudo/cd/export).
+            if getattr(shell, "shell_name", "") == "ssh" and hasattr(shell, "start_interactive_shell_loop"):
+                print_info("Using persistent SSH PTY mode for this interactive session.")
+                return bool(shell.start_interactive_shell_loop())
             
             while True:
                 try:

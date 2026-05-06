@@ -17,11 +17,23 @@ from core.framework.framework import Framework
 from core.output_handler import print_info, print_success, print_error, print_warning, print_debug, print_status
 from interfaces.api_server import ApiServer
 
+
+def _resolve_api_key(cli_key):
+    k = (cli_key or "").strip()
+    if k:
+        return k
+    return (os.environ.get("KITTYSPLOIT_API_KEY") or "").strip() or None
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description='KittySploit API Server')
     parser.add_argument('-H', '--host', default='127.0.0.1', help='Host to bind the API server (default: 127.0.0.1)')
     parser.add_argument('-p', '--port', type=int, default=5000, help='Port for the API server (default: 5000)')
-    parser.add_argument('-k', '--api-key', help='API key for authentication (optional)')
+    parser.add_argument(
+        '-k',
+        '--api-key',
+        help='API key (or set environment variable KITTYSPLOIT_API_KEY)',
+    )
     parser.add_argument('-m', '--master-key', help='Master key to unlock the database (optional, will prompt if not provided)')
     parser.add_argument('-d', '--debug', action='store_true', help='Enable debug mode')
     return parser.parse_args()
@@ -52,18 +64,22 @@ def main():
                 print_error("Failed to load encryption. Database remains locked. Stopping framework.")
                 return 1
         
+        api_key = _resolve_api_key(args.api_key)
+        if not api_key:
+            print_error("API key required: use -k/--api-key or set KITTYSPLOIT_API_KEY.")
+            return 1
+
         # Créer et démarrer le serveur API
         print_success(f"Starting API server on {args.host}:{args.port}...")
-        if args.api_key:
-            print_success("API authentication enabled")
-            
+        print_success("API authentication enabled")
+
         api_server = ApiServer(
             framework=framework,
             host=args.host,
             port=args.port,
-            api_key=args.api_key
+            api_key=api_key,
         )
-        
+
         # Démarrer le serveur
         api_server.start()
         

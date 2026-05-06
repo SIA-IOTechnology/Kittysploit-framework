@@ -35,14 +35,23 @@ class AuthHandler(SimpleXMLRPCRequestHandler):
     """Handler personnalisé pour l'authentification"""
 
     def do_POST(self):
-        if self.server.api_key:
-            auth_header = self.headers.get('Authorization')
-            if not auth_header or auth_header != f"Bearer {self.server.api_key}":
-                self.send_response(401)
-                self.send_header("Content-type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"Unauthorized")
-                return
+        key = getattr(self.server, "api_key", None)
+        if not key:
+            self.send_response(401)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(
+                b"Unauthorized: RPC server requires a non-empty api_key on the server "
+                b"(configure --api-key or KITTYSPLOIT_API_KEY)."
+            )
+            return
+        auth_header = self.headers.get("Authorization")
+        if not auth_header or auth_header != f"Bearer {key}":
+            self.send_response(401)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Unauthorized")
+            return
         try:
             super().do_POST()
         except Exception as e:
@@ -63,7 +72,7 @@ class RpcServer:
     def __init__(self, framework, host='127.0.0.1', port=8888, api_key=None):
         self.host = host
         self.port = port
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip() or None
         self.framework = framework
         self.clients = {}
         self.server = None
@@ -118,6 +127,12 @@ class RpcServer:
         if not self.is_port_available():
             logging.error(f"Port {self.port} already in use.")
             return
+
+        if not self.api_key:
+            raise ValueError(
+                "RpcServer requires a non-empty api_key "
+                "(CLI -k/--api-key or environment KITTYSPLOIT_API_KEY)."
+            )
 
         try:
             self.server = SimpleXMLRPCServer(

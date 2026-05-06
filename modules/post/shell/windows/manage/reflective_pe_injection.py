@@ -15,7 +15,7 @@ class Module(Post):
     }
 
     pe_file = OptFile("", "Local path to the PE file (DLL/EXE) to inject", True)
-    proc_id = OptInt(0, "Process ID of the remote process to inject the DLL into", False)
+    proc_id = OptInteger(0, "Process ID of the remote process to inject the DLL into", False)
     proc_name = OptString("", "Name of the remote process to inject the DLL into", False)
     exe_args = OptString("", "Arguments to pass to the executable being reflectively loaded", False)
     func_return_type = OptString("Void", "Return type of the function being called in the DLL (String, WString, Void)", False)

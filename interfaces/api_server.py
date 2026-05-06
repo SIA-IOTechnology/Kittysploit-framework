@@ -47,7 +47,7 @@ class ApiServer:
     def __init__(self, framework, host='127.0.0.1', port=5000, api_key=None):
         self.host = host
         self.port = port
-        self.api_key = api_key
+        self.api_key = (api_key or "").strip() or None
         self.app = Flask(__name__)
         CORS(self.app)  # Permettre les requêtes cross-origin
         self.framework = framework
@@ -723,10 +723,13 @@ class ApiServer:
                 return jsonify({"success": True})
     
     def check_auth(self, request):
-        """Vérifie l'authentification de la requête (supporte X-API-Key et Authorization Bearer)"""
+        """Vérifie l'authentification de la requête (supporte X-API-Key et Authorization Bearer).
+
+        Sans clé serveur configurée, l'accès est refusé (plus d'« open bar » par défaut).
+        """
         if not self.api_key:
-            return True
-        
+            return False
+
         # Support de X-API-Key (méthode originale)
         api_key = request.headers.get('X-API-Key')
         if api_key == self.api_key:
@@ -852,7 +855,14 @@ class ApiServer:
         """Démarre le serveur API"""
         if self.running:
             return
-        
+
+        if not self.api_key:
+            self.logger.error(
+                "API server refused to start: set a non-empty api_key "
+                "(CLI --api-key / -k or environment KITTYSPLOIT_API_KEY)."
+            )
+            raise ValueError("ApiServer requires a non-empty api_key")
+
         def run_server():
             self.app.run(host=self.host, port=self.port, debug=False, use_reloader=False, threaded=True)
         

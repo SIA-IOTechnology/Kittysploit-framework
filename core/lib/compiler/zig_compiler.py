@@ -196,7 +196,13 @@ class ZigCompiler:
         if not self.is_available():
             print_error("Zig compiler not available")
             return False
-        
+
+        # Linux @cImport (unistd.h, etc.) only resolves when Zig links libc; without -lc you get
+        # "libc headers not available; compilation does not link against libc".
+        extra_args = list(extra_args or [])
+        if target_platform.lower() == "linux" and not any(a == "-lc" for a in extra_args):
+            extra_args.append("-lc")
+
         try:
             # Convert to absolute path first; handle bare filenames (no directory)
             output_path = os.path.abspath(output_path)

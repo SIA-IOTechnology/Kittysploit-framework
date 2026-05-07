@@ -55,10 +55,12 @@ Rules:
 - Use only against systems and networks you are explicitly authorized to test.
 - For free-form user requests, start with `ks_plan_natural_request` to extract intent,
   targets, module candidates, and native command/tool suggestions.
-- Typical flow: search or plan → inspect a module → set RHOST/target/port/etc. → run →
-  poll logs with the returned client_id.
+- Typical flow: search or plan → `ks_prepare_module_run` → confirm resolved options →
+  `ks_run_module` → poll logs with the returned client_id.
 - `ks_execute_command` can drive the framework through its native CLI commands when that
   is more natural than raw module RPC calls.
+- `ks_execute_natural_request` can prepare and launch the best module through RPC when
+  `allow_dangerous=true`; otherwise it returns a blocked pre-flight instead of guessing.
 - The "discreet" operation profile adjusts common options (timeout, threads, verbose) when they exist on the module.
 - The interpreter tool runs Python inside KittySploit's context — use with extreme care.
 """
@@ -241,6 +243,29 @@ def create_mcp_server(
 
     @mcp.tool()
     @safe
+    def ks_prepare_module_run(
+        module_path: str,
+        request: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+        operation_profile: Optional[Literal["normal", "discreet", "aggressive"]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Pre-flight a module run without executing it.
+
+        Resolves inferred options from a natural-language request, overlays explicit `options`,
+        applies the optional operation profile, and reports whether required options are filled.
+        """
+        return _safe_json(
+            natural_bridge.prepare_module_run(
+                module_path,
+                request=request,
+                options=options,
+                operation_profile=operation_profile,
+            )
+        )
+
+    @mcp.tool()
+    @safe
     def ks_run_module(
         module_path: str,
         options: Optional[Dict[str, Any]] = None,
@@ -339,20 +364,133 @@ def create_mcp_server(
         prefer_ollama: bool = True,
         dry_run: bool = False,
         max_candidates: int = 6,
+        execution_mode: Literal["module_rpc", "safe_sequence", "first_command"] = "module_rpc",
+        use_runtime_kernel: bool = False,
     ) -> Dict[str, Any]:
         """
-        Translate a natural-language request into KittySploit commands, then optionally
-        execute the first recommended command.
+        Translate a natural-language request, then execute it through a controlled strategy.
+
+        `module_rpc` prepares the top module and launches it only when `allow_dangerous=true`.
+        `safe_sequence` executes all recommended safe commands until a blocked/dangerous step.
+        `first_command` preserves the older single-command behavior.
         """
         result = natural_bridge.plan_request(
             request,
             max_candidates=max_candidates,
-            execute_recommended=not dry_run,
-            allow_dangerous=allow_dangerous,
+            execute_recommended=False,
+            allow_dangerous=False,
             prefer_ollama=prefer_ollama,
         )
-        if result.get("executed_command"):
+        if dry_run:
+            result["execution"] = {"status": "dry_run"}
+            return _safe_json(result)
+
+        execution_mode = execution_mode or "module_rpc"
+        result["execution_mode"] = execution_mode
+
+        if execution_mode == "module_rpc":
+            parsed_info = result.get("parsed_request") or {}
+            if parsed_info.get("intent") == "command":
+                recommended = result.get("recommended_commands") or []
+                first_command = recommended[0].get("command") if recommended and isinstance(recommended[0], dict) else None
+                executed = command_bridge.execute_command(
+                    str(first_command or request),
+                    allow_dangerous=allow_dangerous,
+                )
+                result["executed_command"] = executed
+                result["execution"] = {"status": executed.get("status")}
+                if executed.get("status") in ("ok", "failed"):
+                    _invalidate_module_caches()
+                return _safe_json(result)
+
+            if parsed_info.get("intent") != "execute_module":
+                result["execution"] = {
+                    "status": "planned_only",
+                    "reason": "The request was not classified as a module execution request.",
+                }
+                return _safe_json(result)
+
+            prepared = result.get("prepared_run")
+            if not prepared and result.get("recommended_modules"):
+                top = result["recommended_modules"][0]
+                prepared = natural_bridge.prepare_module_run(
+                    top["path"],
+                    request=request,
+                    operation_profile=(result.get("parsed_request") or {}).get("operation_profile"),
+                )
+                result["prepared_run"] = prepared
+
+            if not isinstance(prepared, dict) or prepared.get("error"):
+                result["execution"] = {
+                    "status": "blocked",
+                    "reason": "No runnable module could be prepared from the request.",
+                }
+                return _safe_json(result)
+
+            if prepared.get("missing_options"):
+                result["execution"] = {
+                    "status": "needs_options",
+                    "missing_options": prepared.get("missing_options"),
+                    "reason": "Required options are still missing after inference.",
+                }
+                return _safe_json(result)
+
+            if not allow_dangerous:
+                result["execution"] = {
+                    "status": "requires_allow_dangerous",
+                    "reason": "Launching a module can run scanners/exploits/listeners and requires allow_dangerous=true.",
+                    "prepared_run": prepared,
+                }
+                return _safe_json(result)
+
+            module_path = str(prepared.get("module_path") or "")
+            operation_profile = str(prepared.get("operation_profile") or "normal")
+            merged = _merge_operation_profile(
+                rpc,
+                module_path,
+                prepared.get("resolved_options") or {},
+                operation_profile,
+            )
+            launched = rpc.run_module(
+                module_path,
+                merged,
+                use_runtime_kernel=use_runtime_kernel,
+            )
+            result["executed_module"] = launched
+            result["execution"] = {
+                "status": (launched or {}).get("status", "unknown") if isinstance(launched, dict) else "unknown",
+                "module_path": module_path,
+                "resolved_options": merged,
+                "client_id": launched.get("client_id") if isinstance(launched, dict) else None,
+            }
             _invalidate_module_caches()
+            return _safe_json(result)
+
+        if execution_mode == "safe_sequence":
+            sequence = command_bridge.execute_command_sequence(
+                result.get("recommended_commands") or [],
+                allow_dangerous=allow_dangerous,
+                stop_on_error=True,
+            )
+            result["executed_sequence"] = sequence
+            result["execution"] = {"status": sequence.get("status"), "count": sequence.get("count")}
+            if sequence.get("count"):
+                _invalidate_module_caches()
+            return _safe_json(result)
+
+        recommended = result.get("recommended_commands") or []
+        if recommended:
+            first_command = recommended[0].get("command") if isinstance(recommended[0], dict) else recommended[0]
+            executed = command_bridge.execute_command(
+                str(first_command or ""),
+                allow_dangerous=allow_dangerous,
+            )
+            result["executed_command"] = executed
+            result["execution"] = {"status": executed.get("status")}
+            if executed.get("status") in ("ok", "failed"):
+                _invalidate_module_caches()
+        else:
+            result["execution"] = {"status": "no_recommendation"}
         return _safe_json(result)
 
     @mcp.tool()

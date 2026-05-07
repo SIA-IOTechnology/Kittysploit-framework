@@ -14,6 +14,8 @@ class AgentMetrics:
     deterministic_steps: int = 0
     llm_calls: int = 0
     llm_fallback_count: int = 0
+    network_units_used: int = 0
+    network_units_skipped: int = 0
 
 
 def _default_execution_plan() -> Dict[str, Any]:
@@ -52,6 +54,8 @@ class AgentState:
     user_agent: str = ""
     request_delay_min: float = 0.0
     request_delay_max: float = 0.0
+    request_budget: int = 0
+    llm_budget: int = 0
     async_probes: bool = False
     llm_local: bool = False
     llm_model: str = "llama3.1:8b"
@@ -101,6 +105,8 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "user_agent": state.user_agent,
         "request_delay_min": state.request_delay_min,
         "request_delay_max": state.request_delay_max,
+        "request_budget": state.request_budget,
+        "llm_budget": state.llm_budget,
         "async_probes": state.async_probes,
         "llm_local": state.llm_local,
         "llm_model": state.llm_model,
@@ -126,6 +132,8 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
             "deterministic_steps": m.deterministic_steps,
             "llm_calls": m.llm_calls,
             "llm_fallback_count": m.llm_fallback_count,
+            "network_units_used": m.network_units_used,
+            "network_units_skipped": m.network_units_skipped,
         },
         "history_scores": state.history_scores,
         "host_profile": state.host_profile,
@@ -162,6 +170,8 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
             deterministic_steps=int(mm.get("deterministic_steps", 0)),
             llm_calls=int(mm.get("llm_calls", 0)),
             llm_fallback_count=int(mm.get("llm_fallback_count", 0)),
+            network_units_used=int(mm.get("network_units_used", 0)),
+            network_units_skipped=int(mm.get("network_units_skipped", 0)),
         )
     else:
         metrics = AgentMetrics()
@@ -185,6 +195,8 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         user_agent=str(d.get("user_agent", "") or ""),
         request_delay_min=float(d.get("request_delay_min", 0.0) or 0.0),
         request_delay_max=float(d.get("request_delay_max", 0.0) or 0.0),
+        request_budget=int(d.get("request_budget", 0) or 0),
+        llm_budget=int(d.get("llm_budget", 0) or 0),
         async_probes=bool(d.get("async_probes", False)),
         llm_local=bool(d.get("llm_local", False)),
         llm_model=str(d.get("llm_model", "llama3.1:8b")),

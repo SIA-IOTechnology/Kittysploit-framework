@@ -42,6 +42,8 @@ class ShowCommand(BaseCommand):
         "environments": "docker_environment",
         "docker_environment": "docker_environment",
         "docker_environments": "docker_environment",
+        "backdoor": "backdoor",
+        "backdoors": "backdoor",
     }
     
     MODULE_PATH_PREFIXES = [
@@ -69,7 +71,7 @@ class ShowCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|listeners|encoders|obfuscators|docker]"
+        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|listeners|encoders|obfuscators|docker|backdoors]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
@@ -96,6 +98,8 @@ class ShowCommand(BaseCommand):
             "environments",  # alias
             "nops",
             "workspaces",
+            "backdoors",
+            "backdoor",
         ]
         
         # Add module-specific options if a module is loaded
@@ -127,6 +131,7 @@ Arguments:
     docker         Show Docker environment modules
     nops           Show available NOP types
     workspaces     Show available workspaces
+    backdoors      Show backdoor modules
 
 Examples:
     show                    # Show current module information
@@ -135,6 +140,7 @@ Examples:
     show modules            # List all available modules
     show exploits           # List exploit modules
     show docker             # List Docker environments
+    show backdoors          # List backdoor modules
     show listeners          # List all available listeners
     show nops               # Show available NOP types
         """
@@ -200,13 +206,19 @@ Examples:
                 self._show_modules_by_category("Workflow", "workflow")
             elif show_type in ("docker", "environment", "environments"):
                 self._show_modules_by_category("Docker environment", "docker_environment")
+            elif show_type in ("backdoor", "backdoors"):
+                self._show_modules_by_category("Backdoor", "backdoor")
             elif show_type == "nops":
                 self._show_nops()
             elif show_type == "workspaces":
                 self._show_workspaces()
             else:
                 print_error(f"Unknown show type: {show_type}")
-                print_info("Use 'show options', 'show advanced', 'show info', 'show modules', 'show listeners', 'show encoders', 'show obfuscators', 'show nops', or 'show workspaces'")
+                print_info(
+                    "Use 'show options', 'show advanced', 'show info', 'show modules', "
+                    "'show listeners', 'show encoders', 'show obfuscators', 'show nops', "
+                    "'show workspaces', or 'show backdoors'"
+                )
                 return False
             
             return True

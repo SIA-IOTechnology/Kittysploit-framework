@@ -43,6 +43,8 @@ STOPWORDS = {
     "ce",
     "cet",
     "cette",
+    "chercher",
+    "cherche",
     "comment",
     "de",
     "des",
@@ -63,6 +65,8 @@ STOPWORDS = {
     "into",
     "je",
     "la",
+    "lance",
+    "lancer",
     "le",
     "les",
     "list",
@@ -83,6 +87,7 @@ STOPWORDS = {
     "pour",
     "please",
     "possible",
+    "peux",
     "quiet",
     "discreet",
     "stealth",
@@ -161,6 +166,7 @@ MODULE_TYPE_ALIASES = {
 FAMILY_HINTS = {
     "agent": "scanner",
     "auth bypass": "exploits",
+    "brute force": "auxiliary",
     "bruteforce": "auxiliary",
     "cms": "scanner",
     "csrf": "browser_auxiliary",
@@ -171,6 +177,8 @@ FAMILY_HINTS = {
     "fingerprint": "scanner",
     "fuzz": "auxiliary",
     "generate payload": "payloads",
+    "local privilege escalation": "post",
+    "local privesc": "post",
     "handler": "listeners",
     "http": "scanner",
     "inject": "exploits",
@@ -179,8 +187,16 @@ FAMILY_HINTS = {
     "payload": "payloads",
     "pivot": "post",
     "post": "post",
+    "post exploit": "post",
     "privesc": "post",
     "privilege escalation": "post",
+    "privilege escalation local": "post",
+    "privilège": "post",
+    "privilege": "post",
+    "élévation": "post",
+    "elevation": "post",
+    "élévation de privilèges": "post",
+    "elevation de privileges": "post",
     "rce": "exploits",
     "recon": "scanner",
     "reverse shell": "payloads",
@@ -206,6 +222,7 @@ KEYWORD_EXPANSIONS = {
     "ftp": ["ftp"],
     "http": ["http", "https", "web"],
     "https": ["https", "http", "web"],
+    "web": ["web", "http", "https"],
     "cloud": ["cloud", "aws", "azure", "gcp", "kubernetes"],
     "aws": ["aws", "s3", "iam", "ec2", "cloud"],
     "azure": ["azure", "blob", "cloud"],
@@ -219,6 +236,9 @@ KEYWORD_EXPANSIONS = {
     "telecom": ["telecom", "diameter", "gtp", "pfcp"],
     "ldap": ["ldap", "active_directory", "ad"],
     "osint": ["osint", "whois", "dns"],
+    "privesc": ["privesc", "privilege", "escalation", "local"],
+    "lpe": ["lpe", "privesc", "privilege", "escalation", "local"],
+    "cve": ["cve", "vulnerability", "vuln"],
 }
 
 READ_ONLY_COMMANDS = {
@@ -337,6 +357,7 @@ OPTION_ROLE_HINTS = (
 )
 
 EXPLICIT_VALUE_PATTERNS = (
+    ("url", re.compile(r"\b(?:url|target_url|site|endpoint)\s*[:=]?\s*([^\s,;]+)", re.I)),
     ("username", re.compile(r"\b(?:username|user|login)\s*[:=]?\s*([^\s,;]+)", re.I)),
     ("password", re.compile(r"\b(?:password|pass|secret)\s*[:=]?\s*([^\s,;]+)", re.I)),
     ("rhost", re.compile(r"\b(?:rhost|target|host|ip)\s*[:=]?\s*([^\s,;]+)", re.I)),
@@ -344,6 +365,9 @@ EXPLICIT_VALUE_PATTERNS = (
     ("lhost", re.compile(r"\b(?:lhost|callback|connect\s+back\s+to)\s*[:=]?\s*([^\s,;]+)", re.I)),
     ("lport", re.compile(r"\b(?:lport)\s*[:=]?\s*(\d{1,5})\b", re.I)),
 )
+
+CVE_PATTERN = re.compile(r"\bCVE[-_ ]?(20\d{2})[-_ ]?(\d{4,7})\b", re.I)
+GENERIC_OPTION_ASSIGNMENT_PATTERN = re.compile(r"\b([A-Za-z][A-Za-z0-9_]{1,40})\s*=\s*([^\s,;]+)")
 
 TARGET_PATTERN = re.compile(
     r"(https?://[^\s]+)|"
@@ -378,6 +402,10 @@ def _clean_whitespace(text: str) -> str:
     return " ".join(str(text or "").strip().split())
 
 
+def _clean_extracted_value(value: Any) -> str:
+    return str(value or "").strip().strip(" \t\r\n'\"`<>()[]{}.,;")
+
+
 def _safe_value(value: Any) -> Any:
     if value is None:
         return None
@@ -403,6 +431,17 @@ def _normalize_module_type(raw_value: str) -> str:
     if not cleaned:
         return ""
     return MODULE_TYPE_ALIASES.get(cleaned, cleaned)
+
+
+def _normalize_module_path(raw_value: str) -> str:
+    path = _clean_extracted_value(raw_value).replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    if path.startswith("modules/"):
+        path = path[len("modules/") :]
+    if path.endswith(".py"):
+        path = path[:-3]
+    return path.strip("/").lower()
 
 
 def _module_runtime_path(module: Any) -> Optional[str]:
@@ -505,7 +544,7 @@ def _extract_module_path(request: str) -> Optional[str]:
     match = MODULE_PATH_PATTERN.search(str(request or ""))
     if not match:
         return None
-    return match.group(0).strip().lower()
+    return _normalize_module_path(match.group(0))
 
 
 def _extract_explicit_options(request: str) -> Dict[str, str]:
@@ -513,12 +552,40 @@ def _extract_explicit_options(request: str) -> Dict[str, str]:
     for name, pattern in EXPLICIT_VALUE_PATTERNS:
         match = pattern.search(str(request or ""))
         if match:
-            options[name] = match.group(1).strip().strip(",;")
+            options[name] = _clean_extracted_value(match.group(1))
+
+    for match in GENERIC_OPTION_ASSIGNMENT_PATTERN.finditer(str(request or "")):
+        key = match.group(1).strip().lower()
+        if key in STOPWORDS:
+            continue
+        options.setdefault(key, _clean_extracted_value(match.group(2)))
     return options
 
 
+def _extract_cves(request: str) -> List[str]:
+    cves = []
+    for year, ident in CVE_PATTERN.findall(str(request or "")):
+        cves.append(f"CVE-{year}-{ident}")
+    return _dedupe(cves)
+
+
+def _cve_variants(cve: str) -> List[str]:
+    lowered = str(cve or "").lower()
+    if not lowered:
+        return []
+    return _dedupe(
+        [
+            lowered,
+            lowered.replace("-", "_"),
+            lowered.replace("-", ""),
+            lowered.replace("cve-", ""),
+            lowered.replace("cve-", "cve_"),
+        ]
+    )
+
+
 def _normalize_target(raw_target: Optional[str], request: str = "") -> Dict[str, Any]:
-    raw_value = _clean_whitespace(raw_target or "")
+    raw_value = _clean_extracted_value(_clean_whitespace(raw_target or ""))
     if not raw_value:
         return {
             "raw": None,
@@ -533,7 +600,10 @@ def _normalize_target(raw_target: Optional[str], request: str = "") -> Dict[str,
         parsed = urlparse(raw_value)
         scheme = parsed.scheme.lower() or None
         host = parsed.hostname or None
-        port = parsed.port
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
         if port is None and scheme == "https":
             port = 443
         elif port is None and scheme == "http":
@@ -615,6 +685,9 @@ def _extract_keywords(request: str, target: Dict[str, Any], explicit_module_path
             part for part in explicit_module_path.split("/") if part and part not in STOPWORDS
         )
 
+    for cve in _extract_cves(request):
+        filtered.extend(_cve_variants(cve))
+
     if target.get("scheme"):
         filtered.append(target["scheme"])
         if target["scheme"] in ("http", "https"):
@@ -629,8 +702,28 @@ def _extract_keywords(request: str, target: Dict[str, Any], explicit_module_path
 
 def _detect_operation_profile(request: str) -> str:
     lowered = str(request or "").lower()
-    discreet_tokens = ("quiet", "stealth", "stealthy", "discreet", "silent", "low noise")
-    aggressive_tokens = ("aggressive", "fast", "full speed", "loud", "spray")
+    discreet_tokens = (
+        "quiet",
+        "stealth",
+        "stealthy",
+        "discreet",
+        "discret",
+        "silencieux",
+        "furtif",
+        "silent",
+        "low noise",
+        "peu bruyant",
+    )
+    aggressive_tokens = (
+        "aggressive",
+        "agressif",
+        "fast",
+        "rapide",
+        "full speed",
+        "loud",
+        "bruyant",
+        "spray",
+    )
     if any(token in lowered for token in discreet_tokens):
         return "discreet"
     if any(token in lowered for token in aggressive_tokens):
@@ -641,6 +734,30 @@ def _detect_operation_profile(request: str) -> str:
 def _detect_intent(request: str, explicit_module_path: Optional[str], target: Dict[str, Any]) -> Tuple[str, List[str]]:
     lowered = str(request or "").lower()
     secondary: List[str] = []
+    execute_tokens = ("run", "execute", "launch", "start", "lance", "lancer", "exécute", "execute")
+    inspect_tokens = (
+        "options",
+        "show info",
+        "module info",
+        "explain module",
+        "describe module",
+        "décris module",
+        "decris module",
+    )
+    search_tokens = (
+        "scan",
+        "scanner",
+        "enumerate",
+        "énumère",
+        "enumere",
+        "detect",
+        "fingerprint",
+        "find",
+        "search",
+        "cherche",
+        "recherche",
+        "lookup",
+    )
 
     if _looks_like_command(request):
         return "command", secondary
@@ -666,13 +783,16 @@ def _detect_intent(request: str, explicit_module_path: Optional[str], target: Di
     ):
         return "framework_info", secondary
 
-    if any(token in lowered for token in ("options", "show info", "module info", "explain module", "describe module")):
+    if any(token in lowered for token in inspect_tokens):
         return "inspect_module", secondary
 
-    if explicit_module_path and any(token in lowered for token in ("run", "execute", "launch", "start")):
+    if explicit_module_path and any(token in lowered for token in execute_tokens):
         return "execute_module", secondary
 
-    if any(token in lowered for token in ("run", "execute", "launch", "start")) and target.get("normalized"):
+    if any(token in lowered for token in execute_tokens) and _extract_cves(lowered):
+        return "execute_module", secondary
+
+    if any(token in lowered for token in execute_tokens) and target.get("normalized"):
         return "execute_module", secondary
 
     if any(token in lowered for token in ("help", "commands", "what can you do")):
@@ -681,7 +801,7 @@ def _detect_intent(request: str, explicit_module_path: Optional[str], target: Di
     if any(token in lowered for token in ("show", "describe", "explain", "details", "info")) and explicit_module_path:
         return "inspect_module", secondary
 
-    if any(token in lowered for token in ("scan", "enumerate", "detect", "fingerprint", "find", "search", "lookup")):
+    if any(token in lowered for token in search_tokens):
         return "search_module", secondary
 
     return "search_module", secondary
@@ -779,6 +899,51 @@ def _option_role(name: str, description: str = "") -> str:
         if token in lowered_name or token in lowered_desc:
             return role
     return "generic"
+
+
+def _option_has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _quote_command_value(value: Any) -> str:
+    return shlex.quote(_stringify(value))
+
+
+def _merge_profile_into_options(
+    option_entries: List[Dict[str, Any]],
+    options: Optional[Dict[str, Any]],
+    profile: Optional[str],
+) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(options or {})
+    normalized_profile = str(profile or "").strip().lower()
+    if normalized_profile in ("", "normal", "default"):
+        return merged
+
+    names_by_lower = {str(entry.get("name") or "").lower(): str(entry.get("name") or "") for entry in option_entries}
+
+    def set_if_present(names: Iterable[str], value: Any) -> None:
+        for name in names:
+            actual = names_by_lower.get(str(name).lower())
+            if actual:
+                merged[actual] = value
+                return
+
+    if normalized_profile == "discreet":
+        set_if_present(("timeout", "TIMEOUT"), "30")
+        set_if_present(("threads", "THREADS"), "1")
+        set_if_present(("verbose", "VERBOSE"), "false")
+    elif normalized_profile == "aggressive":
+        set_if_present(("timeout", "TIMEOUT"), "5")
+        set_if_present(("threads", "THREADS"), "16")
+        set_if_present(("verbose", "VERBOSE"), "true")
+
+    return merged
 
 
 @dataclass
@@ -917,6 +1082,38 @@ class MCPCommandBridge:
             "stderr": stderr.getvalue() or None,
             "elapsed_ms": round((time.monotonic() - started_at) * 1000.0, 2),
             "safety": safety,
+            "state": self.get_state(),
+        }
+
+    def execute_command_sequence(
+        self,
+        commands: List[Union[str, Dict[str, Any]]],
+        allow_dangerous: bool = False,
+        stop_on_error: bool = True,
+        max_commands: int = 12,
+    ) -> Dict[str, Any]:
+        """Execute a bounded native command sequence with per-command safety checks."""
+        results: List[Dict[str, Any]] = []
+        overall_status = "ok"
+
+        for item in list(commands or [])[: max(1, min(max_commands, 25))]:
+            command_line = item.get("command") if isinstance(item, dict) else item
+            command_line = _clean_whitespace(command_line)
+            if not command_line:
+                continue
+
+            result = self.execute_command(command_line, allow_dangerous=allow_dangerous)
+            results.append(result)
+            status = result.get("status")
+            if status != "ok":
+                overall_status = status or "failed"
+                if stop_on_error:
+                    break
+
+        return {
+            "status": overall_status,
+            "count": len(results),
+            "results": results,
             "state": self.get_state(),
         }
 
@@ -1105,12 +1302,20 @@ class NaturalLanguagePlanner:
         name_low = str(row.get("name") or "").lower()
         desc_low = str(row.get("description") or "").lower()
         tags_low = " ".join([str(tag).lower() for tag in row.get("tags") or []])
+        cve_low = str(row.get("cve") or "").lower()
         row_type = _normalize_module_type(row.get("type") or "")
         preferred_types = {_normalize_module_type(item) for item in parsed.module_types if item}
 
         if parsed.explicit_module_path and parsed.explicit_module_path == path_low:
             score += 250.0
             reasons.append("Exact module path requested.")
+
+        cve_blob = f"{path_low} {name_low} {desc_low} {tags_low} {cve_low}"
+        for cve in _extract_cves(parsed.normalized_request):
+            if any(variant and variant in cve_blob for variant in _cve_variants(cve)):
+                score += 180.0
+                reasons.append(f"Matches requested {cve}.")
+                break
 
         if preferred_types:
             if row_type in preferred_types:
@@ -1119,7 +1324,7 @@ class NaturalLanguagePlanner:
             else:
                 score -= 12.0
 
-        if parsed.intent == "execute_module" and row_type in ("exploits", "scanner", "listeners", "payloads"):
+        if parsed.intent == "execute_module" and row_type in ("exploits", "scanner", "listeners", "payloads", "post"):
             score += 6.0
         elif parsed.intent == "inspect_module":
             score += 2.0
@@ -1382,6 +1587,7 @@ class NaturalLanguagePlanner:
         request: Optional[str] = None,
         target: Optional[str] = None,
     ) -> Dict[str, Any]:
+        module_path = _normalize_module_path(module_path)
         cache_key = f"{module_path}|{request or ''}|{target or ''}"
         if cache_key in self._module_details_cache:
             return self._module_details_cache[cache_key]
@@ -1465,6 +1671,115 @@ class NaturalLanguagePlanner:
 
         self._module_details_cache[cache_key] = details
         return details
+
+    def prepare_module_run(
+        self,
+        module_path: str,
+        request: Optional[str] = None,
+        options: Optional[Dict[str, Any]] = None,
+        operation_profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Resolve inferred and explicit options for a module without executing it.
+
+        This gives MCP clients a stable pre-flight object: known options to pass to
+        `ks_run_module`, unknown user-supplied options, and required options still missing.
+        """
+        normalized_path = _normalize_module_path(module_path)
+        parsed = self.parse_request(request or normalized_path)
+        details = self.get_module_details(normalized_path, request=request or "")
+        if "error" in details:
+            return details
+
+        option_entries = list(details.get("options") or [])
+        names_by_lower = {
+            str(entry.get("name") or "").lower(): str(entry.get("name") or "")
+            for entry in option_entries
+        }
+        entries_by_name = {
+            str(entry.get("name") or ""): entry
+            for entry in option_entries
+        }
+
+        resolved: Dict[str, Any] = {}
+        for key, value in (details.get("option_hints") or {}).items():
+            actual = names_by_lower.get(str(key).lower())
+            if actual and _option_has_value(value):
+                resolved[actual] = value
+
+        unknown_options: Dict[str, Any] = {}
+        for raw_key, value in (options or {}).items():
+            actual = names_by_lower.get(str(raw_key).lower())
+            if actual:
+                resolved[actual] = value
+            else:
+                unknown_options[str(raw_key)] = _safe_value(value)
+
+        resolved = _merge_profile_into_options(option_entries, resolved, operation_profile or parsed.operation_profile)
+
+        missing_after_resolution: List[str] = []
+        for option_name in details.get("required_options") or []:
+            entry = entries_by_name.get(option_name, {})
+            if _option_has_value(resolved.get(option_name)):
+                continue
+            if _option_has_value(entry.get("current_value")):
+                continue
+            if _option_has_value(entry.get("default")):
+                continue
+            missing_after_resolution.append(option_name)
+
+        command_sequence: List[Dict[str, Any]] = [
+            {
+                "command": f"use {normalized_path}",
+                "reason": "Select the module.",
+                "safety": "stateful",
+                "allowed_without_dangerous": True,
+            }
+        ]
+        for option_name, option_value in resolved.items():
+            command_sequence.append(
+                {
+                    "command": f"set {option_name} {_quote_command_value(option_value)}",
+                    "reason": f"Set resolved option '{option_name}'.",
+                    "safety": "stateful",
+                    "allowed_without_dangerous": True,
+                }
+            )
+        command_sequence.append(
+            {
+                "command": "run",
+                "reason": "Execute the module after required options are filled.",
+                "safety": "dangerous",
+                "allowed_without_dangerous": False,
+            }
+        )
+
+        can_run = not missing_after_resolution
+        return {
+            "module_path": normalized_path,
+            "name": details.get("name"),
+            "type": details.get("type"),
+            "operation_profile": operation_profile or parsed.operation_profile,
+            "resolved_options": _safe_value(resolved),
+            "unknown_options": unknown_options,
+            "required_options": details.get("required_options") or [],
+            "missing_options": missing_after_resolution,
+            "can_run": can_run,
+            "safety": "dangerous" if can_run else "needs_options",
+            "option_hints": details.get("option_hints") or {},
+            "recommended_commands": command_sequence,
+            "recommended_mcp_call": {
+                "tool": "ks_run_module",
+                "arguments": {
+                    "module_path": normalized_path,
+                    "options": _safe_value(resolved),
+                    "operation_profile": operation_profile or parsed.operation_profile,
+                },
+                "reason": "Run the prepared module through RPC once confirmed.",
+            }
+            if can_run
+            else None,
+        }
 
     def _ollama_plan(
         self,
@@ -1687,23 +2002,30 @@ class NaturalLanguagePlanner:
         if top_path:
             calls.append(
                 {
-                    "tool": "ks_get_module_options",
-                    "arguments": {"module_path": top_path},
-                    "reason": "Inspect the best candidate's options.",
+                    "tool": "ks_prepare_module_run",
+                    "arguments": {
+                        "module_path": top_path,
+                        "request": parsed.normalized_request,
+                        "operation_profile": parsed.operation_profile,
+                    },
+                    "reason": "Resolve required options and pre-flight the best candidate.",
                 }
             )
-            details = self.get_module_details(top_path, request=parsed.request)
-            option_hints = details.get("option_hints") or {}
             if parsed.intent == "execute_module":
+                prepared = self.prepare_module_run(
+                    top_path,
+                    request=parsed.request,
+                    operation_profile=parsed.operation_profile,
+                )
                 calls.append(
                     {
                         "tool": "ks_run_module",
                         "arguments": {
                             "module_path": top_path,
-                            "options": option_hints,
+                            "options": prepared.get("resolved_options") or {},
                             "operation_profile": parsed.operation_profile,
                         },
-                        "reason": "Execute the top candidate with inferred option hints.",
+                        "reason": "Execute the top candidate after MCP-side confirmation.",
                     }
                 )
 
@@ -1784,6 +2106,14 @@ class NaturalLanguagePlanner:
                 }
             )
 
+        prepared_run = None
+        if enriched_candidates and parsed.intent in ("execute_module", "inspect_module"):
+            prepared_run = self.prepare_module_run(
+                enriched_candidates[0]["path"],
+                request=request,
+                operation_profile=parsed.operation_profile,
+            )
+
         heuristic_commands = self._recommend_commands(parsed, enriched_candidates)
         ollama_plan = self._ollama_plan(parsed, enriched_candidates, heuristic_commands) if prefer_ollama else None
         recommended_commands = list(
@@ -1808,6 +2138,7 @@ class NaturalLanguagePlanner:
             "request": request,
             "parsed_request": asdict(parsed),
             "recommended_modules": enriched_candidates,
+            "prepared_run": prepared_run,
             "recommended_commands": recommended_commands,
             "heuristic_commands": heuristic_commands,
             "recommended_mcp_calls": mcp_calls,

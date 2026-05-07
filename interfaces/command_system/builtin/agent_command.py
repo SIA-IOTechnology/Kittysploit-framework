@@ -22,6 +22,12 @@ from core.output_handler import (
 )
 from interfaces.command_system.builtin.agent.agent_constants import (
     DEFAULT_AGENT_USER_AGENT,
+    DISCREET_PROFILE_DEFAULT_DELAY_MAX,
+    DISCREET_PROFILE_DEFAULT_DELAY_MIN,
+    DISCREET_PROFILE_DEFAULT_MAX_MODULES,
+    DISCREET_PROFILE_DEFAULT_RECON_MODULES,
+    DISCREET_PROFILE_DEFAULT_REQUEST_BUDGET,
+    DISCREET_PROFILE_MAX_LLM_CALLS,
     SAFETY_PROFILE_NAMES,
 )
 
@@ -42,8 +48,8 @@ class AgentCommand(BaseCommand):
         return (
             "agent <target> [--threads N] [--protocol PROTO] [--no-exploit] "
             "[--llm-local] [--max-modules N] [--recon-modules N] "
-            "[--safety-profile safe|normal|aggressive] [--request-delay-min S] "
-            "[--request-delay-max S] [--async-probes] [--all]"
+            "[--safety-profile safe|discreet|normal|aggressive] [--request-budget N] "
+            "[--request-delay-min S] [--request-delay-max S] [--async-probes] [--all]"
         )
 
     @property
@@ -61,6 +67,7 @@ Examples:
     agent target.com --llm-local --llm-model llama3.1:8b
     agent target.com --llm-local
     agent target.com --max-modules 40 --recon-modules 12
+    agent target.com --safety-profile discreet
     agent target.com --safety-profile safe --request-delay-min 0.5 --request-delay-max 2
     agent target.com --async-probes
     agent target.com --all
@@ -132,7 +139,25 @@ Examples:
             "--safety-profile",
             choices=SAFETY_PROFILE_NAMES,
             default="normal",
-            help="Execution guardrails: safe blocks noisy modules, normal preserves defaults, aggressive removes guardrails.",
+            help=(
+                "Execution guardrails: safe blocks noisy modules, discreet keeps a small request budget, "
+                "normal preserves defaults, aggressive removes guardrails."
+            ),
+        )
+        parser.add_argument(
+            "--request-budget",
+            type=int,
+            default=0,
+            help=(
+                "Approximate maximum agent-owned network units. A probe or module launch costs one unit. "
+                "0 means profile default / unbounded."
+            ),
+        )
+        parser.add_argument(
+            "--llm-budget",
+            type=int,
+            default=0,
+            help="Maximum local LLM calls for this agent run. 0 means profile default / unbounded.",
         )
         parser.add_argument(
             "--user-agent",
@@ -191,7 +216,22 @@ Examples:
         if delay_max < delay_min:
             delay_max = delay_min
         threads = max(1, int(parsed.threads))
-        if parsed.safety_profile == "safe":
+        max_modules = max(5, int(parsed.max_modules))
+        recon_modules = max(3, int(parsed.recon_modules))
+        request_budget = max(0, int(parsed.request_budget or 0))
+        llm_budget = max(0, int(parsed.llm_budget or 0))
+
+        if parsed.safety_profile == "discreet":
+            threads = 1
+            max_modules = min(max_modules, DISCREET_PROFILE_DEFAULT_MAX_MODULES)
+            recon_modules = min(recon_modules, DISCREET_PROFILE_DEFAULT_RECON_MODULES)
+            request_budget = request_budget or DISCREET_PROFILE_DEFAULT_REQUEST_BUDGET
+            llm_budget = llm_budget or DISCREET_PROFILE_MAX_LLM_CALLS
+            if delay_max <= 0:
+                delay_min = DISCREET_PROFILE_DEFAULT_DELAY_MIN
+                delay_max = DISCREET_PROFILE_DEFAULT_DELAY_MAX
+            parsed.async_probes = False
+        elif parsed.safety_profile == "safe":
             threads = 1
 
         state = AgentState(
@@ -207,12 +247,14 @@ Examples:
             user_agent=str(parsed.user_agent or DEFAULT_AGENT_USER_AGENT),
             request_delay_min=delay_min,
             request_delay_max=delay_max,
+            request_budget=request_budget,
+            llm_budget=llm_budget,
             async_probes=bool(parsed.async_probes),
             llm_local=parsed.llm_local,
             llm_model=parsed.llm_model,
             llm_endpoint=parsed.llm_endpoint,
-            max_modules=max(5, int(parsed.max_modules)),
-            recon_modules=max(3, int(parsed.recon_modules)),
+            max_modules=max_modules,
+            recon_modules=recon_modules,
             execution_plan={
                 "next_actions": [],
                 "max_requests_next_phase": 0,

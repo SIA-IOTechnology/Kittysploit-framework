@@ -63,6 +63,8 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     CMS_SPECIALIZATION_BLOB_TOKENS,
     DEFAULT_AGENT_USER_AGENT,
     DISALLOWED_POST_AUTH_TOKENS,
+    DISCREET_PROFILE_BLOCKED_MODULE_SUBSTRINGS,
+    DISCREET_PROFILE_EXPENSIVE_MODULE_SUBSTRINGS,
     DRUPAL_BLOB_MARKERS,
     DERIVED_HOST_SCAN_MAX_HOSTS,
     DERIVED_HOST_SCAN_MODULES_PER_HOST,
@@ -298,20 +300,169 @@ class AgentWorkflowCore:
         timeout_s: float = 4.0,
         read_bytes: int = 8192,
     ) -> List[Dict[str, Any]]:
-        async_rows = self._run_async_http_probe_many(state, urls, timeout_s, read_bytes)
-        if async_rows is not None:
-            return async_rows
-        rows = []
-        for url in urls:
-            self._sleep_between_agent_actions(state, f"http-probe:{url}")
-            rows.append(self._sync_http_probe_one(state, url, timeout_s, read_bytes))
-        return rows
+        if not urls:
+            return []
+
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        cache = kb.setdefault("http_probe_cache", {})
+        key_to_url: Dict[str, str] = {}
+        output_by_key: Dict[str, Dict[str, Any]] = {}
+        ordered_keys: List[str] = []
+
+        for raw_url in urls:
+            key = self._normalize_probe_url(raw_url)
+            ordered_keys.append(key)
+            key_to_url.setdefault(key, raw_url)
+            cached = cache.get(key) if isinstance(cache, dict) else None
+            if isinstance(cached, dict):
+                row = dict(cached)
+                row["cached"] = True
+                output_by_key[key] = row
+
+        fetch_keys = [key for key in key_to_url.keys() if key not in output_by_key]
+        fetch_urls = [key_to_url[key] for key in fetch_keys]
+        if fetch_urls:
+            remaining = self._request_budget_remaining(state)
+            if remaining is not None:
+                allowed_count = max(0, min(len(fetch_urls), remaining))
+                skipped_urls = fetch_urls[allowed_count:]
+                fetch_keys = fetch_keys[:allowed_count]
+                fetch_urls = fetch_urls[:allowed_count]
+                for skipped_url in skipped_urls:
+                    key = self._normalize_probe_url(skipped_url)
+                    state.metrics.network_units_skipped += 1
+                    output_by_key[key] = {
+                        "url": skipped_url,
+                        "status": 0,
+                        "headers": {},
+                        "body": "",
+                        "final_url": "",
+                        "error": "request budget exhausted before HTTP probe",
+                    }
+
+        if fetch_urls:
+            # Reserve one budget unit per actual HTTP probe. Module-owned internal requests
+            # are budgeted at launch time; these are agent-owned probes.
+            if not self._consume_network_units(state, len(fetch_urls)):
+                for url in fetch_urls:
+                    key = self._normalize_probe_url(url)
+                    output_by_key[key] = {
+                        "url": url,
+                        "status": 0,
+                        "headers": {},
+                        "body": "",
+                        "final_url": "",
+                        "error": "request budget exhausted before HTTP probe",
+                    }
+                fetch_urls = []
+                fetch_keys = []
+
+        fetched_rows: List[Dict[str, Any]] = []
+        if fetch_urls:
+            async_rows = self._run_async_http_probe_many(state, fetch_urls, timeout_s, read_bytes)
+            if async_rows is not None:
+                fetched_rows = async_rows
+            else:
+                for url in fetch_urls:
+                    self._sleep_between_agent_actions(state, f"http-probe:{url}")
+                    fetched_rows.append(self._sync_http_probe_one(state, url, timeout_s, read_bytes))
+
+        for key, row in zip(fetch_keys, fetched_rows):
+            normalized_row = dict(row)
+            normalized_row["cached"] = False
+            output_by_key[key] = normalized_row
+            if isinstance(cache, dict) and not normalized_row.get("error"):
+                cache[key] = {
+                    "url": normalized_row.get("url"),
+                    "status": normalized_row.get("status"),
+                    "headers": normalized_row.get("headers") or {},
+                    "body": str(normalized_row.get("body", "") or "")[:read_bytes],
+                    "final_url": normalized_row.get("final_url") or "",
+                    "error": "",
+                }
+
+        kb["http_probe_cache"] = cache
+        state.knowledge_base = kb
+        return [
+            output_by_key.get(
+                key,
+                {"url": key_to_url.get(key, key), "status": 0, "headers": {}, "body": "", "final_url": "", "error": ""},
+            )
+            for key in ordered_keys
+        ]
 
     def _normalized_safety_profile(self, state: AgentState) -> str:
         profile = str(getattr(state, "safety_profile", "normal") or "normal").strip().lower()
-        if profile not in {"safe", "normal", "aggressive"}:
+        if profile not in {"safe", "discreet", "normal", "aggressive"}:
             return "normal"
         return profile
+
+    def _discreet_mode(self, state: AgentState) -> bool:
+        return self._normalized_safety_profile(state) == "discreet"
+
+    def _request_budget_remaining(self, state: AgentState) -> Optional[int]:
+        try:
+            budget = int(getattr(state, "request_budget", 0) or 0)
+        except Exception:
+            budget = 0
+        if budget <= 0:
+            return None
+        used = int(getattr(state.metrics, "network_units_used", 0) or 0)
+        return max(0, budget - used)
+
+    def _consume_network_units(self, state: AgentState, units: int = 1) -> bool:
+        units = max(1, int(units or 1))
+        remaining = self._request_budget_remaining(state)
+        if remaining is not None and remaining < units:
+            state.metrics.network_units_skipped += units
+            return False
+        state.metrics.network_units_used += units
+        return True
+
+    def _budget_skip_result(self, module: Dict[str, Any], phase_name: str) -> Dict[str, Any]:
+        path = module.get("path", "") if isinstance(module, dict) else ""
+        return {
+            "module": module.get("name", path) if isinstance(module, dict) else str(path),
+            "path": path,
+            "status": "skipped",
+            "vulnerable": False,
+            "message": f"{phase_name}: request budget exhausted before module launch",
+            "details": {"reason": "request_budget_exhausted"},
+        }
+
+    def _limit_modules_by_request_budget(
+        self,
+        state: AgentState,
+        modules: List[Dict[str, Any]],
+        phase_name: str,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        remaining = self._request_budget_remaining(state)
+        if remaining is None:
+            return list(modules or []), []
+        if remaining <= 0:
+            skipped = [self._budget_skip_result(m, phase_name) for m in modules or []]
+            state.metrics.network_units_skipped += len(skipped)
+            return [], skipped
+        allowed = list((modules or [])[:remaining])
+        skipped_modules = list((modules or [])[remaining:])
+        skipped = [self._budget_skip_result(m, phase_name) for m in skipped_modules]
+        state.metrics.network_units_skipped += len(skipped)
+        return allowed, skipped
+
+    def _normalize_probe_url(self, url: str) -> str:
+        try:
+            parsed = urllib.parse.urlsplit(str(url or "").strip())
+            scheme = parsed.scheme.lower()
+            host = (parsed.hostname or "").lower()
+            port = parsed.port
+            netloc = host
+            if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+                netloc = f"{host}:{port}"
+            path = parsed.path or "/"
+            query = f"?{parsed.query}" if parsed.query else ""
+            return urllib.parse.urlunsplit((scheme, netloc, path, query, ""))
+        except Exception:
+            return str(url or "").strip()
 
     def _action_delay_bounds(self, state: AgentState) -> Tuple[float, float]:
         try:
@@ -339,12 +490,32 @@ class AgentWorkflowCore:
         time.sleep(delay)
 
     def _module_block_reason_for_profile(self, state: AgentState, module_path: Any) -> str:
-        if self._normalized_safety_profile(state) != "safe":
-            return ""
+        profile = self._normalized_safety_profile(state)
         low = str(module_path or "").lower()
-        for token in SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
-            if token in low:
-                return f"safe profile blocks noisy module token `{token}`"
+        if profile == "safe":
+            for token in SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
+                if token in low:
+                    return f"safe profile blocks noisy module token `{token}`"
+            return ""
+        if profile == "discreet":
+            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+            signals = {str(x).lower() for x in kb.get("risk_signals", []) or []}
+            has_auth_or_login = bool(
+                signals.intersection({
+                    "authenticated_session",
+                    "credentials_obtained",
+                    "login_form_detected",
+                    "login_redirect_detected",
+                    "login_surface_detected",
+                })
+                or kb.get("login_paths")
+            )
+            for token in DISCREET_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
+                if token in low:
+                    return f"discreet profile blocks high-volume module token `{token}`"
+            for token in DISCREET_PROFILE_EXPENSIVE_MODULE_SUBSTRINGS:
+                if token in low and not has_auth_or_login:
+                    return f"discreet profile defers expensive module token `{token}` until stronger evidence"
         return ""
 
     def _filter_modules_for_safety_profile(
@@ -390,8 +561,12 @@ class AgentWorkflowCore:
         if not saw_rate_limit:
             return
         delay_min, delay_max = self._action_delay_bounds(state)
-        state.request_delay_min = max(delay_min, 2.0)
-        state.request_delay_max = max(delay_max, 6.0)
+        if self._discreet_mode(state):
+            state.request_delay_min = max(delay_min, 5.0)
+            state.request_delay_max = max(delay_max, 15.0)
+        else:
+            state.request_delay_min = max(delay_min, 2.0)
+            state.request_delay_max = max(delay_max, 6.0)
         if getattr(state, "verbose", False):
             print_warning("Rate limit signal detected; increasing agent delay window")
 
@@ -428,7 +603,7 @@ class AgentWorkflowCore:
         kb["risk_signals"] = sorted(risk)
         kb["waf_signal_count"] = int(kb.get("waf_signal_count", 0) or 0) + len(signals)
         state.knowledge_base = kb
-        threshold = 1 if self._normalized_safety_profile(state) == "safe" else 3
+        threshold = 1 if self._normalized_safety_profile(state) in ("safe", "discreet") else 3
         if int(kb.get("waf_signal_count", 0) or 0) >= threshold:
             state.campaign_stop_reason = (
                 f"{phase_name}: blocking/WAF signals detected; pausing campaign to avoid target overload"
@@ -452,15 +627,20 @@ class AgentWorkflowCore:
         phase_name: str = "phase",
     ) -> List[Dict[str, Any]]:
         allowed, skipped = self._filter_modules_for_safety_profile(state, modules)
+        allowed, budget_skipped = self._limit_modules_by_request_budget(state, allowed, phase_name)
+        skipped.extend(budget_skipped)
         if not allowed:
             return skipped
 
         profile = self._normalized_safety_profile(state)
-        effective_threads = 1 if profile == "safe" else max(1, int(threads or 1))
+        effective_threads = 1 if profile in ("safe", "discreet") else max(1, int(threads or 1))
         results: List[Dict[str, Any]] = list(skipped)
 
-        if profile == "safe":
+        if profile in ("safe", "discreet"):
             for module in allowed:
+                if not self._consume_network_units(state, 1):
+                    results.append(self._budget_skip_result(module, phase_name))
+                    continue
                 self._sleep_between_agent_actions(state, f"{phase_name}:{module.get('path', '')}")
                 batch_results = scanner._execute_modules([module], target_info, 1, verbose)
                 results.extend(batch_results)
@@ -469,6 +649,9 @@ class AgentWorkflowCore:
                     break
             return results
 
+        if not self._consume_network_units(state, len(allowed)):
+            results.extend([self._budget_skip_result(module, phase_name) for module in allowed])
+            return results
         self._sleep_between_agent_actions(state, phase_name)
         batch_results = scanner._execute_modules(allowed, target_info, effective_threads, verbose)
         results.extend(batch_results)
@@ -1066,6 +1249,8 @@ class AgentWorkflowCore:
         )
         if self._should_run_post_auth_methodical_wave(state.knowledge_base):
             post_auth_budget = min(12, max(3, int(state.max_modules) - len(executed_paths)))
+            if self._discreet_mode(state):
+                post_auth_budget = min(5, max(2, int(state.max_modules) - len(executed_paths)))
             self._run_post_auth_methodical_wave(
                 state,
                 modules,
@@ -1638,7 +1823,7 @@ class AgentWorkflowCore:
             if len(actions) >= max_actions:
                 return actions
 
-        if len(actions) < 2:
+        if len(actions) < 2 and not self._discreet_mode(state):
             if "auxiliary/scanner/http/crawler" in allowed:
                 actions.append({
                     "type": "run_followup",
@@ -1653,6 +1838,8 @@ class AgentWorkflowCore:
             "auxiliary/scanner/http/sql_injection",
             "auxiliary/scanner/http/lfi_fuzzer",
         ):
+            if self._discreet_mode(state) and not kb.get("discovered_params"):
+                break
             if inj in allowed and len(actions) < max_actions:
                 low = inj.lower()
                 if self._post_auth_vector_is_disallowed(low):
@@ -1694,7 +1881,7 @@ class AgentWorkflowCore:
             if mod not in selected:
                 selected.insert(0, mod)
 
-        if not selected and "auxiliary/scanner/http/crawler" not in executed_paths:
+        if not selected and not self._discreet_mode(state) and "auxiliary/scanner/http/crawler" not in executed_paths:
             crawler = by_path.get("auxiliary/scanner/http/crawler")
             if crawler:
                 selected.append(crawler)
@@ -1776,6 +1963,14 @@ class AgentWorkflowCore:
             "/wp-json/",
             "/?rest_route=/",
         ]
+        if self._discreet_mode(state):
+            probe_paths = [
+                "/",
+                "/robots.txt",
+                "/wp-login.php",
+                "/wp-json/",
+                "/login.php",
+            ]
         probe_results = []
         tech_hints = set([str(x).lower() for x in kb.get("tech_hints", [])])
         endpoints = set(kb.get("discovered_endpoints", []))
@@ -2057,7 +2252,7 @@ class AgentWorkflowCore:
             state.knowledge_base["planner_campaign_goal"] = state.campaign_goal or ""
         # Avoid mixed/interleaved module output in verbose mode: run campaign
         # phases sequentially so logs remain attributable to the right module.
-        phase_threads = 1 if verbose else max(2, min(threads, 8))
+        phase_threads = 1 if verbose or self._discreet_mode(state) else max(2, min(threads, 8))
         forced_protocol = state.protocol
 
         # For non-web explicit protocol scans, keep bounded one-pass behavior.
@@ -2286,6 +2481,7 @@ class AgentWorkflowCore:
                 snapshot_before,
                 self._snapshot_campaign_state(state, all_results),
                 no_novelty_streak,
+                state,
             )
             if stop_now:
                 state.campaign_stop_reason = stop_reason
@@ -2378,6 +2574,7 @@ class AgentWorkflowCore:
                         snapshot_before,
                         self._snapshot_campaign_state(state, all_results),
                         no_novelty_streak,
+                        state,
                     )
                     if stop_now:
                         state.campaign_stop_reason = stop_reason
@@ -2475,6 +2672,7 @@ class AgentWorkflowCore:
                     snapshot_before,
                     self._snapshot_campaign_state(state, all_results),
                     no_novelty_streak,
+                    state,
                 )
                 if stop_now:
                     state.campaign_stop_reason = stop_reason
@@ -2573,6 +2771,7 @@ class AgentWorkflowCore:
                     snapshot_before,
                     self._snapshot_campaign_state(state, all_results),
                     no_novelty_streak,
+                    state,
                 )
                 if stop_now:
                     state.campaign_stop_reason = stop_reason
@@ -2583,6 +2782,8 @@ class AgentWorkflowCore:
                     return all_results
 
             post_auth_budget = min(12, max(3, max_modules - len(executed_paths)))
+            if self._discreet_mode(state):
+                post_auth_budget = min(5, max(2, max_modules - len(executed_paths)))
             self._run_post_auth_methodical_wave(
                 state,
                 modules,
@@ -2690,6 +2891,7 @@ class AgentWorkflowCore:
                     snapshot_before,
                     self._snapshot_campaign_state(state, all_results),
                     no_novelty_streak,
+                    state,
                 )
                 if stop_now:
                     state.campaign_stop_reason = stop_reason
@@ -2718,6 +2920,46 @@ class AgentWorkflowCore:
             float(confidence.get("joomla", 0.0) or 0.0),
         )
         cms_high = cms_conf >= 0.75
+        if self._discreet_mode(state):
+            if has_auth:
+                return {
+                    "recon": min(max_modules, max(2, max_modules // 6)),
+                    "crawl": 0,
+                    "inject": max(1, max_modules // 10),
+                    "specialized": max(4, max_modules // 3),
+                    "followup": max(4, max_modules // 3),
+                }
+            if cms_high:
+                return {
+                    "recon": min(max_modules, 3),
+                    "crawl": 0,
+                    "inject": 0,
+                    "specialized": max(4, max_modules // 3),
+                    "followup": max(3, max_modules // 4),
+                }
+            if auth_focus:
+                return {
+                    "recon": min(max_modules, 3),
+                    "crawl": 0,
+                    "inject": 0,
+                    "specialized": max(2, max_modules // 5),
+                    "followup": max(4, max_modules // 3),
+                }
+            if info_score <= 4.0 and endpoint_count <= 2 and hint_count <= 2:
+                return {
+                    "recon": min(max_modules, 4),
+                    "crawl": 1,
+                    "inject": 1,
+                    "specialized": max(2, max_modules // 5),
+                    "followup": max(2, max_modules // 6),
+                }
+            return {
+                "recon": min(max_modules, max(3, int(state.recon_modules))),
+                "crawl": 0,
+                "inject": 1,
+                "specialized": max(3, max_modules // 4),
+                "followup": max(3, max_modules // 5),
+            }
         if has_auth:
             return {
                 "recon": min(max_modules, max(3, max_modules // 6)),
@@ -2896,7 +3138,7 @@ class AgentWorkflowCore:
             "vulns": len([r for r in all_results if r.get("vulnerable")]),
         }
 
-    def _evaluate_campaign_stop(self, phase_name, phase_results, before, after, no_novelty_streak):
+    def _evaluate_campaign_stop(self, phase_name, phase_results, before, after, no_novelty_streak, state=None):
         novelty = (
             (after.get("endpoints", 0) - before.get("endpoints", 0))
             + (after.get("params", 0) - before.get("params", 0))
@@ -2919,18 +3161,25 @@ class AgentWorkflowCore:
             if any(marker in blob for marker in WAF_BODY_MARKERS):
                 waf_markers += 1
 
-        if no_novelty_streak >= 2:
-            return True, no_novelty_streak, f"{phase_name}: low novelty for 2 consecutive phases"
+        novelty_limit = 1 if state is not None and self._discreet_mode(state) else 2
+        if no_novelty_streak >= novelty_limit:
+            return True, no_novelty_streak, (
+                f"{phase_name}: low novelty for {novelty_limit} consecutive phase(s)"
+            )
 
         if status_codes:
             noisy = [c for c in status_codes if c in HTTP_STATUS_RISK_SIGNALS]
             noisy_ratio = len(noisy) / max(1, len(status_codes))
-            if len(status_codes) >= 20 and noisy_ratio >= 0.85:
+            status_floor = 8 if state is not None and self._discreet_mode(state) else 20
+            ratio_floor = 0.65 if state is not None and self._discreet_mode(state) else 0.85
+            if len(status_codes) >= status_floor and noisy_ratio >= ratio_floor:
                 return True, no_novelty_streak, (
                     f"{phase_name}: excessive redirect/forbidden/rate-limit noise ({len(noisy)}/{len(status_codes)})"
                 )
             waf_codes = [c for c in status_codes if c in WAF_RISK_HTTP_STATUS_CODES]
-            if len(waf_codes) >= 3 or waf_markers >= 2:
+            waf_floor = 1 if state is not None and self._discreet_mode(state) else 3
+            marker_floor = 1 if state is not None and self._discreet_mode(state) else 2
+            if len(waf_codes) >= waf_floor or waf_markers >= marker_floor:
                 return True, no_novelty_streak, (
                     f"{phase_name}: repeated blocking/WAF signals ({len(waf_codes)} status, {waf_markers} marker)"
                 )
@@ -3544,6 +3793,9 @@ class AgentWorkflowCore:
                 result["message"] = block_reason
                 result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
                 results.append(result)
+                continue
+            if not self._consume_network_units(state, 1):
+                results.append(self._budget_skip_result(module_info, "targeted"))
                 continue
 
             self._sleep_between_agent_actions(state, f"targeted:{module_path}")
@@ -4919,6 +5171,29 @@ class AgentWorkflowCore:
             self._log_strategic_next_action(state)
             return state
 
+        if int(getattr(state, "llm_budget", 0) or 0) > 0 and state.metrics.llm_calls >= int(state.llm_budget):
+            state.metrics.llm_fallback_count += 1
+            state.llm_plan = self._heuristic_plan(
+                decision_findings,
+                "Heuristic plan (LLM budget reached).",
+                state=state,
+            )
+            state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
+            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
+            if nba:
+                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
+            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.decision_source = "heuristic"
+            self._print_decision_summary(state)
+            self._append_timeline_event(
+                state,
+                "reason",
+                "LLM budget reached; heuristic planner fallback applied.",
+                kind="decision",
+                extra={"goal": state.campaign_goal, "source": state.decision_source},
+            )
+            return state
+
         print_status("Reasoning with local LLM...")
         state.metrics.llm_calls += 1
         redirect_observation = self._collect_redirect_observation(state)
@@ -5298,6 +5573,13 @@ class AgentWorkflowCore:
         elif auth_surface or cms_lock:
             # Enough budget for login bruteforce plus a couple of chained scanners (4 was too tight).
             max_requests = min(max_requests, 8)
+        if self._discreet_mode(state):
+            if auth_session:
+                max_requests = min(max_requests, 5)
+            elif auth_surface or cms_lock:
+                max_requests = min(max_requests, 4)
+            else:
+                max_requests = min(max_requests, 3)
         actions = []
         for idx, path in enumerate(selected_paths[:5], start=1):
             if path in allow_paths:
@@ -5592,6 +5874,13 @@ class AgentWorkflowCore:
         elif self._should_prioritize_auth_surface(kb) or cms_lock:
             # Login/CMS-tight phases still need room for bruteforce + chained scanners (4 was too low).
             upper_bound = min(upper_bound, 10)
+        if self._discreet_mode(state):
+            if self._has_authenticated_session(kb):
+                upper_bound = min(upper_bound, 5)
+            elif self._should_prioritize_auth_surface(kb) or cms_lock:
+                upper_bound = min(upper_bound, 4)
+            else:
+                upper_bound = min(upper_bound, 3)
         max_requests = max(2, min(max_requests, upper_bound))
 
         stop_conditions = llm_response.get("stop_conditions", [])
@@ -5817,6 +6106,16 @@ class AgentWorkflowCore:
                 "message": "",
                 "details": {},
             }
+            block_reason = self._module_block_reason_for_profile(state, module_path)
+            if block_reason:
+                result["status"] = "skipped"
+                result["message"] = block_reason
+                result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
+                results.append(result)
+                continue
+            if not self._consume_network_units(state, 1):
+                results.append(self._budget_skip_result(module_info, "plan-followup"))
+                continue
             announced_bruteforce = False
             if "admin_login_bruteforce" in str(module_path).lower():
                 hinted_path = (
@@ -6114,6 +6413,16 @@ class AgentWorkflowCore:
         failed_paths = set()
         attempted_paths = set()
         for exploit_path in sorted(exploit_paths):
+            if isinstance(state, AgentState):
+                block_reason = self._module_block_reason_for_profile(state, exploit_path)
+                if block_reason:
+                    failed_paths.add(exploit_path)
+                    print_warning(f"Exploit skipped [{exploit_path}]: {block_reason}")
+                    continue
+                if not self._consume_network_units(state, 1):
+                    failed_paths.add(exploit_path)
+                    print_warning(f"Exploit skipped [{exploit_path}]: request budget exhausted")
+                    continue
             attempted_paths.add(exploit_path)
             try:
                 set_thread_output_quiet(not verbose)
@@ -6297,9 +6606,12 @@ class AgentWorkflowCore:
                     state, state.knowledge_base, max_actions=6
                 )
                 if post_rows:
+                    post_max_requests = min(12, max(6, len(post_rows) + 2))
+                    if self._discreet_mode(state):
+                        post_max_requests = min(4, max(2, len(post_rows)))
                     post_plan = {
                         "next_actions": post_rows,
-                        "max_requests_next_phase": min(12, max(6, len(post_rows) + 2)),
+                        "max_requests_next_phase": post_max_requests,
                     }
                     post_followups = self._execute_plan_followups(
                         state,
@@ -6477,5 +6789,7 @@ class AgentWorkflowCore:
         print_info(f"- deterministic_steps: {deterministic_steps}")
         print_info(f"- llm_calls: {llm_calls}")
         print_info(f"- llm_fallback_count: {llm_fallback_count}")
+        print_info(f"- network_units_used: {int(getattr(metrics, 'network_units_used', 0) or 0)}")
+        print_info(f"- network_units_skipped: {int(getattr(metrics, 'network_units_skipped', 0) or 0)}")
         print_info(f"- deterministic_ratio: {det_ratio:.1f}%")
         print_info(f"- llm_ratio: {llm_ratio:.1f}%")

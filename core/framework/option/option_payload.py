@@ -125,8 +125,8 @@ class OptPayload(Option):
                 
                 # Determine which options to copy based on handler type
                 if handler_type == 'reverse':
-                    # For reverse shells, copy lhost, lport, and obfuscator (path + options when set on exploit)
-                    reverse_options = ['lhost', 'lport', 'obfuscator']
+                    # For reverse shells, copy connection options and payload transforms.
+                    reverse_options = ['lhost', 'lport', 'encoder', 'obfuscator']
                     for option_name in reverse_options:
                         if hasattr(instance, option_name) and option_name in payload_options:
                             instance_value = getattr(instance, option_name)

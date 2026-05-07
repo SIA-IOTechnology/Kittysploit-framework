@@ -13,7 +13,14 @@ from typing import Dict, Final, FrozenSet, Tuple
 
 DEFAULT_AGENT_USER_AGENT: Final[str] = "KittysploitAgent/1.0 (+authorized-testing)"
 
-SAFETY_PROFILE_NAMES: Final[Tuple[str, ...]] = ("safe", "normal", "aggressive")
+SAFETY_PROFILE_NAMES: Final[Tuple[str, ...]] = ("safe", "discreet", "normal", "aggressive")
+
+DISCREET_PROFILE_DEFAULT_MAX_MODULES: Final[int] = 18
+DISCREET_PROFILE_DEFAULT_RECON_MODULES: Final[int] = 5
+DISCREET_PROFILE_DEFAULT_REQUEST_BUDGET: Final[int] = 26
+DISCREET_PROFILE_DEFAULT_DELAY_MIN: Final[float] = 0.7
+DISCREET_PROFILE_DEFAULT_DELAY_MAX: Final[float] = 2.2
+DISCREET_PROFILE_MAX_LLM_CALLS: Final[int] = 1
 
 SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
     "admin_login_bruteforce",
@@ -23,6 +30,28 @@ SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
     "fuzzer",
     "write_access",
     "file_download",
+)
+
+DISCREET_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
+    "api_fuzzer",
+    "bypass_403",
+    "bypass_404",
+    "crawler",
+    "directory_bruteforce",
+    "fuzz",
+    "fuzzer",
+    "hop_proxy_generator",
+    "smuggling",
+    "spider",
+    "write_access",
+)
+
+DISCREET_PROFILE_EXPENSIVE_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
+    "admin_login_bruteforce",
+    "bruteforce",
+    "file_download",
+    "password",
+    "credential",
 )
 
 WAF_RISK_HTTP_STATUS_CODES: Final[Tuple[int, ...]] = (403, 406, 429)

@@ -4,8 +4,9 @@
 """
 Android shell implementation for ANDROID (ADB) sessions.
 
-This shell expects the listener to store a ppadb device object in
-listener._session_connections[session_id].
+This shell accepts either a ppadb device object stored by a listener or a
+ppadb-like adapter stored directly in session data. The adapter only needs a
+``shell(command)`` method.
 """
 
 from __future__ import annotations
@@ -109,6 +110,15 @@ class AndroidShell(BaseShell):
                 listener_id = session.data.get("listener_id")
                 self.serial = session.data.get("adb_device_id") or session.host
 
+                direct_device = session.data.get("connection") or session.data.get("adb_device")
+                if direct_device and hasattr(direct_device, "shell"):
+                    self.device = direct_device
+                    self.serial = getattr(direct_device, "serial", None) or self.serial or session.host
+                    self.hostname = self.serial or "android"
+                    self.username = "shell"
+                    self.is_connected = True
+                    return
+
             if listener_id and hasattr(self.framework, "active_listeners"):
                 listener = self.framework.active_listeners.get(listener_id)
                 if listener and hasattr(listener, "_session_connections") and self.session_id in listener._session_connections:
@@ -171,4 +181,3 @@ Example:
         serial = self.serial or (getattr(self.device, "serial", None) if self.device else None) or "unknown"
         status = "connected" if self.is_connected and self.device else "disconnected"
         return {"output": f"ADB device: {serial}\nStatus: {status}\n", "status": 0, "error": ""}
-

@@ -254,6 +254,21 @@ def _print_plan(plan: Dict[str, Any]) -> None:
             if reason:
                 print_info(f"   {reason}")
 
+    prepared = plan.get("prepared_run") or {}
+    if prepared:
+        print_info("")
+        print_info("Prepared run")
+        print_info(f"Module: {prepared.get('module_path')}")
+        if prepared.get("resolved_options"):
+            values = ", ".join(
+                f"{key}={value}" for key, value in (prepared.get("resolved_options") or {}).items()
+            )
+            print_info(f"Resolved options: {values}")
+        if prepared.get("missing_options"):
+            print_warning(f"Missing options: {', '.join(prepared.get('missing_options') or [])}")
+        elif prepared.get("can_run"):
+            print_success("Required options are filled.")
+
     executed = plan.get("executed_command")
     if executed:
         print_info("")

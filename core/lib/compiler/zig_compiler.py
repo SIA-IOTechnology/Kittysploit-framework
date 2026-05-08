@@ -70,7 +70,7 @@ class ZigCompiler:
             
             if lib_dir.exists() and lib_dir.is_dir():
                 # Complete installation found
-                print_info(f"Found Zig compiler (complete installation): {zig_path}")
+                print_success(f"Found Zig compiler")
                 return str(zig_path)
             else:
                 # Only executable found, but no lib/ directory

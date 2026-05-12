@@ -283,7 +283,8 @@ The launcher automatically finds the extension folder in `extensions/<id>/latest
 
 ### 2. Dependencies
 
-- List Python imports in `allowed_imports`
+- List third-party **import top-level names** in `[permissions].allowed_imports` (e.g. `websockets`, `frida`). Skip the standard library and modules you ship under `src/`.
+- On **`market install`** and on each **`python launch_<id>.py`**, the framework checks `importlib.util.find_spec` for each name and runs **`pip install <name>`** (with `_` → `-` for PyPI) for any missing package. Set `network_access = true` if installs must reach PyPI.
 - Don't include proprietary binary dependencies
 - Prefer standard or common libraries
 

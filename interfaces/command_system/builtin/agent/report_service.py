@@ -90,6 +90,11 @@ class ReportService:
             why_it_matters.append("Login surface was detected and may justify auth-first decisions.")
         if risk_signals:
             why_it_matters.append(f"Observed risk signals: {', '.join(risk_signals[:5])}.")
+        request_intel = knowledge_base.get("request_intel", {}) if isinstance(knowledge_base, dict) else {}
+        if isinstance(request_intel, dict) and int(request_intel.get("analyzed_flows", 0) or 0) > 0:
+            why_it_matters.append(
+                f"HTTP request intelligence analyzed {request_intel.get('analyzed_flows', 0)} captured flow(s)."
+            )
 
         return {
             "decision_counts": decision_counts,
@@ -227,6 +232,11 @@ class ReportService:
                     "sql_injection_findings": len(sql_findings),
                     "errors": len(error_results),
                     "new_sessions": len(new_sessions),
+                    "request_intel_flows": int(
+                        (safe_knowledge_base.get("request_intel", {}) or {}).get("analyzed_flows", 0)
+                        if isinstance(safe_knowledge_base.get("request_intel", {}), dict)
+                        else 0
+                    ),
                 },
                 "llm_plan": llm_plan,
                 "knowledge_base": safe_knowledge_base,
@@ -258,6 +268,16 @@ class ReportService:
                 report_md.write(f"- Observed modules: `{len(safe_knowledge_base.get('observed_modules', []))}`\n")
                 report_md.write(f"- Discovered endpoints: `{len(safe_knowledge_base.get('discovered_endpoints', []))}`\n")
                 report_md.write(f"- Discovered params: `{len(safe_knowledge_base.get('discovered_params', []))}`\n")
+                request_intel = (
+                    safe_knowledge_base.get("request_intel", {})
+                    if isinstance(safe_knowledge_base.get("request_intel", {}), dict)
+                    else {}
+                )
+                if request_intel:
+                    report_md.write(
+                        f"- HTTP request intelligence: `{request_intel.get('analyzed_flows', 0)}` flow(s), "
+                        f"`{len(request_intel.get('interesting_requests', []) or [])}` interesting request(s)\n"
+                    )
                 if safe_knowledge_base.get("tech_confidence"):
                     top_conf = sorted(
                         [(k, v) for k, v in safe_knowledge_base.get("tech_confidence", {}).items()],

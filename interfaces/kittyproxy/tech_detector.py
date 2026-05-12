@@ -66,9 +66,15 @@ class TechnologyDetector:
             # Frontend frameworks (low priority - require more specific patterns)
             'React': [
                 r'__REACT_DEVTOOLS',
-                r'react-dom',
+                r'\breact-dom\b',
                 r'React\.createElement',
                 r'data-reactroot',
+                r'data-reactid',
+                r'__react(?:fiber|props|container)?\b',
+                r'_reactrootcontainer',
+                r'\breact(?:\.production|\.development|\.min){0,2}\.js\b',
+                r'\breact/jsx-runtime\b',
+                r'__NEXT_DATA__',
             ],
             'Vue.js': [
                 r'__VUE__',
@@ -532,8 +538,9 @@ class TechnologyDetector:
         if not html:
             return found
         
-        # React typique
-        if 'id="root"' in html or 'id="app"' in html:
+        # React requires implementation-specific markers. Generic app/root
+        # containers are common in non-React sites and cause false positives.
+        if self._has_strong_react_marker(html):
             found.add('React')
         
         # Vue composition API / templates
@@ -557,6 +564,26 @@ class TechnologyDetector:
             found.add('Svelte')
         
         return found
+
+    def _has_strong_react_marker(self, content: str) -> bool:
+        if not content:
+            return False
+        markers = [
+            r'__REACT_DEVTOOLS',
+            r'React\.createElement',
+            r'data-reactroot\b',
+            r'data-reactid\b',
+            r'__react(?:fiber|props|container)?\b',
+            r'_reactrootcontainer',
+            r'\breact-dom\b',
+            r'\breact(?:\.production|\.development|\.min){0,2}\.js\b',
+            r'\breact/jsx-runtime\b',
+            r'__NEXT_DATA__',
+            r'id=["\']__next["\']',
+            r'id=["\']___gatsby["\']',
+            r'gatsby-',
+        ]
+        return any(re.search(marker, content, re.IGNORECASE) for marker in markers)
     
     def _is_valid_detection(self, pattern: str, text: str, tech_name: str) -> bool:
         """Vérifie si une détection est valide (évite les faux positifs)"""
@@ -618,14 +645,10 @@ class TechnologyDetector:
         content = re.sub(r'//.*?$|/\*.*?\*/', '', content, flags=re.MULTILINE | re.DOTALL)
         
         # Patterns stricts pour chaque framework
+        if tech_name == 'React':
+            return self._has_strong_react_marker(content)
+
         strict_patterns = {
-            'React': [
-                r'__REACT_DEVTOOLS',
-                r'React\.createElement',
-                r'data-reactroot',
-                r'react-dom',
-                r'from\s+["\']react["\']',
-            ],
             'Angular': [
                 r'ng-app',
                 r'ng-controller',
@@ -663,7 +686,7 @@ class TechnologyDetector:
         if 'Flask' in detected['frameworks']:
             # Vérifier si React/Angular sont vraiment présents (pas juste le mot dans un commentaire)
             if 'React' in detected['frameworks']:
-                if not (re.search(r'__REACT_DEVTOOLS|React\.createElement|data-reactroot', html, re.IGNORECASE) if html else False):
+                if not self._has_strong_react_marker(html):
                     detected['frameworks'].remove('React')
             
             if 'Angular' in detected['frameworks']:
@@ -709,7 +732,7 @@ class TechnologyDetector:
         # Si Node.js/Express est détecté, retirer React/Angular sauf si vraiment présents
         if 'Express.js' in detected['frameworks'] or 'Node.js' in detected['languages']:
             if 'React' in detected['frameworks']:
-                if not (re.search(r'__REACT_DEVTOOLS|React\.createElement', html, re.IGNORECASE) if html else False):
+                if not self._has_strong_react_marker(html):
                     detected['frameworks'].remove('React')
         
         return detected
@@ -792,4 +815,3 @@ class TechnologyDetector:
 
 # Instance globale
 tech_detector = TechnologyDetector()
-

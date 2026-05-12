@@ -55,6 +55,14 @@ class Module(Auxiliary, Http_client):
         'reset_only': (r'(forgot password|reset password)', 1),
     }
 
+    ERROR_DECOY_PATTERNS = {
+        "http_error_title": r"<title[^>]*>\s*(?:4\d{2}|5\d{2}|error|not found|access denied|forbidden|service unavailable)[^<]*</title>",
+        "traceback": r"(traceback|exception|stack trace|fatal error|uncaught)",
+        "maintenance": r"(maintenance mode|temporarily unavailable|service unavailable)",
+        "waf_block": r"(request blocked|access denied|forbidden|incident id|captcha|cloudflare|akamai|imperva)",
+        "missing_resource": r"(page not found|404|resource not found|cannot be found)",
+    }
+
     def check(self):
         try:
             response = self.http_request(method="GET", path="/", allow_redirects=True)
@@ -124,6 +132,16 @@ class Module(Auxiliary, Http_client):
             return "Medium"
         return "Low"
 
+    def _error_decoy_markers(self, html, status_code):
+        markers = []
+        content = (html or "").lower()
+        if int(status_code or 0) >= 400:
+            markers.append(f"http_{int(status_code)}")
+        for key, pattern in self.ERROR_DECOY_PATTERNS.items():
+            if re.search(pattern, content, re.IGNORECASE):
+                markers.append(key)
+        return markers
+
     def _detect_on_path(self, path):
         try:
             response = self.http_request(method="GET", path=path, allow_redirects=True)
@@ -135,7 +153,12 @@ class Module(Auxiliary, Http_client):
                 return None
 
             score, indicators = self._analyze_login_markers(response.text or "")
-            is_login_page = score >= self.min_score and 'password_input' in indicators
+            decoy_markers = self._error_decoy_markers(response.text or "", response.status_code)
+            is_login_page = (
+                score >= self.min_score
+                and 'password_input' in indicators
+                and not decoy_markers
+            )
 
             effective_path = self.response_effective_path(path, response)
 
@@ -146,6 +169,8 @@ class Module(Auxiliary, Http_client):
                 'score': score,
                 'confidence': self._confidence_from_score(score),
                 'indicators': indicators,
+                'decoy_markers': decoy_markers,
+                'login_error_decoy': bool(decoy_markers),
                 'is_login_page': is_login_page,
                 'title': self._extract_title(response.text or "")
             }
@@ -163,6 +188,7 @@ class Module(Auxiliary, Http_client):
     def run(self):
         paths = self._build_paths()
         detections = []
+        suspicious_pages = []
 
         print_status("Starting login page detection...")
         print_info(f"Target: {self.target}")
@@ -198,6 +224,12 @@ class Module(Auxiliary, Http_client):
                     f"Login page detected on {shown}{redirect_note} "
                     f"(status={result['status']}, score={result['score']}, confidence={result['confidence']})"
                 )
+            elif result.get("login_error_decoy") and result.get("score", 0) >= max(2, int(self.min_score) - 1):
+                suspicious_pages.append(result)
+                print_warning(
+                    f"Suspicious login-like decoy/error page on {result['path']} "
+                    f"(status={result['status']}, score={result['score']}, decoy={','.join(result.get('decoy_markers', [])[:3])})"
+                )
             else:
                 print_info(
                     f"No login marker match on {path} "
@@ -227,6 +259,28 @@ class Module(Auxiliary, Http_client):
                 'paths': ", ".join(d['path'] for d in detections[:5]),
                 # Explicit path for agent KB / admin_login_bruteforce (root ``/`` is valid).
                 'login_path': detections[0]['path'],
+                'login_error_decoy': False,
+                'suspicious_login_pages': [],
+            }
+            return True
+
+        if suspicious_pages:
+            table_data = []
+            for entry in suspicious_pages[:8]:
+                table_data.append([
+                    entry["path"],
+                    entry["status"],
+                    entry["score"],
+                    ", ".join(entry.get("decoy_markers", [])[:3]) or "-",
+                ])
+            print_warning(f"Detected {len(suspicious_pages)} suspicious login-like error/decoy page(s).")
+            print_table(['Path', 'HTTP', 'Score', 'Decoy Markers'], table_data)
+            self.vulnerability_info = {
+                'reason': f"Suspicious login-like decoy/error page(s): {len(suspicious_pages)}",
+                'severity': 'Low',
+                'login_error_decoy': True,
+                'suspicious_login_pages': [row.get("path", "") for row in suspicious_pages[:10]],
+                'paths': ", ".join([row.get("path", "") for row in suspicious_pages[:5]]),
             }
             return True
 

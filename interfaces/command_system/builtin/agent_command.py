@@ -49,7 +49,8 @@ class AgentCommand(BaseCommand):
             "agent <target> [--threads N] [--protocol PROTO] [--no-exploit] "
             "[--llm-local] [--max-modules N] [--recon-modules N] "
             "[--safety-profile safe|discreet|normal|aggressive] [--request-budget N] "
-            "[--request-delay-min S] [--request-delay-max S] [--async-probes] [--all]"
+            "[--request-delay-min S] [--request-delay-max S] [--async-probes] "
+            "[--http-replay off|safe|active] [--all] [--shell-hunter]"
         )
 
     @property
@@ -70,7 +71,9 @@ Examples:
     agent target.com --safety-profile discreet
     agent target.com --safety-profile safe --request-delay-min 0.5 --request-delay-max 2
     agent target.com --async-probes
-    agent target.com --all
+    agent https://target.com --http-replay safe
+    agent https://target.com --reuse-proxy-auth --http-replay active
+    agent target.com --all --shell-hunter
         """
 
     def __init__(self, framework, session, output_handler):
@@ -144,6 +147,7 @@ Examples:
                 "normal preserves defaults, aggressive removes guardrails."
             ),
         )
+        parser.add_argument("--shell-hunter", action="store_true", help="Aggressively pursue interactive shells")
         parser.add_argument(
             "--request-budget",
             type=int,
@@ -180,6 +184,37 @@ Examples:
             "--async-probes",
             action="store_true",
             help="Use async HTTP for agent-owned probes when aiohttp is available.",
+        )
+        parser.add_argument(
+            "--no-proxy-flows",
+            action="store_true",
+            help="Do not import matching KittyProxy CLI flows into the agent knowledge base.",
+        )
+        parser.add_argument(
+            "--proxy-flow-limit",
+            type=int,
+            default=40,
+            help="Maximum recent KittyProxy flows to analyze for this target (default: 40).",
+        )
+        parser.add_argument(
+            "--http-replay",
+            choices=("off", "safe", "active"),
+            default="safe",
+            help=(
+                "Replay captured request candidates when useful: off disables it, safe only re-sends "
+                "idempotent GET/HEAD/OPTIONS requests, active may replay original non-idempotent methods."
+            ),
+        )
+        parser.add_argument(
+            "--http-replay-max",
+            type=int,
+            default=3,
+            help="Maximum captured request candidates to replay during request intelligence (default: 3).",
+        )
+        parser.add_argument(
+            "--reuse-proxy-auth",
+            action="store_true",
+            help="Seed agent modules with Cookie context observed in matching KittyProxy flows.",
         )
         parser.add_argument(
             "--all",
@@ -250,6 +285,12 @@ Examples:
             request_budget=request_budget,
             llm_budget=llm_budget,
             async_probes=bool(parsed.async_probes),
+            proxy_flows=not bool(parsed.no_proxy_flows),
+            proxy_flow_limit=max(0, int(parsed.proxy_flow_limit)),
+            http_replay=str(parsed.http_replay or "safe"),
+            http_replay_max=max(0, int(parsed.http_replay_max)),
+            reuse_proxy_auth=bool(parsed.reuse_proxy_auth),
+            shell_hunter=bool(parsed.shell_hunter),
             llm_local=parsed.llm_local,
             llm_model=parsed.llm_model,
             llm_endpoint=parsed.llm_endpoint,
@@ -278,6 +319,7 @@ Examples:
                 "auth_milestone": {},
                 "credential_store": [],
                 "active_auth_context": {},
+                "request_intel": {},
                 "module_capability_catalog": module_capability_catalog,
             },
             sessions_before={

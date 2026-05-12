@@ -59,6 +59,9 @@ class PlannerState:
 
     executed_actions: Set[str] = field(default_factory=set)
     failed_actions: Set[str] = field(default_factory=set)
+    unlocked_capabilities: Set[str] = field(default_factory=set)
+    rce_potential: bool = False
+    shell_hunter_mode: bool = False
 
 
 @dataclass
@@ -67,6 +70,7 @@ class ActionProfile:
     cost: float = 10.0
     noise: float = 5.0
     produces: Dict[str, float] = field(default_factory=dict)
+    consumes: Set[str] = field(default_factory=set)
 
 
 OUTPUT_VALUE: Dict[str, float] = {
@@ -75,9 +79,12 @@ OUTPUT_VALUE: Dict[str, float] = {
     "session_cookie": 50.0,
     "authenticated_session": 60.0,
     "auth_bypass": 70.0,
-    "rce": 85.0,
-    "shell": 100.0,
-    "root": 150.0,
+    "rce": 120.0,
+    "shell": 200.0,
+    "root": 250.0,
+    "csrf_token": 15.0,
+    "file_read": 20.0,
+    "admin_access": 80.0,
 }
 
 
@@ -115,15 +122,31 @@ class ActionScorer:
                 "root": 2.5,
             },
         }
+        self.capability_bonus = 45.0
 
     def score(self, action: ActionProfile, state: PlannerState) -> float:
         progress = self._expected_progress(action, state)
-        progress *= self._context_multiplier(action, state)
+        multiplier = self._context_multiplier(action, state)
+        
+        if state.shell_hunter_mode:
+            is_high_value = any(token in action.name.lower() for token in ("rce", "shell", "exploit", "upload", "command"))
+            if is_high_value or action.produces.get("shell", 0) > 0 or action.produces.get("rce", 0) > 0:
+                multiplier *= 2.5
+
+        progress *= multiplier
 
         redundancy = self._redundancy_penalty(action, state)
         terminal_bonus = self._terminal_bonus(action, state)
+        chain_bonus = self._chaining_bonus(action, state)
 
-        return round(progress + terminal_bonus - action.cost - action.noise - redundancy, 3)
+        return round(progress + terminal_bonus + chain_bonus - action.cost - action.noise - redundancy, 3)
+
+    def _chaining_bonus(self, action: ActionProfile, state: PlannerState) -> float:
+        bonus = 0.0
+        for cap in action.consumes:
+            if cap in state.unlocked_capabilities:
+                bonus += self.capability_bonus
+        return bonus
 
     def _expected_progress(self, action: ActionProfile, state: PlannerState) -> float:
         weights = self.goal_output_weights.get(state.goal, self.goal_output_weights["obtain_session"])
@@ -264,6 +287,9 @@ def planner_state_from_kb(kb: Dict[str, Any]) -> PlannerState:
         login_path_known=has_login_paths,
         executed_actions=executed,
         failed_actions=failed,
+        unlocked_capabilities={str(c).lower() for c in kb.get("unlocked_capabilities", []) or []},
+        rce_potential="rce" in hint_blob or "lfi_detected" in signals or "file_read_success" in signals,
+        shell_hunter_mode=bool(kb.get("shell_hunter_mode", False)),
     )
 
 
@@ -299,8 +325,20 @@ def _infer_produces(path_lower: str, blob: str) -> Dict[str, float]:
     if "bypass" in path_lower or "smuggling" in path_lower:
         return {"auth_bypass": 0.4, "rce": 0.15}
     if "login" in path_lower or "auth" in blob:
-        return {"authenticated_session": 0.12, "credentials": 0.08}
+        return {"authenticated_session": 0.12, "credentials": 0.08, "csrf_token": 0.2}
     return {}
+
+
+def _infer_consumes(path_lower: str, blob: str) -> Set[str]:
+    """Heuristic ``consumes`` set from module path + metadata blob."""
+    consumes = set()
+    if any(x in path_lower for x in ("post_auth", "authenticated", "admin_panel")):
+        consumes.add("session_cookie")
+    if "admin" in path_lower and any(x in path_lower for x in ("exploit", "rce", "upload")):
+        consumes.add("admin_access")
+    if "csrf" in path_lower and "exploit" in path_lower:
+        consumes.add("csrf_token")
+    return consumes
 
 
 def action_profile_from_module(module: Dict[str, Any]) -> ActionProfile:
@@ -320,8 +358,16 @@ def action_profile_from_module(module: Dict[str, Any]) -> ActionProfile:
     produces = _infer_produces(path_lower, blob)
     # strip keys not in OUTPUT_VALUE (keeps scorer consistent)
     produces = {k: v for k, v in produces.items() if k in OUTPUT_VALUE}
+    
+    consumes = _infer_consumes(path_lower, blob)
 
-    return ActionProfile(name=name, cost=min(55.0, cost), noise=min(40.0, noise), produces=produces)
+    return ActionProfile(
+        name=name, 
+        cost=min(55.0, cost), 
+        noise=min(40.0, noise), 
+        produces=produces,
+        consumes=consumes
+    )
 
 
 _SCORER = ActionScorer()

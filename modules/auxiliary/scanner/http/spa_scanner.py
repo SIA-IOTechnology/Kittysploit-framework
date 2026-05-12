@@ -66,6 +66,188 @@ class Module(Auxiliary, Http_client):
         '/web.config',
     ]
 
+    FRAMEWORK_STRONG_MARKERS = {
+        "React": [
+            r"data-reactroot\b",
+            r"data-reactid\b",
+            r"__react(?:fiber|props|container)?\b",
+            r"_reactrootcontainer",
+            r"\breact-dom\b",
+            r"\breact(?:\.production|\.development|\.min){0,2}\.js\b",
+            r"\breact/jsx-runtime\b",
+            r"__next_data__",
+            r"id=[\"']__next[\"']",
+            r"id=[\"']___gatsby[\"']",
+            r"gatsby-",
+        ],
+        "Angular": [
+            r"\bng-version\b",
+            r"\bng-app\b",
+            r"\bng-controller\b",
+            r"\bng-view\b",
+            r"_ngcontent-",
+            r"angular(?:\.min)?\.js",
+            r"platform-browser",
+            r"zone\.js",
+        ],
+        "Vue.js": [
+            r"\bdata-v-[a-f0-9]{4,}",
+            r"\bdata-v-app\b",
+            r"__vue__",
+            r"\bv-(?:if|for|bind|model|show|on)\b",
+            r"vue(?:\.runtime)?(?:\.global|\.esm-browser|\.min)?\.js",
+            r"__nuxt__",
+            r"id=[\"']__nuxt[\"']",
+        ],
+        "Ember.js": [
+            r"ember-application",
+            r"ember-view",
+            r"ember(?:\.min)?\.js",
+            r"data-ember-",
+        ],
+        "Backbone.js": [
+            r"backbone(?:\.min)?\.js",
+            r"backbone\.history",
+            r"backbone\.router",
+        ],
+        "Knockout.js": [
+            r"knockout(?:\.min)?\.js",
+            r"\bko\.applybindings\b",
+            r"data-bind=[\"']",
+        ],
+    }
+
+    GENERIC_SPA_MARKERS = [
+        r"id=[\"'](?:app|root|__next|__nuxt|___gatsby)[\"']",
+        r"/(?:static/js|assets)/[^\"']+\.(?:js|mjs)",
+        r"(?:app|main|bundle|chunk|runtime)[._-][^\"']*\.(?:js|mjs)",
+        r"webpackjsonp",
+        r"window\.__initial_state__",
+        r"vite/client",
+        r"type=[\"']module[\"'][^>]+src=[\"'][^\"']+\.(?:js|mjs)",
+    ]
+
+    DOM_XSS_SOURCE_PATTERNS = [
+        r"location\.(?:hash|search|href|pathname)",
+        r"document\.url",
+        r"document\.location",
+        r"document\.referrer",
+        r"window\.name",
+        r"postmessage\s*\(",
+    ]
+
+    DOM_XSS_SINK_PATTERNS = [
+        r"innerhtml\s*=",
+        r"outerhtml\s*=",
+        r"document\.write\s*\(",
+        r"document\.writeln\s*\(",
+        r"insertadjacenthtml\s*\(",
+        r"eval\s*\(",
+        r"new\s+function\s*\(",
+        r"settimeout\s*\(\s*[^,]*[\"'`]",
+        r"setinterval\s*\(\s*[^,]*[\"'`]",
+        r"\.srcdoc\s*=",
+    ]
+
+    def _detect_framework_from_text(self, text):
+        """
+        Return a framework only when strong implementation markers are present.
+
+        Plain words such as "react", "angular" or "vue" are intentionally ignored:
+        they are too common in page text, SEO copy, third-party scripts and CSS class
+        names, which caused false positives on normal sites.
+        """
+        if not text:
+            return None
+
+        normalized = text.lower()
+        for framework, markers in self.FRAMEWORK_STRONG_MARKERS.items():
+            evidence = sum(1 for marker in markers if re.search(marker, normalized, re.IGNORECASE))
+            if evidence >= 1:
+                return framework
+        return None
+
+    def _extract_script_paths(self, html):
+        paths = []
+        if not html:
+            return paths
+
+        target_host = str(getattr(self, "target", "") or "").lower().split(":", 1)[0]
+        for match in re.finditer(r"<script\b[^>]*\bsrc=[\"']([^\"']+)[\"']", html, re.IGNORECASE):
+            src = match.group(1).strip()
+            if not src or src.startswith(("data:", "javascript:", "#")):
+                continue
+
+            parsed = urllib.parse.urlparse(src)
+            if parsed.netloc:
+                script_host = parsed.hostname.lower() if parsed.hostname else ""
+                if target_host and script_host and script_host != target_host:
+                    continue
+
+            path = parsed.path or "/"
+            if not path.lower().endswith((".js", ".mjs")):
+                continue
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+            if path not in paths:
+                paths.append(path)
+            if len(paths) >= 5:
+                break
+        return paths
+
+    def _fetch_script_corpus(self, html):
+        corpus = []
+        for path in self._extract_script_paths(html):
+            try:
+                response = self.http_request(
+                    method="GET",
+                    path=path,
+                    allow_redirects=True,
+                    timeout=6,
+                )
+                if not response or response.status_code >= 400:
+                    continue
+                content_type = response.headers.get("Content-Type", "").lower()
+                if content_type and not any(token in content_type for token in ("javascript", "ecmascript", "text/plain", "octet-stream")):
+                    continue
+                corpus.append(response.text[:200000])
+            except Exception:
+                continue
+        return "\n".join(corpus)
+
+    def _looks_like_spa_shell(self, html, script_corpus=""):
+        text = f"{html or ''}\n{script_corpus or ''}".lower()
+        if not text:
+            return False
+        evidence = sum(1 for marker in self.GENERIC_SPA_MARKERS if re.search(marker, text, re.IGNORECASE))
+        return evidence >= 2
+
+    def analyze_dom_xss(self, html, script_corpus=""):
+        corpus = f"{html or ''}\n{script_corpus or ''}"
+        if not corpus:
+            return {
+                "suspected": False,
+                "sources": [],
+                "sinks": [],
+                "evidence_score": 0,
+            }
+        normalized = corpus.lower()
+        sources = [
+            p for p in self.DOM_XSS_SOURCE_PATTERNS
+            if re.search(p, normalized, re.IGNORECASE)
+        ]
+        sinks = [
+            p for p in self.DOM_XSS_SINK_PATTERNS
+            if re.search(p, normalized, re.IGNORECASE)
+        ]
+        score = (len(sources) * 2) + (len(sinks) * 3)
+        return {
+            "suspected": bool(sources and sinks),
+            "sources": sources[:8],
+            "sinks": sinks[:8],
+            "evidence_score": score,
+        }
+
     def check(self):
         """
         Check if the target is accessible and might be a SPA
@@ -73,24 +255,20 @@ class Module(Auxiliary, Http_client):
         try:
             response = self.http_request(method="GET", path="/")
             if response:
-                # Check for SPA indicators
-                content = response.text.lower()
+                content = response.text
                 headers = str(response.headers).lower()
-                
-                spa_indicators = [
-                    'react', 'angular', 'vue', 'ember',
-                    'single page application', 'spa',
-                    'app.js', 'main.js', 'bundle.js',
-                    'webpack', 'vite', 'parcel',
-                ]
-                
-                if any(indicator in content or indicator in headers for indicator in spa_indicators):
+
+                if self._detect_framework_from_text(content) or self._looks_like_spa_shell(content):
                     return True
-                
+
+                bundler_indicators = ['app.js', 'main.js', 'bundle.js', 'webpack', 'vite', 'parcel']
+                if any(indicator in content.lower() or indicator in headers for indicator in bundler_indicators):
+                    return True
+
                 # Check for typical SPA structure (minimal HTML, lots of JS)
-                if len(content) < 5000 and ('<script' in content or 'bundle' in content.lower()):
+                if len(content) < 5000 and '<script' in content.lower():
                     return True
-                
+
                 # Even if not detected, continue scanning
                 return True
             return False
@@ -106,29 +284,21 @@ class Module(Auxiliary, Http_client):
             if not response:
                 return None
             
-            content = response.text.lower()
-            
-            # Check for React
-            if 'react' in content or 'react-dom' in content:
-                return "React"
-            
-            # Check for Angular
-            if 'angular' in content or 'ng-app' in content or '[ng-' in content:
-                return "Angular"
-            
-            # Check for Vue
-            if 'vue' in content or 'v-if' in content or 'v-for' in content:
-                return "Vue.js"
-            
-            # Check for Ember
-            if 'ember' in content:
-                return "Ember.js"
-            
-            # Check for Backbone
-            if 'backbone' in content:
-                return "Backbone.js"
-            
-            return "SPA (unknown framework)"
+            content = response.text or ""
+
+            framework = self._detect_framework_from_text(content)
+            if framework:
+                return framework
+
+            script_corpus = self._fetch_script_corpus(content)
+            framework = self._detect_framework_from_text(script_corpus)
+            if framework:
+                return framework
+
+            if self._looks_like_spa_shell(content, script_corpus):
+                return "SPA (unknown framework)"
+
+            return None
         except Exception as e:
             print_debug(f"Error detecting SPA framework: {str(e)}")
             return None
@@ -406,5 +576,49 @@ class Module(Auxiliary, Http_client):
                 print_info(f" - [{issue['severity']}] {issue['type']}: {issue['issue']}")
                 print_info(f"   - Details: {issue['details']}")
             print_info("")
+
+        # DOM-XSS behavioral analysis (HTML + fetched same-origin scripts)
+        dom_xss = {"suspected": False, "sources": [], "sinks": [], "evidence_score": 0}
+        try:
+            root = self.http_request(method="GET", path="/", allow_redirects=True)
+            root_html = root.text if root else ""
+            script_corpus = self._fetch_script_corpus(root_html)
+            dom_xss = self.analyze_dom_xss(root_html, script_corpus)
+            if dom_xss["suspected"]:
+                print_warning(
+                    f"Potential DOM-XSS behavior detected "
+                    f"(sources={len(dom_xss['sources'])}, sinks={len(dom_xss['sinks'])}, score={dom_xss['evidence_score']})"
+                )
+            else:
+                print_info("No strong DOM-XSS behavior pattern detected.")
+        except Exception as e:
+            print_debug(f"DOM-XSS behavioral analysis failed: {e}")
+
+        severity = "Info"
+        reason_parts = []
+        if dom_xss["suspected"]:
+            severity = "Medium"
+            reason_parts.append("Potential DOM-XSS source/sink chain detected in SPA scripts")
+        if self.exposed_files:
+            severity = "Medium" if severity == "Info" else severity
+            reason_parts.append(f"Exposed sensitive files: {len(self.exposed_files)}")
+        if self.cors_issues:
+            severity = "High" if any(i.get("severity") == "High" for i in self.cors_issues) else severity
+            reason_parts.append(f"CORS issues: {len(self.cors_issues)}")
+        if not reason_parts:
+            reason_parts.append("SPA behavioral scan completed")
+
+        self.vulnerability_info = {
+            "reason": " | ".join(reason_parts),
+            "severity": severity,
+            "dom_xss_suspected": bool(dom_xss.get("suspected")),
+            "dom_xss_sources": dom_xss.get("sources", [])[:6],
+            "dom_xss_sinks": dom_xss.get("sinks", [])[:6],
+            "dom_xss_score": int(dom_xss.get("evidence_score", 0) or 0),
+            "discovered_api_endpoints": [row.get("endpoint") for row in self.discovered_endpoints[:12]],
+            "auth_issue_count": len(self.authentication_issues),
+            "cors_issue_count": len(self.cors_issues),
+            "sensitive_file_count": len(self.exposed_files),
+        }
         
         return True

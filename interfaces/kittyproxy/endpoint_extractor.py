@@ -63,6 +63,25 @@ class EndpointExtractor:
         'class_name', 'url', 'path', 'name', 'key', 'id', 'type', 'value',
     })
 
+    REACT_STRONG_MARKERS = (
+        r'data-reactroot\b',
+        r'data-reactid\b',
+        r'__react(?:fiber|props|container)?\b',
+        r'_reactrootcontainer',
+        r'\breact-dom\b',
+        r'\breact(?:\.production|\.development|\.min){0,2}\.js\b',
+        r'\breact/jsx-runtime\b',
+        r'__next_data__',
+        r'id=["\']__next["\']',
+        r'id=["\']___gatsby["\']',
+        r'gatsby-',
+    )
+
+    def _has_strong_react_marker(self, content: str) -> bool:
+        if not content:
+            return False
+        return any(re.search(marker, content, re.IGNORECASE) for marker in self.REACT_STRONG_MARKERS)
+
     def _extract_secrets_from_js(self, js: str, base_url: str) -> List[Dict]:
         """Extract potential credentials/secrets from JavaScript (variable names + context, no raw values)."""
         from urllib.parse import urlparse
@@ -260,15 +279,14 @@ class EndpointExtractor:
             is_react = False
             if detected_technologies:
                 frameworks = detected_technologies.get('frameworks', [])
-                if 'React' in frameworks:
+                if 'React' in frameworks and self._has_strong_react_marker(content):
                     is_react = True
                     if domain:
                         self.react_domains.add(domain)
             
             # Vérifier aussi dans le contenu si pas déjà détecté
             if not is_react:
-                react_indicators = ['react', 'React', '__REACT_DEVTOOLS', 'React.createElement', 'data-reactroot', 'react-dom']
-                if any(indicator in content for indicator in react_indicators):
+                if self._has_strong_react_marker(content):
                     is_react = True
                     if domain:
                         self.react_domains.add(domain)
@@ -1529,4 +1547,3 @@ class EndpointExtractor:
 
 # Instance globale
 endpoint_extractor = EndpointExtractor()
-

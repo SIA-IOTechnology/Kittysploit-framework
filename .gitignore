@@ -73,3 +73,9 @@ test/
 codeline.txt
 
 python-3.13.5-embed-amd64.zip
+
+todo/*
+kitty_marketplace/*
+
+launch_*.py
+modules/browser_exploits/multi/chrome_font_feature_uaf.py

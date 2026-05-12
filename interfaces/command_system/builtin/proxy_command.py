@@ -1,104 +1,53 @@
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
-from core.proxy_manager import ProxyManager
 import argparse
-import json
 import time
-from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import List
+
 
 class ProxyCommand(BaseCommand):
-    """Command to manage network request interception and analysis"""
-    
+    """CLI-only KittyProxy command (no web interface)."""
+
     @property
     def name(self) -> str:
         return "proxy"
-    
+
     @property
     def description(self) -> str:
-        return "Intercept and analyze network requests from framework modules"
-    
+        return "Start and manage KittyProxy in CLI headless mode"
+
     @property
     def usage(self) -> str:
-        return "proxy [start|stop|status|list|show|replay|export|clear] [options]"
-    
+        return "proxy [start|stop|status|interactive] [options]"
+
     def get_subcommands(self) -> List[str]:
-        """Get available subcommands for auto-completion"""
-        return ['start', 'stop', 'status', 'list', 'show', 'replay', 'export', 'clear', 'hexdump']
-    
+        return ['start', 'stop', 'status', 'interactive']
+
     def _create_parser(self):
-        """Create argument parser for proxy command"""
         parser = argparse.ArgumentParser(
             prog='proxy',
-            description='Intercept and analyze network requests from framework modules'
+            description='Run KittyProxy in headless CLI mode (no GUI/API)'
         )
-        
         subparsers = parser.add_subparsers(dest='action', help='Available actions')
-        
-        # Start proxy
-        start_parser = subparsers.add_parser('start', help='Start the proxy server')
-        start_parser.add_argument('--host', default='127.0.0.1',
-                                help='Host to bind proxy to (default: 127.0.0.1)')
-        start_parser.add_argument('--port', type=int, default=8888,
-                                help='Port to bind proxy to (default: 8888)')
-        start_parser.add_argument('--mode', choices=['http', 'socks'], default='http',
-                                help='Proxy mode to start (default: http)')
-        start_parser.add_argument('--socks-user', dest='socks_user',
-                                help='Username for SOCKS authentication (optional)')
-        start_parser.add_argument('--socks-pass', dest='socks_pass',
-                                help='Password for SOCKS authentication (optional)')
-        start_parser.add_argument('-v', '--verbose', action='store_true',
-                                help='Enable verbose output')
-        
-        # Stop proxy
-        stop_parser = subparsers.add_parser('stop', help='Stop the proxy server')
-        
-        # Status
-        status_parser = subparsers.add_parser('status', help='Show proxy status')
-        
-        # List requests
-        list_parser = subparsers.add_parser('list', help='List captured requests')
-        list_parser.add_argument('--limit', type=int, default=20,
-                               help='Number of requests to show (default: 20)')
-        list_parser.add_argument('--protocol', choices=['HTTP', 'HTTPS', 'TCP', 'UDP', 'SOCKS5'],
-                               help='Filter by protocol')
-        list_parser.add_argument('--method', 
-                               help='Filter by HTTP method (GET, POST, etc.)')
-        
-        # Show specific request
-        show_parser = subparsers.add_parser('show', help='Show details of a specific request')
-        show_parser.add_argument('request_id', help='Request ID to show')
-        show_parser.add_argument('--raw', action='store_true',
-                               help='Show raw request/response data')
-        
-        # Hex dump request
-        hexdump_parser = subparsers.add_parser('hexdump', help='Show hex dump of request/response data')
-        hexdump_parser.add_argument('request_id', help='Request ID to show hex dump for')
-        hexdump_parser.add_argument('--request', action='store_true',
-                                  help='Show hex dump of request data (default: response)')
-        hexdump_parser.add_argument('--response', action='store_true',
-                                  help='Show hex dump of response data (default)')
-        
-        # Replay request
-        replay_parser = subparsers.add_parser('replay', help='Replay a captured request')
-        replay_parser.add_argument('request_id', help='Request ID to replay')
-        
-        # Export requests
-        export_parser = subparsers.add_parser('export', help='Export captured requests')
-        export_parser.add_argument('filename', help='Output filename')
-        export_parser.add_argument('--format', choices=['json', 'har'], default='json',
-                                 help='Export format (default: json)')
-        
-        # Clear requests
-        clear_parser = subparsers.add_parser('clear', help='Clear all captured requests')
-        
+
+        start_parser = subparsers.add_parser('start', help='Start headless KittyProxy')
+        start_parser.add_argument('--host', default='127.0.0.1', help='Host to bind proxy to (default: 127.0.0.1)')
+        start_parser.add_argument('--port', type=int, default=8080, help='Port to bind proxy to (default: 8080)')
+        start_parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+
+        subparsers.add_parser('stop', help='Stop headless KittyProxy')
+        subparsers.add_parser('status', help='Show headless KittyProxy status')
+        interactive_parser = subparsers.add_parser('interactive', help='Open interactive proxy console')
+        interactive_parser.add_argument('--auto-start', action='store_true', help='Start proxy automatically if not running')
+        interactive_parser.add_argument('--host', default='127.0.0.1', help='Host used with --auto-start (default: 127.0.0.1)')
+        interactive_parser.add_argument('--port', type=int, default=8080, help='Port used with --auto-start (default: 8080)')
+
         return parser
-    
+
     def execute(self, args, **kwargs):
-        """Execute the proxy command"""
         if not args:
             args = ['--help']
-        
+
         try:
             parsed_args = self._create_parser().parse_args(args)
             return self._handle_action(parsed_args)
@@ -107,316 +56,286 @@ class ProxyCommand(BaseCommand):
         except Exception as e:
             print_error(f"Error executing proxy command: {e}")
             return False
-    
+
     def _handle_action(self, args):
-        """Handle the specific action"""
         if not args.action:
             print_error("No action specified. Use 'proxy --help' for usage information.")
             return False
-        
-        # Get or create proxy manager
-        if not hasattr(self.framework, 'proxy_manager'):
-            self.framework.proxy_manager = ProxyManager(verbose=True)
-        
-        proxy_manager = self.framework.proxy_manager
-        
+
         if args.action == 'start':
-            return self._start_proxy(proxy_manager, args)
-        elif args.action == 'stop':
-            return self._stop_proxy(proxy_manager)
-        elif args.action == 'status':
-            return self._show_status(proxy_manager)
-        elif args.action == 'list':
-            return self._list_requests(proxy_manager, args)
-        elif args.action == 'show':
-            return self._show_request(proxy_manager, args)
-        elif args.action == 'hexdump':
-            return self._hexdump_request(proxy_manager, args)
-        elif args.action == 'replay':
-            return self._replay_request(proxy_manager, args)
-        elif args.action == 'export':
-            return self._export_requests(proxy_manager, args)
-        elif args.action == 'clear':
-            return self._clear_requests(proxy_manager)
-        else:
-            print_error(f"Unknown action: {args.action}")
+            return self._start_proxy(args)
+        if args.action == 'stop':
+            return self._stop_proxy()
+        if args.action == 'status':
+            return self._show_status()
+        if args.action == 'interactive':
+            return self._interactive_mode(args)
+
+        print_error(f"Unknown action: {args.action}")
+        return False
+
+    def _get_runtime_state(self):
+        if not hasattr(self.framework, 'kittyproxy_runtime'):
+            self.framework.kittyproxy_runtime = {
+                'instance': None,
+                'host': None,
+                'port': None,
+                'started_at': None,
+                'configured_proxy_url': None,
+                'previous_proxy_config': None,
+            }
+        return self.framework.kittyproxy_runtime
+
+    def _is_running(self, state) -> bool:
+        instance = state.get('instance')
+        if not instance:
             return False
-    
-    def _start_proxy(self, proxy_manager: ProxyManager, args):
-        """Start the proxy server"""
-        if proxy_manager.is_running:
-            print_warning("Proxy server is already running")
+        return bool(getattr(instance, 'thread', None) and instance.thread.is_alive())
+
+    def _start_proxy(self, args):
+        state = self._get_runtime_state()
+        if self._is_running(state):
+            print_warning(f"KittyProxy is already running on {state['host']}:{state['port']}")
             return True
-        
-        if proxy_manager.start(args.host, args.port, mode=args.mode,
-                              socks_username=args.socks_user, socks_password=args.socks_pass):
-            print_success(f"{args.mode.upper()} proxy server started on {args.host}:{args.port}")
-            return True
-        else:
-            print_error("Failed to start proxy server")
+
+        try:
+            from interfaces.kittyproxy.proxy_core import MitmProxyWrapper
+        except ImportError as e:
+            print_error(f"Could not load KittyProxy runtime: {e}")
+            print_info("Install dependency with: pip install mitmproxy")
             return False
-    
-    def _stop_proxy(self, proxy_manager: ProxyManager):
-        """Stop the proxy server"""
-        if not proxy_manager.is_running:
-            print_warning("Proxy server is not running")
-            return True
-        
-        proxy_manager.stop()
-        print_success("Proxy server stopped")
-        return True
-    
-    def _show_status(self, proxy_manager: ProxyManager):
-        """Show proxy status"""
-        status = proxy_manager.get_status()
-        
-        print_info("=== Proxy Status ===")
-        print_info(f"Running: {'Yes' if status['is_running'] else 'No'}")
-        print_info(f"Mode: {status.get('mode', 'http').upper()}")
-        if status['is_running']:
-            print_info(f"Host: {status['host']}")
-            print_info(f"Port: {status['port']}")
-        print_info(f"Captured requests: {status['captured_requests']}")
-        print_info(f"Capture HTTP: {'Yes' if status['capture_http'] else 'No'}")
-        print_info(f"Capture HTTPS: {'Yes' if status['capture_https'] else 'No'}")
-        print_info(f"Capture TCP: {'Yes' if status['capture_tcp'] else 'No'}")
-        print_info(f"Capture UDP: {'Yes' if status['capture_udp'] else 'No'}")
-        print_info("=" * 20)
-        
-        return True
-    
-    def _list_requests(self, proxy_manager: ProxyManager, args):
-        """List captured requests"""
-        requests = proxy_manager.get_requests(limit=args.limit)
-        
-        if not requests:
-            print_info("No requests captured yet")
-            return True
-        
-        # Apply filters
-        if args.protocol:
-            expected = args.protocol.upper()
-            requests = [req for req in requests if req.get('protocol', '').upper() == expected]
-        
-        if args.method:
-            requests = [req for req in requests if req.get('method', '').upper() == args.method.upper()]
-        
-        if not requests:
-            print_info("No requests match the specified filters")
-            return True
-        
-        print_info(f"=== Captured Requests ({len(requests)} shown) ===")
-        print_info(f"{'ID':<8} {'Time':<8} {'Protocol':<6} {'Method':<6} {'URL':<40} {'Status':<6} {'Duration':<8}")
-        print_info("-" * 90)
-        
-        for req in requests:
-            timestamp = datetime.fromisoformat(req['timestamp']).strftime("%H:%M:%S")
-            method = req.get('method', '')[:6]
-            url = req.get('url', '')[:40]
-            
-            # Format status appropriately for different protocols
-            response_code = req.get('response_code', 0)
-            if req['protocol'] == 'HTTPS' and req.get('method') == 'CONNECT':
-                if response_code == 200:
-                    status = "TUNNEL"
-                elif response_code == 504:
-                    status = "TIMEOUT"
-                elif response_code == 502:
-                    status = "ERROR"
-                else:
-                    status = "CONNECT"
-            else:
-                status = str(response_code)[:6]
-            
-            duration = f"{req.get('duration_ms', 0):.1f}ms"[:8]
-            
-            print_info(f"{req['id']:<8} {timestamp:<8} {req['protocol']:<6} {method:<6} {url:<40} {status:<6} {duration:<8}")
-        
-        print_info("=" * 90)
-        return True
-    
-    def _show_request(self, proxy_manager: ProxyManager, args):
-        """Show details of a specific request"""
-        request = proxy_manager.get_request_by_id(args.request_id)
-        
-        if not request:
-            print_error(f"Request {args.request_id} not found")
-            return False
-        
-        print_info(f"=== Request Details: {args.request_id} ===")
-        print_info(f"Timestamp: {request['timestamp']}")
-        print_info(f"Protocol: {request['protocol']}")
-        print_info(f"Method: {request.get('method', 'N/A')}")
-        print_info(f"URL: {request.get('url', 'N/A')}")
-        print_info(f"Host: {request['host']}")
-        print_info(f"Port: {request['port']}")
-        print_info(f"SSL: {'Yes' if request['ssl_enabled'] else 'No'}")
-        print_info(f"Response Code: {request.get('response_code', 'N/A')}")
-        print_info(f"Duration: {request.get('duration_ms', 0):.2f}ms")
-        
-        if request.get('error'):
-            print_error(f"Error: {request['error']}")
-        
-        # Headers
-        if request.get('headers'):
-            print_info("\n=== Request Headers ===")
-            for key, value in request['headers'].items():
-                print_info(f"{key}: {value}")
-        
-        if request.get('response_headers'):
-            print_info("\n=== Response Headers ===")
-            for key, value in request['response_headers'].items():
-                print_info(f"{key}: {value}")
-        
-        # Body
-        if request.get('body_text'):
-            print_info(f"\n=== Request Body ({len(request['body_text'])} chars) ===")
-            if args.raw:
-                print_info(request['body_text'])
-            else:
-                # Truncate long bodies
-                body = request['body_text']
-                if len(body) > 500:
-                    print_info(body[:500] + "... (truncated)")
-                else:
-                    print_info(body)
-        
-        if request.get('response_body_text'):
-            print_info(f"\n=== Response Body ({len(request['response_body_text'])} chars) ===")
-            if args.raw:
-                print_info(request['response_body_text'])
-            else:
-                # Truncate long bodies
-                body = request['response_body_text']
-                if len(body) > 500:
-                    print_info(body[:500] + "... (truncated)")
-                else:
-                    print_info(body)
-        
-        # Raw binary data (for non-HTTP protocols)
-        if request.get('body') and request['protocol'] not in ['HTTP', 'HTTPS']:
-            # Convert data to bytes if it's a string (base64 encoded)
-            data = request['body']
-            if isinstance(data, str):
+
+        try:
+            proxy = MitmProxyWrapper(host=args.host, port=args.port, api_host=None, api_port=None)
+            proxy.start()
+            time.sleep(0.2)
+            if not proxy.thread.is_alive():
+                print_error("KittyProxy failed to start")
+                return False
+
+            state['instance'] = proxy
+            state['host'] = args.host
+            state['port'] = args.port
+            state['started_at'] = time.time()
+            state['configured_proxy_url'] = None
+            state['previous_proxy_config'] = None
+
+            if hasattr(self.framework, 'configure_proxy'):
+                client_host = '127.0.0.1' if args.host in ('0.0.0.0', '::') else args.host
                 try:
-                    import base64
-                    data = base64.b64decode(data)
-                except:
-                    data = data.encode('utf-8')
-            
-            print_info(f"\n=== Raw Request Data ({len(data)} bytes) ===")
-            if args.raw:
-                # Show as hex dump
-                for i in range(0, len(data), 16):
-                    chunk = data[i:i+16]
-                    hex_str = ' '.join(f'{b:02x}' for b in chunk)
-                    ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
-                    print_info(f"{i:04x}: {hex_str:<48} |{ascii_str}|")
-            else:
-                # Show first 100 bytes as text
-                body = data.decode('utf-8', errors='ignore')
-                if len(body) > 100:
-                    print_info(body[:100] + "... (truncated)")
-                else:
-                    print_info(body)
-        
-        if request.get('response_body') and request['protocol'] not in ['HTTP', 'HTTPS']:
-            # Convert data to bytes if it's a string (base64 encoded)
-            data = request['response_body']
-            if isinstance(data, str):
-                try:
-                    import base64
-                    data = base64.b64decode(data)
-                except:
-                    data = data.encode('utf-8')
-            
-            print_info(f"\n=== Raw Response Data ({len(data)} bytes) ===")
-            if args.raw:
-                # Show as hex dump
-                for i in range(0, len(data), 16):
-                    chunk = data[i:i+16]
-                    hex_str = ' '.join(f'{b:02x}' for b in chunk)
-                    ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
-                    print_info(f"{i:04x}: {hex_str:<48} |{ascii_str}|")
-            else:
-                # Show first 100 bytes as text
-                body = data.decode('utf-8', errors='ignore')
-                if len(body) > 100:
-                    print_info(body[:100] + "... (truncated)")
-                else:
-                    print_info(body)
-        
-        print_info("=" * 50)
-        return True
-    
-    def _hexdump_request(self, proxy_manager: ProxyManager, args):
-        """Show hex dump of request/response data"""
-        request = proxy_manager.get_request_by_id(args.request_id)
-        
-        if not request:
-            print_error(f"Request {args.request_id} not found")
+                    if hasattr(self.framework, 'get_proxy_config'):
+                        state['previous_proxy_config'] = self.framework.get_proxy_config()
+                    self.framework.configure_proxy(True, client_host, args.port, scheme='http')
+                    state['configured_proxy_url'] = f"http://{client_host}:{args.port}"
+                    if getattr(args, 'verbose', False):
+                        print_info(f"Framework HTTP proxy configured: {state['configured_proxy_url']}")
+                except Exception as e:
+                    print_warning(f"Proxy started, but framework proxy configuration failed: {e}")
+
+            print_success(f"KittyProxy started on {args.host}:{args.port} (headless mode)")
+            if getattr(args, 'verbose', False):
+                print_info("No web interface is started in this mode.")
+            return True
+        except Exception as e:
+            print_error(f"Failed to start KittyProxy: {e}")
             return False
-        
-        # Determine which data to show
-        if args.request:
-            data = request.get('body', b'')
-            data_type = "Request"
-        else:
-            data = request.get('response_body', b'')
-            data_type = "Response"
-        
-        # Convert data to bytes if needed
-        if isinstance(data, str):
+
+    def _stop_proxy(self):
+        state = self._get_runtime_state()
+        if not self._is_running(state):
+            print_warning("KittyProxy is not running")
+            return True
+
+        try:
+            state['instance'].stop()
+            self._restore_framework_proxy(state)
+            state['instance'] = None
+            state['host'] = None
+            state['port'] = None
+            state['started_at'] = None
+            state['configured_proxy_url'] = None
+            state['previous_proxy_config'] = None
+            print_success("KittyProxy stopped")
+            return True
+        except Exception as e:
+            print_error(f"Failed to stop KittyProxy: {e}")
+            return False
+
+    def _restore_framework_proxy(self, state):
+        configured_url = state.get('configured_proxy_url')
+        if not configured_url or not hasattr(self.framework, 'configure_proxy'):
+            return
+        try:
+            current_url = self.framework.get_proxy_url() if hasattr(self.framework, 'get_proxy_url') else None
+        except Exception:
+            current_url = None
+        if current_url and current_url != configured_url:
+            return
+
+        previous = state.get('previous_proxy_config') or {}
+        if previous.get('enabled') and previous.get('http_proxy'):
             try:
-                import base64
-                data = base64.b64decode(data)
-            except:
-                # If not base64, treat as UTF-8
-                data = data.encode('utf-8')
-        elif not isinstance(data, bytes):
-            data = str(data).encode('utf-8')
-        
-        if not data:
-            print_info(f"No {data_type.lower()} data available for request {args.request_id}")
-            return True
-        
-        print_info(f"=== {data_type} Hex Dump: {args.request_id} ===")
-        print_info(f"Protocol: {request['protocol']}")
-        print_info(f"Data size: {len(data)} bytes")
-        print_info("=" * 60)
-        
-        # Show hex dump
-        for i in range(0, len(data), 16):
-            chunk = data[i:i+16]
-            hex_str = ' '.join(f'{b:02x}' for b in chunk)
-            ascii_str = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
-            print_info(f"{i:08x}: {hex_str:<48} |{ascii_str}|")
-        
-        print_info("=" * 60)
+                from urllib.parse import urlparse
+                parsed = urlparse(previous.get('http_proxy'))
+                if parsed.hostname and parsed.port:
+                    self.framework.configure_proxy(
+                        True,
+                        parsed.hostname,
+                        parsed.port,
+                        scheme=parsed.scheme or previous.get('protocol') or 'http',
+                        username=previous.get('username'),
+                        password=previous.get('password'),
+                    )
+                    return
+            except Exception:
+                pass
+        try:
+            self.framework.configure_proxy(False)
+        except Exception:
+            pass
+
+    def _show_status(self):
+        state = self._get_runtime_state()
+        running = self._is_running(state)
+
+        print_info("=== KittyProxy (CLI) Status ===")
+        print_info(f"Running: {'Yes' if running else 'No'}")
+        if running:
+            uptime = int(time.time() - state['started_at']) if state.get('started_at') else 0
+            print_info(f"Host: {state['host']}")
+            print_info(f"Port: {state['port']}")
+            print_info(f"Uptime: {uptime}s")
+        print_info("=" * 30)
         return True
-    
-    def _replay_request(self, proxy_manager: ProxyManager, args):
-        """Replay a captured request"""
-        print_info(f"Replaying request {args.request_id}...")
-        
-        if proxy_manager.replay_request(args.request_id):
-            print_success("Request replayed successfully")
-            return True
-        else:
-            print_error("Failed to replay request")
-            return False
-    
-    def _export_requests(self, proxy_manager: ProxyManager, args):
-        """Export captured requests"""
-        if proxy_manager.export_requests(args.filename):
-            print_success(f"Requests exported to {args.filename}")
-            return True
-        else:
-            print_error("Failed to export requests")
-            return False
-    
-    def _clear_requests(self, proxy_manager: ProxyManager):
-        """Clear all captured requests"""
-        proxy_manager.clear_requests()
-        print_success("All captured requests cleared")
+
+    def _interactive_mode(self, args):
+        state = self._get_runtime_state()
+        if not self._is_running(state):
+            if not args.auto_start:
+                print_warning("KittyProxy is not running. Use 'proxy start' or 'proxy interactive --auto-start'.")
+                return False
+            if not self._start_proxy(args):
+                return False
+            state = self._get_runtime_state()
+
+        print_success("Entering proxy interactive mode. Type 'help' for commands, 'exit' to leave.")
+        while True:
+            try:
+                raw = input("kittyproxy> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print_info("")
+                break
+
+            if not raw:
+                continue
+
+            parts = raw.split()
+            command = parts[0].lower()
+
+            if command in ('exit', 'quit', 'q'):
+                break
+            if command == 'help':
+                self._print_interactive_help()
+                continue
+            if command == 'status':
+                self._show_status()
+                continue
+            if command == 'list':
+                limit = 10
+                if len(parts) > 1:
+                    try:
+                        limit = max(1, int(parts[1]))
+                    except ValueError:
+                        print_error("Invalid limit. Example: list 20")
+                        continue
+                self._interactive_list_flows(limit=limit)
+                continue
+            if command == 'show':
+                if len(parts) < 2:
+                    print_error("Usage: show <flow_id>")
+                    continue
+                self._interactive_show_flow(parts[1])
+                continue
+            if command == 'clear':
+                self._interactive_clear_flows()
+                continue
+            if command == 'stop':
+                self._stop_proxy()
+                continue
+            if command == 'start':
+                if self._is_running(state):
+                    print_warning("KittyProxy is already running")
+                    continue
+                start_args = argparse.Namespace(host=args.host, port=args.port, verbose=False)
+                self._start_proxy(start_args)
+                state = self._get_runtime_state()
+                continue
+
+            print_warning(f"Unknown interactive command: {command}. Type 'help'.")
+
+        print_info("Leaving proxy interactive mode.")
         return True
+
+    def _print_interactive_help(self):
+        print_info("Interactive commands:")
+        print_info("  help           Show this help")
+        print_info("  status         Show proxy status")
+        print_info("  list [limit]   List latest captured flows (default: 10)")
+        print_info("  show <flow_id> Show one flow details")
+        print_info("  clear          Clear captured flows")
+        print_info("  start          Start proxy (uses --host/--port from interactive command)")
+        print_info("  stop           Stop proxy")
+        print_info("  exit           Leave interactive mode")
+
+    def _interactive_list_flows(self, limit: int = 10):
+        try:
+            from interfaces.kittyproxy.flow_manager import flow_manager
+            flows = flow_manager.get_flows()
+        except Exception as e:
+            print_error(f"Failed to access flow manager: {e}")
+            return
+
+        if not flows:
+            print_info("No captured flows yet.")
+            return
+
+        rows = flows[:limit]
+        print_info(f"{'ID':<12} {'Method':<7} {'Status':<6} {'Host':<24} URL")
+        print_info("-" * 90)
+        for f in rows:
+            fid = (f.get('id') or '')[:12]
+            method = (f.get('method') or '-')[:7]
+            status = str(f.get('status_code') or '-')[:6]
+            host = (f.get('host') or '-')[:24]
+            url = f.get('url') or '-'
+            print_info(f"{fid:<12} {method:<7} {status:<6} {host:<24} {url}")
+
+    def _interactive_show_flow(self, flow_id: str):
+        try:
+            from interfaces.kittyproxy.flow_manager import flow_manager
+            flow = flow_manager.get_flow(flow_id)
+        except Exception as e:
+            print_error(f"Failed to access flow manager: {e}")
+            return
+
+        if not flow:
+            print_error(f"Flow not found: {flow_id}")
+            return
+
+        print_info(f"ID: {flow.get('id')}")
+        print_info(f"Method: {flow.get('method')}")
+        print_info(f"URL: {flow.get('url')}")
+        print_info(f"Status: {flow.get('status_code')}")
+        print_info(f"Duration(ms): {flow.get('duration_ms')}")
+        req = flow.get('request') or {}
+        res = flow.get('response') or {}
+        print_info(f"Request bytes: {req.get('content_length', 0)}")
+        print_info(f"Response bytes: {res.get('content_length', 0)}")
+
+    def _interactive_clear_flows(self):
+        try:
+            from interfaces.kittyproxy.flow_manager import flow_manager
+            flow_manager.clear()
+            print_success("Captured flows cleared.")
+        except Exception as e:
+            print_error(f"Failed to clear flows: {e}")

@@ -30,7 +30,7 @@ class HelpCommand(BaseCommand):
             'environments'
         ],
         'Network & Discovery': [
-            'network_discover', 'myip', 'proxy', 'scanner', 'tor'
+            'network_discover', 'myip', 'http', 'proxy', 'debug_proxy', 'scanner', 'tor'
         ],
         'Development & Tools': [
             'edit', 'generate', 'pattern', 'syscall', 'compatible_payloads'

@@ -5,11 +5,16 @@
 Marketplace Client - Client to interact with the registry
 """
 
+import importlib.util
 import os
 import shutil
-import zipfile
+import subprocess
+import sys
 import tempfile
-from typing import Optional, Dict, List, Any
+import zipfile
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import requests
 
 try:
@@ -20,7 +25,87 @@ except ImportError as e:
     REGISTRY_AVAILABLE = False
     REGISTRY_IMPORT_ERROR = str(e)
 
-from core.output_handler import print_error, print_warning, print_success, print_info
+from core.output_handler import print_error, print_info, print_success, print_warning
+
+
+def install_extension_python_dependencies(ext_base: Path) -> bool:
+    """
+    Install missing PyPI packages listed under extension.toml [permissions].allowed_imports.
+
+    Skips the standard library, framework-internal top-level names, and modules shipped
+    under ext_base/src/ (single-file or package).
+
+    Returns True if nothing was required or pip succeeded; False if pip failed.
+    """
+    ext_base = Path(ext_base)
+    manifest_path = ext_base / "extension.toml"
+    if not manifest_path.is_file():
+        return True
+
+    manifest_data: Dict[str, Any] = {}
+    try:
+        try:
+            import tomllib
+
+            with open(manifest_path, "rb") as manifest_file:
+                manifest_data = tomllib.load(manifest_file) or {}
+        except ImportError:
+            import toml
+
+            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
+                manifest_data = toml.load(manifest_file) or {}
+    except Exception as exc:
+        print_warning(f"Could not read extension manifest for dependencies: {exc}")
+        return True
+
+    permissions = manifest_data.get("permissions") or {}
+    allowed_imports = permissions.get("allowed_imports") or []
+    if not allowed_imports:
+        return True
+
+    stdlib_modules = set(getattr(sys, "stdlib_module_names", ()))
+    internal_prefixes = ("core", "lib", "modules", "interfaces", "kittysploit", "kittyos_cosmic")
+
+    missing_packages: List[str] = []
+    seen_packages: set[str] = set()
+
+    for module_name in allowed_imports:
+        if not isinstance(module_name, str) or not module_name:
+            continue
+
+        root_module = module_name.split(".", 1)[0]
+        if (
+            not root_module
+            or root_module in stdlib_modules
+            or root_module.startswith(internal_prefixes)
+            or root_module in ("__future__",)
+        ):
+            continue
+
+        local_module_file = ext_base / "src" / f"{root_module}.py"
+        local_module_pkg = ext_base / "src" / root_module
+        if local_module_file.is_file() or local_module_pkg.is_dir():
+            continue
+
+        if importlib.util.find_spec(root_module) is not None:
+            continue
+
+        package_name = root_module.replace("_", "-")
+        if package_name not in seen_packages:
+            seen_packages.add(package_name)
+            missing_packages.append(package_name)
+
+    if not missing_packages:
+        return True
+
+    print_info(f"Installing missing extension dependencies: {', '.join(missing_packages)}")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
+        print_success(f"Installed extension dependencies: {', '.join(missing_packages)}")
+        return True
+    except subprocess.CalledProcessError as exc:
+        print_error(f"pip install failed for extension dependencies ({missing_packages}): {exc}")
+        return False
 
 
 class ExtensionClient:
@@ -394,14 +479,21 @@ class ExtensionClient:
                 print_info("UI interface detected - PolicyEngine validation ignored (no Module class required)")
             
             # Register hooks/events/middlewares if declared (sandbox is stored in .extension_metadata.json only)
-            self._register_extension_components(manifest, extract_dir, sandbox_config)
+            self._register_extension_components(
+                manifest,
+                extract_dir,
+                sandbox_config,
+                registry_market_id=str(marketplace_id),
+            )
             
             # Create stubs/links according to extension type
             # Pass marketplace_id so launcher can find extension in new structure
             stub_created = self._create_stub_files(manifest, extract_dir, version or "latest", marketplace_id=marketplace_id)
             if not stub_created:
                 print_warning("Unable to create stubs - extension may not be accessible")
-            
+
+            install_extension_python_dependencies(Path(extract_dir))
+
             # Installation successful
             os.remove(tmp_path)
             print_success(f"Extension {manifest_id} v{manifest.version} installed successfully")
@@ -574,6 +666,19 @@ class ExtensionClient:
                 if os.path.exists(manifest_path):
                     manifest = ManifestParser.parse(manifest_path)
                     if manifest:
+                        registry_market_id = None
+                        meta_path = os.path.join(os.path.dirname(manifest_path), ".extension_metadata.json")
+                        if os.path.isfile(meta_path):
+                            try:
+                                import json
+
+                                with open(meta_path, "r", encoding="utf-8") as mf:
+                                    meta = json.load(mf) or {}
+                                rid = meta.get("registry_market_id")
+                                if rid is not None:
+                                    registry_market_id = str(rid).strip() or None
+                            except Exception:
+                                registry_market_id = None
                         # Determine if this is new structure or old
                         # If marketplace_id == manifest.id, it's old structure
                         if marketplace_id == manifest.id:
@@ -585,7 +690,8 @@ class ExtensionClient:
                                 "type": manifest.extension_type.value,
                                 "path": marketplace_path,  # extensions/{manifest_id}
                                 "marketplace_id": None,  # Unknown in old structure
-                                "directory_id": marketplace_id
+                                "directory_id": marketplace_id,
+                                "registry_market_id": registry_market_id,
                             })
                         else:
                             # New structure: extensions/{marketplace_id}/{manifest_id}/latest/
@@ -596,7 +702,8 @@ class ExtensionClient:
                                 "type": manifest.extension_type.value,
                                 "path": item_path,  # extensions/{marketplace_id}/{manifest_id}/latest/
                                 "marketplace_id": marketplace_id,  # Marketplace ID
-                                "directory_id": marketplace_id  # For backward compatibility
+                                "directory_id": marketplace_id,  # For backward compatibility
+                                "registry_market_id": registry_market_id,
                             })
         
         return installed
@@ -661,6 +768,7 @@ class ExtensionClient:
         manifest,
         extract_dir: str,
         sandbox_config: Optional[Dict[str, Any]] = None,
+        registry_market_id: Optional[str] = None,
     ):
         """
         Register hooks/events/middlewares declared in the manifest
@@ -669,6 +777,7 @@ class ExtensionClient:
             manifest: ExtensionManifest
             extract_dir: Extension extraction directory
             sandbox_config: Pre-computed sandbox profile (avoids duplicate generation)
+            registry_market_id: ID used in `market install <id>` (registry listing / download id)
         """
         try:
             # This function will be called during framework loading
@@ -691,6 +800,8 @@ class ExtensionClient:
                 "middlewares": manifest.permissions.middlewares,
                 "sandbox_config": sandbox_config,
             }
+            if registry_market_id is not None and str(registry_market_id).strip():
+                metadata["registry_market_id"] = str(registry_market_id).strip()
             
             with open(metadata_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
@@ -976,8 +1087,6 @@ from core.utils.venv_helper import ensure_venv
 
 ensure_venv(__file__)
 
-import subprocess
-import importlib.util
 from pathlib import Path
 
 
@@ -1002,77 +1111,6 @@ def find_extension_base():
     )
 
 
-def _load_manifest_data(ext_base: Path):
-    """Load extension.toml manifest as a dictionary."""
-    manifest_path = ext_base / "extension.toml"
-    if not manifest_path.exists():
-        return {{}}
-
-    try:
-        import tomllib  # Python 3.11+
-        with open(manifest_path, "rb") as manifest_file:
-            return tomllib.load(manifest_file) or {{}}
-    except ImportError:
-        try:
-            import toml
-            with open(manifest_path, "r", encoding="utf-8") as manifest_file:
-                return toml.load(manifest_file) or {{}}
-        except Exception:
-            return {{}}
-    except Exception:
-        return {{}}
-
-
-def _install_missing_dependencies(ext_base: Path):
-    """Install missing external dependencies declared by extension manifest."""
-    manifest_data = _load_manifest_data(ext_base)
-    permissions = manifest_data.get("permissions", {{}})
-    allowed_imports = permissions.get("allowed_imports", []) or []
-
-    stdlib_modules = set(getattr(sys, "stdlib_module_names", set()))
-    internal_prefixes = ("core", "lib", "modules", "interfaces", "kittysploit", "kittyos_cosmic")
-
-    missing_packages = []
-    seen_packages = set()
-
-    for module_name in allowed_imports:
-        if not isinstance(module_name, str) or not module_name:
-            continue
-
-        root_module = module_name.split(".", 1)[0]
-        if (
-            not root_module
-            or root_module in stdlib_modules
-            or root_module.startswith(internal_prefixes)
-            or root_module in ("__future__",)
-        ):
-            continue
-
-        local_module_file = ext_base / "src" / f"{{root_module}}.py"
-        local_module_pkg = ext_base / "src" / root_module
-        if local_module_file.exists() or local_module_pkg.exists():
-            continue
-
-        if importlib.util.find_spec(root_module) is not None:
-            continue
-
-        package_name = root_module.replace("_", "-")
-        if package_name not in seen_packages:
-            seen_packages.add(package_name)
-            missing_packages.append(package_name)
-
-    if not missing_packages:
-        return
-
-    print(f"Installing missing extension dependencies: {{', '.join(missing_packages)}}")
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
-    except subprocess.CalledProcessError as exc:
-        raise RuntimeError(
-            f"Failed to install required dependencies ({{', '.join(missing_packages)}})."
-        ) from exc
-
-
 def main():
     """Main launcher function"""
     try:
@@ -1090,8 +1128,17 @@ def main():
                 sys.path.insert(0, str(path_to_add))
 
         # Ensure extension Python dependencies are available before execution
-        _install_missing_dependencies(ext_base)
-        
+        try:
+            from core.registry.client import install_extension_python_dependencies
+
+            if not install_extension_python_dependencies(ext_base):
+                print(
+                    "Warning: some extension dependencies failed to install; launch may still fail.",
+                    file=sys.stderr,
+                )
+        except Exception as dep_exc:
+            print(f"Warning: dependency install skipped: {{dep_exc}}", file=sys.stderr)
+
         # Execute the entry point
         print(f"Launching {extension_name}...")
         print(f"Extension directory: {{ext_base}}")

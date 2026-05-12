@@ -21,6 +21,7 @@ from interfaces.command_system.builtin.agent.module_scoring import estimate_netw
 
 MAX_RECORDS = 2000
 FILE_NAME = "module_performance.json"
+RECENT_REWARD_WINDOW = 10
 
 
 def classify_target_profile(kb: Dict[str, Any]) -> str:
@@ -101,6 +102,7 @@ class ModulePerformanceMemory:
         # (module_path, profile) -> {count, sum_reward}
         self._agg: Dict[Tuple[str, str], Dict[str, float]] = {}
         self._agg_path_only: Dict[str, Dict[str, float]] = {}
+        self._recent_by_path: Dict[str, Dict[str, float]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -117,6 +119,8 @@ class ModulePerformanceMemory:
     def _rebuild_aggregates(self) -> None:
         self._agg.clear()
         self._agg_path_only.clear()
+        self._recent_by_path.clear()
+        reward_windows: Dict[str, List[float]] = {}
         for row in self._records:
             if not isinstance(row, dict):
                 continue
@@ -125,9 +129,27 @@ class ModulePerformanceMemory:
             r = float(row.get("reward", 0) or 0)
             if path:
                 self._bump(self._agg_path_only, path, r)
+                win = reward_windows.setdefault(path, [])
+                win.append(r)
+                if len(win) > RECENT_REWARD_WINDOW:
+                    del win[0]
             if path and prof:
                 key = (path, prof)
                 self._bump_dict(self._agg, key, r)
+        for path, win in reward_windows.items():
+            if not win:
+                continue
+            neg_streak = 0
+            for reward in reversed(win):
+                if reward < 0:
+                    neg_streak += 1
+                else:
+                    break
+            self._recent_by_path[path] = {
+                "avg_recent": float(sum(win) / max(1, len(win))),
+                "neg_streak": float(neg_streak),
+                "n_recent": float(len(win)),
+            }
 
     @staticmethod
     def _bump(store: Dict[str, Dict[str, float]], path: str, reward: float) -> None:
@@ -171,7 +193,15 @@ class ModulePerformanceMemory:
         exploit_link: bool,
         likely_fp: bool,
         cost: float,
+        novelty_zero_batch: bool = False,
+        auth_gain: bool = False,
+        shell_gain: bool = False,
+        phase_name: str = "",
     ) -> float:
+        phase = str(phase_name or "").lower()
+        phase_factor = 1.0
+        if phase in ("injection", "follow-up", "followup", "targeted", "adaptive", "exploit"):
+            phase_factor = 1.08
         gain = (
             share_ep * 1.1
             + share_params * 1.35
@@ -179,6 +209,14 @@ class ModulePerformanceMemory:
             + (2.1 if vulnerable else 0.0)
             + (1.15 if exploit_link else 0.0)
         )
+        gain *= phase_factor
+        if auth_gain:
+            gain += 2.2
+        if shell_gain:
+            gain += 4.2
+        # Penalize costly/noisy dead runs that provide no novelty and no action signal.
+        if novelty_zero_batch and not vulnerable and not exploit_link:
+            gain -= 1.35
         if likely_fp:
             gain -= 1.85
         return gain / max(0.45, cost)
@@ -204,6 +242,14 @@ class ModulePerformanceMemory:
         d_ep = max(0.0, a["endpoints"] - b["endpoints"])
         d_pa = max(0.0, a["params"] - b["params"])
         d_info = a["info"] - b["info"]
+        novelty_zero_batch = d_ep <= 0.0 and d_pa <= 0.0 and d_info <= 0.0
+        before_signals = {str(s).lower() for s in (kb_before.get("risk_signals", []) if isinstance(kb_before, dict) else [])}
+        after_signals = {str(s).lower() for s in (kb_after.get("risk_signals", []) if isinstance(kb_after, dict) else [])}
+        auth_gain = "authenticated_session" in after_signals and "authenticated_session" not in before_signals
+        shell_gain = (
+            ("interactive_shell" in after_signals or "shell_obtained" in after_signals)
+            and not ("interactive_shell" in before_signals or "shell_obtained" in before_signals)
+        )
         n = max(1, len(phase_results))
         share_ep = d_ep / n
         share_pa = d_pa / n
@@ -230,6 +276,10 @@ class ModulePerformanceMemory:
                 ex_link,
                 likely_fp,
                 cost,
+                novelty_zero_batch=novelty_zero_batch,
+                auth_gain=auth_gain,
+                shell_gain=shell_gain,
+                phase_name=phase_name,
             )
             record = {
                 "ts": ts,
@@ -271,10 +321,13 @@ class ModulePerformanceMemory:
         c_any = int((ent_any or {}).get("count", 0) or 0)
         if c_prof < 2 and c_any < 3:
             return 1.0
+        recent_mult = self._recent_path_multiplier(module_path)
         if c_prof >= 3:
             w = min(1.0, c_prof / 8.0)
-            return m_prof * w + m_any * (1.0 - w)
-        return m_any
+            base = m_prof * w + m_any * (1.0 - w)
+        else:
+            base = m_any
+        return max(0.45, min(1.42, base * recent_mult))
 
     @staticmethod
     def _mult_for_key(ent: Optional[Dict[str, float]]) -> float:
@@ -290,3 +343,24 @@ class ModulePerformanceMemory:
     def _mult_for_key_path(self, module_path: str) -> float:
         ent = self._agg_path_only.get(module_path)
         return self._mult_for_key(ent)
+
+    def _recent_path_multiplier(self, module_path: str) -> float:
+        ent = self._recent_by_path.get(module_path)
+        if not ent:
+            return 1.0
+        avg_recent = float(ent.get("avg_recent", 0.0) or 0.0)
+        neg_streak = int(ent.get("neg_streak", 0.0) or 0.0)
+        n_recent = int(ent.get("n_recent", 0.0) or 0.0)
+        if n_recent < 3:
+            return 1.0
+        if neg_streak >= 5:
+            return 0.62
+        if neg_streak >= 3:
+            return 0.76
+        if avg_recent >= 1.7:
+            return 1.16
+        if avg_recent >= 0.9:
+            return 1.08
+        if avg_recent <= -0.9:
+            return 0.78
+        return 1.0

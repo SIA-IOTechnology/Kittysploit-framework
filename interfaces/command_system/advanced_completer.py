@@ -92,6 +92,20 @@ class AdvancedCompleter(Completer):
             yield from self._iter_proxy_completions(args, current_word, ends_with_space)
             return
 
+        if command == "debug_proxy":
+            args = tokens[1:]
+            if ends_with_space:
+                args.append("")
+            yield from self._iter_debug_proxy_completions(args, current_word, ends_with_space)
+            return
+
+        if command == "agent":
+            args = tokens[1:]
+            if ends_with_space:
+                args.append("")
+            yield from self._iter_agent_completions(args, current_word, ends_with_space)
+            return
+
         if command == "sessions":
             args = tokens[1:]
             if ends_with_space:
@@ -174,7 +188,7 @@ class AdvancedCompleter(Completer):
             yield Completion(value, start_position=-len(partial), display_meta=display_meta or "Value")
 
     def _iter_proxy_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
-        subcommands = ['start', 'stop', 'status', 'list', 'show', 'replay', 'export', 'clear', 'hexdump']
+        subcommands = ['start', 'stop', 'status', 'interactive']
 
         if not args or (len(args) == 1 and not ends_with_space and len(args[0]) == len(partial)):
             for item in self._filter_items(subcommands, partial):
@@ -184,11 +198,36 @@ class AdvancedCompleter(Completer):
         subcommand = args[0]
 
         if len(args) == 1 and ends_with_space:
+            for opt in ['--host', '--port', '--verbose', '--auto-start']:
+                yield Completion(opt, start_position=0, display_meta="Option")
+            return
+
+        if subcommand == 'start':
+            if partial.startswith('--'):
+                for opt in self._filter_items(['--host', '--port', '--verbose'], partial):
+                    yield Completion(opt, start_position=-len(partial), display_meta="Option")
+                return
+        if subcommand == 'interactive':
+            if partial.startswith('--'):
+                for opt in self._filter_items(['--auto-start', '--host', '--port'], partial):
+                    yield Completion(opt, start_position=-len(partial), display_meta="Option")
+                return
+
+    def _iter_debug_proxy_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
+        subcommands = ['start', 'stop', 'status', 'list', 'show', 'replay', 'export', 'clear', 'hexdump']
+
+        if not args or (len(args) == 1 and not ends_with_space and len(args[0]) == len(partial)):
+            for item in self._filter_items(subcommands, partial):
+                yield Completion(item, start_position=-len(partial), display_meta="Debug Proxy Subcommand")
+            return
+
+        subcommand = args[0]
+
+        if len(args) == 1 and ends_with_space:
             for opt in ['--host', '--port', '--mode', '--verbose']:
                 yield Completion(opt, start_position=0, display_meta="Option")
             return
 
-        # Handle specific subcommand options
         if subcommand == 'start':
             if partial.startswith('--'):
                 for opt in self._filter_items(['--host', '--port', '--mode', '--verbose'], partial):
@@ -210,9 +249,33 @@ class AdvancedCompleter(Completer):
                 return
 
         if subcommand in ('show', 'replay', 'hexdump'):
-            # Provide a generic request id prefix
             if len(args) == 2 and not ends_with_space:
                 yield Completion('req_', start_position=-len(partial), display_meta="Request ID")
+            return
+
+    def _iter_agent_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
+        options = [
+            '--threads', '--protocol', '--no-exploit', '--verbose', '--llm-local', '--llm-model',
+            '--llm-endpoint', '--max-modules', '--recon-modules', '--safety-profile',
+            '--request-budget', '--llm-budget', '--user-agent', '--request-delay-min',
+            '--request-delay-max', '--async-probes', '--no-proxy-flows', '--proxy-flow-limit',
+            '--http-replay', '--http-replay-max', '--reuse-proxy-auth', '--all', '--help',
+        ]
+        if len(args) >= 2 and args[-2] == '--safety-profile':
+            for value in self._filter_items(['normal', 'safe', 'discreet', 'aggressive'], partial):
+                yield Completion(value, start_position=-len(partial), display_meta="Safety Profile")
+            return
+        if len(args) >= 2 and args[-2] == '--http-replay':
+            for value in self._filter_items(['safe', 'off', 'active'], partial):
+                yield Completion(value, start_position=-len(partial), display_meta="HTTP Replay")
+            return
+        if len(args) >= 2 and args[-2] == '--protocol':
+            for value in self._filter_items(['http', 'https', 'ssh', 'ftp', 'smb', 'ldap', 'mysql'], partial):
+                yield Completion(value, start_position=-len(partial), display_meta="Protocol")
+            return
+        if partial.startswith('--') or (ends_with_space and (not args or args[-1] == "")):
+            for opt in self._filter_items(options, partial):
+                yield Completion(opt, start_position=-len(partial), display_meta="Agent Option")
             return
 
     def _iter_sessions_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:

@@ -156,6 +156,8 @@ def print_error(message="", **kwargs):
 
 def print_success(message="", **kwargs):
     """Print a success message"""
+    if is_thread_output_quiet():
+        return
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.GREEN}+{Style.RESET_ALL}] {message}", **kwargs)
     else:

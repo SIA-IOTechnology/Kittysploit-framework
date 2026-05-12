@@ -1958,6 +1958,44 @@ Examples:
                 return 0.0
         return 0.0
 
+    def _installed_market_keys(self) -> set:
+        """Identifiers of locally installed extensions (manifest id, registry id, folder ids)."""
+        keys = set()
+        try:
+            from core.registry.client import ExtensionClient
+
+            client = ExtensionClient(registry_url=self.registry_url)
+            for ext in client.list_installed_extensions():
+                for k in ("id", "marketplace_id", "directory_id", "registry_market_id"):
+                    v = ext.get(k)
+                    if v is not None and str(v).strip():
+                        keys.add(str(v).strip())
+        except Exception:
+            pass
+        return keys
+
+    @staticmethod
+    def _remote_item_match_keys(item: Dict) -> List[str]:
+        """Possible registry keys from a browse/search item for install matching."""
+        ordered: List[str] = []
+        seen: set = set()
+        for key in ("id", "slug", "extension_id", "manifest_id", "code", "package_id"):
+            v = item.get(key)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            ordered.append(s)
+        return ordered
+
+    def _item_installed_label(self, item: Dict, installed_keys: set) -> str:
+        for cand in self._remote_item_match_keys(item):
+            if cand in installed_keys:
+                return "Yes"
+        return "No"
+
     def _display_modules_new_format(self, modules: List[Dict], title: str, pagination: Dict = None):
         """Display a list of modules in the new API format"""
         if not modules:
@@ -1967,7 +2005,9 @@ Examples:
         print_info(f"{title}")
         print_info("=" * 80)
         print_empty()
-        
+
+        installed_keys = self._installed_market_keys()
+
         for idx, module in enumerate(modules, 1):
             module_id = module.get('id', 'N/A')
             name = module.get('name', 'Unknown')
@@ -2027,6 +2067,7 @@ Examples:
             print_info(f"  ID:          {module_id}")
             print_info(f"  Author:      {author_name}")
             print_info(f"  Type:        {module_type}")
+            print_info(f"  Installed:   {self._item_installed_label(module, installed_keys)}")
             print_info(f"  Price:       {price_text}")
             print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")
             print_info(f"  Rating:      {rating_text}")
@@ -2057,6 +2098,10 @@ Examples:
         print_info("=" * 70)
         print_info(f"MODULE DETAILS")
         print_info("=" * 70)
+        print_empty()
+
+        installed_keys = self._installed_market_keys()
+        print_info(f"Installed (local): {self._item_installed_label(module, installed_keys)}")
         print_empty()
         
         # Basic info
@@ -2162,7 +2207,9 @@ Examples:
         print_info(f"{title}")
         print_info("=" * 80)
         print_empty()
-        
+
+        installed_keys = self._installed_market_keys()
+
         for idx, ext in enumerate(extensions, 1):
             ext_id = ext.get('id', 'N/A')
             name = ext.get('name', 'Unknown')
@@ -2236,6 +2283,7 @@ Examples:
             print_info(f"  ID:          {ext_id}")
             print_info(f"  Publisher:   {publisher_name}")
             print_info(f"  Type:        {ext_type}")
+            print_info(f"  Installed:   {self._item_installed_label(ext, installed_keys)}")
             print_info(f"  Price:       {price_text}")
             print_info(f"  Downloads:   {total_downloads:,}" if total_downloads > 0 else f"  Downloads:   {total_downloads}")
             print_info(f"  Description: {desc_lines[0]}")
@@ -2248,6 +2296,10 @@ Examples:
         print_info("=" * 70)
         print_info(f"EXTENSION DETAILS")
         print_info("=" * 70)
+        print_empty()
+
+        installed_keys = self._installed_market_keys()
+        print_info(f"Installed (local): {self._item_installed_label(extension, installed_keys)}")
         print_empty()
         
         # Basic info

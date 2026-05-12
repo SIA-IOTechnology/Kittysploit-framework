@@ -57,6 +57,12 @@ class AgentState:
     request_budget: int = 0
     llm_budget: int = 0
     async_probes: bool = False
+    proxy_flows: bool = True
+    proxy_flow_limit: int = 40
+    http_replay: str = "safe"
+    http_replay_max: int = 3
+    reuse_proxy_auth: bool = False
+    shell_hunter: bool = False
     llm_local: bool = False
     llm_model: str = "llama3.1:8b"
     llm_endpoint: str = "http://127.0.0.1:11434/api/chat"
@@ -108,6 +114,12 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "request_budget": state.request_budget,
         "llm_budget": state.llm_budget,
         "async_probes": state.async_probes,
+        "proxy_flows": state.proxy_flows,
+        "proxy_flow_limit": state.proxy_flow_limit,
+        "http_replay": state.http_replay,
+        "http_replay_max": state.http_replay_max,
+        "reuse_proxy_auth": state.reuse_proxy_auth,
+        "shell_hunter": state.shell_hunter,
         "llm_local": state.llm_local,
         "llm_model": state.llm_model,
         "llm_endpoint": state.llm_endpoint,
@@ -198,6 +210,12 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         request_budget=int(d.get("request_budget", 0) or 0),
         llm_budget=int(d.get("llm_budget", 0) or 0),
         async_probes=bool(d.get("async_probes", False)),
+        proxy_flows=bool(d.get("proxy_flows", True)),
+        proxy_flow_limit=int(d.get("proxy_flow_limit", 40) if d.get("proxy_flow_limit", None) is not None else 40),
+        http_replay=str(d.get("http_replay", "safe") or "safe"),
+        http_replay_max=int(d.get("http_replay_max", 3) if d.get("http_replay_max", None) is not None else 3),
+        reuse_proxy_auth=bool(d.get("reuse_proxy_auth", False)),
+        shell_hunter=bool(d.get("shell_hunter", False)),
         llm_local=bool(d.get("llm_local", False)),
         llm_model=str(d.get("llm_model", "llama3.1:8b")),
         llm_endpoint=str(d.get("llm_endpoint", "http://127.0.0.1:11434/api/chat")),

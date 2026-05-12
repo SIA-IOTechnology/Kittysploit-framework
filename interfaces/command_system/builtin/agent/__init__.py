@@ -12,6 +12,7 @@ from interfaces.command_system.builtin.agent.facades import (
 )
 from interfaces.command_system.builtin.agent.local_llm import LocalLLMService
 from interfaces.command_system.builtin.agent.module_catalog import ModuleCatalogService
+from interfaces.command_system.builtin.agent.http_intelligence import HttpRequestIntelligence
 from interfaces.command_system.builtin.agent.report_service import ReportService
 from interfaces.command_system.builtin.agent.target_resolver import TargetResolver
 from interfaces.command_system.builtin.agent.state import AgentMetrics, AgentState
@@ -26,6 +27,7 @@ __all__ = [
     "ExploitPlanner",
     "KnowledgeBaseService",
     "LocalLLMService",
+    "HttpRequestIntelligence",
     "ModuleCatalogService",
     "ReportService",
     "ScanPlanner",

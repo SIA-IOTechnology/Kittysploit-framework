@@ -177,15 +177,15 @@ class Payload(BaseModule):
     
     def shellcode_ip(self, ip: str) -> bytes:
         """
-        Generate shellcode for IP address
+        Generate shellcode for IP address (Network Byte Order)
         """
-        return struct.pack('>I', socket.inet_aton(ip))
+        return socket.inet_aton(ip)
     
     def shellcode_port(self, port: int) -> bytes:
         """
-        Generate shellcode for port
+        Generate shellcode for port (Network Byte Order)
         """
-        return port.to_bytes(2, 'little')
+        return port.to_bytes(2, 'big')
 
     def get_python_script(self) -> Optional[str]:
         """

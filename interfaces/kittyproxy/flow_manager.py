@@ -757,7 +757,6 @@ class FlowManager:
     
     def _analysis_worker(self):
         """Background worker thread that performs heavy analysis on queued flows."""
-        print("[FLOW MANAGER] Analysis worker thread started")
         while self.analysis_worker_running:
             try:
                 flow_id, flow = self.analysis_queue.get(timeout=1)

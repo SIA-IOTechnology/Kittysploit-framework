@@ -68,6 +68,14 @@ While traditional tools struggle with modern web architectures and automated def
       <td align="center"><i>GUI interface</i></td>
       <td align="center"><i>AI-Powered Proxy</i></td>
     </tr>
+    <tr>
+      <td width="50%"><img src="docs/screenshots/kittyv8.png" alt="Marketplace"></td>
+      <td width="50%"><img src="docs/screenshots/kittyprotocol.png" alt="KittyProxy Detail"></td>
+    </tr>
+    <tr>
+      <td align="center"><i>V8 Engine Debugger</i></td>
+      <td align="center"><i>Protocol Analysis</i></td>
+    </tr>
   </table>
 </div>
 

@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framew
 ```
 or 
 ```bash
-git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && install\install.sh
+git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && ./install/install.sh
 ``` 
 
 **Windows:**

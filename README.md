@@ -99,7 +99,7 @@ git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittys
 
 **Start the Web UI:**
 ```bash
-python kittyproxy.py  # Accessible at http://localhost:8000
+python kittyproxy.py 
 ```
 
 ---
@@ -109,10 +109,8 @@ python kittyproxy.py  # Accessible at http://localhost:8000
 Let the framework plan your attack using a local LLM:
 
 ```bash
-# Start an autonomous agent with Llama 3.1
 kittysploit agent target.com --llm-local --llm-model llama3.1:8b
 ```
-
 
 More examples are available in [USAGE.md](USAGE.md).
 

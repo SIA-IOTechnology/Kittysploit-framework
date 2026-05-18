@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Official marketplace extensions distributed via GitHub (bundled in apps/)."""
+"""Official marketplace extensions distributed via GitHub."""
 
 from __future__ import annotations
 
-import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from core.registry.github_install import _load_config_sources
+
+_MANIFEST_FETCH_TIMEOUT = 8
 
 
 def _framework_root() -> Optional[Path]:
@@ -19,6 +21,10 @@ def _framework_root() -> Optional[Path]:
         return framework_root()
     except Exception:
         return None
+
+
+def _normalize_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 
 def _read_manifest_toml(app_dir: Path) -> Dict[str, Any]:
@@ -48,7 +54,46 @@ def _read_manifest_toml(app_dir: Path) -> Dict[str, Any]:
     try:
         import toml
 
-        return toml.load(manifest_path) or {}
+        data = toml.load(manifest_path) or {}
+        return {
+            "id": data.get("id"),
+            "name": data.get("name"),
+            "version": data.get("version"),
+            "description": data.get("description", ""),
+            "author": data.get("author", "KittySploit Team"),
+            "extension_type": data.get("extension_type", "UI"),
+            "price": data.get("metadata", {}).get("price", 0) if isinstance(data.get("metadata"), dict) else 0,
+        }
+    except Exception:
+        return {}
+
+
+def _fetch_github_manifest(repo: str, ref: str) -> Dict[str, Any]:
+    try:
+        import requests
+
+        url = f"https://raw.githubusercontent.com/{repo.strip('/')}/{ref}/extension.toml"
+        response = requests.get(url, timeout=_MANIFEST_FETCH_TIMEOUT)
+        if response.status_code != 200:
+            return {}
+
+        try:
+            import tomllib
+
+            data = tomllib.loads(response.text) or {}
+        except ImportError:
+            import toml
+
+            data = toml.loads(response.text) or {}
+
+        return {
+            "id": data.get("id"),
+            "name": data.get("name"),
+            "version": data.get("version"),
+            "description": data.get("description", ""),
+            "author": data.get("author", "KittySploit Team"),
+            "extension_type": data.get("extension_type", "UI"),
+        }
     except Exception:
         return {}
 
@@ -92,7 +137,26 @@ def _build_official_module(ext_id: str, github: Dict[str, str], manifest: Dict[s
         "github_repo": repo,
         "github_ref": ref,
         "repository": f"https://github.com/{repo}" if repo else "",
+        "install_hint": ext_id,
     }
+
+
+def _resolve_manifest(ext_id: str, github: Dict[str, str], root: Optional[Path]) -> Dict[str, Any]:
+    manifest: Dict[str, Any] = {}
+    if root is not None:
+        app_dir = root / "apps" / ext_id
+        if app_dir.is_dir():
+            manifest = _read_manifest_toml(app_dir)
+
+    if not manifest.get("name"):
+        repo = github.get("repo", "")
+        ref = github.get("ref", "main")
+        if repo:
+            manifest = _fetch_github_manifest(repo, ref) or manifest
+
+    if not manifest.get("id"):
+        manifest["id"] = ext_id
+    return manifest
 
 
 def get_official_marketplace_modules() -> List[Dict[str, Any]]:
@@ -102,16 +166,27 @@ def get_official_marketplace_modules() -> List[Dict[str, Any]]:
     modules: List[Dict[str, Any]] = []
 
     for ext_id, github in sources.items():
-        manifest: Dict[str, Any] = {}
-        if root is not None:
-            app_dir = root / "apps" / ext_id
-            if app_dir.is_dir():
-                manifest = _read_manifest_toml(app_dir)
-        if not manifest.get("id"):
-            manifest["id"] = ext_id
+        manifest = _resolve_manifest(ext_id, github, root)
         modules.append(_build_official_module(ext_id, github, manifest))
 
     return modules
+
+
+def _annotate_remote_with_official(
+    remote: Dict[str, Any],
+    official: Dict[str, Any],
+) -> Dict[str, Any]:
+    enriched = dict(remote)
+    enriched["source"] = "github_official"
+    enriched["github_repo"] = official.get("github_repo", "")
+    enriched["github_ref"] = official.get("github_ref", "main")
+    enriched["repository"] = official.get("repository", "")
+    enriched["install_hint"] = official.get("id", "")
+    enriched["can_download"] = True
+    enriched["is_free"] = True
+    if official.get("version"):
+        enriched["version"] = official.get("version")
+    return enriched
 
 
 def merge_official_modules(
@@ -120,7 +195,12 @@ def merge_official_modules(
     search_query: Optional[str] = None,
     category: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Append official GitHub extensions not already listed in the remote catalog."""
+    """
+    Merge official GitHub extensions into marketplace browse results.
+
+    Catalog entries with the same name as an official app are annotated with
+    GitHub source (no duplicate row). Unmatched official apps are appended.
+    """
     official = get_official_marketplace_modules()
 
     if search_query:
@@ -138,17 +218,30 @@ def merge_official_modules(
         cat = category.strip().lower()
         official = [m for m in official if str(m.get("type", "")).lower() == cat]
 
+    official_by_id = {str(m.get("id", "")).lower(): m for m in official if m.get("id")}
+    official_by_name = {_normalize_name(str(m.get("name", ""))): m for m in official if m.get("name")}
+
     existing_ids: set[str] = set()
-    for module in remote_modules:
+    matched_official_ids: set[str] = set()
+    merged: List[Dict[str, Any]] = []
+
+    for remote in remote_modules:
         for key in ("id", "slug", "extension_id", "manifest_id", "code", "package_id"):
-            value = module.get(key)
+            value = remote.get(key)
             if value is not None:
                 existing_ids.add(str(value).strip().lower())
 
-    merged = list(remote_modules)
+        norm_name = _normalize_name(str(remote.get("name", "")))
+        official_match = official_by_name.get(norm_name)
+        if official_match is not None:
+            matched_official_ids.add(str(official_match.get("id", "")).lower())
+            merged.append(_annotate_remote_with_official(remote, official_match))
+        else:
+            merged.append(remote)
+
     for module in official:
         ext_id = str(module.get("id", "")).strip().lower()
-        if not ext_id or ext_id in existing_ids:
+        if not ext_id or ext_id in existing_ids or ext_id in matched_official_ids:
             continue
         merged.append(module)
         existing_ids.add(ext_id)

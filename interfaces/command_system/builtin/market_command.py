@@ -2207,6 +2207,9 @@ Examples:
                 repo = module.get("github_repo", "")
                 ref = module.get("github_ref", "main")
                 print_info(f"  Source:      Official · GitHub ({repo}@{ref})")
+                install_hint = module.get("install_hint") or module_id
+                if str(install_hint) != str(module_id):
+                    print_info(f"  Install via: market install {install_hint}")
             print_info(f"  Installed:   {self._item_installed_label(module, installed_keys)}")
             print_info(f"  Price:       {price_text}")
             print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")

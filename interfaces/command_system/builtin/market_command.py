@@ -555,17 +555,23 @@ Examples:
             data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
         
         if not data:
-            return False
-        
-        # Handle both new and old API response formats
+            print_warning("Could not reach marketplace catalog — showing official GitHub extensions only.")
+            data = {"modules": [], "pagination": {}}
+
         if 'modules' in data:
-            # New API format
-            modules = data.get('modules', [])
-            pagination = data.get('pagination', {})
+            modules = self._merge_official_github_modules(
+                data.get('modules', []),
+                category=getattr(args, 'category', None),
+            )
+            pagination = dict(data.get('pagination', {}) or {})
+            pagination['total'] = len(modules)
             total = pagination.get('total', len(modules))
-            self._display_modules_new_format(modules, f"Browse Results (Page {args.page}, Total: {total})", pagination)
+            self._display_modules_new_format(
+                modules,
+                f"Browse Results (Page {args.page}, Total: {total})",
+                pagination,
+            )
         else:
-            # Old API format
             extensions = data.get('extensions', [])
             total = data.get('total', 0)
             self._display_extensions(extensions, f"Browse Results (Page {args.page}, Total: {total})")
@@ -595,17 +601,42 @@ Examples:
         
         # Handle both new and old API response formats
         if 'modules' in data:
-            # New API format
-            modules = data.get('modules', [])
-            pagination = data.get('pagination', {})
+            modules = self._merge_official_github_modules(
+                data.get('modules', []),
+                search_query=args.query,
+                category=getattr(args, 'category', None),
+            )
+            pagination = dict(data.get('pagination', {}) or {})
+            pagination['total'] = len(modules)
             total = pagination.get('total', len(modules))
-            self._display_modules_new_format(modules, f"Search Results for '{args.query}' (Page {args.page}, Total: {total})", pagination)
+            self._display_modules_new_format(
+                modules,
+                f"Search Results for '{args.query}' (Page {args.page}, Total: {total})",
+                pagination,
+            )
         else:
-            # Old API format
             extensions = data.get('extensions', [])
             self._display_extensions(extensions, f"Search Results for '{args.query}' (Page {args.page})")
         
         return True
+
+    def _merge_official_github_modules(
+        self,
+        modules: List[Dict],
+        *,
+        search_query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> List[Dict]:
+        try:
+            from core.registry.official_extensions import merge_official_modules
+
+            return merge_official_modules(
+                modules,
+                search_query=search_query,
+                category=category,
+            )
+        except Exception:
+            return modules
     
     def _install_module(self, args) -> bool:
         """Install a module or all free modules"""
@@ -2172,6 +2203,10 @@ Examples:
             print_info(f"  ID:          {module_id}")
             print_info(f"  Author:      {author_name}")
             print_info(f"  Type:        {module_type}")
+            if module.get("source") == "github_official":
+                repo = module.get("github_repo", "")
+                ref = module.get("github_ref", "main")
+                print_info(f"  Source:      Official · GitHub ({repo}@{ref})")
             print_info(f"  Installed:   {self._item_installed_label(module, installed_keys)}")
             print_info(f"  Price:       {price_text}")
             print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")

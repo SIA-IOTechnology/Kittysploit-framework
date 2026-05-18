@@ -89,6 +89,43 @@ for entry in root.iterdir():
         shutil.copy2(entry, target)
 PY
 
+python3 - "${OPT_DIR}" <<'PY'
+import os
+import shutil
+import sys
+from pathlib import Path
+
+opt = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(opt))
+os.chdir(opt)
+
+from core.registry.client import ExtensionClient
+from core.registry.manifest import ManifestParser
+
+OFFICIAL_APPS = ("kittyproxy", "kittyosint", "kittyprotocol")
+client = ExtensionClient(extensions_dir=str(opt / "extensions"))
+
+for app_id in OFFICIAL_APPS:
+    app_src = opt / "apps" / app_id
+    if not app_src.is_dir():
+        raise SystemExit(f"apps/{app_id} missing")
+
+    target = opt / "extensions" / app_id / app_id / "latest"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(app_src, target)
+
+    manifest = ManifestParser.parse(str(target / "extension.toml"))
+    if not manifest:
+        raise SystemExit(f"Invalid extension.toml for {app_id}")
+
+    if not client._create_stub_files(manifest, str(target), "latest", marketplace_id=app_id):
+        raise SystemExit(f"Failed to create launcher for {app_id}")
+
+    print(f"Bundled extension {app_id} -> {target}")
+PY
+
 cat > "${DEBIAN_DIR}/control" <<EOF
 Package: ${PKG_NAME}
 Version: ${VERSION}
@@ -146,17 +183,23 @@ EOF
 cat > "${BIN_DIR}/kittyproxy" <<'EOF'
 #!/usr/bin/env bash
 export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/kittyproxy.py "$@"
+exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyproxy.py "$@"
 EOF
 
 cat > "${BIN_DIR}/kittyosint" <<'EOF'
 #!/usr/bin/env bash
 export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/kittyosint.py "$@"
+exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyosint.py "$@"
+EOF
+
+cat > "${BIN_DIR}/kittyprotocol" <<'EOF'
+#!/usr/bin/env bash
+export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
+exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyprotocol.py "$@"
 EOF
 
 chmod 755 "${DEBIAN_DIR}/postinst" "${DEBIAN_DIR}/prerm"
-chmod 755 "${BIN_DIR}/kittysploit" "${BIN_DIR}/kittymcp" "${BIN_DIR}/kittyproxy" "${BIN_DIR}/kittyosint"
+chmod 755 "${BIN_DIR}/kittysploit" "${BIN_DIR}/kittymcp" "${BIN_DIR}/kittyproxy" "${BIN_DIR}/kittyosint" "${BIN_DIR}/kittyprotocol"
 
 DPKG_HELP="$(dpkg-deb --help || true)"
 if [[ "${DPKG_HELP}" == *"--root-owner-group"* ]]; then

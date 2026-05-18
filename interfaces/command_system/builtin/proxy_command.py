@@ -99,10 +99,17 @@ class ProxyCommand(BaseCommand):
             return True
 
         try:
-            from interfaces.kittyproxy.proxy_core import MitmProxyWrapper
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path, kittyproxy_install_hint
+
+            if not ensure_kittyproxy_path():
+                print_error("KittyProxy is not installed.")
+                print_info(kittyproxy_install_hint())
+                return False
+            from kittyproxy.proxy_core import MitmProxyWrapper
         except ImportError as e:
             print_error(f"Could not load KittyProxy runtime: {e}")
             print_info("Install dependency with: pip install mitmproxy")
+            print_info(kittyproxy_install_hint())
             return False
 
         try:
@@ -289,7 +296,10 @@ class ProxyCommand(BaseCommand):
 
     def _interactive_list_flows(self, limit: int = 10):
         try:
-            from interfaces.kittyproxy.flow_manager import flow_manager
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path
+
+            ensure_kittyproxy_path()
+            from kittyproxy.flow_manager import flow_manager
             flows = flow_manager.get_flows()
         except Exception as e:
             print_error(f"Failed to access flow manager: {e}")
@@ -312,7 +322,10 @@ class ProxyCommand(BaseCommand):
 
     def _interactive_show_flow(self, flow_id: str):
         try:
-            from interfaces.kittyproxy.flow_manager import flow_manager
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path
+
+            ensure_kittyproxy_path()
+            from kittyproxy.flow_manager import flow_manager
             flow = flow_manager.get_flow(flow_id)
         except Exception as e:
             print_error(f"Failed to access flow manager: {e}")
@@ -334,7 +347,10 @@ class ProxyCommand(BaseCommand):
 
     def _interactive_clear_flows(self):
         try:
-            from interfaces.kittyproxy.flow_manager import flow_manager
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path
+
+            ensure_kittyproxy_path()
+            from kittyproxy.flow_manager import flow_manager
             flow_manager.clear()
             print_success("Captured flows cleared.")
         except Exception as e:

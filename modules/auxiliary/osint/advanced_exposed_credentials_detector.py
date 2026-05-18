@@ -24,8 +24,10 @@ class Module(Auxiliary, Http_client):
         r"(?i)\b(?:user(?:name)?|login|mail|email)\b\s*[:=]\s*([^\s:;,\"]{2,})\s*[|:;,]\s*\b(?:pass(?:word)?|pwd|token|secret)\b\s*[:=]\s*([^\s\"']{4,})"
     )
     KEYVALUE_RX = re.compile(
-        r"(?i)\b(api[_-]?key|secret|token|client[_-]?secret|aws_access_key_id|aws_secret_access_key)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-\/+=]{8,})[\"']?"
+        r"(?i)\b(api[_-]?key|secret|token|client[_-]?secret|aws_access_key_id|aws_secret_access_key|private_key)\b\s*[:=]\s*[\"']?([A-Za-z0-9_\-\/+=]{8,})[\"']?"
     )
+    PEM_RX = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.I)
+    SERVICE_ACCOUNT_RX = re.compile(r'["\']type["\']\s*:\s*["\']service_account["\']', re.I)
     HASH_RX = re.compile(r"\b[a-fA-F0-9]{32,64}\b")
 
     def _to_int(self, value, default_value):
@@ -40,6 +42,10 @@ class Module(Auxiliary, Http_client):
         value = str(finding.get("value", ""))
         if kind == "user_pass_pair":
             score += 5
+        elif kind == "private_key":
+            score += 8
+        elif kind == "service_account":
+            score += 8
         elif kind == "secret_kv":
             score += 4
         elif kind == "email_hint":
@@ -64,6 +70,22 @@ class Module(Auxiliary, Http_client):
                 "kind": "secret_kv",
                 "value": f"{key_name}={key_val[:6]}***",
                 "context": f"secret-like assignment in {source_url}",
+                "source": source_url,
+            })
+        if self.PEM_RX.search(text):
+            findings.append({
+                "kind": "private_key",
+                "value": "PEM private key",
+                "context": f"PEM marker in {source_url}",
+                "source": source_url,
+            })
+        if self.SERVICE_ACCOUNT_RX.search(text) and (
+            self.PEM_RX.search(text) or "gserviceaccount.com" in text.lower()
+        ):
+            findings.append({
+                "kind": "service_account",
+                "value": "service_account JSON",
+                "context": f"Google service account in {source_url}",
                 "source": source_url,
             })
         for email in self.EMAIL_RX.findall(text):
@@ -189,7 +211,9 @@ class Module(Auxiliary, Http_client):
                 print_success(f"Results saved to {self.output_file}")
             except Exception as e:
                 print_error(f"Failed to save output: {e}")
-        return data
+        if selected:
+            return data
+        return False
 
     def get_graph_nodes(self, data):
         if not isinstance(data, dict) or "error" in data:

@@ -268,7 +268,10 @@ class HttpRequestIntelligence:
             return summary
 
         try:
-            from interfaces.kittyproxy.flow_manager import flow_manager
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path
+
+            ensure_kittyproxy_path()
+            from kittyproxy.flow_manager import flow_manager
         except Exception as exc:
             summary["error"] = f"KittyProxy flow manager unavailable: {exc}"
             return summary
@@ -524,7 +527,10 @@ class HttpRequestIntelligence:
         response_b64: str,
     ) -> List[Dict[str, Any]]:
         try:
-            from interfaces.kittyproxy.reflection_checker import get_all_fuzzable_params
+            from core.utils.kittyproxy_path import ensure_kittyproxy_path
+
+            ensure_kittyproxy_path()
+            from kittyproxy.reflection_checker import get_all_fuzzable_params
 
             return get_all_fuzzable_params(url, method, headers, body_b64, response_b64)
         except Exception:

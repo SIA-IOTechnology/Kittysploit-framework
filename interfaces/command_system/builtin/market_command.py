@@ -48,7 +48,7 @@ This command allows you to browse, search, and install modules from the KittySpl
 Subcommands:
     list          List all available modules
     search <term> Search for modules by name or description
-    install [id]  Install a module by its ID (or use --all-free to install all free modules)
+    install [id]  Install by ID, local path, or github:owner/repo (or --all-free)
     info <id>     Show detailed information about a module
     installed     List installed modules
     update [id]   Update installed modules (all or specific module)
@@ -104,7 +104,11 @@ Examples:
         
         # Install command
         install_parser = subparsers.add_parser('install', help='Install a module')
-        install_parser.add_argument('module_id', nargs='?', help='Module ID to install (optional, use --all-free to install all free modules)')
+        install_parser.add_argument(
+            'module_id',
+            nargs='?',
+            help='Module ID, local path, or github:owner/repo[@ref] (optional; use --all-free for all free modules)',
+        )
         install_parser.add_argument('--force', '-f', action='store_true', help='Force installation')
         install_parser.add_argument('--all-free', '-a', action='store_true', help='Install all free modules from the marketplace')
         
@@ -605,28 +609,56 @@ Examples:
     
     def _install_module(self, args) -> bool:
         """Install a module or all free modules"""
-        # Authentication is required for installation
-        if not self.token and not self.api_key:
-            print_error("Authentication required")
-            print_info("Use 'market login' or 'market register'")
-            return False
-        
-        # If --all-free flag is set, install all free modules
         if args.all_free:
             return self._install_all_free_modules(args)
-        
-        # Otherwise, install a specific module
+
         if not args.module_id:
             print_error("Please specify a module ID or use --all-free to install all free modules")
             print_info("Usage: market install <module_id>")
+            print_info("   or: market install ./apps/kittyproxy")
+            print_info("   or: market install ./kittyproxy.zip")
+            print_info("   or: market install github:SIA-IOTechnology/KittyProxy")
             print_info("   or: market install --all-free")
             return False
-        
+
+        module_id = args.module_id.strip()
+
+        local_path = os.path.abspath(os.path.expanduser(module_id))
+        if os.path.isdir(local_path) and os.path.isfile(os.path.join(local_path, "extension.toml")):
+            return self._install_from_local_path({"name": module_id, "id": module_id}, local_path, "latest")
+
+        if os.path.isfile(local_path) and local_path.lower().endswith((".zip", ".kext")):
+            return self._install_from_zip_bundle(local_path)
+
+        from core.registry.github_install import get_github_source, parse_github_spec
+
+        github_spec = parse_github_spec(module_id)
+        if github_spec:
+            repo, ref = github_spec
+            return self._install_from_github(repo, ref, extension_id=None)
+
+        github_fallback = get_github_source(module_id)
+        if github_fallback and not self.token and not self.api_key:
+            repo, ref = github_fallback
+            print_info(f"Installing '{module_id}' from GitHub (no registry account required): {repo}@{ref}")
+            return self._install_from_github(repo, ref, extension_id=module_id)
+
+        if not self.token and not self.api_key:
+            print_error("Authentication required for registry downloads")
+            print_info("Use 'market login' or 'market register'")
+            if github_fallback:
+                print_info(f"Or install from GitHub only: market install github:{github_fallback[0]}")
+            return False
+
         # Get module info - search in the modules list
         params = {'per_page': 100, 'page': 1}
         data = self._make_request('market/modules', params=params, requires_auth=True, use_new_api=True)
         
         if not data:
+            if github_fallback:
+                repo, ref = github_fallback
+                print_info(f"Registry unavailable — installing from GitHub: {repo}@{ref}")
+                return self._install_from_github(repo, ref, extension_id=module_id)
             print_error("Authentication required")
             print_info("Use 'market login' or 'market register'")
             return False
@@ -639,7 +671,7 @@ Examples:
             page = 1
             while not found and page <= 10:  # Limit to 10 pages
                 for module in modules:
-                    if str(module.get('id')) == str(args.module_id):
+                    if str(module.get('id')) == str(module_id):
                         module_data = module
                         found = True
                         break
@@ -659,11 +691,16 @@ Examples:
                         break
         
         if not module_data:
-            print_error(f"Module {args.module_id} not found")
+            if github_fallback:
+                repo, ref = github_fallback
+                print_info(f"Extension '{module_id}' not in catalog — installing from GitHub: {repo}@{ref}")
+                return self._install_from_github(repo, ref, extension_id=module_id)
+            print_error(f"Module {module_id} not found in marketplace catalog")
+            print_info("For KittyProxy: market install kittyproxy (GitHub fallback) or market install github:SIA-IOTechnology/KittyProxy")
             return False
-        
+
         # Check if module can be downloaded using the check endpoint (recommended)
-        check_data = self._make_request(f'market/check/{args.module_id}', requires_auth=True, use_new_api=True)
+        check_data = self._make_request(f'market/check/{module_id}', requires_auth=True, use_new_api=True)
         
         if check_data:
             # Use check endpoint response
@@ -711,7 +748,75 @@ Examples:
                 return False
         
         # Download and install
-        return self._download_and_install_extension(args.module_id, module_data)
+        return self._download_and_install_extension(module_id, module_data)
+
+    def _install_from_zip_bundle(self, bundle_path: str) -> bool:
+        """Install an extension from a local .zip or .kext marketplace bundle."""
+        import shutil
+        from core.registry.github_install import extract_extension_bundle
+        from core.registry.manifest import ManifestParser
+
+        print_info(f"Installing from bundle: {bundle_path}")
+        staging_dir = None
+        try:
+            staging_dir = extract_extension_bundle(bundle_path)
+            manifest_path = os.path.join(staging_dir, "extension.toml")
+            manifest = ManifestParser.parse(manifest_path)
+            if not manifest:
+                print_error("Invalid extension.toml in bundle")
+                return False
+
+            module = {
+                "id": manifest.id,
+                "name": manifest.name,
+                "version": manifest.version,
+            }
+            print_success(f"Bundle contains extension '{manifest.name}' v{manifest.version}")
+            return self._install_from_local_path(module, staging_dir, manifest.version)
+        except Exception as exc:
+            print_error(f"Failed to install from bundle: {exc}")
+            return False
+        finally:
+            if staging_dir is not None:
+                work_root = os.path.dirname(staging_dir)
+                if work_root and os.path.isdir(work_root):
+                    shutil.rmtree(work_root, ignore_errors=True)
+
+    def _install_from_github(self, repo: str, ref: str, extension_id: Optional[str] = None) -> bool:
+        """Download a public GitHub repository and install it as a marketplace extension."""
+        import shutil
+        from core.registry.github_install import download_github_extension
+        from core.registry.manifest import ManifestParser
+
+        print_info(f"Downloading from GitHub: https://github.com/{repo} (ref: {ref})...")
+        staging_dir = None
+        try:
+            staging_dir = download_github_extension(repo, ref)
+            manifest_path = os.path.join(staging_dir, "extension.toml")
+            manifest = ManifestParser.parse(manifest_path)
+            if not manifest:
+                print_error("Invalid extension.toml in GitHub repository")
+                return False
+
+            ext_id = extension_id or manifest.id
+            module = {
+                "id": ext_id,
+                "name": manifest.name,
+                "version": manifest.version,
+            }
+            print_success(f"Repository contains extension '{manifest.name}' v{manifest.version}")
+            return self._install_from_local_path(module, staging_dir, manifest.version)
+        except requests.exceptions.RequestException as exc:
+            print_error(f"Failed to download from GitHub: {exc}")
+            return False
+        except Exception as exc:
+            print_error(f"GitHub install failed: {exc}")
+            return False
+        finally:
+            if staging_dir is not None:
+                work_root = os.path.dirname(staging_dir)
+                if work_root and os.path.isdir(work_root):
+                    shutil.rmtree(work_root, ignore_errors=True)
     
     def _install_all_free_modules(self, args) -> bool:
         """Install all free modules from the marketplace"""

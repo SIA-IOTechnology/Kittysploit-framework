@@ -35,7 +35,13 @@ class OsintPlugin(Plugin):
     def _load_osint_tool(self):
         previous_module = getattr(self.framework, "current_module", None) if self.framework else None
         try:
-            from interfaces.kittyosint.core import KittyOSINT
+            from core.utils.marketplace_apps import ensure_app_path, install_hint
+
+            if not ensure_app_path("kittyosint"):
+                print_error("KittyOSINT is not installed.")
+                print_info(install_hint("kittyosint"))
+                return None
+            from kittyosint.core import KittyOSINT
             return KittyOSINT(framework=self.framework)
         except Exception as e:
             print_error(f"Failed to initialize KittyOSINT core: {e}")

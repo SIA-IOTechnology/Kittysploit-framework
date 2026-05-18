@@ -1040,31 +1040,40 @@ class ExtensionClient:
         if not version_dir:
             version_dir = "latest"
         
-        # Build search paths: new structure first, then old structure
+        # Build search paths: registry layout first, then legacy flat layout
         search_paths = []
         marketplace_id_str = marketplace_id if marketplace_id and marketplace_id != extension_id else None
+        same_id_nested = marketplace_id and marketplace_id == extension_id
         if marketplace_id_str:
-            # New structure: extensions/{marketplace_id}/{manifest_id}/latest/
             search_paths.append(f'extensions/{marketplace_id_str}/{extension_id}/{version_dir}')
-        # Old structure: extensions/{manifest_id}/latest/
+        if same_id_nested:
+            search_paths.append(f'extensions/{extension_id}/{extension_id}/{version_dir}')
         search_paths.append(f'extensions/{extension_id}/{version_dir}')
-        
+
         search_paths_str = '", "'.join(search_paths)
-        
-        # Build the launcher code with proper marketplace_id handling
+
+        marketplace_blocks = []
         if marketplace_id_str:
-            marketplace_code = f'''    # Try new structure first: extensions/{marketplace_id_str}/{extension_id}/{version_dir}/
-    candidate = here / "extensions" / "{marketplace_id_str}" / "{extension_id}" / "{version_dir}"
+            marketplace_blocks.append(
+                f'''    candidate = here / "extensions" / "{marketplace_id_str}" / "{extension_id}" / "{version_dir}"
     if candidate.exists() and candidate.is_dir():
         return candidate
-    # Also try from current working directory
     candidate = Path.cwd() / "extensions" / "{marketplace_id_str}" / "{extension_id}" / "{version_dir}"
     if candidate.exists() and candidate.is_dir():
         return candidate
-    
-    # Fallback to old structure: extensions/{extension_id}/{version_dir}/'''
-        else:
-            marketplace_code = f'''    # Try old structure: extensions/{extension_id}/{version_dir}/'''
+'''
+            )
+        if same_id_nested:
+            marketplace_blocks.append(
+                f'''    candidate = here / "extensions" / "{extension_id}" / "{extension_id}" / "{version_dir}"
+    if candidate.exists() and candidate.is_dir():
+        return candidate
+    candidate = Path.cwd() / "extensions" / "{extension_id}" / "{extension_id}" / "{version_dir}"
+    if candidate.exists() and candidate.is_dir():
+        return candidate
+'''
+            )
+        marketplace_code = "".join(marketplace_blocks)
         
         return f'''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-

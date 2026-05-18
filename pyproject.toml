@@ -91,9 +91,6 @@ windows = [
 
 [project.scripts]
 kittysploit = "kittysploit.__main__:main"
-kittyproxy = "interfaces.kittyproxy.__main__:main"
-kittyosint = "interfaces.kittyosint:main"
-kittyprotocol = "interfaces.kittyprotocol:main"
 kittymcp-server = "kittymcp_server:main"
 kittymcp-client = "kittymcp_client:main"
 
@@ -103,4 +100,4 @@ py-modules = ["kittymcp", "kittymcp_client"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["core*", "interfaces*", "modules*", "lib*", "plugins*", "kittysploit*", "data*"]
-exclude = ["examples*", "scripts*", "install*", "tests*", "venv*"]
+exclude = ["examples*", "scripts*", "install*", "tests*", "venv*", "apps*"]

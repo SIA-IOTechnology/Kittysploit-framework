@@ -99,7 +99,7 @@ git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittys
 
 **Start the Web UI:**
 ```bash
-python kittyproxy.py 
+python launch_kittyproxy.py 
 ```
 
 ---

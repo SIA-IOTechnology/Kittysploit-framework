@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests

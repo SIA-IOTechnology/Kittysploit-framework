@@ -28,46 +28,80 @@ except ImportError as e:
 from core.output_handler import print_error, print_info, print_success, print_warning
 
 
-def install_extension_python_dependencies(ext_base: Path) -> bool:
-    """
-    Install missing PyPI packages listed under extension.toml [permissions].allowed_imports.
+# Common import name -> PyPI distribution (when name differs from module)
+_IMPORT_TO_PYPI: Dict[str, str] = {
+    "pil": "Pillow",
+    "cv2": "opencv-python",
+    "sklearn": "scikit-learn",
+    "yaml": "PyYAML",
+    "dotenv": "python-dotenv",
+    "flask_cors": "flask-cors",
+    "flask_socketio": "flask-socketio",
+    "socketio": "python-socketio",
+}
 
-    Skips the standard library, framework-internal top-level names, and modules shipped
-    under ext_base/src/ (single-file or package).
 
-    Returns True if nothing was required or pip succeeded; False if pip failed.
-    """
-    ext_base = Path(ext_base)
+def _load_extension_manifest_data(ext_base: Path) -> Dict[str, Any]:
     manifest_path = ext_base / "extension.toml"
     if not manifest_path.is_file():
-        return True
-
-    manifest_data: Dict[str, Any] = {}
+        return {}
     try:
         try:
             import tomllib
 
             with open(manifest_path, "rb") as manifest_file:
-                manifest_data = tomllib.load(manifest_file) or {}
+                return tomllib.load(manifest_file) or {}
         except ImportError:
             import toml
 
             with open(manifest_path, "r", encoding="utf-8") as manifest_file:
-                manifest_data = toml.load(manifest_file) or {}
+                return toml.load(manifest_file) or {}
     except Exception as exc:
         print_warning(f"Could not read extension manifest for dependencies: {exc}")
-        return True
+        return {}
 
-    permissions = manifest_data.get("permissions") or {}
-    allowed_imports = permissions.get("allowed_imports") or []
-    if not allowed_imports:
-        return True
 
+def _parse_requirements_lines(text: str) -> List[str]:
+    specs: List[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("-"):
+            # Skip pip flags/options in requirements files (-r, --index-url, ...)
+            continue
+        specs.append(line)
+    return specs
+
+
+def _collect_explicit_pypi_specs(manifest_data: Dict[str, Any], ext_base: Path) -> List[str]:
+    specs: List[str] = []
+    deps = manifest_data.get("dependencies") or {}
+    if not isinstance(deps, dict):
+        deps = {}
+
+    for key in ("pypi", "python", "packages"):
+        entries = deps.get(key)
+        if isinstance(entries, list):
+            for item in entries:
+                if isinstance(item, str) and item.strip():
+                    specs.append(item.strip())
+
+    req_name = deps.get("requirements_file") or deps.get("requirements")
+    if isinstance(req_name, str) and req_name.strip():
+        req_path = ext_base / req_name.strip()
+        if req_path.is_file():
+            specs.extend(_parse_requirements_lines(req_path.read_text(encoding="utf-8")))
+
+    return specs
+
+
+def _packages_from_allowed_imports(ext_base: Path, allowed_imports: List[Any]) -> List[str]:
     stdlib_modules = set(getattr(sys, "stdlib_module_names", ()))
     internal_prefixes = ("core", "lib", "modules", "interfaces", "kittysploit", "kittyos_cosmic")
 
     missing_packages: List[str] = []
-    seen_packages: set[str] = set()
+    seen: set[str] = set()
 
     for module_name in allowed_imports:
         if not isinstance(module_name, str) or not module_name:
@@ -90,22 +124,65 @@ def install_extension_python_dependencies(ext_base: Path) -> bool:
         if importlib.util.find_spec(root_module) is not None:
             continue
 
-        package_name = root_module.replace("_", "-")
-        if package_name not in seen_packages:
-            seen_packages.add(package_name)
+        package_name = _IMPORT_TO_PYPI.get(root_module.lower(), root_module.replace("_", "-"))
+        if package_name not in seen:
+            seen.add(package_name)
             missing_packages.append(package_name)
 
-    if not missing_packages:
-        return True
+    return missing_packages
 
-    print_info(f"Installing missing extension dependencies: {', '.join(missing_packages)}")
+
+def _run_pip_install(args: List[str]) -> bool:
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
-        print_success(f"Installed extension dependencies: {', '.join(missing_packages)}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *args])
         return True
     except subprocess.CalledProcessError as exc:
-        print_error(f"pip install failed for extension dependencies ({missing_packages}): {exc}")
+        print_error(f"pip install failed ({' '.join(args)}): {exc}")
         return False
+
+
+def install_extension_python_dependencies(ext_base: Path) -> bool:
+    """
+    Install Python dependencies for a marketplace extension.
+
+    Order:
+      1. requirements.txt at extension root (if present)
+      2. [dependencies] pypi/python/packages in extension.toml
+      3. Missing packages inferred from [permissions].allowed_imports
+
+    Returns True if nothing was required or all pip steps succeeded.
+    """
+    ext_base = Path(ext_base)
+    ok = True
+
+    requirements_txt = ext_base / "requirements.txt"
+    if requirements_txt.is_file():
+        print_info(f"Installing extension dependencies from {requirements_txt.name}...")
+        if _run_pip_install(["-r", str(requirements_txt)]):
+            print_success(f"Dependencies installed from {requirements_txt.name}")
+        else:
+            ok = False
+
+    manifest_data = _load_extension_manifest_data(ext_base)
+    explicit_specs = _collect_explicit_pypi_specs(manifest_data, ext_base)
+    if explicit_specs:
+        print_info(f"Installing extension dependencies: {', '.join(explicit_specs)}")
+        if _run_pip_install(explicit_specs):
+            print_success("Extension dependencies installed")
+        else:
+            ok = False
+
+    permissions = manifest_data.get("permissions") or {}
+    allowed_imports = permissions.get("allowed_imports") or []
+    inferred = _packages_from_allowed_imports(ext_base, allowed_imports)
+    if inferred:
+        print_info(f"Installing missing extension dependencies: {', '.join(inferred)}")
+        if _run_pip_install(inferred):
+            print_success(f"Installed: {', '.join(inferred)}")
+        else:
+            ok = False
+
+    return ok
 
 
 class ExtensionClient:

@@ -2669,9 +2669,14 @@ Examples:
                     shutil.copy2(src, dst)
             
             # Use ExtensionClient to create stubs/launchers
+            from core.registry.client import install_extension_python_dependencies
+
             client = ExtensionClient(registry_url=self.registry_url)
             stub_created = client._create_stub_files(manifest, target_dir, "latest", marketplace_id=marketplace_id)
-            
+
+            if not install_extension_python_dependencies(Path(target_dir)):
+                print_warning("Some Python dependencies failed to install; the extension may not run correctly.")
+
             if stub_created:
                 print_success(f"Extension '{manifest.name}' v{version} installed from local path")
                 return True
@@ -3162,10 +3167,21 @@ Examples:
                         use_path = use_path[:-len("/latest")]
                 
                 print_info(f"   Use 'use {use_path}' to load the module")
+
+                from core.registry.client import install_extension_python_dependencies
+
+                if not install_extension_python_dependencies(Path(extract_dir)):
+                    print_warning("Some Python dependencies failed to install; the extension may not run correctly.")
                 
             except ImportError:
                 print_warning("Could not validate manifest (registry module not available)")
                 print_success(f"Module '{module_name}' extracted to: {extract_dir}")
+                try:
+                    from core.registry.client import install_extension_python_dependencies
+
+                    install_extension_python_dependencies(Path(extract_dir))
+                except Exception:
+                    pass
             except Exception as e:
                 print_warning(f"Could not fully validate module: {e}")
                 print_success(f"Module '{module_name}' extracted to: {extract_dir}")

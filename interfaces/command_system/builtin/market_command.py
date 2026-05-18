@@ -2132,6 +2132,10 @@ Examples:
                 return "Yes"
         return "No"
 
+    @staticmethod
+    def _is_github_official_item(item: Dict) -> bool:
+        return item.get("source") == "github_official"
+
     def _display_modules_new_format(self, modules: List[Dict], title: str, pagination: Dict = None):
         """Display a list of modules in the new API format"""
         if not modules:
@@ -2203,7 +2207,7 @@ Examples:
             print_info(f"  ID:          {module_id}")
             print_info(f"  Author:      {author_name}")
             print_info(f"  Type:        {module_type}")
-            if module.get("source") == "github_official":
+            if self._is_github_official_item(module):
                 repo = module.get("github_repo", "")
                 ref = module.get("github_ref", "main")
                 print_info(f"  Source:      Official · GitHub ({repo}@{ref})")
@@ -2212,7 +2216,8 @@ Examples:
                     print_info(f"  Install via: market install {install_hint}")
             print_info(f"  Installed:   {self._item_installed_label(module, installed_keys)}")
             print_info(f"  Price:       {price_text}")
-            print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")
+            if not self._is_github_official_item(module):
+                print_info(f"  Downloads:   {downloads:,}" if downloads > 0 else f"  Downloads:   {downloads}")
             print_info(f"  Rating:      {rating_text}")
             print_info(f"  Description: {desc_lines[0]}")
             for line in desc_lines[1:]:
@@ -2288,8 +2293,11 @@ Examples:
             print_info(f"Rating: {rating:.1f}/5.0 ({rating_count} reviews)")
         else:
             print_info(f"Rating: No ratings yet")
-        
-        print_info(f"Downloads: {module.get('downloads', 0)}")
+
+        if not self._is_github_official_item(module):
+            print_info(f"Downloads: {module.get('downloads', 0)}")
+        elif module.get("github_repo"):
+            print_info(f"Source: Official · GitHub ({module.get('github_repo')}@{module.get('github_ref', 'main')})")
         print_empty()
         
         # Description

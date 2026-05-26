@@ -5,20 +5,43 @@
 Shell manager for handling different shell types
 """
 
+import importlib
 from typing import Dict, Any, List, Optional, Type
 from .base_shell import BaseShell
+from core.output_handler import print_info, print_error, print_success
+
+
+def _lazy_import(module_path: str, class_name: str):
+    """Return a proxy that imports the real class on first access."""
+    _cls = None
+
+    class _Proxy:
+        def __new__(cls, *args, **kwargs):
+            nonlocal _cls
+            if _cls is None:
+                mod = importlib.import_module(module_path, package=__package__)
+                _cls = getattr(mod, class_name)
+            return _cls(*args, **kwargs)
+
+        @classmethod
+        def _resolve(cls):
+            nonlocal _cls
+            if _cls is None:
+                mod = importlib.import_module(module_path, package=__package__)
+                _cls = getattr(mod, class_name)
+            return _cls
+
+    _Proxy.__name__ = class_name
+    _Proxy.__qualname__ = class_name
+    return _Proxy
+
+
+# Shells that only depend on the stdlib are imported eagerly
 from .classic_shell import ClassicShell
 from .javascript_shell import JavaScriptShell
 from .ssh_shell import SSHShell
 from .meterpreter_shell import MeterpreterShell
 from .php_shell import PHPShell
-from .mysql_shell import MySQLShell
-from .postgresql_shell import PostgreSQLShell
-from .redis_shell import RedisShell
-from .ldap_shell import LDAPShell
-from .mongodb_shell import MongoDBShell
-from .elasticsearch_shell import ElasticsearchShell
-from .mssql_shell import MSSQLShell
 from .mqtt_shell import MQTTShell
 from .dns_shell import DNSShell
 from .ftp_shell import FTPShell
@@ -26,7 +49,16 @@ from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
 from .android_shell import AndroidShell
 from .email_shell import EmailShell
-from core.output_handler import print_info, print_error, print_success
+
+# Shells that need optional third-party packages are loaded lazily
+# so the framework can start even when those packages are missing.
+MySQLShell = _lazy_import('.mysql_shell', 'MySQLShell')
+PostgreSQLShell = _lazy_import('.postgresql_shell', 'PostgreSQLShell')
+RedisShell = _lazy_import('.redis_shell', 'RedisShell')
+LDAPShell = _lazy_import('.ldap_shell', 'LDAPShell')
+MongoDBShell = _lazy_import('.mongodb_shell', 'MongoDBShell')
+ElasticsearchShell = _lazy_import('.elasticsearch_shell', 'ElasticsearchShell')
+MSSQLShell = _lazy_import('.mssql_shell', 'MSSQLShell')
 
 class ShellManager:
     """Manager for different shell types"""
@@ -75,8 +107,15 @@ class ShellManager:
                 print_info(f"Available shell types: {', '.join(self.shell_types.keys())}")
                 return None
             
-            # Create shell instance
+            # Resolve lazy proxy to the real class (triggers the import)
             shell_class = self.shell_types[shell_type]
+            if hasattr(shell_class, '_resolve'):
+                try:
+                    shell_class = shell_class._resolve()
+                except (ImportError, ModuleNotFoundError) as exc:
+                    print_error(f"Cannot create {shell_type} shell: missing package — {exc}")
+                    print_info(f"Install the required package and try again.")
+                    return None
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
             elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "classic"):
@@ -250,6 +289,16 @@ class ShellManager:
             return None
         
         shell_class = self.shell_types[shell_type]
+        if hasattr(shell_class, '_resolve'):
+            try:
+                shell_class = shell_class._resolve()
+            except (ImportError, ModuleNotFoundError):
+                return {
+                    'name': shell_type,
+                    'shell_name': shell_type,
+                    'description': f"{shell_type} shell (package not installed)",
+                    'available_commands': 0,
+                }
         # Do not instantiate shell classes here: some require constructor args (session_id/framework).
         return {
             'name': shell_class.__name__,

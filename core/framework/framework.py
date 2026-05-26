@@ -114,6 +114,10 @@ class Framework:
         # Initialize NOP manager
         self.nops = NopManager()
         
+        # Initialize route manager for pivot routing
+        from lib.pivot.route_manager import RouteManager
+        self.route_manager = RouteManager(framework=self)
+        
         # Initialize debug manager
         self.debug_manager = DebugManager()
         # Interactive input manager (for web terminal -> plugin routing, e.g. minicom)

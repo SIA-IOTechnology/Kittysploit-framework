@@ -88,7 +88,7 @@ from core.framework.enums import (
 # Import remote connection function
 from core.lib import remote
 
-from core.framework.failure import fail, Fail, ProcedureError, ErrorDescription
+from core.framework.failure import fail, Fail, FailureType, ProcedureError, ErrorDescription
 
 # Make everything available for "from kittysploit import *"
 __all__ = [
@@ -115,6 +115,7 @@ __all__ = [
     'fail',
     'Fail',
     'ProcedureError',
+    'FailureType',
     'ErrorDescription',
     # Option types
     'OptString',

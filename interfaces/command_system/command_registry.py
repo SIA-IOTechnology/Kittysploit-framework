@@ -104,7 +104,8 @@ class CommandRegistry:
             'reload',
             'portal',
             'scanner',
-            'tor'
+            'tor',
+            'route'
         ]
         
         for command_name in builtin_commands:

@@ -130,11 +130,14 @@ echo
 # 6. Install packages in ordered groups so failures are isolated
 # ---------------------------------------------------------------------------
 
+TERMUX_TMP="${TMPDIR:-${PREFIX:-/data/data/com.termux/files/usr}/tmp}"
+mkdir -p "$TERMUX_TMP"
+
 install_pkg() {
     local name="$1"
     shift
     echo -ne "  ${YELLOW}→${NC} $name ... "
-    if $PIP install "$@" 2>/tmp/kittysploit_pip_err.log; then
+    if $PIP install "$@" 2>"$TERMUX_TMP/kittysploit_pip_err.log"; then
         echo -e "${GREEN}OK${NC}"
         return 0
     else

@@ -78,8 +78,11 @@ class Config:
         for directory in [start_dir] + list(start_dir.parents):
             for candidate in ["config.toml", "config/kittysploit.toml", "kittysploit.toml"]:
                 config_path = directory / candidate
-                if config_path.exists():
-                    return str(config_path)
+                try:
+                    if config_path.exists():
+                        return str(config_path)
+                except (PermissionError, OSError):
+                    continue
         # Return default path
         return str(start_dir / "config.toml")
     
@@ -92,7 +95,11 @@ class Config:
         
         try:
             config_path = Path(self.config_file)
-            if not config_path.exists():
+            try:
+                exists = config_path.exists()
+            except (PermissionError, OSError):
+                exists = False
+            if not exists:
                 self._create_default_config_file(config_path)
             with open(config_path, 'rb') as f:
                 self.config = tomllib.load(f)

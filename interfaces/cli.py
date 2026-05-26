@@ -14,7 +14,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.filters import Condition
 
 from core.session import Session
-from core.output_handler import OutputHandler, print_info, print_error, print_status
+from core.output_handler import OutputHandler, print_info, print_error, print_status, print_warning
 from interfaces.command_system.command_registry import CommandRegistry
 from interfaces.command_system.advanced_completer import AdvancedCompleter
 from core.config import Config

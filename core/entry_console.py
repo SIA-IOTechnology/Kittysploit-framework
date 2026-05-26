@@ -106,13 +106,18 @@ def main():
     # Handle encryption setup/loading for RPC and API modes only
     # CLI mode handles encryption in interfaces/cli.py
     if args.rpc or args.api:
-        if not framework.is_encryption_initialized():
+        from core.encryption_manager import HAS_CRYPTOGRAPHY
+        if not HAS_CRYPTOGRAPHY:
+            print_warning(
+                "The 'cryptography' package is not installed. "
+                "Encryption is disabled — sensitive data will be stored in plaintext."
+            )
+        elif not framework.is_encryption_initialized():
             print_info("Setting up encryption for sensitive data protection...")
             if not framework.initialize_encryption():
                 print_error("Failed to initialize encryption. Stopping framework.")
                 return
         else:
-            # Load existing encryption
             if not framework.load_encryption():
                 print_error("Failed to load encryption. Stopping framework.")
                 return

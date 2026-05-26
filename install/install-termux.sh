@@ -73,12 +73,15 @@ echo
 # ---------------------------------------------------------------------------
 # 3. Environment variables needed for native compilation in Termux
 # ---------------------------------------------------------------------------
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
 export CARGO_BUILD_TARGET=""
 export CFLAGS="-Wno-error -Wno-incompatible-function-pointer-types"
-export LDFLAGS="-L/data/data/com.termux/files/usr/lib"
-export CPPFLAGS="-I/data/data/com.termux/files/usr/include"
-export PKG_CONFIG_PATH="/data/data/com.termux/files/usr/lib/pkgconfig"
-export CRYPTOGRAPHY_DONT_BUILD_RUST=0
+export LDFLAGS="-L${PREFIX}/lib"
+export CPPFLAGS="-I${PREFIX}/include"
+export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig"
+export OPENSSL_DIR="$PREFIX"
+export OPENSSL_INCLUDE_DIR="${PREFIX}/include"
+export OPENSSL_LIB_DIR="${PREFIX}/lib"
 export SODIUM_INSTALL="system"
 
 # ---------------------------------------------------------------------------
@@ -179,9 +182,17 @@ echo
 echo -e "${YELLOW}[*]${NC} Installing cryptography packages (needs Rust compiler)..."
 echo -e "${YELLOW}[*]${NC} This may take several minutes on first install..."
 
-install_or_warn "cryptography"  cryptography
+# Try binary wheel first, then build from source
+if ! install_pkg "cryptography" cryptography --only-binary :all: 2>/dev/null; then
+    echo -e "  ${YELLOW}→${NC} No binary wheel available, building from source..."
+    if ! install_pkg "cryptography" cryptography --no-build-isolation; then
+        echo -e "  ${YELLOW}→${NC} Retrying with pip env vars..."
+        CRYPTOGRAPHY_DONT_BUILD_RUST=1 install_or_warn "cryptography" cryptography
+    fi
+fi
+
 install_or_warn "pycryptodome"  pycryptodome
-install_or_warn "bcrypt"        bcrypt
+install_or_warn "bcrypt"        bcrypt --no-build-isolation
 install_or_warn "paramiko"      paramiko
 install_or_warn "pyjwt"         pyjwt
 echo
@@ -318,9 +329,12 @@ if [ ${#SKIPPED[@]} -gt 0 ]; then
 fi
 
 echo -e "${BLUE}Troubleshooting tips:${NC}"
-echo -e "  - If cryptography failed  : pkg install rust openssl && pip install cryptography"
-echo -e "  - If psutil failed        : pkg install clang python-dev && pip install psutil"
+echo -e "  - If cryptography failed  : pkg install rust openssl && pip install cryptography --no-build-isolation"
+echo -e "  - If psutil failed        : pkg install clang && pip install psutil"
 echo -e "  - If Pillow failed        : pkg install libjpeg-turbo libpng && pip install Pillow"
 echo -e "  - If psycopg2 failed      : pkg install postgresql && pip install psycopg2"
 echo -e "  - For Bluetooth (bleak)   : not supported on stock Termux"
+echo
+echo -e "${YELLOW}Note:${NC} If cryptography could not be installed, the framework will"
+echo -e "  still work but without database encryption (data stored in plaintext)."
 echo

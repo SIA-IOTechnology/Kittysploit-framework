@@ -168,7 +168,14 @@ class CLI:
             print_info("\n" + "="*80)
         
         # Handle encryption setup/loading
-        if not self.framework.is_encryption_initialized():
+        from core.encryption_manager import HAS_CRYPTOGRAPHY
+        if not HAS_CRYPTOGRAPHY:
+            print_warning(
+                "The 'cryptography' package is not installed. "
+                "Encryption is disabled — sensitive data will be stored in plaintext."
+            )
+            print_warning("Install it with: pip install cryptography")
+        elif not self.framework.is_encryption_initialized():
             print_info("\n" + "="*80)
             print_status("Encryption setup")
             print_info("="*80)

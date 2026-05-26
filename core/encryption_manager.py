@@ -10,13 +10,19 @@ import base64
 import hashlib
 import secrets
 from typing import Optional, Dict, Any, Union
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.backends import default_backend
 from core.output_handler import print_info, print_warning, print_error, print_success, print_status
 import getpass
 import json
+
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.backends import default_backend
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
+    Fernet = None
 
 class EncryptionManager:
     """Manager for encrypting and decrypting sensitive data"""
@@ -43,6 +49,11 @@ class EncryptionManager:
         self._fernet = None
         self._is_initialized = False
     
+    @staticmethod
+    def is_available() -> bool:
+        """Check if the cryptography library is installed"""
+        return HAS_CRYPTOGRAPHY
+
     def is_initialized(self) -> bool:
         """
         Check if encryption is initialized
@@ -50,10 +61,23 @@ class EncryptionManager:
         Returns:
             True if encryption is initialized, False otherwise
         """
+        if not HAS_CRYPTOGRAPHY:
+            return False
         return (os.path.exists(self.key_file) and 
                 os.path.exists(self.salt_file) and 
                 os.path.exists(self.config_file))
     
+    def _check_cryptography(self) -> bool:
+        """Verify that the cryptography library is available, warn once if not"""
+        if HAS_CRYPTOGRAPHY:
+            return True
+        print_warning(
+            "The 'cryptography' package is not installed. "
+            "Encryption features are disabled. "
+            "Install it with: pip install cryptography"
+        )
+        return False
+
     def initialize_encryption(self, password: str = None) -> bool:
         """
         Initialize encryption with a password
@@ -64,6 +88,8 @@ class EncryptionManager:
         Returns:
             True if initialization successful, False otherwise
         """
+        if not self._check_cryptography():
+            return False
         if self.is_initialized():
             print_warning("[!] Encryption is already initialized.")
             return True
@@ -146,6 +172,8 @@ class EncryptionManager:
         Returns:
             True if loading successful, False otherwise
         """
+        if not self._check_cryptography():
+            return False
         if not self.is_initialized():
             print_error("Encryption not initialized. Run initialize_encryption() first.")
             return False
@@ -225,6 +253,8 @@ class EncryptionManager:
         Returns:
             Base64 encoded encrypted data
         """
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError("cryptography package is not installed.")
         if not self._is_initialized or self._fernet is None:
             raise RuntimeError("Encryption not initialized. Call load_encryption() first.")
         
@@ -260,6 +290,8 @@ class EncryptionManager:
         Returns:
             Decrypted data (original type)
         """
+        if not HAS_CRYPTOGRAPHY:
+            raise RuntimeError("cryptography package is not installed.")
         if not self._is_initialized or self._fernet is None:
             raise RuntimeError("Encryption not initialized. Call load_encryption() first.")
         
@@ -323,6 +355,8 @@ class EncryptionManager:
         Returns:
             True if password changed successfully
         """
+        if not self._check_cryptography():
+            return False
         if not self.is_initialized():
             print_error("Encryption not initialized.")
             return False

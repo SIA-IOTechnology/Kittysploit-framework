@@ -94,6 +94,7 @@ from interfaces.command_system.builtin.agent.auth_operations import AuthContextO
 from interfaces.command_system.builtin.agent.io_utils import atomic_write_json, load_json_dict
 from interfaces.command_system.builtin.agent.module_scoring import (
     ModuleScoreRules,
+    estimate_network_cost,
     information_score_kb,
     module_blob_lower,
     module_path_lower,
@@ -1489,6 +1490,194 @@ class AgentWorkflowCore:
             return "Best low-noise validation step from current evidence."
         return "Best next low-noise validation step."
 
+    def _action_matching_findings(self, path: str, findings: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+        """Return findings that directly justify a planned action path."""
+        low = str(path or "").strip().lower()
+        if not low:
+            return []
+
+        exact: List[Dict[str, Any]] = []
+        fuzzy: List[Dict[str, Any]] = []
+        base = low.rstrip("/").split("/")[-1]
+        for item in findings or []:
+            if not isinstance(item, dict):
+                continue
+            finding_path = str(item.get("path", "") or "").strip().lower()
+            exploit_path = str(self._catalog.normalize_exploit_module_path(item.get("exploit_module")) or "").lower()
+            linked_paths = [
+                str(p).strip().lower()
+                for p in self._catalog.normalize_linked_module_paths(item.get("linked_modules"))
+            ]
+            if low == finding_path or low == exploit_path or low in linked_paths:
+                exact.append(item)
+                continue
+            if len(base) >= 8:
+                blob = " ".join([
+                    finding_path,
+                    exploit_path,
+                    " ".join(linked_paths),
+                    str(item.get("module", "") or "").lower(),
+                    str(item.get("message", "") or "").lower(),
+                ])
+                if base in blob:
+                    fuzzy.append(item)
+
+        rows = exact or fuzzy
+        return sorted(rows, key=lambda row: float(row.get("context_score", 0.0) or 0.0), reverse=True)
+
+    def _action_decision_explanation(
+        self,
+        action: Dict[str, Any],
+        state: AgentState,
+        findings: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build an auditable explanation for a planner action."""
+        action_type = str(action.get("type", "") or "").strip().lower()
+        path = str(action.get("path", "") or "").strip()
+        low = path.lower()
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        matching = self._action_matching_findings(path, findings)
+        top = matching[0] if matching else {}
+        reason = self._action_reason_for_path(path, state, findings)
+
+        evidence: List[str] = []
+        tradeoffs: List[str] = []
+        goal = str(getattr(state, "campaign_goal", "") or "").strip()
+        if goal:
+            evidence.append(f"campaign_goal={goal}")
+
+        if top:
+            msg = self._shorten_text(top.get("message", ""), 150)
+            if msg:
+                evidence.append(f"matched_finding={msg}")
+            decision_class = str(top.get("decision_class", "") or "").strip()
+            if decision_class:
+                evidence.append(f"decision_class={decision_class}")
+            context_hints = [str(x) for x in (top.get("context_hints", []) or []) if str(x).strip()]
+            if context_hints:
+                evidence.append("context_hints=" + ",".join(context_hints[:4]))
+            if self._catalog.normalize_exploit_module_path(top.get("exploit_module")):
+                evidence.append("direct_exploit_link=true")
+
+        conf_rows = self._stack_confidence_rows(kb, threshold=0.4)
+        if conf_rows:
+            evidence.append(f"stack={conf_rows[0][0]}:{conf_rows[0][1]:.2f}")
+
+        login_paths = [str(p) for p in kb.get("login_paths", []) or [] if str(p).startswith("/")]
+        if login_paths and any(token in low for token in ("login", "auth", "bruteforce")):
+            evidence.append(f"login_paths={len(login_paths)}")
+
+        signals = [str(x).lower() for x in kb.get("risk_signals", []) or [] if str(x).strip()]
+        useful_signals = [
+            s for s in signals
+            if s in (
+                "authenticated_session",
+                "credentials_obtained",
+                "login_surface_detected",
+                "login_form_detected",
+                "waf_or_blocking_detected",
+                "dom_xss_signal",
+                "sql_injection",
+            )
+        ]
+        if useful_signals:
+            evidence.append("signals=" + ",".join(useful_signals[:5]))
+
+        request_intel = kb.get("request_intel", {}) if isinstance(kb.get("request_intel", {}), dict) else {}
+        if int(request_intel.get("analyzed_flows", 0) or 0) > 0:
+            evidence.append(f"http_flows={request_intel.get('analyzed_flows', 0)}")
+
+        expected_gain = 1.0
+        if action_type == "run_exploit":
+            expected_gain += 2.2
+        elif action_type == "run_followup":
+            expected_gain += 1.2
+        elif action_type == "prioritize":
+            expected_gain += 0.5
+
+        if top:
+            expected_gain += min(3.0, max(0.0, float(top.get("context_score", 0.0) or 0.0)) / 3.0)
+            if top.get("decision_class") == "exploit":
+                expected_gain += 1.0
+            elif top.get("decision_class") == "followup":
+                expected_gain += 0.45
+        if "authenticated_session" in signals and action_type == "run_exploit":
+            expected_gain += 0.8
+        if any(token in low for token in ("rce", "shell", "upload", "command")):
+            expected_gain += 0.7
+        if any(token in low for token in ("login", "bruteforce")) and login_paths:
+            expected_gain += 0.55
+
+        risk_cost = float(estimate_network_cost(low))
+        if action_type == "run_exploit":
+            risk_cost += 1.25
+        if "bruteforce" in low:
+            risk_cost += 1.1
+        if any(token in low for token in ("crawler", "fuzzer", "fuzz")):
+            risk_cost += 0.8
+        profile = self._normalized_safety_profile(state)
+        if profile in ("safe", "discreet"):
+            risk_cost += 0.35
+            tradeoffs.append(f"safety_profile={profile}")
+        if "waf_or_blocking_detected" in signals:
+            risk_cost += 1.2
+            tradeoffs.append("blocking/WAF signal increases execution risk")
+
+        block_reason = self._module_block_reason_for_profile(state, path)
+        if block_reason:
+            risk_cost += 2.0
+            tradeoffs.append(block_reason)
+
+        if top:
+            factors = top.get("risk_factors", {}) if isinstance(top.get("risk_factors", {}), dict) else {}
+            confidence = float(factors.get("confidence", 0.72) or 0.72)
+        elif evidence:
+            confidence = 0.64
+        else:
+            confidence = 0.46
+        if action_type == "run_exploit" and not any("direct_exploit_link=true" == e for e in evidence):
+            confidence -= 0.12
+            tradeoffs.append("exploit path is inferred rather than directly linked")
+        if "possible" in " ".join(evidence).lower() or "potential" in " ".join(evidence).lower():
+            confidence -= 0.1
+        confidence = max(0.1, min(1.0, confidence))
+
+        score = max(0.0, (expected_gain * confidence * 2.0) - (risk_cost * 0.35))
+        if not tradeoffs and action_type == "run_followup":
+            tradeoffs.append("validation-first step before higher-risk exploitation")
+
+        return {
+            "reason": reason,
+            "score": round(score, 3),
+            "confidence": round(confidence, 3),
+            "expected_gain": round(expected_gain, 3),
+            "risk_cost": round(risk_cost, 3),
+            "evidence": evidence[:8],
+            "tradeoffs": tradeoffs[:5],
+        }
+
+    def _enrich_execution_plan_actions(
+        self,
+        state: AgentState,
+        plan: Dict[str, Any],
+        findings: Optional[List[Any]] = None,
+    ) -> Dict[str, Any]:
+        """Attach decision explanations to every planner action."""
+        out = dict(plan or {})
+        actions = []
+        for row in out.get("next_actions", []) or []:
+            if not isinstance(row, dict):
+                continue
+            enriched = dict(row)
+            explanation = self._action_decision_explanation(enriched, state, findings)
+            enriched["decision_explanation"] = explanation
+            enriched["decision_score"] = explanation["score"]
+            enriched["confidence"] = explanation["confidence"]
+            enriched.setdefault("reason", explanation["reason"])
+            actions.append(enriched)
+        out["next_actions"] = actions
+        return out
+
     def _match_keywords_to_catalog(self, knowledge_base, keywords):
         catalog_paths = []
         if isinstance(knowledge_base, dict):
@@ -2338,11 +2527,18 @@ class AgentWorkflowCore:
             t = str(a.get("type", "")).lower()
             p = str(a.get("path", "")).strip()
             if t in ("run_followup", "run_exploit") and p:
-                return {
+                out = {
                     "type": t,
                     "path": p,
-                    "reason": "Planner next action (from execution plan).",
+                    "reason": str(a.get("reason") or "Planner next action (from execution plan)."),
                 }
+                if "decision_score" in a:
+                    out["decision_score"] = a.get("decision_score")
+                if "confidence" in a:
+                    out["confidence"] = a.get("confidence")
+                if isinstance(a.get("decision_explanation"), dict):
+                    out["decision_explanation"] = a.get("decision_explanation")
+                return out
         return None
 
     def _auth_first_mode(self, state: AgentState) -> bool:
@@ -2398,10 +2594,10 @@ class AgentWorkflowCore:
                     and "admin_login_bruteforce" in str(a.get("path", "")).lower()
                 )
             ]
-            return out
+            return self._enrich_execution_plan_actions(state, out, findings)
         if not self._auth_first_mode(state):
             out["auth_first_mode"] = False
-            return out
+            return self._enrich_execution_plan_actions(state, out, findings)
 
         out["auth_first_mode"] = True
         bf_path = "auxiliary/scanner/http/login/admin_login_bruteforce"
@@ -2446,7 +2642,7 @@ class AgentWorkflowCore:
         except Exception:
             mr = 8
         out["max_requests_next_phase"] = max(mr, 8)
-        return out
+        return self._enrich_execution_plan_actions(state, out, findings)
 
     def _suggest_post_auth_methodical_actions(self, state: AgentState, knowledge_base, max_actions=8):
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
@@ -5755,9 +5951,17 @@ class AgentWorkflowCore:
 
         nba = llm_plan.get("next_best_action")
         if isinstance(nba, dict) and nba.get("type"):
+            nba_score = nba.get("decision_score")
+            nba_conf = nba.get("confidence")
+            score_suffix = ""
+            if nba_score is not None or nba_conf is not None:
+                score_suffix = (
+                    f" | score={float(nba_score or 0.0):.2f}"
+                    f" conf={float(nba_conf or 0.0):.2f}"
+                )
             print_info(
                 f"Next action: {nba.get('type')} {nba.get('path', '')} "
-                f"| {self._shorten_text(nba.get('reason', ''), 120)}"
+                f"| {self._shorten_text(nba.get('reason', ''), 120)}{score_suffix}"
             )
 
         actions = [a for a in (plan.get("next_actions") or []) if isinstance(a, dict)]
@@ -5768,13 +5972,27 @@ class AgentWorkflowCore:
         if run_actions:
             print_info("Planned actions:")
             for row in run_actions:
-                reason = self._action_reason_for_path(
+                explanation = row.get("decision_explanation", {})
+                reason = (
+                    explanation.get("reason")
+                    if isinstance(explanation, dict)
+                    else ""
+                ) or self._action_reason_for_path(
                     str(row.get("path", "") or ""),
                     state,
                     state.contextual_findings or state.vulnerable_results,
                 )
+                score = row.get("decision_score")
+                confidence = row.get("confidence")
+                score_suffix = ""
+                if score is not None or confidence is not None:
+                    score_suffix = f" score={float(score or 0.0):.2f} conf={float(confidence or 0.0):.2f}"
                 print_info(f"- {row.get('type')} {row.get('path', '')}")
-                print_info(f"  because: {self._shorten_text(reason, 120)}")
+                print_info(f"  because: {self._shorten_text(reason, 120)}{score_suffix}")
+                if isinstance(explanation, dict):
+                    evidence = explanation.get("evidence", []) or []
+                    if evidence:
+                        print_info(f"  evidence: {self._shorten_text('; '.join(evidence[:3]), 140)}")
 
         rationale = llm_plan.get("rationale")
         if rationale:

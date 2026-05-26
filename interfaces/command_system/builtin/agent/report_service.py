@@ -70,10 +70,17 @@ class ReportService:
             action_type = str(action.get("type", "")).lower()
             if action_type not in ("run_followup", "run_exploit", "prioritize"):
                 continue
+            explanation = action.get("decision_explanation", {})
+            if not isinstance(explanation, dict):
+                explanation = {}
             planned_actions.append({
                 "type": action_type,
                 "path": str(action.get("path", "") or ""),
                 "priority": action.get("priority"),
+                "reason": str(action.get("reason") or explanation.get("reason") or ""),
+                "decision_score": action.get("decision_score"),
+                "confidence": action.get("confidence"),
+                "decision_explanation": explanation,
             })
             if len(planned_actions) >= 6:
                 break
@@ -302,9 +309,17 @@ class ReportService:
                 report_md.write(f"- Confidence: {decision_summary.get('reasoning_confidence', 0.0)}\n")
                 next_best_action = decision_summary.get("next_best_action", {}) or {}
                 if next_best_action.get("type"):
+                    score = next_best_action.get("decision_score")
+                    confidence = next_best_action.get("confidence")
+                    suffix = ""
+                    if score is not None or confidence is not None:
+                        suffix = (
+                            f" score={float(score or 0.0):.2f}"
+                            f" confidence={float(confidence or 0.0):.2f}"
+                        )
                     report_md.write(
                         f"- Next best action: `{next_best_action.get('type')}` "
-                        f"`{next_best_action.get('path', '')}`\n"
+                        f"`{next_best_action.get('path', '')}`{suffix}\n"
                     )
                     if next_best_action.get("reason"):
                         report_md.write(
@@ -330,7 +345,24 @@ class ReportService:
                 if planned_actions:
                     report_md.write("- Planned actions:\n")
                     for row in planned_actions:
-                        report_md.write(f"  - `{row.get('type')}` `{row.get('path', '')}`\n")
+                        score = row.get("decision_score")
+                        confidence = row.get("confidence")
+                        suffix = ""
+                        if score is not None or confidence is not None:
+                            suffix = (
+                                f" score={float(score or 0.0):.2f}"
+                                f" confidence={float(confidence or 0.0):.2f}"
+                            )
+                        report_md.write(f"  - `{row.get('type')}` `{row.get('path', '')}`{suffix}\n")
+                        reason = row.get("reason") or (row.get("decision_explanation", {}) or {}).get("reason")
+                        if reason:
+                            report_md.write(f"    reason: {self._shorten(reason, 220)}\n")
+                        explanation = row.get("decision_explanation", {}) or {}
+                        evidence = explanation.get("evidence", []) if isinstance(explanation, dict) else []
+                        if evidence:
+                            report_md.write(
+                                f"    evidence: {self._shorten('; '.join([str(x) for x in evidence[:4]]), 260)}\n"
+                            )
                 report_md.write("\n")
 
                 report_md.write("## Important Findings\n")

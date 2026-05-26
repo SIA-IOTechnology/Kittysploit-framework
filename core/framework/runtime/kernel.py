@@ -19,15 +19,22 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
-    # Créer une classe mock pour psutil.Process
+
+    class _MockMemoryInfo:
+        rss = 0
+
     class MockProcess:
+        def __init__(self, pid=None):
+            pass
         def cpu_percent(self, interval=0.1):
             return 0.0
         def memory_info(self):
-            class MockMemoryInfo:
-                rss = 0
-            return MockMemoryInfo()
-    psutil = type('psutil', (), {'Process': lambda: MockProcess()})()
+            return _MockMemoryInfo()
+
+    class _MockPsutil:
+        Process = MockProcess
+
+    psutil = _MockPsutil()
 
 from core.framework.base_module import BaseModule
 from core.framework.utils.sandbox_executor import SandboxExecutor

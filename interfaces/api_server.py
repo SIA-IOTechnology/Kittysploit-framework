@@ -6,7 +6,7 @@ API Server unifié - Service REST pour le framework
 Combine les fonctionnalités de api_server et headless_service
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import threading
 import uuid
@@ -16,7 +16,7 @@ import time
 import io
 import sys
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 
 # Ajouter le répertoire parent au PYTHONPATH pour les imports relatifs
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,6 +35,18 @@ try:
 except ImportError:
     RUNTIME_KERNEL_AVAILABLE = False
 
+from interfaces.api_security import (
+    ROLE_PERMISSIONS,
+    ApiRateLimiter,
+    RequestAuthenticator,
+    RotatingTokenManager,
+    iso_timestamp,
+    mask_token,
+    normalize_roles,
+    parse_cors_origins,
+    secrets_equal,
+)
+
 class ApiServer:
     """
     Serveur API unifié pour le framework
@@ -48,17 +60,28 @@ class ApiServer:
         self.host = host
         self.port = port
         self.api_key = (api_key or "").strip() or None
+        self.started_at = time.time()
         self.app = Flask(__name__)
-        CORS(self.app)  # Permettre les requêtes cross-origin
         self.framework = framework
         self.clients = {}  # Stocke les clients connectés
         self.interpreters = {}  # Stocke les interpréteurs par session
         self.server_thread: Optional[threading.Thread] = None
         self.running = False
+        self.token_manager = RotatingTokenManager(self.api_key, issuer="kittysploit-api")
+        self.authenticator = RequestAuthenticator(self.token_manager)
+        self.rate_limiter = ApiRateLimiter()
+        self.route_permissions: Dict[str, str] = {}
+        self.route_rate_tiers: Dict[str, str] = {}
+        self._last_auth_error: Dict[str, Any] = {
+            "status_code": 401,
+            "error": "Unauthorized",
+            "message": "A valid API key or Bearer access token is required.",
+        }
         
         # Logger
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        self._configure_cors()
         
         # Initialize registry service if available (mode serveur registry uniquement)
         # Note: Le registry est normalement un service distant géré par KittySploit
@@ -99,17 +122,135 @@ class ApiServer:
     
     def setup_routes(self):
         """Configure les routes de l'API"""
+
+        @self.app.before_request
+        def enforce_rbac():
+            return self.enforce_rbac()
         
         # ===== Routes de base =====
         
         @self.app.route('/api/health', methods=['GET'])
         def health():
-            """Health check"""
+            """Health check public (résumé non sensible)."""
+            return jsonify(self.health_payload(detailed=False))
+
+        @self.app.route('/api/health/live', methods=['GET'])
+        def health_live():
+            """Liveness check public."""
             return jsonify({
-                "status": "healthy",
-                "version": getattr(self.framework, 'version', 'unknown'),
-                "runtime_kernel": "active" if (RUNTIME_KERNEL_AVAILABLE and hasattr(self.framework, 'runtime_kernel')) else "inactive",
-                "interpreter": "available" if INTERPRETER_AVAILABLE else "unavailable"
+                "status": "alive",
+                "service": "kittysploit-api",
+                "timestamp": iso_timestamp(),
+                "uptime_seconds": round(time.time() - self.started_at, 3),
+            })
+
+        @self.app.route('/api/health/ready', methods=['GET'])
+        def health_ready():
+            """Readiness check avec statut HTTP adapté."""
+            payload = self.health_payload(detailed=True)
+            status_code = 200 if payload.get("status") in ("healthy", "degraded") else 503
+            return jsonify(payload), status_code
+
+        @self.app.route('/api/health/detailed', methods=['GET'])
+        def health_detailed():
+            """Health détaillé pour opérateurs authentifiés."""
+            return jsonify(self.health_payload(detailed=True))
+
+        @self.app.route('/api/openapi.json', methods=['GET'])
+        def openapi_json():
+            """Specification OpenAPI 3.0 de l'API REST."""
+            return jsonify(self.build_openapi_spec())
+
+        @self.app.route('/api/docs', methods=['GET'])
+        def api_docs():
+            """Documentation Swagger UI minimale."""
+            return (
+                """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>KittySploit API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => SwaggerUIBundle({ url: "/api/openapi.json", dom_id: "#swagger-ui" });
+  </script>
+</body>
+</html>""",
+                200,
+                {"Content-Type": "text/html; charset=utf-8"},
+            )
+
+        @self.app.route('/api/auth/token', methods=['POST'])
+        def auth_token():
+            """Émet un access token court terme et un refresh token rotatif."""
+            data = request.json or {}
+            roles = normalize_roles(data.get("roles") or ("operator",))
+            token_data = self.token_manager.issue_pair(
+                subject=str(data.get("subject") or "operator"),
+                roles=roles,
+                permissions=data.get("permissions") or None,
+                access_ttl_seconds=data.get("ttl_seconds"),
+                refresh_ttl_seconds=data.get("refresh_ttl_seconds"),
+                metadata={"issuer": "api"},
+            )
+            return jsonify(token_data), 201
+
+        @self.app.route('/api/auth/refresh', methods=['POST'])
+        @self.app.route('/api/auth/rotate', methods=['POST'])
+        def auth_refresh():
+            """Rotation du refresh token: révoque l'ancienne famille et émet une nouvelle paire."""
+            data = request.json or {}
+            refresh_token = data.get("refresh_token")
+            if not refresh_token:
+                auth_header = request.headers.get("Authorization", "")
+                if auth_header.lower().startswith("bearer "):
+                    refresh_token = auth_header[7:].strip()
+            token_data = self.token_manager.rotate_refresh(refresh_token)
+            if not token_data:
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": "A valid refresh token is required.",
+                }), 401
+            return jsonify(token_data)
+
+        @self.app.route('/api/auth/revoke', methods=['POST'])
+        def auth_revoke():
+            """Révoque un access/refresh token rotatif."""
+            data = request.json or {}
+            body_token = data.get("token") or data.get("refresh_token")
+            current_token = request.headers.get("X-API-Key")
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                current_token = auth_header[7:].strip()
+
+            token = body_token
+            if not token:
+                token = current_token
+            ctx = getattr(g, "auth_context", None)
+            if body_token and token != current_token and ctx and not ctx.has_permission("auth:token"):
+                return jsonify({
+                    "error": "Forbidden",
+                    "message": "Only an admin token can revoke another token.",
+                }), 403
+            if token and self.api_key and secrets_equal(token, self.api_key):
+                return jsonify({
+                    "error": "Forbidden",
+                    "message": "The bootstrap API key cannot be revoked through this endpoint.",
+                }), 403
+            revoked = self.token_manager.revoke(token)
+            return jsonify({"revoked": revoked, "token": mask_token(token)})
+
+        @self.app.route('/api/auth/me', methods=['GET'])
+        def auth_me():
+            """Retourne le principal authentifié et les stats RBAC."""
+            ctx = getattr(g, "auth_context", None)
+            return jsonify({
+                "principal": ctx.to_dict() if ctx else None,
+                "token_manager": self.token_manager.stats(),
             })
         
         @self.app.route('/api/metrics', methods=['GET'])
@@ -721,33 +862,526 @@ class ApiServer:
                     return jsonify({"error": "Revocation failed"}), 400
                 
                 return jsonify({"success": True})
+
+        self.configure_route_permissions()
+
+    def _configure_cors(self) -> None:
+        """Enable CORS only when KITTYSPLOIT_API_CORS_ORIGINS is explicitly set."""
+        origins = parse_cors_origins(os.environ.get("KITTYSPLOIT_API_CORS_ORIGINS"))
+        if not origins:
+            self.logger.info(
+                "CORS disabled by default; set KITTYSPLOIT_API_CORS_ORIGINS to allow cross-origin access"
+            )
+            return
+        if origins == ["*"]:
+            self.logger.warning("CORS allows all origins (KITTYSPLOIT_API_CORS_ORIGINS=*)")
+            CORS(self.app, resources={r"/api/*": {"origins": "*"}})
+            return
+        CORS(
+            self.app,
+            resources={r"/api/*": {"origins": origins}},
+            supports_credentials=True,
+        )
+        self.logger.info("CORS enabled for origins: %s", ", ".join(origins))
+
+    def configure_route_permissions(self):
+        """Map Flask endpoints to RBAC permissions."""
+        self.route_permissions = {
+            # Public, low-sensitivity discovery/status endpoints.
+            "health": "public",
+            "health_live": "public",
+            "openapi_json": "public",
+            "api_docs": "public",
+            "auth_refresh": "public",
+
+            # Auth/token lifecycle.
+            "auth_token": "auth:token",
+            "auth_revoke": "authenticated",
+            "auth_me": "authenticated",
+
+            # Health/details and framework read paths.
+            "health_ready": "health:read",
+            "health_detailed": "health:read",
+            "get_metrics": "metrics:read",
+            "get_modules": "modules:read",
+            "get_module_info": "modules:read",
+            "get_sessions": "sessions:read",
+            "get_session": "sessions:read",
+            "get_output": "output:read",
+            "stream_output": "output:read",
+            "get_events": "events:read",
+            "get_resource_usage": "resources:read",
+            "list_workspaces": "workspaces:read",
+            "list_registry_extensions": "registry:read",
+            "get_registry_extension": "registry:read",
+            "download_registry_extension": "registry:read",
+
+            # Mutating/high-risk operations.
+            "generate_mock_data": "mock:generate",
+            "run_module": "modules:run",
+            "execute_module": "modules:run",
+            "delete_session": "sessions:delete",
+            "execute_interpreter": "interpreter:execute",
+            "create_pipeline": "pipelines:write",
+            "switch_workspace": "workspaces:switch",
+            "purchase_registry_extension": "registry:write",
+            "register_publisher": "registry:write",
+            "publish_extension": "registry:write",
+            "revoke_extension": "registry:write",
+        }
+        self.route_rate_tiers = {
+            "health": "public",
+            "health_live": "public",
+            "openapi_json": "public",
+            "api_docs": "public",
+            "auth_token": "auth",
+            "auth_refresh": "auth",
+            "auth_revoke": "auth",
+            "generate_mock_data": "admin",
+            "run_module": "mutate",
+            "execute_module": "mutate",
+            "delete_session": "mutate",
+            "execute_interpreter": "admin",
+            "create_pipeline": "mutate",
+            "switch_workspace": "mutate",
+            "purchase_registry_extension": "admin",
+            "register_publisher": "admin",
+            "publish_extension": "admin",
+            "revoke_extension": "admin",
+        }
+
+    def enforce_rbac(self):
+        """Authenticate and authorize every /api route before reaching handlers."""
+        if not request.path.startswith("/api"):
+            return None
+
+        permission = self.route_permissions.get(request.endpoint)
+        if permission == "public":
+            rate_tier = self.route_rate_tiers.get(request.endpoint, "public")
+            allowed, rate_info = self.rate_limiter.allow(
+                rate_tier,
+                request.remote_addr or "unknown",
+            )
+            if not allowed:
+                return self.rate_limit_response(rate_info)
+            return None
+
+        rate_tier = self.route_rate_tiers.get(request.endpoint, "read")
+        allowed, rate_info = self.rate_limiter.allow(
+            rate_tier,
+            request.remote_addr or "unknown",
+        )
+        if not allowed:
+            return self.rate_limit_response(rate_info)
+
+        if permission is None:
+            permission = "admin:all"
+
+        required_permission = None if permission == "authenticated" else permission
+        ctx, error = self.authenticator.authenticate_request(request, required_permission)
+        if error:
+            self._last_auth_error = error
+            return self.auth_error_response()
+
+        g.auth_context = ctx
+        return None
     
-    def check_auth(self, request):
+    def check_auth(self, request, permission=None):
         """Vérifie l'authentification de la requête (supporte X-API-Key et Authorization Bearer).
 
         Sans clé serveur configurée, l'accès est refusé (plus d'« open bar » par défaut).
         """
-        if not self.api_key:
-            return False
-
-        # Support de X-API-Key (méthode originale)
-        api_key = request.headers.get('X-API-Key')
-        if api_key == self.api_key:
+        ctx = getattr(g, "auth_context", None)
+        if ctx and ctx.has_permission(permission):
             return True
-        
-        # Support de Authorization Bearer (méthode headless_service)
-        auth_header = request.headers.get('Authorization')
-        if auth_header:
-            # Format: "Bearer <api_key>" ou juste "<api_key>"
-            if auth_header.startswith('Bearer '):
-                token = auth_header[7:]
+
+        ctx, error = self.authenticator.authenticate_request(request, permission)
+        if error:
+            self._last_auth_error = error
+            return False
+        g.auth_context = ctx
+        return True
+
+    def rate_limit_response(self, rate_info: Optional[Dict[str, int]]):
+        """Return a 429 response when a client exceeds route rate limits."""
+        info = rate_info or {}
+        response = jsonify({
+            "error": "Too Many Requests",
+            "message": "API rate limit exceeded for this endpoint.",
+            "retry_after": info.get("retry_after"),
+            "limit": info.get("limit"),
+            "window_seconds": info.get("window_seconds"),
+        })
+        response.status_code = 429
+        retry_after = info.get("retry_after")
+        if retry_after:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
+
+    def auth_error_response(self):
+        """Return the last authentication/authorization error as JSON."""
+        error = dict(self._last_auth_error)
+        status_code = int(error.pop("status_code", 401))
+        return jsonify(error), status_code
+
+    def health_payload(self, detailed=False):
+        """Build API health details without leaking internals on the public summary."""
+        auth_ready = bool(self.api_key)
+        framework_ready = self.framework is not None
+        status = "healthy" if auth_ready and framework_ready else "unhealthy"
+        runtime_status = (
+            "active"
+            if (RUNTIME_KERNEL_AVAILABLE and hasattr(self.framework, 'runtime_kernel'))
+            else "inactive"
+        )
+
+        payload = {
+            "status": status,
+            "service": "kittysploit-api",
+            "version": getattr(self.framework, 'version', 'unknown'),
+            "timestamp": iso_timestamp(),
+            "uptime_seconds": round(time.time() - self.started_at, 3),
+            "runtime_kernel": runtime_status,
+            "interpreter": "available" if INTERPRETER_AVAILABLE else "unavailable",
+        }
+
+        if not detailed:
+            return payload
+
+        components = {
+            "framework": {
+                "status": "ok" if framework_ready else "error",
+                "workspace": getattr(self.framework, "current_workspace", None),
+            },
+            "auth": {
+                "status": "ok" if auth_ready else "error",
+                **self.token_manager.stats(),
+            },
+            "runtime_kernel": {
+                "status": runtime_status,
+                "package_available": RUNTIME_KERNEL_AVAILABLE,
+            },
+            "interpreter": {
+                "status": "available" if INTERPRETER_AVAILABLE else "unavailable",
+            },
+            "registry": {
+                "mode": self.registry_mode,
+                "status": "available" if self.registry_service else "client",
+            },
+            "clients": {
+                "total": len(self.clients),
+                "active": sum(1 for c in self.clients.values() if c.get("active")),
+            },
+        }
+
+        try:
+            if hasattr(self.framework, "get_module_counts_by_type"):
+                components["modules"] = {
+                    "status": "ok",
+                    "counts": self.framework.get_module_counts_by_type(),
+                }
+            elif hasattr(self.framework, "get_available_modules"):
+                modules = self.framework.get_available_modules()
+                components["modules"] = {
+                    "status": "ok",
+                    "count": len(modules) if hasattr(modules, "__len__") else None,
+                }
+        except Exception as e:
+            components["modules"] = {"status": "degraded", "error": str(e)}
+            status = "degraded"
+
+        try:
+            if hasattr(self.framework, "get_workspaces"):
+                workspaces = self.framework.get_workspaces()
+                components["workspaces"] = {
+                    "status": "ok",
+                    "count": len(workspaces) if hasattr(workspaces, "__len__") else None,
+                }
+        except Exception as e:
+            components["workspaces"] = {"status": "degraded", "error": str(e)}
+            status = "degraded"
+
+        payload["status"] = status
+        payload["components"] = components
+        payload["rbac"] = {
+            role: sorted(perms)
+            for role, perms in ROLE_PERMISSIONS.items()
+        }
+        return payload
+
+    def build_openapi_spec(self):
+        """Return a compact OpenAPI 3 document for the Flask REST surface."""
+        security = [{"ApiKeyAuth": []}, {"BearerAuth": []}]
+
+        def response(description, schema_type="object"):
+            return {
+                "description": description,
+                "content": {
+                    "application/json": {
+                        "schema": {"type": schema_type},
+                    },
+                },
+            }
+
+        def operation(
+            method,
+            summary,
+            permission="authenticated",
+            *,
+            request_body=False,
+            parameters=None,
+            public=False,
+        ):
+            op = {
+                "summary": summary,
+                "operationId": method,
+                "responses": {
+                    "200": response("OK"),
+                    "401": response("Unauthorized"),
+                    "403": response("Forbidden"),
+                },
+                "x-rbac-permission": "public" if public else permission,
+            }
+            if public:
+                op["security"] = []
+                op["responses"].pop("401", None)
+                op["responses"].pop("403", None)
             else:
-                token = auth_header
-            
-            if token == self.api_key:
-                return True
-        
-        return False
+                op["security"] = security
+            if parameters:
+                op["parameters"] = parameters
+            if request_body:
+                op["requestBody"] = {
+                    "required": False,
+                    "content": {
+                        "application/json": {
+                            "schema": {"type": "object", "additionalProperties": True},
+                        },
+                    },
+                }
+            return op
+
+        path_param = lambda name, typ="string": {
+            "name": name,
+            "in": "path",
+            "required": True,
+            "schema": {"type": typ},
+        }
+
+        paths = {
+            "/api/health": {
+                "get": operation("getHealth", "Public health summary", public=True),
+            },
+            "/api/health/live": {
+                "get": operation("getLiveness", "Public liveness check", public=True),
+            },
+            "/api/health/ready": {
+                "get": operation("getReadiness", "Detailed readiness check", "health:read"),
+            },
+            "/api/health/detailed": {
+                "get": operation("getDetailedHealth", "Detailed health report", "health:read"),
+            },
+            "/api/openapi.json": {
+                "get": operation("getOpenApiSpec", "OpenAPI document", public=True),
+            },
+            "/api/auth/token": {
+                "post": operation("issueToken", "Issue rotating access/refresh tokens", "auth:token", request_body=True),
+            },
+            "/api/auth/refresh": {
+                "post": operation("refreshToken", "Rotate a refresh token", public=True, request_body=True),
+            },
+            "/api/auth/rotate": {
+                "post": operation("rotateToken", "Alias for refresh-token rotation", public=True, request_body=True),
+            },
+            "/api/auth/revoke": {
+                "post": operation("revokeToken", "Revoke a rotating token", "authenticated", request_body=True),
+            },
+            "/api/auth/me": {
+                "get": operation("getAuthContext", "Current authenticated principal", "authenticated"),
+            },
+            "/api/metrics": {
+                "get": operation("getMetrics", "Framework metrics", "metrics:read"),
+            },
+            "/api/data/generate-mock": {
+                "post": operation("generateMockData", "Generate mock framework data", "mock:generate", request_body=True),
+            },
+            "/api/modules": {
+                "get": operation("listModules", "List modules", "modules:read"),
+            },
+            "/api/modules/{module_path}": {
+                "get": operation(
+                    "getModuleInfo",
+                    "Get module metadata and options",
+                    "modules:read",
+                    parameters=[path_param("module_path")],
+                ),
+            },
+            "/api/modules/{module_path}/run": {
+                "post": operation(
+                    "runModule",
+                    "Run a module with output streaming",
+                    "modules:run",
+                    request_body=True,
+                    parameters=[path_param("module_path")],
+                ),
+            },
+            "/api/modules/{module_path}/execute": {
+                "post": operation(
+                    "executeModule",
+                    "Run a module via classic or runtime-kernel execution",
+                    "modules:run",
+                    request_body=True,
+                    parameters=[path_param("module_path")],
+                ),
+            },
+            "/api/sessions": {
+                "get": operation("listSessions", "List sessions", "sessions:read"),
+            },
+            "/api/sessions/{session_id}": {
+                "get": operation(
+                    "getSession",
+                    "Get session details",
+                    "sessions:read",
+                    parameters=[path_param("session_id", "integer")],
+                ),
+                "delete": operation(
+                    "deleteSession",
+                    "Delete a session",
+                    "sessions:delete",
+                    parameters=[path_param("session_id", "integer")],
+                ),
+            },
+            "/api/output/{client_id}": {
+                "get": operation(
+                    "getOutput",
+                    "Poll module output",
+                    "output:read",
+                    parameters=[path_param("client_id")],
+                ),
+            },
+            "/api/output/{client_id}/stream": {
+                "get": operation(
+                    "streamOutput",
+                    "Stream module output via SSE",
+                    "output:read",
+                    parameters=[path_param("client_id")],
+                ),
+            },
+            "/api/interpreter/execute": {
+                "post": operation(
+                    "executeInterpreter",
+                    "Execute Python in the framework interpreter",
+                    "interpreter:execute",
+                    request_body=True,
+                ),
+            },
+            "/api/pipelines": {
+                "post": operation("createPipeline", "Create and execute a pipeline", "pipelines:write", request_body=True),
+            },
+            "/api/events": {
+                "get": operation("listEvents", "List runtime events", "events:read"),
+            },
+            "/api/resources/{module_id}": {
+                "get": operation(
+                    "getResourceUsage",
+                    "Get module resource usage",
+                    "resources:read",
+                    parameters=[path_param("module_id")],
+                ),
+            },
+            "/api/workspaces": {
+                "get": operation("listWorkspaces", "List workspaces", "workspaces:read"),
+            },
+            "/api/workspaces/{name}": {
+                "post": operation(
+                    "switchWorkspace",
+                    "Switch workspace",
+                    "workspaces:switch",
+                    parameters=[path_param("name")],
+                ),
+            },
+            "/api/registry/extensions": {
+                "get": operation("listRegistryExtensions", "List registry extensions", "registry:read"),
+                "post": operation("publishExtension", "Publish a registry extension", "registry:write", request_body=True),
+            },
+            "/api/registry/extensions/{extension_id}": {
+                "get": operation(
+                    "getRegistryExtension",
+                    "Get registry extension details",
+                    "registry:read",
+                    parameters=[path_param("extension_id")],
+                ),
+            },
+            "/api/registry/extensions/{extension_id}/download": {
+                "get": operation(
+                    "downloadRegistryExtension",
+                    "Download registry extension bundle",
+                    "registry:read",
+                    parameters=[path_param("extension_id")],
+                ),
+            },
+            "/api/registry/extensions/{extension_id}/purchase": {
+                "post": operation(
+                    "purchaseRegistryExtension",
+                    "Purchase a registry extension",
+                    "registry:write",
+                    request_body=True,
+                    parameters=[path_param("extension_id")],
+                ),
+            },
+            "/api/registry/publishers": {
+                "post": operation("registerPublisher", "Register a publisher", "registry:write", request_body=True),
+            },
+            "/api/registry/extensions/{extension_id}/revoke": {
+                "post": operation(
+                    "revokeRegistryExtension",
+                    "Revoke a registry extension",
+                    "registry:write",
+                    request_body=True,
+                    parameters=[path_param("extension_id")],
+                ),
+            },
+        }
+
+        return {
+            "openapi": "3.0.3",
+            "info": {
+                "title": "KittySploit REST API",
+                "version": getattr(self.framework, 'version', 'unknown'),
+                "description": "REST control surface for KittySploit with rotating tokens and RBAC.",
+            },
+            "servers": [{"url": f"http://{self.host}:{self.port}"}],
+            "paths": paths,
+            "components": {
+                "securitySchemes": {
+                    "ApiKeyAuth": {
+                        "type": "apiKey",
+                        "in": "header",
+                        "name": "X-API-Key",
+                        "description": "Bootstrap admin key, normally used to mint rotating tokens.",
+                    },
+                    "BearerAuth": {
+                        "type": "http",
+                        "scheme": "bearer",
+                        "description": "Rotating access token returned by /api/auth/token or /api/auth/refresh.",
+                    },
+                },
+                "schemas": {
+                    "Error": {
+                        "type": "object",
+                        "properties": {
+                            "error": {"type": "string"},
+                            "message": {"type": "string"},
+                            "required_permission": {"type": "string"},
+                        },
+                    }
+                },
+            },
+            "x-rbac-roles": {
+                role: sorted(perms)
+                for role, perms in ROLE_PERMISSIONS.items()
+            },
+        }
     
     def setup_output_redirection(self, client_id):
         """Configure la redirection des sorties pour un client"""
@@ -876,4 +1510,4 @@ class ApiServer:
         """Arrête le serveur API"""
         # Flask ne supporte pas l'arrêt propre, on marque juste comme arrêté
         self.running = False
-        self.logger.info("API server stopped") 
+        self.logger.info("API server stopped")

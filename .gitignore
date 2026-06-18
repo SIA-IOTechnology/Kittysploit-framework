@@ -29,6 +29,7 @@ cache/
 # Test files
 test_*.py
 *_test.py
+!tests/test_json_schemas.py
 
 # Temporary files
 *.tmp
@@ -79,3 +80,7 @@ kitty_marketplace/*
 
 launch_*.py
 modules/browser_exploits/multi/chrome_font_feature_uaf.py
+
+apps/*
+artifacts/*
+TODO.md

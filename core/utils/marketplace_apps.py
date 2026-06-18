@@ -1,45 +1,22 @@
-"""Resolve official marketplace UI apps (kittyproxy, kittyosint, kittyprotocol)."""
+"""Resolve official marketplace UI apps."""
 
 from __future__ import annotations
 
 import importlib.util
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional
+
+from core.utils.paths import framework_root, shared_static_img_dir
 
 # extension id -> python package directory name under src/
 OFFICIAL_APP_PACKAGES: Dict[str, str] = {
     "kittyproxy": "kittyproxy",
     "kittyosint": "kittyosint",
     "kittyprotocol": "kittyprotocol",
+    "kittyreport": "kittyreport",
+    "kittysupply": "kittysupply",
 }
-
-
-def framework_root() -> Optional[Path]:
-    core_spec = importlib.util.find_spec("core")
-    if core_spec and core_spec.origin:
-        root = Path(core_spec.origin).resolve().parent.parent
-        if (root / "core").is_dir():
-            return root
-
-    env_home = os.environ.get("KITTYSPLOIT_HOME")
-    if env_home:
-        root = Path(env_home).expanduser().resolve()
-        if (root / "core").is_dir():
-            return root
-
-    root = Path(__file__).resolve().parents[2]
-    if (root / "core").is_dir():
-        return root
-    return None
-
-
-def shared_static_img_dir() -> Path:
-    root = framework_root()
-    if root is None:
-        raise FileNotFoundError("KittySploit framework root not found")
-    return root / "interfaces" / "static" / "img"
 
 
 def discover_app_src(root: Path, package_name: str) -> Optional[Path]:

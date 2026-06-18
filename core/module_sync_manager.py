@@ -24,6 +24,7 @@ from core.models.models import Module
 from core.output_handler import print_info, print_success, print_error, print_warning
 from core.utils.exceptions import KittyException
 from core.utils.module_static_metadata import extract_module_sync_metadata
+from core.module_search import ModuleSearchFilters, apply_module_search_filters, extract_search_facets
 
 
 class ModuleSyncManager:
@@ -209,6 +210,10 @@ class ModuleSyncManager:
                     opts_dict = meta.get("options") or {}
                     if not isinstance(opts_dict, dict):
                         opts_dict = {}
+                    facets = extract_search_facets(meta, module_path)
+                    opts_dict["_search"] = {
+                        key: value for key, value in facets.items() if value
+                    }
                     try:
                         opts_json = json.dumps(opts_dict)
                     except (TypeError, ValueError):
@@ -491,16 +496,67 @@ class ModuleSyncManager:
         except Exception:
             return ""
     
-    def search_modules(self, query: str = "", module_type: str = "", 
-                      author: str = "", cve: str = "", tags: str = "", limit: int = 100) -> List[Dict]:
-        """Search modules in database"""
+    def search_modules(
+        self,
+        filters: ModuleSearchFilters = None,
+        query: str = "",
+        module_type: str = "",
+        author: str = "",
+        cve: str = "",
+        tags: str = "",
+        limit: int = 100,
+    ) -> List[Dict]:
+        """Search modules in database with optional structured filters."""
+        if filters is None:
+            filters = ModuleSearchFilters(
+                query=query,
+                module_type=module_type,
+                author=author,
+                cve=cve,
+                tag=tags,
+                limit=limit,
+            )
         try:
             with self.db_manager.session_scope(self.workspace) as session:
                 query_obj = session.query(Module).filter(Module.is_active == True)
-                
-                # Free-text: each token must match at least one of name, description, path, tags (SQL only).
-                if query:
-                    for raw_token in query.replace(",", " ").split():
+
+                if filters.normalized_type():
+                    query_obj = query_obj.filter(Module.type == filters.normalized_type())
+                if filters.author:
+                    query_obj = query_obj.filter(Module.author.ilike(f"%{filters.author}%"))
+                if filters.cve:
+                    query_obj = query_obj.filter(
+                        or_(
+                            Module.cve.ilike(f"%{filters.cve}%"),
+                            Module.path.ilike(f"%{filters.cve.lower()}%"),
+                        )
+                    )
+                if filters.tag:
+                    query_obj = query_obj.filter(Module.tags.ilike(f"%{filters.tag}%"))
+                if filters.platform:
+                    query_obj = query_obj.filter(
+                        or_(
+                            Module.options.ilike(f"%{filters.platform.lower()}%"),
+                            Module.path.ilike(f"%{filters.platform.lower()}%"),
+                        )
+                    )
+                if filters.protocol:
+                    query_obj = query_obj.filter(
+                        or_(
+                            Module.options.ilike(f"%{filters.protocol.lower()}%"),
+                            Module.path.ilike(f"%/{filters.protocol.lower()}/%"),
+                        )
+                    )
+                if filters.reliability:
+                    query_obj = query_obj.filter(Module.options.ilike(f"%{filters.normalized_reliability()}%"))
+
+                if filters.since:
+                    query_obj = query_obj.filter(Module.updated_at >= filters.since)
+                if filters.until:
+                    query_obj = query_obj.filter(Module.updated_at <= filters.until)
+
+                if filters.query:
+                    for raw_token in filters.query.replace(",", " ").split():
                         token = raw_token.strip()
                         if not token:
                             continue
@@ -513,24 +569,12 @@ class ModuleSyncManager:
                                 Module.tags.ilike(pattern),
                             )
                         )
-                
-                if module_type:
-                    query_obj = query_obj.filter(Module.type == module_type)
-                
-                if author:
-                    query_obj = query_obj.filter(Module.author.ilike(f"%{author}%"))
-                
-                if cve:
-                    query_obj = query_obj.filter(Module.cve.ilike(f"%{cve}%"))
-                
-                if tags:
-                    query_obj = query_obj.filter(Module.tags.ilike(f"%{tags}%"))
-                
-                # Apply limit and order
-                modules = query_obj.order_by(Module.name).limit(limit).all()
-                
-                return [module.to_dict() for module in modules]
-                
+
+                fetch_limit = max(int(filters.limit or 50) * 4, 100)
+                modules = query_obj.order_by(Module.updated_at.desc(), Module.name).limit(fetch_limit).all()
+                records = [module.to_dict() for module in modules]
+                return apply_module_search_filters(records, filters)
+
         except Exception as e:
             print_error(f"Error searching modules: {e}")
             return []

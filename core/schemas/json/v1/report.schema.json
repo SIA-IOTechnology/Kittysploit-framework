@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/report.schema.json",
+  "title": "KittySploit Report",
+  "description": "A report bundle for KittySploit exports, MCP/API payloads, marketplace plugins, and external deliverables.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "generated_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "client_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "template": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "formats": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "json",
+          "md",
+          "markdown",
+          "html",
+          "pdf",
+          "sarif",
+          "csaf",
+          "cyclonedx",
+          "vex"
+        ]
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "target.schema.json"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "$ref": "target.schema.json"
+      },
+      "default": []
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "finding.schema.json"
+      },
+      "default": []
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "evidence.schema.json"
+      },
+      "default": []
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "$ref": "job.schema.json"
+      },
+      "default": []
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "$ref": "session.schema.json"
+      },
+      "default": []
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "finding_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "host_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "job_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "status_counts": {
+          "$ref": "common.schema.json#/$defs/counts"
+        },
+        "severity_counts": {
+          "$ref": "common.schema.json#/$defs/counts"
+        },
+        "retest_pending": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "exports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[A-Fa-f0-9]{64}$"
+          },
+          "generated_at": {
+            "oneOf": [
+              {
+                "$ref": "common.schema.json#/$defs/timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "appendices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "metadata": {
+            "$ref": "common.schema.json#/$defs/metadata"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    }
+  },
+  "required": [
+    "schema_version",
+    "workspace",
+    "generated_at",
+    "findings",
+    "summary"
+  ],
+  "additionalProperties": false
+}

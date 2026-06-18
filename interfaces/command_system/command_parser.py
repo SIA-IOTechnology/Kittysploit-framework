@@ -7,8 +7,26 @@ Similar to ModuleArgumentParser but adapted for the new command system
 """
 
 import argparse
+import shlex
+from typing import List
+
 from core.utils.exceptions import KittyException
 from core.output_handler import print_info
+
+
+def split_command_line(command_line: str) -> List[str]:
+    """
+    Split a CLI command line into tokens, respecting quoted strings.
+
+    Falls back to whitespace splitting when quotes are unbalanced.
+    """
+    text = str(command_line or "").strip()
+    if not text:
+        return []
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
 
 class CommandArgumentParser(argparse.ArgumentParser):
     """

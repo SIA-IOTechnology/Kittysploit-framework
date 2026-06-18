@@ -322,6 +322,25 @@ class RuntimeKernel:
                                 framework.output_handler.print_error(context.error)
                             
                             return
+
+                if framework and getattr(framework, 'scope_manager', None):
+                    scope_manager = framework.scope_manager
+                    decision = scope_manager.evaluate_module(module_instance)
+                    if scope_manager.enabled and not decision.allowed:
+                        context.status = "failed"
+                        context.error = f"[SCOPE] {decision.reason}"
+                        if hasattr(framework, 'output_handler') and framework.output_handler:
+                            framework.output_handler.print_error(context.error)
+                        scope_manager.audit(
+                            "execution_denied",
+                            {
+                                "reason": decision.reason,
+                                "targets": decision.targets,
+                                "module": getattr(module_instance, "name", ""),
+                                "via": "runtime_kernel",
+                            },
+                        )
+                        return
                 
                 # Exécuter le module
                 result = module_instance.run()

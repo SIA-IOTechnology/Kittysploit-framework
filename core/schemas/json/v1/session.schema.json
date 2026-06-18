@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/session.schema.json",
+  "title": "KittySploit Session",
+  "description": "A runtime or persisted session created by a listener, exploit, browser channel, or post-exploitation transport.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "session_id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "session_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transport": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "target.schema.json"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target_host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target_port": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "local_host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "local_port": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "payload": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "handler": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "last_seen": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "is_active": {
+      "type": "boolean"
+    },
+    "is_interactive": {
+      "type": "boolean"
+    },
+    "workspace_id": {
+      "$ref": "common.schema.json#/$defs/nullable_id"
+    },
+    "workspace": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "info": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "session_data": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "session_info": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tags": {
+      "$ref": "common.schema.json#/$defs/tags"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    }
+  },
+  "required": [
+    "id",
+    "session_type",
+    "is_active"
+  ],
+  "additionalProperties": false
+}

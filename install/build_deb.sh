@@ -177,7 +177,7 @@ EOF
 cat > "${BIN_DIR}/kittymcp" <<'EOF'
 #!/usr/bin/env bash
 export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/kittymcp.py "$@"
+exec /opt/kittysploit/venv/bin/python /opt/kittysploit/kittymcp_server.py "$@"
 EOF
 
 cat > "${BIN_DIR}/kittyproxy" <<'EOF'

@@ -11,6 +11,7 @@ from core.db_manager import DatabaseManager
 from core.workspace_manager import WorkspaceManager
 from core.framework.nops import NopManager
 from core.module_sync_manager import ModuleSyncManager
+from core.module_search import ModuleSearchFilters
 from core.debug_manager import DebugManager
 from core.config import Config
 from core.charter_manager import CharterManager
@@ -154,6 +155,14 @@ class Framework:
             self.guardian_manager = None
             if hasattr(self, 'output_handler'):
                 self.output_handler.print_warning(f"Guardian Manager not available: {e}")
+
+        try:
+            from core.scope_manager import ScopeManager
+            self.scope_manager = ScopeManager(self.current_workspace)
+        except Exception as e:
+            self.scope_manager = None
+            if hasattr(self, 'output_handler'):
+                self.output_handler.print_warning(f"Scope Manager not available: {e}")
         
         # Initialize workspaces
         self._init_workspaces()
@@ -748,6 +757,10 @@ class Framework:
                         )
                         
                         return False
+
+        if hasattr(self, 'scope_manager') and self.scope_manager:
+            if not self.scope_manager.ensure_execution_permitted(self.current_module):
+                return False
         
         # Utiliser le Runtime Kernel si demandé
         if use_runtime_kernel:
@@ -1125,6 +1138,12 @@ class Framework:
             # Update module_sync_manager with the new workspace
             if hasattr(self, 'module_sync_manager'):
                 self.module_sync_manager.workspace = name
+
+            if hasattr(self, 'session_manager') and self.session_manager:
+                self.session_manager.reload_for_current_workspace()
+
+            if hasattr(self, 'scope_manager') and self.scope_manager:
+                self.scope_manager.set_workspace(name)
         
         return success
     
@@ -1421,12 +1440,33 @@ class Framework:
         """Get module synchronization status"""
         return self.module_sync_manager.get_sync_status()
     
-    def search_modules_db(self, query: str = "", module_type: str = "", 
-                         author: str = "", cve: str = "", limit: int = 100) -> List[Dict]:
-        """Search modules in database (faster than filesystem search)"""
-        return self.module_loader.search_modules_db(
-            query, module_type, author, cve, tags="", limit=limit
-        )
+    def search_modules_db(
+        self,
+        filters: ModuleSearchFilters = None,
+        query: str = "",
+        module_type: str = "",
+        author: str = "",
+        cve: str = "",
+        tags: str = "",
+        limit: int = 100,
+        **kwargs,
+    ) -> List[Dict]:
+        """Search modules in database (faster than filesystem search)."""
+        if filters is None:
+            filters = ModuleSearchFilters(
+                query=query,
+                module_type=module_type,
+                author=author,
+                cve=cve,
+                tag=tags,
+                limit=limit,
+                platform=str(kwargs.get("platform") or ""),
+                protocol=str(kwargs.get("protocol") or ""),
+                reliability=str(kwargs.get("reliability") or ""),
+                since=kwargs.get("since"),
+                until=kwargs.get("until"),
+            )
+        return self.module_loader.search_modules_db(filters=filters)
     
     def get_module_stats_db(self) -> Dict[str, int]:
         """Get module statistics from database"""

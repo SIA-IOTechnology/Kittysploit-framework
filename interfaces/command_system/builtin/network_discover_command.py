@@ -135,9 +135,14 @@ Note: Some methods require elevated privileges (sudo/Administrator).
     
     def execute(self, args, **kwargs) -> bool:
         """Execute the network discovery command"""
+        raw = list(args or [])
+        if not raw or raw[0].lower() in ("help", "--help", "-h"):
+            print_info(self.help_text)
+            return True
+
         try:
             # Parse arguments
-            options = self._parse_args(args)
+            options = self._parse_args(raw)
             
             # Get network range
             if options['range']:
@@ -146,6 +151,7 @@ Note: Some methods require elevated privileges (sudo/Administrator).
                 network = self._get_local_network()
                 if not network:
                     print_error("Could not determine local network. Please specify --range")
+                    print_info("Example: network_discover --range 192.168.1.0/24")
                     return False
             
             print_info(f"Starting network discovery on {network}")
@@ -175,22 +181,26 @@ Note: Some methods require elevated privileges (sudo/Administrator).
         
         i = 0
         while i < len(args):
-            if args[i] == '--range' and i + 1 < len(args):
+            arg = args[i]
+            if arg in ("--help", "-h"):
+                i += 1
+                continue
+            if arg == '--range' and i + 1 < len(args):
                 options['range'] = args[i + 1]
                 i += 2
-            elif args[i] == '--timeout' and i + 1 < len(args):
+            elif arg == '--timeout' and i + 1 < len(args):
                 try:
                     options['timeout'] = int(args[i + 1])
                 except ValueError:
                     print_warning(f"Invalid timeout value: {args[i + 1]}, using default")
                 i += 2
-            elif args[i] == '--threads' and i + 1 < len(args):
+            elif arg == '--threads' and i + 1 < len(args):
                 try:
                     options['threads'] = int(args[i + 1])
                 except ValueError:
                     print_warning(f"Invalid threads value: {args[i + 1]}, using default")
                 i += 2
-            elif args[i] == '--method' and i + 1 < len(args):
+            elif arg == '--method' and i + 1 < len(args):
                 options['method'] = args[i + 1].lower()
                 i += 2
             else:
@@ -198,64 +208,100 @@ Note: Some methods require elevated privileges (sudo/Administrator).
         
         return options
     
+    def _get_local_ip(self):
+        """Return the primary local IPv4 address, if any."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2)
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            sock.close()
+            if ip and not ip.startswith("127."):
+                return ip
+        except Exception:
+            pass
+
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+            if ip and not ip.startswith("127."):
+                return ip
+        except Exception:
+            pass
+        return None
+
+    def _network_from_ip_linux(self, local_ip):
+        """Resolve CIDR for local_ip using `ip addr`."""
+        try:
+            result = subprocess.run(
+                ["ip", "-o", "-4", "addr", "show"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+            pattern = re.compile(rf"\binet {re.escape(local_ip)}/(\d+)\b")
+            for line in result.stdout.splitlines():
+                match = pattern.search(line)
+                if match:
+                    return ipaddress.ip_network(f"{local_ip}/{match.group(1)}", strict=False)
+        except Exception:
+            return None
+        return None
+
     def _get_local_network(self):
         """Get the local network range"""
         try:
-            # Get local IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-            
-            # Get network interface info
+            local_ip = self._get_local_ip()
+            if not local_ip:
+                return None
+
             if platform.system() == "Windows":
                 result = subprocess.run(['ipconfig'], capture_output=True, text=True)
                 lines = result.stdout.split('\n')
                 for i, line in enumerate(lines):
                     if local_ip in line:
-                        # Look for subnet mask in nearby lines
-                        for j in range(max(0, i-5), min(len(lines), i+5)):
+                        for j in range(max(0, i - 5), min(len(lines), i + 5)):
                             if 'Subnet Mask' in lines[j] or 'Masque' in lines[j]:
                                 mask_line = lines[j]
-                                # Extract mask
                                 mask = mask_line.split(':')[-1].strip()
                                 if mask:
-                                    # Convert mask to CIDR
                                     cidr = self._mask_to_cidr(mask)
                                     if cidr:
-                                        network = ipaddress.ip_network(f"{local_ip}/{cidr}", strict=False)
-                                        return network
+                                        return ipaddress.ip_network(f"{local_ip}/{cidr}", strict=False)
             else:
-                # Linux/Mac - try to get from route table
-                result = subprocess.run(['ip', 'route', 'get', '8.8.8.8'], capture_output=True, text=True)
+                network = self._network_from_ip_linux(local_ip)
+                if network:
+                    return network
+
+                result = subprocess.run(
+                    ['ip', 'route', 'get', '8.8.8.8'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
                 if result.returncode == 0:
-                    # Parse route output to get network
                     for line in result.stdout.split('\n'):
                         if 'src' in line:
                             parts = line.split()
-                            for i, part in enumerate(parts):
-                                if part == 'src' and i + 1 < len(parts):
-                                    src_ip = parts[i + 1]
-                                    # Try common subnets
-                                    for cidr in [24, 16, 8]:
-                                        try:
-                                            network = ipaddress.ip_network(f"{src_ip}/{cidr}", strict=False)
-                                            if src_ip in network:
-                                                return network
-                                        except:
-                                            continue
-            
-            # Fallback to common private networks
-            for cidr in [24, 16, 8]:
+                            for idx, part in enumerate(parts):
+                                if part == 'src' and idx + 1 < len(parts):
+                                    src_ip = parts[idx + 1]
+                                    network = self._network_from_ip_linux(src_ip)
+                                    if network:
+                                        return network
+
+            for cidr in (24, 16, 8):
                 try:
                     network = ipaddress.ip_network(f"{local_ip}/{cidr}", strict=False)
-                    if local_ip in network:
+                    if ipaddress.ip_address(local_ip) in network:
                         return network
-                except:
+                except Exception:
                     continue
-            
+
             return None
-            
+
         except Exception as e:
             print_warning(f"Could not determine local network: {e}")
             return None

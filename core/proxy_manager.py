@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 import json
+import logging
 import ssl
 import base64
 from datetime import datetime
@@ -21,6 +22,9 @@ from http.client import HTTPConnection
 import requests
 
 from core.output_handler import print_info, print_success, print_error, print_warning
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,6 +113,7 @@ class ProxyManager:
             self.ssl_context.check_hostname = False
             self.ssl_context.verify_mode = ssl.CERT_NONE
         except Exception as e:
+            logger.warning("Failed to setup proxy SSL context", exc_info=True)
             if self.verbose:
                 print_error(f"Failed to setup SSL context: {e}")
     
@@ -149,6 +154,7 @@ class ProxyManager:
             return True
             
         except Exception as e:
+            logger.exception("Failed to start proxy server on %s:%s in %s mode", host, port, mode)
             print_error(f"Failed to start proxy server: {e}")
             return False
     
@@ -159,8 +165,8 @@ class ProxyManager:
         if self.proxy_socket:
             try:
                 self.proxy_socket.close()
-            except:
-                pass
+            except OSError:
+                logger.debug("Failed to close proxy socket cleanly", exc_info=True)
             self.proxy_socket = None
         
         if self.verbose:
@@ -183,6 +189,7 @@ class ProxyManager:
                 
             except Exception as e:
                 if self.is_running:  # Only log if we're supposed to be running
+                    logger.warning("Error in proxy accept loop", exc_info=True)
                     if self.verbose:
                         print_error(f"Error in proxy loop: {e}")
                 break
@@ -224,13 +231,14 @@ class ProxyManager:
                 self._handle_tcp_connection(client_socket, first_line, address)
                 
         except Exception as e:
+            logger.warning("Error handling proxy client %s", address, exc_info=True)
             if self.verbose:
                 print_error(f"Error handling client {address}: {e}")
         finally:
             try:
                 client_socket.close()
-            except:
-                pass
+            except OSError:
+                logger.debug("Failed to close client socket for %s", address, exc_info=True)
     
     def _handle_socks_client(self, client_socket: socket.socket, address: Tuple[str, int]):
         """Minimal SOCKS5 handler that forwards traffic and logs requests."""
@@ -298,13 +306,14 @@ class ProxyManager:
             self._create_tcp_tunnel(client_socket, dest_address, dest_port, request)
 
         except Exception as e:
+            logger.warning("SOCKS client error from %s", address, exc_info=True)
             if self.verbose:
                 print_error(f"SOCKS client error from {address}: {e}")
         finally:
             try:
                 client_socket.close()
-            except Exception:
-                pass
+            except OSError:
+                logger.debug("Failed to close SOCKS client socket for %s", address, exc_info=True)
     
     def _handle_http_request(self, client_socket: socket.socket, first_line: bytes, address: Tuple[str, int]):
         """Handle HTTP request"""
@@ -353,6 +362,7 @@ class ProxyManager:
                 print_info(f"HTTP {request.method} {request.url} -> {request.response_code}")
                 
         except Exception as e:
+            logger.warning("Error handling HTTP request from %s", address, exc_info=True)
             if self.verbose:
                 print_error(f"Error handling HTTP request: {e}")
     
@@ -380,6 +390,7 @@ class ProxyManager:
             self._create_https_tunnel(client_socket, host, port, address)
             
         except Exception as e:
+            logger.warning("Error handling HTTPS CONNECT from %s", address, exc_info=True)
             if self.verbose:
                 print_error(f"Error handling HTTPS CONNECT: {e}")
     
@@ -394,6 +405,7 @@ class ProxyManager:
                     host, port = target.split(':')
                     return {'host': host, 'port': int(port)}
         except Exception as e:
+            logger.debug("Error parsing CONNECT target from %r", connect_line, exc_info=True)
             if self.verbose:
                 print_error(f"Error parsing CONNECT target: {e}")
         return None
@@ -443,11 +455,13 @@ class ProxyManager:
             self._create_tcp_tunnel(client_socket, host, port, request)
             
         except Exception as e:
+            logger.warning("Error handling TCP tunnel for %s", target_info, exc_info=True)
             if self.verbose:
                 print_error(f"Error handling TCP tunnel: {e}")
     
     def _create_tcp_tunnel(self, client_socket: socket.socket, host: str, port: int, request: NetworkRequest):
         """Create TCP tunnel to target server"""
+        target_socket = None
         try:
             # Connect to target server
             target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -455,12 +469,20 @@ class ProxyManager:
             
             # Tunnel data between client and server
             self._tunnel_data(client_socket, target_socket, request)
-            
-            target_socket.close()
-            
+
         except Exception as e:
+            logger.warning("Error creating TCP tunnel to %s:%s", host, port, exc_info=True)
+            request.response_code = 502
+            request.error = str(e)
+            self._store_request(request)
             if self.verbose:
                 print_error(f"Error creating TCP tunnel: {e}")
+        finally:
+            if target_socket:
+                try:
+                    target_socket.close()
+                except OSError:
+                    logger.debug("Failed to close TCP target socket for %s:%s", host, port, exc_info=True)
     
     def _handle_tcp_connection(self, client_socket: socket.socket, first_line: bytes, address: Tuple[str, int]):
         """Handle generic TCP connection"""
@@ -484,6 +506,7 @@ class ProxyManager:
                 print_info(f"TCP connection from {address[0]}:{address[1]}")
                 
         except Exception as e:
+            logger.warning("Error handling generic TCP connection from %s", address, exc_info=True)
             if self.verbose:
                 print_error(f"Error handling TCP connection: {e}")
     
@@ -536,7 +559,9 @@ class ProxyManager:
                     body_length = int(content_length)
                     body = client_socket.recv(body_length)
                 except ValueError:
-                    pass  # Invalid content-length, ignore
+                    logger.debug("Invalid HTTP content-length %r; ignoring request body", content_length, exc_info=True)
+                    if self.verbose:
+                        print_warning(f"Invalid content-length ignored: {content_length}")
             
             return {
                 'method': method,
@@ -549,12 +574,14 @@ class ProxyManager:
             }
             
         except Exception as e:
+            logger.warning("Error parsing HTTP request", exc_info=True)
             if self.verbose:
                 print_error(f"Error parsing HTTP request: {e}")
             return None
     
     def _forward_http_request(self, request_data: Dict) -> Optional[Dict]:
         """Forward HTTP request to target server"""
+        session = None
         try:
             start_time = time.time()
 
@@ -605,21 +632,33 @@ class ProxyManager:
                 'body': response_body,
                 'duration_ms': (time.time() - start_time) * 1000
             }
-            session.close()
             return response_data
 
         except requests.exceptions.Timeout:
+            logger.warning(
+                "Timeout forwarding HTTP request to %s",
+                request_data.get('url', 'unknown'),
+                exc_info=True,
+            )
             if self.verbose:
                 print_error(f"Timeout forwarding HTTP request to {request_data.get('url', 'unknown')}")
             return None
         except requests.exceptions.ConnectionError as e:
+            logger.warning("Connection error forwarding HTTP request", exc_info=True)
             if self.verbose:
                 print_error(f"Connection error forwarding HTTP request: {e}")
             return None
         except Exception as e:
+            logger.warning("Error forwarding HTTP request", exc_info=True)
             if self.verbose:
                 print_error(f"Error forwarding HTTP request: {e}")
             return None
+        finally:
+            if session:
+                try:
+                    session.close()
+                except Exception:
+                    logger.debug("Failed to close proxy forwarding session", exc_info=True)
     
     def _read_http_response(self, socket: socket.socket) -> Dict:
         """Read HTTP response from socket"""
@@ -653,7 +692,8 @@ class ProxyManager:
                         if not chunk:
                             break
                         body += chunk
-                    except:
+                    except OSError:
+                        logger.debug("Socket error while reading HTTP response body", exc_info=True)
                         break
             
             return {
@@ -663,6 +703,7 @@ class ProxyManager:
             }
             
         except Exception as e:
+            logger.warning("Error reading HTTP response from socket", exc_info=True)
             if self.verbose:
                 print_error(f"Error reading HTTP response: {e}")
             return {'status_code': 0, 'headers': {}, 'body': b''}
@@ -691,6 +732,7 @@ class ProxyManager:
                 client_socket.sendall(body)
 
         except Exception as e:
+            logger.warning("Error sending HTTP response to client", exc_info=True)
             if self.verbose:
                 print_error(f"Error sending HTTP response: {e}")
     
@@ -712,6 +754,7 @@ class ProxyManager:
     
     def _create_https_tunnel(self, client_socket: socket.socket, host: str, port: int, address: Tuple[str, int]):
         """Create HTTPS tunnel (CONNECT method)"""
+        target_socket = None
         try:
             # Connect to target server
             target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -736,10 +779,9 @@ class ProxyManager:
             
             # Tunnel data between client and server (raw data, no SSL wrapping)
             self._tunnel_data(client_socket, target_socket, request)
-            
-            target_socket.close()
-            
+
         except socket.timeout:
+            logger.warning("Timeout creating HTTPS tunnel to %s:%s", host, port, exc_info=True)
             if self.verbose:
                 print_error(f"Timeout connecting to {host}:{port}")
             # Create failed request object
@@ -757,6 +799,7 @@ class ProxyManager:
             )
             self._store_request(request)
         except Exception as e:
+            logger.warning("Error creating HTTPS tunnel to %s:%s", host, port, exc_info=True)
             if self.verbose:
                 print_error(f"Error creating HTTPS tunnel to {host}:{port}: {e}")
             # Create failed request object
@@ -773,9 +816,27 @@ class ProxyManager:
                 error=str(e)
             )
             self._store_request(request)
+        finally:
+            if target_socket:
+                try:
+                    target_socket.close()
+                except OSError:
+                    logger.debug("Failed to close HTTPS target socket for %s:%s", host, port, exc_info=True)
     
     def _create_ssl_tunnel(self, client_socket: socket.socket, host: str, port: int, address: Tuple[str, int]):
         """Create SSL tunnel for HTTPS (legacy method)"""
+        target_socket = None
+        ssl_socket = None
+        request = NetworkRequest(
+            id=f"req_{self.request_counter}",
+            timestamp=datetime.now().isoformat(),
+            protocol="HTTPS",
+            method="CONNECT",
+            url=f"https://{host}:{port}",
+            host=host,
+            port=port,
+            ssl_enabled=True
+        )
         try:
             # Connect to target server
             target_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -789,36 +850,40 @@ class ProxyManager:
             
             ssl_socket = ssl_context.wrap_socket(target_socket, server_hostname=host)
             
-            # Create request object for logging
-            request = NetworkRequest(
-                id=f"req_{self.request_counter}",
-                timestamp=datetime.now().isoformat(),
-                protocol="HTTPS",
-                method="CONNECT",
-                url=f"https://{host}:{port}",
-                host=host,
-                port=port,
-                ssl_enabled=True
-            )
-            
             if self.verbose:
                 print_info(f"SSL tunnel established to {host}:{port}")
             
             # Tunnel data between client and server
             self._tunnel_data(client_socket, ssl_socket, request)
-            
-            ssl_socket.close()
-            target_socket.close()
-            
+
         except ssl.SSLError as e:
+            logger.warning("SSL error creating tunnel to %s:%s", host, port, exc_info=True)
+            request.response_code = 502
+            request.error = f"SSL error: {e}"
+            self._store_request(request)
             if self.verbose:
                 print_error(f"SSL error creating tunnel to {host}:{port}: {e}")
         except socket.timeout:
+            logger.warning("Timeout creating SSL tunnel to %s:%s", host, port, exc_info=True)
+            request.response_code = 504
+            request.error = "Connection timeout"
+            self._store_request(request)
             if self.verbose:
                 print_error(f"Timeout connecting to {host}:{port}")
         except Exception as e:
+            logger.warning("Error creating SSL tunnel to %s:%s", host, port, exc_info=True)
+            request.response_code = 502
+            request.error = str(e)
+            self._store_request(request)
             if self.verbose:
                 print_error(f"Error creating SSL tunnel to {host}:{port}: {e}")
+        finally:
+            for sock, label in ((ssl_socket, "SSL"), (target_socket, "SSL target")):
+                if sock:
+                    try:
+                        sock.close()
+                    except OSError:
+                        logger.debug("Failed to close %s socket for %s:%s", label, host, port, exc_info=True)
     
     def _tunnel_data(self, client_socket: socket.socket, target_socket: socket.socket, request: NetworkRequest):
         """Tunnel data between client and target"""
@@ -864,9 +929,25 @@ class ProxyManager:
                             if self.verbose and len(data) < 200:
                                 print_info(f"[{request.protocol}] Target -> Client: {len(data)} bytes")
                             
-                    except socket.error:
+                    except socket.error as e:
+                        logger.debug(
+                            "Socket error in %s tunnel for %s:%s",
+                            request.protocol,
+                            request.host,
+                            request.port,
+                            exc_info=True,
+                        )
+                        request.response_code = 502
+                        request.error = str(e)
                         return
                     except Exception as e:
+                        logger.warning(
+                            "Error in %s tunnel data transfer for %s:%s",
+                            request.protocol,
+                            request.host,
+                            request.port,
+                            exc_info=True,
+                        )
                         if self.verbose:
                             print_error(f"Error in tunnel data transfer: {e}")
                         # Update status for error
@@ -875,6 +956,13 @@ class ProxyManager:
                         return
                         
         except Exception as e:
+            logger.warning(
+                "Error in %s data tunnel for %s:%s",
+                request.protocol,
+                request.host,
+                request.port,
+                exc_info=True,
+            )
             if self.verbose:
                 print_error(f"Error in data tunnel: {e}")
             # Update status for error
@@ -913,9 +1001,11 @@ class ProxyManager:
                 if len(line) > 8192:
                     break
         except socket.timeout:
+            logger.debug("Timeout reading line from socket", exc_info=True)
             if self.verbose:
                 print_warning("Timeout reading line from socket")
         except Exception as e:
+            logger.debug("Error reading line from socket", exc_info=True)
             if self.verbose:
                 print_error(f"Error reading line from socket: {e}")
         
@@ -981,6 +1071,7 @@ class ProxyManager:
             return True
             
         except Exception as e:
+            logger.warning("Failed to export proxy requests to %s", filename, exc_info=True)
             if self.verbose:
                 print_error(f"Failed to export requests: {e}")
             return False
@@ -990,6 +1081,7 @@ class ProxyManager:
         try:
             request_data = self.get_request_by_id(request_id)
             if not request_data:
+                logger.warning("Cannot replay proxy request %s: request not found", request_id)
                 if self.verbose:
                     print_error(f"Request {request_id} not found")
                 return False
@@ -1000,11 +1092,13 @@ class ProxyManager:
             if request.protocol in ['HTTP', 'HTTPS']:
                 return self._replay_http_request(request)
             else:
+                logger.warning("Replay not supported for protocol: %s", request.protocol)
                 if self.verbose:
                     print_warning(f"Replay not supported for protocol: {request.protocol}")
                 return False
                 
         except Exception as e:
+            logger.warning("Failed to replay proxy request %s", request_id, exc_info=True)
             if self.verbose:
                 print_error(f"Failed to replay request: {e}")
             return False
@@ -1031,6 +1125,7 @@ class ProxyManager:
             elif request.method == 'DELETE':
                 response = requests.delete(url, headers=headers, timeout=30)
             else:
+                logger.warning("Unsupported method for replay: %s", request.method)
                 if self.verbose:
                     print_warning(f"Unsupported method for replay: {request.method}")
                 return False
@@ -1041,6 +1136,7 @@ class ProxyManager:
             return True
             
         except Exception as e:
+            logger.warning("Failed to replay HTTP request %s", request.id, exc_info=True)
             if self.verbose:
                 print_error(f"Failed to replay HTTP request: {e}")
             return False

@@ -10,6 +10,7 @@ import socket
 import time
 from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
+from core.framework.option.base_option import Option as BaseOption
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
 
 class RunCommand(BaseCommand):
@@ -40,6 +41,7 @@ all required options before running.
 Options:
     --preview                 Show execution preview without running
     --background              Run module in background (for listeners)
+    --yes, -y                 Skip destructive-action confirmation (scope)
 
 Examples:
     run                       # Execute the current module
@@ -69,6 +71,12 @@ Examples:
             action='store_true',
             help='Run module in background (for listeners)'
         )
+
+        parser.add_argument(
+            '--yes', '-y',
+            action='store_true',
+            help='Skip destructive-action confirmation prompt'
+        )
         
         return parser
     
@@ -89,6 +97,12 @@ Examples:
             return False
         
         module = self.framework.current_module
+
+        # Preview is a pre-flight view: it must work even when required options
+        # are missing, because reporting those gaps is part of the feature.
+        if parsed_args.preview:
+            self._show_execution_preview(module, background=parsed_args.background)
+            return True
         
         try:
             # Check if all required options are set
@@ -99,6 +113,13 @@ Examples:
                 else:
                     print_error("Not all required options are set")
                 print_info("Use 'show options' to see required options")
+                return False
+
+            scope_manager = getattr(self.framework, 'scope_manager', None)
+            if scope_manager and not scope_manager.ensure_execution_permitted(
+                module,
+                skip_confirm=parsed_args.yes,
+            ):
                 return False
             
             # Vérifier la blacklist du Guardian avant l'exécution
@@ -145,11 +166,6 @@ Examples:
                         alert.action_description = "Module execution blocked"
                         
                         return False
-            
-            # Show preview if requested
-            if parsed_args.preview:
-                self._show_execution_preview(module)
-                return True
             
             # Check if module requires root privileges
             if module.requires_root:
@@ -373,11 +389,398 @@ Examples:
         except Exception as e:
             print_warning(f"Could not register module as background job: {e}")
     
-    def _show_execution_preview(self, module):
-        """Show execution preview for the module"""
-        # Analyze the module dynamically
-        print_info("To be implemented ....")
-        print_info("Feature incoming ....")
+    def _show_execution_preview(self, module, background: bool = False):
+        """Show a non-executing pre-flight summary for the current module."""
+        module_name = getattr(module, 'name', '') or self._module_path(module) or type(module).__name__
+        module_type = self._module_type(module)
+        missing_options = self._missing_options(module)
+        target_entries = self._target_entries(module)
+        target_option_names = self._target_option_names(module)
+        payload_preview = self._payload_listener_preview(module)
+        privilege_preview = self._privilege_preview(module)
+        guardian_preview = self._guardian_preview(target_entries, target_option_names)
+        scope_preview = self._scope_preview(module)
+
+        print_empty()
+        print_info("Execution Preview")
+        print_info("=" * 50)
+        print_info(f"Module: {module_name}")
+        module_path = self._module_path(module)
+        if module_path:
+            print_info(f"Path: {module_path}")
+        print_info(f"Type: {module_type}")
+        print_info(f"Mode: {self._execution_mode(module, background)}")
+
+        print_empty()
+        print_info("Target")
+        if target_entries:
+            for name, value in target_entries:
+                print_info(f"  {name}: {value}")
+        elif target_option_names:
+            print_warning("  No target value configured")
+            print_info(f"  Target options: {', '.join(target_option_names)}")
+        else:
+            print_warning("  No target option detected")
+
+        print_empty()
+        print_info("Required Options")
+        if missing_options:
+            print_warning(f"  Missing: {', '.join(missing_options)}")
+            print_info("  Ready: no")
+        else:
+            print_success("  Missing: none")
+            print_info("  Ready: yes")
+
+        print_empty()
+        print_info("Payload / Listener")
+        for line in payload_preview:
+            print_info(f"  {line}")
+
+        print_empty()
+        print_info("Required Privileges")
+        for line in privilege_preview:
+            print_info(f"  {line}")
+
+        print_empty()
+        print_info("Engagement Scope")
+        for level, line in scope_preview:
+            if level == "error":
+                print_error(f"  {line}")
+            elif level == "warning":
+                print_warning(f"  {line}")
+            elif level == "success":
+                print_success(f"  {line}")
+            else:
+                print_info(f"  {line}")
+
+        print_empty()
+        print_info("Guardian Scope")
+        for level, line in guardian_preview:
+            if level == "error":
+                print_error(f"  {line}")
+            elif level == "warning":
+                print_warning(f"  {line}")
+            elif level == "success":
+                print_success(f"  {line}")
+            else:
+                print_info(f"  {line}")
+
+        print_empty()
+        if missing_options:
+            print_warning("Preview only: execution would fail until required options are set.")
+        elif any(level == "error" for level, _line in scope_preview):
+            print_warning("Preview only: engagement scope would block execution.")
+        elif any(level == "error" for level, _line in guardian_preview):
+            print_warning("Preview only: Guardian would block execution for the current scope.")
+        elif any(level == "warning" and "confirmation" in line for level, line in scope_preview):
+            print_warning("Preview only: destructive-action confirmation would be required.")
+        else:
+            print_success("Preview complete: no required-option, scope, or Guardian blocker detected.")
+
+    def _module_path(self, module) -> str:
+        raw_path = str(getattr(module, '__module__', '') or '')
+        if raw_path.startswith('modules.'):
+            return raw_path[len('modules.'):].replace('.', '/')
+        return raw_path.replace('.', '/') if raw_path else ''
+
+    def _module_type(self, module) -> str:
+        module_type = (
+            getattr(module, 'type', None)
+            or getattr(module, 'TYPE_MODULE', None)
+            or getattr(module, '__info__', {}).get('type')
+            or 'module'
+        )
+        return self._stringify(module_type).lower()
+
+    def _execution_mode(self, module, background: bool = False) -> str:
+        module_type = self._module_type(module)
+        if module_type == 'payload':
+            return 'generate payload'
+        if module_type == 'listener':
+            return 'start listener in background' if background else 'start listener'
+        if background:
+            return 'execute in background'
+        return 'execute module'
+
+    def _module_options(self, module) -> Dict[str, Any]:
+        try:
+            options = module.get_options() if hasattr(module, 'get_options') else {}
+            return options or {}
+        except Exception as exc:
+            print_warning(f"Could not read module options for preview: {exc}")
+            return {}
+
+    def _option_descriptor(self, module, name: str):
+        descriptor = getattr(type(module), name, None)
+        return descriptor if isinstance(descriptor, BaseOption) else None
+
+    def _option_display_value(self, module, name: str, default: Any = "") -> str:
+        descriptor = self._option_descriptor(module, name)
+        if descriptor:
+            instance_data = getattr(descriptor, '_instance_values', {}).get(id(module), {}) or {}
+            if 'display_value' in instance_data:
+                return self._stringify(instance_data.get('display_value', ''))
+            return self._stringify(getattr(descriptor, '_default_display_value', default))
+
+        try:
+            value = getattr(module, name)
+        except Exception:
+            value = default
+        return self._stringify(value)
+
+    def _missing_options(self, module) -> List[str]:
+        try:
+            if hasattr(module, 'get_missing_options'):
+                return [str(item) for item in module.get_missing_options()]
+        except Exception as exc:
+            print_warning(f"Could not compute missing options with module helper: {exc}")
+
+        missing = []
+        for name, option_data in self._module_options(module).items():
+            required = bool(option_data[1]) if len(option_data) > 1 else False
+            if required and not self._is_set(self._option_display_value(module, name)):
+                missing.append(str(name))
+        return missing
+
+    def _target_entries(self, module) -> List[tuple]:
+        target_names = self._target_option_name_set()
+        entries = []
+        for name, option_data in self._module_options(module).items():
+            if str(name).lower() not in target_names:
+                continue
+            default = option_data[0] if option_data else ""
+            value = self._option_display_value(module, name, default)
+            if self._is_set(value):
+                entries.append((str(name), value))
+        return entries
+
+    def _target_option_names(self, module) -> List[str]:
+        target_names = self._target_option_name_set()
+        return [
+            str(name)
+            for name in self._module_options(module).keys()
+            if str(name).lower() in target_names
+        ]
+
+    def _target_option_name_set(self) -> set:
+        target_names = {
+            'target', 'targets', 'rhost', 'rhosts', 'host', 'hosts', 'hostname',
+            'ip', 'domain', 'url', 'uri', 'endpoint', 'base_url', 'target_url',
+            'tcp_host', 'tcp_port', 'port', 'rport', 'path', 'ssl',
+        }
+        return target_names
+
+    def _payload_listener_preview(self, module) -> List[str]:
+        module_type = self._module_type(module)
+        payload_path = self._payload_path(module)
+
+        if module_type == 'listener':
+            return self._listener_module_preview(module)
+
+        if module_type == 'payload':
+            return self._payload_module_preview(module, "Current module")
+
+        lines = []
+        if payload_path:
+            lines.append(f"Payload: {payload_path}")
+            payload_module = self._load_preview_module(payload_path)
+            if payload_module:
+                lines.extend(self._payload_module_preview(payload_module, None))
+            elif str(payload_path).startswith("msf/"):
+                lines.extend(self._metasploit_payload_preview(payload_path))
+            else:
+                lines.append("Listener: unavailable (payload metadata could not be loaded)")
+        elif 'payload' in self._module_options(module):
+            lines.append("Payload: not configured")
+            if 'payload' in self._missing_options(module):
+                lines.append("Listener: unavailable until payload is set")
+            else:
+                lines.append("Listener: none declared")
+        else:
+            lines.append("Payload: none")
+            lines.append("Listener: none")
+
+        disable_handler = self._option_display_value(module, 'disablePayloadHandler')
+        if self._is_truthy(disable_handler):
+            lines.append("Automatic handler: disabled by disablePayloadHandler")
+        elif payload_path:
+            lines.append("Automatic handler: enabled")
+        return lines
+
+    def _listener_module_preview(self, module) -> List[str]:
+        lines = ["Payload: none (listener module)"]
+        listener_name = getattr(module, 'name', '') or self._module_path(module) or type(module).__name__
+        lines.append(f"Listener: {listener_name}")
+
+        endpoint_parts = []
+        for name in ('lhost', 'lport', 'rhost', 'rport', 'host', 'port', 'handler', 'session_type'):
+            if name in self._module_options(module) or hasattr(type(module), name):
+                value = self._option_display_value(module, name)
+                if self._is_set(value):
+                    endpoint_parts.append(f"{name}={value}")
+        if endpoint_parts:
+            lines.append(f"Listener options: {', '.join(endpoint_parts)}")
+        return lines
+
+    def _payload_module_preview(self, module, prefix: Optional[str]) -> List[str]:
+        info = getattr(module, '__info__', {}) or {}
+        lines = []
+        if prefix:
+            module_name = getattr(module, 'name', '') or info.get('name') or self._module_path(module)
+            lines.append(f"{prefix}: {module_name}")
+
+        listener = self._stringify(info.get('listener'))
+        handler = self._stringify(info.get('handler'))
+        session_type = self._stringify(info.get('session_type'))
+        protocol = self._stringify(info.get('protocol'))
+
+        lines.append(f"Listener: {listener or 'none declared'}")
+        if handler:
+            lines.append(f"Handler: {handler}")
+        if session_type:
+            lines.append(f"Session type: {session_type}")
+        if protocol:
+            lines.append(f"Protocol: {protocol}")
+        return lines
+
+    def _metasploit_payload_preview(self, payload_path: str) -> List[str]:
+        plugin_manager = getattr(self.framework, 'plugin_manager', None)
+        metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
+        infer = getattr(metasploit_plugin, '_infer_msf_payload_metadata', None)
+        if not infer:
+            return ["Listener: metasploit/multi/handler", "Handler: inferred by Metasploit plugin"]
+        try:
+            metadata = infer(payload_path) or {}
+        except Exception as exc:
+            return [f"Listener: unavailable (Metasploit metadata error: {exc})"]
+        return [
+            f"Listener: {self._stringify(metadata.get('listener')) or 'metasploit/multi/handler'}",
+            f"Handler: {self._stringify(metadata.get('handler')) or 'unknown'}",
+            f"Session type: {self._stringify(metadata.get('session_type')) or 'unknown'}",
+        ]
+
+    def _payload_path(self, module) -> str:
+        descriptor = self._option_descriptor(module, 'payload')
+        if descriptor and hasattr(descriptor, '_instance_values'):
+            instance_data = descriptor._instance_values.get(id(module), {}) or {}
+            value = instance_data.get('value')
+            if self._is_set(value):
+                return self._stringify(value)
+
+        info_payload = (getattr(module, '__info__', {}) or {}).get('payload')
+        if isinstance(info_payload, dict):
+            default = info_payload.get('default')
+            if self._is_set(default):
+                return self._stringify(default)
+        elif self._is_set(info_payload):
+            return self._stringify(info_payload)
+
+        if descriptor:
+            instance_data = getattr(descriptor, '_instance_values', {}).get(id(module), {}) or {}
+            value = instance_data.get('display_value') or getattr(descriptor, '_default_display_value', '')
+            if self._is_set(value):
+                return self._stringify(value)
+        return ""
+
+    def _load_preview_module(self, module_path: str):
+        module_loader = getattr(self.framework, 'module_loader', None)
+        if not module_loader:
+            return None
+        try:
+            return module_loader.load_module(
+                module_path,
+                load_only=True,
+                framework=self.framework,
+                silent=True,
+            )
+        except Exception:
+            return None
+
+    def _privilege_preview(self, module) -> List[str]:
+        info = getattr(module, '__info__', {}) or {}
+        requires_root = bool(getattr(module, 'requires_root', False) or info.get('requires_root', False))
+        lines = []
+        if requires_root:
+            lines.append("Root/admin privileges required")
+        else:
+            lines.append("No root/admin requirement declared")
+
+        for key in ('required_privileges', 'privileges_required', 'privileges', 'required_permissions'):
+            value = info.get(key)
+            if value:
+                lines.append(f"{key}: {self._stringify(value)}")
+        return lines
+
+    def _guardian_preview(self, target_entries: List[tuple], target_option_names: List[str] = None) -> List[tuple]:
+        guardian = getattr(self.framework, 'guardian_manager', None)
+        if not guardian:
+            return [("warning", "Guardian manager unavailable")]
+
+        enabled = bool(getattr(guardian, 'enabled', False))
+        blacklist = getattr(guardian, 'blacklist', {}) or {}
+        whitelist = getattr(guardian, 'whitelist', set()) or set()
+        lines = [
+            ("info", f"Monitoring: {'enabled' if enabled else 'disabled'}"),
+            ("info", f"Auto-action: {'enabled' if getattr(guardian, 'auto_action', False) else 'disabled'}"),
+            ("info", f"Blacklist entries: {len(blacklist)}"),
+        ]
+
+        target_ip = None
+        extractor = getattr(self.framework, '_extract_target_ip_from_module', None)
+        if extractor:
+            try:
+                target_ip = extractor()
+            except Exception:
+                target_ip = None
+
+        if target_ip:
+            lines.append(("info", f"Execution target IP: {target_ip}"))
+            if target_ip in blacklist:
+                entry = blacklist[target_ip]
+                reason = entry.get('reason', 'Unknown reason')
+                timestamp = entry.get('timestamp', 'Unknown time')
+                lines.append(("error", f"Status: BLOCKED by blacklist ({reason}, added {timestamp})"))
+            elif target_ip in whitelist:
+                lines.append(("success", "Status: allowed by Guardian whitelist"))
+            elif enabled:
+                lines.append(("success", "Status: allowed by current Guardian blacklist"))
+            else:
+                lines.append(("info", "Status: not enforced while Guardian is disabled"))
+        elif target_entries:
+            visible_targets = ", ".join(f"{name}={value}" for name, value in target_entries[:4])
+            lines.append(("warning", f"Execution target IP: unresolved from options ({visible_targets})"))
+            lines.append(("warning", "Status: IP blacklist cannot be evaluated without a concrete IP"))
+        elif target_option_names:
+            lines.append(("warning", f"Execution target IP: no concrete target value configured ({', '.join(target_option_names)})"))
+            lines.append(("warning", "Status: IP blacklist cannot be evaluated until a target value is set"))
+        else:
+            lines.append(("warning", "Execution target IP: no target option in scope"))
+        return lines
+
+    def _scope_preview(self, module) -> List[tuple]:
+        manager = getattr(self.framework, 'scope_manager', None)
+        if not manager:
+            return [("warning", "Scope manager unavailable")]
+        return manager.preview_lines(module)
+
+    def _stringify(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if hasattr(value, 'value'):
+            return self._stringify(value.value)
+        if hasattr(value, 'name') and not isinstance(value, str):
+            return str(value.name).lower()
+        if isinstance(value, (list, tuple, set)):
+            return ", ".join(self._stringify(item) for item in value if self._stringify(item))
+        return str(value)
+
+    def _is_set(self, value: Any) -> bool:
+        text = self._stringify(value).strip()
+        return bool(text and text.lower() not in {'none', 'null'})
+
+    def _is_truthy(self, value: Any) -> bool:
+        text = self._stringify(value).strip().lower()
+        return text in {'1', 'true', 'yes', 'y', 'on'}
 
 
     

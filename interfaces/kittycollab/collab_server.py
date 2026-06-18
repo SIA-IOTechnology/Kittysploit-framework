@@ -25,6 +25,7 @@ except ImportError:
 
 from core.config import Config
 from core.output_handler import print_info, print_success, print_error, print_warning
+from core.utils.paths import framework_root
 
 
 class CollabWebServer:
@@ -58,6 +59,11 @@ class CollabWebServer:
             template_dir = os.path.join(os.path.dirname(base_dir), 'collab', 'templates')
         if not os.path.exists(static_dir):
             static_dir = os.path.join(os.path.dirname(base_dir), 'collab', 'static')
+
+        root = framework_root()
+        self.shared_static_img_dir = (
+            str(root / "interfaces" / "static" / "img") if root else None
+        )
         
         if self.verbose:
             print_info(f"Template folder: {template_dir}")
@@ -746,47 +752,44 @@ class CollabWebServer:
             """Serve favicon from interfaces/static/img"""
             if self.verbose:
                 print_info(f"[GET /favicon.ico] Serving favicon")
-            
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # interfaces/collab_client
-            interfaces_dir = os.path.dirname(current_file_dir)  # interfaces
-            favicon_path = os.path.join(interfaces_dir, 'static', 'img', 'favicon.ico')
-            
+
+            static_img_dir = self.shared_static_img_dir
+            if not static_img_dir or not os.path.isdir(static_img_dir):
+                if self.verbose:
+                    print_warning(f"Static img directory not found at: {static_img_dir}")
+                return jsonify({'status': 'error', 'message': 'Favicon not found'}), 404
+
+            favicon_path = os.path.join(static_img_dir, 'favicon.ico')
             if not os.path.exists(favicon_path):
                 if self.verbose:
                     print_warning(f"Favicon not found at: {favicon_path}")
                 return jsonify({'status': 'error', 'message': 'Favicon not found'}), 404
-            
+
             try:
-                return send_from_directory(os.path.join(interfaces_dir, 'static', 'img'), 'favicon.ico', mimetype='image/x-icon')
+                return send_from_directory(static_img_dir, 'favicon.ico', mimetype='image/x-icon')
             except Exception as e:
                 print_error(f"Error serving favicon: {e}")
                 return jsonify({'status': 'error', 'message': str(e)}), 500
-        
+
         # Route pour servir les images depuis interfaces/static/img
         @self.app.route('/static/img/<path:filename>')
         def serve_static_img(filename):
             """Serve static images from interfaces/static/img"""
             if self.verbose:
                 print_info(f"[GET /static/img/{filename}] Serving image")
-            
-            # Chemin vers interfaces/static/img
-            # __file__ est dans interfaces/collab_client/simple_server.py
-            # On remonte jusqu'à interfaces/ puis on va dans static/img
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # interfaces/collab_client
-            interfaces_dir = os.path.dirname(current_file_dir)  # interfaces
-            static_img_dir = os.path.join(interfaces_dir, 'static', 'img')
-            
-            if not os.path.exists(static_img_dir):
+
+            static_img_dir = self.shared_static_img_dir
+            if not static_img_dir or not os.path.isdir(static_img_dir):
                 if self.verbose:
                     print_warning(f"Static img directory not found at: {static_img_dir}")
                 return jsonify({'status': 'error', 'message': 'Directory not found'}), 404
-            
+
             file_path = os.path.join(static_img_dir, filename)
             if not os.path.exists(file_path):
                 if self.verbose:
                     print_warning(f"Image not found: {file_path}")
                 return jsonify({'status': 'error', 'message': 'File not found'}), 404
-            
+
             try:
                 # Déterminer le type MIME pour le favicon
                 mimetype = None

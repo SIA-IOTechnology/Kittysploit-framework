@@ -8,15 +8,20 @@ Provides context-aware completion and lightweight discovery helpers.
 
 import time
 import difflib
+import logging
 import socket
 from itertools import islice
-from typing import List, Dict, Any, Optional, Iterable
+from typing import List, Dict, Optional, Iterable, Set
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Filter
 
 from interfaces.command_system.command_registry import CommandRegistry
+from interfaces.command_system.command_parser import split_command_line
+
+
+logger = logging.getLogger(__name__)
 
 
 class AdvancedCompleter(Completer):
@@ -31,6 +36,7 @@ class AdvancedCompleter(Completer):
         self._command_cache: List[str] = []
         self._modules_cache: List[str] = []
         self._subcommand_cache: Dict[str, List[str]] = {}
+        self._logged_completion_errors: Set[str] = set()
 
         self._last_command_cache = 0.0
         self._last_module_cache = 0.0
@@ -49,7 +55,7 @@ class AdvancedCompleter(Completer):
     # ------------------------------------------------------------------ #
     def get_completions(self, document: Document, complete_event) -> Iterable[Completion]:
         text = document.text_before_cursor
-        tokens = text.split()
+        tokens = split_command_line(text)
         ends_with_space = text.endswith(" ")
         current_word = tokens[-1] if tokens and not ends_with_space else ""
 
@@ -146,7 +152,10 @@ class AdvancedCompleter(Completer):
             try:
                 suggestions.extend(metasploit_plugin.complete_msf_modules(partial))
             except Exception:
-                pass
+                self._log_completion_error(
+                    "metasploit-module-completions",
+                    "Metasploit module completion provider failed",
+                )
         for module_path in self._filter_items(suggestions, partial, limit=40):
             yield Completion(module_path, start_position=-len(partial), display_meta="Module")
 
@@ -176,7 +185,10 @@ class AdvancedCompleter(Completer):
                 try:
                     suggestions.extend(metasploit_plugin.complete_msf_payloads(partial))
                 except Exception:
-                    pass
+                    self._log_completion_error(
+                        "metasploit-payload-completions",
+                        "Metasploit payload completion provider failed",
+                    )
         elif option_lower == "obfuscator":
             suggestions = self._collect_obfuscator_paths()
 
@@ -327,6 +339,11 @@ class AdvancedCompleter(Completer):
             try:
                 commands = self.command_registry.get_available_commands()
             except Exception:
+                self._log_completion_error(
+                    "available-commands",
+                    "Failed to read available commands from registry; using loaded command instances",
+                    level=logging.WARNING,
+                )
                 commands = list(self.command_registry.commands.keys())
             self._command_cache = sorted(set(commands))
             self._last_command_cache = now
@@ -339,6 +356,11 @@ class AdvancedCompleter(Completer):
                 discovered = self.framework.module_loader.discover_modules()
                 module_paths = sorted(discovered.keys())
             except Exception:
+                self._log_completion_error(
+                    "module-discovery",
+                    "Failed to discover modules for completion",
+                    level=logging.WARNING,
+                )
                 module_paths = []
             self._modules_cache = module_paths
             self._last_module_cache = now
@@ -352,11 +374,20 @@ class AdvancedCompleter(Completer):
                 try:
                     cmd_instance = self.command_registry.get_command(command)
                 except Exception:
+                    self._log_completion_error(
+                        f"command-instance:{command}",
+                        f"Failed to instantiate command '{command}' for subcommand completion",
+                    )
                     cmd_instance = None
             if cmd_instance and hasattr(cmd_instance, 'get_subcommands'):
                 try:
                     subcommands = list(cmd_instance.get_subcommands() or [])
                 except Exception:
+                    self._log_completion_error(
+                        f"subcommands:{command}",
+                        f"Command '{command}' failed while providing subcommands",
+                        level=logging.WARNING,
+                    )
                     subcommands = []
             self._subcommand_cache[command] = sorted(set(subcommands))
         return self._subcommand_cache.get(command, [])
@@ -386,7 +417,11 @@ class AdvancedCompleter(Completer):
                 if getattr(session, 'id', None):
                     identifiers.append(session.id)
         except Exception:
-            pass
+            self._log_completion_error(
+                "session-identifiers",
+                "Failed to collect framework session identifiers for completion",
+                level=logging.WARNING,
+            )
 
         try:
             for session in session_manager.get_browser_sessions():
@@ -394,14 +429,21 @@ class AdvancedCompleter(Completer):
                 if session_id:
                     identifiers.append(session_id)
         except Exception:
-            pass
+            self._log_completion_error(
+                "browser-session-identifiers",
+                "Failed to collect browser session identifiers for completion",
+                level=logging.WARNING,
+            )
 
         metasploit_plugin = self._get_metasploit_plugin()
         if metasploit_plugin:
             try:
                 identifiers.extend(metasploit_plugin.complete_msf_session_ids())
             except Exception:
-                pass
+                self._log_completion_error(
+                    "metasploit-session-completions",
+                    "Metasploit session completion provider failed",
+                )
 
         return sorted(set(filter(None, identifiers)))
 
@@ -412,7 +454,10 @@ class AdvancedCompleter(Completer):
             _, _, addresses = socket.gethostbyname_ex(hostname)
             candidates.update(addresses)
         except OSError:
-            pass
+            self._log_completion_error(
+                "local-ip-candidates",
+                "Failed to resolve local IP candidates for completion",
+            )
         return sorted(set(filter(None, candidates)))
 
     def _collect_payload_paths(self) -> List[str]:
@@ -431,7 +476,11 @@ class AdvancedCompleter(Completer):
                 if module_path.startswith("payloads/"):
                     payload_paths.append(module_path)
         except Exception:
-            pass
+            self._log_completion_error(
+                "payload-discovery",
+                "Failed to discover payload paths for completion",
+                level=logging.WARNING,
+            )
 
         return sorted(set(filter(None, payload_paths)))
 
@@ -442,6 +491,10 @@ class AdvancedCompleter(Completer):
         try:
             return plugin_manager.get_plugin("metasploit")
         except Exception:
+            self._log_completion_error(
+                "metasploit-plugin",
+                "Failed to access Metasploit plugin for completion",
+            )
             return None
 
     def _collect_obfuscator_paths(self) -> List[str]:
@@ -458,9 +511,20 @@ class AdvancedCompleter(Completer):
                 if module_path.startswith("obfuscators/"):
                     obfuscator_paths.append(module_path)
         except Exception:
-            pass
+            self._log_completion_error(
+                "obfuscator-discovery",
+                "Failed to discover obfuscator paths for completion",
+                level=logging.WARNING,
+            )
         
         return sorted(set(filter(None, obfuscator_paths)))
+
+    def _log_completion_error(self, key: str, message: str, level: int = logging.DEBUG) -> None:
+        """Log noisy completion failures once so interactive typing stays usable."""
+        if key in self._logged_completion_errors:
+            return
+        self._logged_completion_errors.add(key)
+        logger.log(level, message, exc_info=True)
 
 
 class ContextFilter(Filter):

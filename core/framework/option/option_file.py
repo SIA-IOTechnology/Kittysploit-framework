@@ -1,5 +1,6 @@
 from core.framework.option.base_option import Option
 from core.utils.exceptions import OptionValidationError
+from core.utils.paths import data_dir
 import os
 
 class OptFile(Option):
@@ -22,7 +23,7 @@ class OptFile(Option):
         
         if path.startswith("file://"):
             path = path.replace("file://", "")
-            path = os.path.join(os.getcwd(), "data", *path.split('/'))
+            path = str(data_dir().joinpath(*path.split('/')))
             
             if not os.path.exists(path):
                 raise OptionValidationError("File '{}' does not exist.".format(path))
@@ -40,7 +41,7 @@ class OptFile(Option):
         # If value starts with file://, validate the file exists
         if value and str(value).startswith("file://"):
             path = str(value).replace("file://", "")
-            path = os.path.join(os.getcwd(), "data", *path.split('/'))
+            path = str(data_dir().joinpath(*path.split('/')))
             if not os.path.exists(path):
                 raise OptionValidationError(f"File '{path}' does not exist.")
     

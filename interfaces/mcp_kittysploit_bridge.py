@@ -30,6 +30,7 @@ from core.utils.module_static_metadata import (
     extract_module_search_metadata,
     infer_module_type_from_path,
 )
+from interfaces.command_system.command_parser import split_command_line
 
 
 STOPWORDS = {
@@ -452,7 +453,7 @@ def _module_runtime_path(module: Any) -> Optional[str]:
 
 
 def _looks_like_command(request: str) -> bool:
-    parts = _split_command_line(request)
+    parts = split_command_line(request)
     if not parts:
         return False
     command_name = parts[0].lower()
@@ -499,16 +500,6 @@ def _looks_like_command(request: str) -> bool:
         )
 
     return len(parts) <= 6
-
-
-def _split_command_line(command_line: str) -> List[str]:
-    text = str(command_line or "").strip()
-    if not text:
-        return []
-    try:
-        return shlex.split(text)
-    except ValueError:
-        return text.split()
 
 
 def _module_type_tokens(text: str) -> List[str]:
@@ -808,7 +799,7 @@ def _detect_intent(request: str, explicit_module_path: Optional[str], target: Di
 
 
 def _classify_command(command_line: str) -> Dict[str, Any]:
-    parts = _split_command_line(command_line)
+    parts = split_command_line(command_line)
     if not parts:
         return {
             "command": command_line,
@@ -1059,7 +1050,7 @@ class MCPCommandBridge:
                 "state": self.get_state(),
             }
 
-        parts = _split_command_line(command_line)
+        parts = split_command_line(command_line)
         if not parts:
             return {
                 "status": "error",

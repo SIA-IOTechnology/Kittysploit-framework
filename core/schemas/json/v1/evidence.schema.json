@@ -1,0 +1,437 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/evidence.schema.json",
+  "title": "KittySploit Evidence",
+  "description": "Structured evidence collected by modules, proxy flows, commands, sessions, agents, or manual reporting.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "http",
+        "command",
+        "file",
+        "screenshot",
+        "credential",
+        "session",
+        "network",
+        "proxy_flow",
+        "log",
+        "artifact",
+        "agent_report",
+        "manual",
+        "note",
+        "other"
+      ]
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Compatibility alias used by KittyReport Studio; prefer kind in new producers."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content_preview": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collected_at": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "target.schema.json"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "workspace": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "module",
+            "proxy",
+            "session",
+            "agent",
+            "manual",
+            "api",
+            "mcp",
+            "plugin",
+            "external",
+            "unknown"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "module": {
+      "$ref": "common.schema.json#/$defs/module_ref"
+    },
+    "job_id": {
+      "$ref": "common.schema.json#/$defs/nullable_id"
+    },
+    "session_id": {
+      "$ref": "common.schema.json#/$defs/nullable_id"
+    },
+    "finding_id": {
+      "$ref": "common.schema.json#/$defs/nullable_id"
+    },
+    "ref_id": {
+      "$ref": "common.schema.json#/$defs/nullable_id"
+    },
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "request": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headers": {
+          "$ref": "evidence.schema.json#/$defs/headers"
+        },
+        "body_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body_b64": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "contentEncoding": "base64"
+        },
+        "body_sha256": {
+          "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+        }
+      },
+      "required": [
+        "method",
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "status_code": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 100,
+          "maximum": 599
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headers": {
+          "$ref": "evidence.schema.json#/$defs/headers"
+        },
+        "body_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body_b64": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "contentEncoding": "base64"
+        },
+        "body_sha256": {
+          "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+        },
+        "elapsed_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stdout": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stderr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdout_sha256": {
+          "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+        },
+        "stderr_sha256": {
+          "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mime_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "redacted": {
+          "type": "boolean"
+        },
+        "strategy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "redacted"
+      ],
+      "additionalProperties": false
+    },
+    "chain_of_custody": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "actor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "collected",
+              "stored",
+              "exported",
+              "redacted",
+              "transformed",
+              "verified"
+            ]
+          },
+          "at": {
+            "$ref": "common.schema.json#/$defs/timestamp"
+          },
+          "digest_sha256": {
+            "$ref": "evidence.schema.json#/$defs/sha256_or_null"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "confidence": {
+      "$ref": "common.schema.json#/$defs/confidence"
+    },
+    "tags": {
+      "$ref": "common.schema.json#/$defs/tags"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    }
+  },
+  "required": [
+    "id",
+    "title"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "kind"
+      ]
+    },
+    {
+      "required": [
+        "type"
+      ]
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256_or_null": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "default": {}
+    }
+  }
+}

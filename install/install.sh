@@ -21,16 +21,16 @@ echo -e "${NC}"
 echo -e "${YELLOW}[*]${NC} Checking Python installation..."
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}[!]${NC} Error: Python 3 is not installed"
-    echo -e "${RED}[!]${NC} Please install Python 3.8+ from your package manager"
+    echo -e "${RED}[!]${NC} Please install Python 3.9+ from your package manager"
     exit 1
 fi
 
 # Check Python version
 python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-required_version="3.8"
+required_version="3.9"
 
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)" 2>/dev/null; then
-    echo -e "${RED}[!]${NC} Error: Python 3.8 or higher is required"
+if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>/dev/null; then
+    echo -e "${RED}[!]${NC} Error: Python 3.9 or higher is required"
     echo -e "${RED}[!]${NC} Current version: $python_version"
     exit 1
 fi

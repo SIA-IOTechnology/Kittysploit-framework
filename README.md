@@ -4,7 +4,7 @@
   # KittySploit Framework
   ### *The Next-Gen Exploitation Engine for Modern Red Teams*
 
-  [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
   [![Zig](https://img.shields.io/badge/Payloads-Zig_0.16-orange.svg?style=for-the-badge&logo=zig)](https://ziglang.org/)
   [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
   [![Donate](https://img.shields.io/badge/Sponsor-Liberapay-yellow.svg?style=for-the-badge&logo=liberapay)](https://liberapay.com/KittySploit/donate)

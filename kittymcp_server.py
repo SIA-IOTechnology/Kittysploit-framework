@@ -13,7 +13,7 @@ Cursor example (`~/.cursor/mcp.json`). Prefer secrets in `env`, not in `args`:
     "kittysploit": {
       "command": "/path/to/Kittysploit-framework/venv/bin/python",
       "args": [
-        "/path/to/Kittysploit-framework/kittymcp.py",
+        "/path/to/Kittysploit-framework/kittymcp_server.py",
         "--transport", "stdio",
         "--accept-charter"
       ],
@@ -22,7 +22,9 @@ Cursor example (`~/.cursor/mcp.json`). Prefer secrets in `env`, not in `args`:
         "KITTYSPLOIT_MCP_ACCEPT_CHARTER": "1",
         "KITTYMCP_OLLAMA_ENABLED": "1",
         "KITTYMCP_OLLAMA_MODEL": "llama3.1:8b",
-        "KITTYMCP_OLLAMA_ENDPOINT": "http://127.0.0.1:11434/api/chat"
+        "KITTYMCP_OLLAMA_ENDPOINT": "http://127.0.0.1:11434/api/chat",
+        "KITTYMCP_ROLES": "operator",
+        "KITTYMCP_DANGEROUS_CONSENT": "1"
       }
     }
 
@@ -96,6 +98,20 @@ def parse_args() -> argparse.Namespace:
         "--ollama-timeout",
         type=int,
         help="Timeout in seconds for Ollama requests (or set KITTYMCP_OLLAMA_TIMEOUT).",
+    )
+    p.add_argument(
+        "--mcp-role",
+        action="append",
+        choices=("viewer", "operator", "admin"),
+        help="RBAC role for exposed MCP tools. Repeatable, or set KITTYMCP_ROLES=viewer,operator.",
+    )
+    p.add_argument(
+        "--dangerous-consent",
+        action="store_true",
+        help=(
+            "Allow risky MCP tools (module runs, interpreter, dangerous commands). "
+            "Or set KITTYMCP_DANGEROUS_CONSENT=1."
+        ),
     )
     p.add_argument("-d", "--debug", action="store_true", help="Enable debug logging")
     return p.parse_args()
@@ -191,6 +207,8 @@ def main() -> int:
                 )
                 return 1
 
+        # In-process MCP bypasses XML-RPC auth (api_key=None). RBAC, dangerous consent, and
+        # the execution journal in create_mcp_server() enforce local access controls instead.
         rpc = RpcServer(framework, host="127.0.0.1", port=0, api_key=None)
 
         if use_stdio_mcp:
@@ -206,6 +224,8 @@ def main() -> int:
             transport=args.transport,
             host=args.host,
             port=args.port,
+            roles=args.mcp_role,
+            dangerous_consent=bool(args.dangerous_consent) or _env_truthy("KITTYMCP_DANGEROUS_CONSENT"),
         )
         return 0
     except KeyboardInterrupt:

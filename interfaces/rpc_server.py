@@ -17,6 +17,8 @@ from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
 import io
 import sys
 
+from interfaces.api_security import RotatingTokenManager, iso_timestamp
+
 # Imports optionnels pour les fonctionnalités avancées
 try:
     from core.interpreter import KittyInterpreter
@@ -35,8 +37,8 @@ class AuthHandler(SimpleXMLRPCRequestHandler):
     """Handler personnalisé pour l'authentification"""
 
     def do_POST(self):
-        key = getattr(self.server, "api_key", None)
-        if not key:
+        token_manager = getattr(self.server, "token_manager", None)
+        if not token_manager or not token_manager.bootstrap_secret:
             self.send_response(401)
             self.send_header("Content-type", "text/plain")
             self.end_headers()
@@ -45,8 +47,12 @@ class AuthHandler(SimpleXMLRPCRequestHandler):
                 b"(configure --api-key or KITTYSPLOIT_API_KEY)."
             )
             return
+        api_key = self.headers.get("X-API-Key")
         auth_header = self.headers.get("Authorization")
-        if not auth_header or auth_header != f"Bearer {key}":
+        token = api_key
+        if auth_header:
+            token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else auth_header.strip()
+        if not token_manager.authenticate(token, expected_kind="access"):
             self.send_response(401)
             self.send_header("Content-type", "text/plain")
             self.end_headers()
@@ -84,6 +90,8 @@ class RpcServer:
             'error': [],
         }
         self.interpreters = {}  # Stocke les interpréteurs par session
+        self.started_at = time.time()
+        self.token_manager = RotatingTokenManager(self.api_key, issuer="kittysploit-rpc")
         
         # Initialize registry service if available (mode serveur uniquement)
         # Note: Le registry est normalement un service distant géré par KittySploit
@@ -142,6 +150,7 @@ class RpcServer:
                 logRequests=True
             )
             self.server.api_key = self.api_key
+            self.server.token_manager = self.token_manager
             
             # Register existing functions
             self.server.register_introspection_functions()
@@ -414,14 +423,43 @@ class RpcServer:
         """Récupère les sessions disponibles"""
         return list(self.interpreters.keys())
     
-    def health(self):
+    def health(self, detailed=False):
         """Health check - Retourne l'état du serveur"""
-        return {
+        runtime_status = 'active' if (RUNTIME_KERNEL_AVAILABLE and hasattr(self.framework, 'runtime_kernel')) else 'inactive'
+        payload = {
             'status': 'healthy',
+            'service': 'kittysploit-rpc',
             'version': getattr(self.framework, 'version', 'unknown'),
-            'runtime_kernel': 'active' if (RUNTIME_KERNEL_AVAILABLE and hasattr(self.framework, 'runtime_kernel')) else 'inactive',
+            'timestamp': iso_timestamp(),
+            'uptime_seconds': round(time.time() - self.started_at, 3),
+            'runtime_kernel': runtime_status,
             'interpreter': 'available' if INTERPRETER_AVAILABLE else 'unavailable'
         }
+        if detailed:
+            payload['components'] = {
+                'auth': self.token_manager.stats(),
+                'framework': {
+                    'status': 'ok',
+                    'workspace': getattr(self.framework, 'current_workspace', None),
+                },
+                'runtime_kernel': {
+                    'status': runtime_status,
+                    'package_available': RUNTIME_KERNEL_AVAILABLE,
+                },
+                'interpreter': {
+                    'status': 'available' if INTERPRETER_AVAILABLE else 'unavailable',
+                    'sessions': len(self.interpreters),
+                },
+                'clients': {
+                    'total': len(self.clients),
+                    'active': sum(1 for c in self.clients.values() if c.get('active')),
+                },
+                'registry': {
+                    'mode': self.registry_mode,
+                    'status': 'available' if self.registry_service else 'client',
+                },
+            }
+        return payload
     
     def run_module(self, module_name, params, use_runtime_kernel=False):
         """Exécute un module

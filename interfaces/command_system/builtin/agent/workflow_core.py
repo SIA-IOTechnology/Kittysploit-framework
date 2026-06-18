@@ -31,6 +31,7 @@ from interfaces.command_system.builtin.agent.state import (
     agent_state_from_dict,
     agent_state_to_dict,
 )
+from core.scanner.result_dedup import deduplicate_scanner_results
 
 from interfaces.command_system.builtin.scanner_command import ScannerCommand
 from core.output_handler import (
@@ -3116,10 +3117,10 @@ class AgentWorkflowCore:
             results = self._run_derived_host_surface_scans(state, scanner, all_modules, results)
 
         state.results = results
-        state.vulnerable_results = [
-            r for r in results
-            if self._is_actionable_finding(r)
-        ]
+        state.vulnerable_results = deduplicate_scanner_results(
+            [r for r in results if self._is_actionable_finding(r)],
+            target_info=state.target_info,
+        )
         self._append_timeline_event(
             state,
             "scan",
@@ -5854,24 +5855,8 @@ class AgentWorkflowCore:
         return text[: limit - 3].rstrip() + "..."
 
     def _deduplicate_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Deduplicate repeated findings by path + normalized message."""
-        unique: List[Dict[str, Any]] = []
-        seen = set()
-        for row in findings or []:
-            if not isinstance(row, dict):
-                continue
-            path = str(row.get("path", "")).strip().lower()
-            message = " ".join(str(row.get("message", "")).strip().lower().split())
-            details = row.get("details", {})
-            detail_hint = ""
-            if isinstance(details, dict):
-                detail_hint = str(details.get("path") or details.get("url") or "").strip().lower()
-            key = (path, message, detail_hint)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(row)
-        return unique
+        """Deduplicate repeated findings by vulnerability, host, service and evidence."""
+        return deduplicate_scanner_results(findings)
 
     def _print_detection_summary(self, state: AgentState) -> None:
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}

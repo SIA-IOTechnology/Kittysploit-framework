@@ -9,11 +9,16 @@ import os
 import importlib
 import inspect
 import time
+import logging
 from datetime import datetime
 from typing import Dict, List, Type, Any
 from interfaces.command_system.base_command import BaseCommand
 from core.utils.exceptions import KittyException
 from core.history_manager import HistoryManager
+
+
+logger = logging.getLogger(__name__)
+
 
 class CommandRegistry:
     """Registry for managing commands"""
@@ -25,6 +30,7 @@ class CommandRegistry:
         self.commands: Dict[str, BaseCommand] = {}
         self.command_classes: Dict[str, Type[BaseCommand]] = {}
         self.command_history: List[Dict[str, Any]] = []
+        self._history_workspace_id = None
         
         # Initialize history manager
         # Get workspace ID from name
@@ -33,10 +39,15 @@ class CommandRegistry:
             if hasattr(framework, 'workspace_manager'):
                 current_workspace = framework.workspace_manager.get_current_workspace()
                 workspace_id = current_workspace.id if current_workspace else None
-        except:
-            pass
+        except Exception:
+            logger.warning(
+                "Unable to determine current workspace for command history; "
+                "history will not be workspace-scoped",
+                exc_info=True,
+            )
         
         self.history_manager = HistoryManager(framework.db_manager, workspace_id, framework)
+        self._history_workspace_id = self.history_manager.refresh_workspace()
         
         # Load built-in commands
         self._load_builtin_commands()
@@ -91,10 +102,14 @@ class CommandRegistry:
             'jobs',
             'msf',
             'check',
+            'doctor',
             'sound',
             'pattern',
             'reset',
             'syscall',
+            'detection_pack',
+            'api_import',
+            'new',
             'collab_share_module',
             'collab_sync_module',
             'collab_edit_module',
@@ -105,7 +120,9 @@ class CommandRegistry:
             'portal',
             'scanner',
             'tor',
-            'route'
+            'route',
+            'scope',
+            'campaign'
         ]
         
         for command_name in builtin_commands:
@@ -122,9 +139,11 @@ class CommandRegistry:
                         break
             except ImportError as e:
                 # Command not found, skip
+                logger.debug("Could not import built-in command %r", command_name, exc_info=True)
                 print(f"Warning: Could not import {command_name}: {e}")
                 continue
             except Exception as e:
+                logger.exception("Error loading built-in command %r", command_name)
                 print(f"Error loading {command_name}: {e}")
                 continue
     
@@ -133,6 +152,7 @@ class CommandRegistry:
         try:
             # Try to load recent history from database
             if hasattr(self, 'history_manager') and self.history_manager:
+                self._history_workspace_id = self.history_manager.refresh_workspace()
                 db_history = self.history_manager.get_history(limit=1000)
                 if db_history:
                     # Convert database format to local format
@@ -144,7 +164,12 @@ class CommandRegistry:
                             try:
                                 dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                                 timestamp = dt.timestamp()
-                            except:
+                            except (TypeError, ValueError):
+                                logger.debug(
+                                    "Invalid command history timestamp %r; using current time",
+                                    timestamp,
+                                    exc_info=True,
+                                )
                                 timestamp = time.time()
                         
                         self.command_history.append({
@@ -154,13 +179,26 @@ class CommandRegistry:
                             'args': entry.get('args', [])
                         })
                     return
-        except Exception as e:
-            # If loading fails, start with empty history
-            pass
+        except Exception:
+            logger.warning(
+                "Failed to load command history from database; continuing with empty history",
+                exc_info=True,
+            )
         
         # Ensure command_history is initialized as a list
         if not hasattr(self, 'command_history') or self.command_history is None:
             self.command_history = []
+
+    def refresh_history_workspace(self, reload: bool = False):
+        """Refresh history workspace state after workspace switches."""
+        if not hasattr(self, 'history_manager') or not self.history_manager:
+            return
+        current_workspace_id = self.history_manager.refresh_workspace()
+        if current_workspace_id != self._history_workspace_id:
+            self._history_workspace_id = current_workspace_id
+            self.command_history = []
+        if reload:
+            self._load_command_history()
     
     def _save_command_history(self):
         """Save command history to database (no-op, handled by add_command)"""
@@ -186,7 +224,11 @@ class CommandRegistry:
                             obj != BaseCommand):
                             self.register_command(obj)
                 except ImportError as e:
+                    logger.debug("Could not import custom command %r", module_name, exc_info=True)
                     print(f"Warning: Could not load custom command {module_name}: {e}")
+                except Exception as e:
+                    logger.exception("Error loading custom command %r", module_name)
+                    print(f"Error loading custom command {module_name}: {e}")
     
     def register_command(self, command_class: Type[BaseCommand]):
         """
@@ -316,6 +358,8 @@ class CommandRegistry:
                 # Ensure result is converted to boolean for history
                 success = bool(result) if result is not None else False
                 self._record_command_history(command_name, args, success)
+                if command_name == 'workspace' and args and args[0].lower() == 'switch' and success:
+                    self.refresh_history_workspace(reload=True)
             
             # Debug: Capture command result
             if framework and hasattr(framework, 'debug_manager') and framework.debug_manager.is_active:
@@ -363,17 +407,25 @@ class CommandRegistry:
         """Record a command in the history"""
         import time
         try:
-            # Create command string
-            command_str = command_name
-            if args:
-                command_str += " " + " ".join(args)
+            self.refresh_history_workspace()
+
+            # Create redacted command string and arguments
+            if hasattr(self, 'history_manager') and self.history_manager:
+                safe_record = self.history_manager.sanitize_command_parts(command_name, args)
+                command_str = safe_record['command']
+                safe_args = safe_record['args']
+            else:
+                command_str = command_name
+                safe_args = list(args or [])
+                if safe_args:
+                    command_str += " " + " ".join(safe_args)
             
             # Create history entry
             history_entry = {
                 'timestamp': time.time(),
                 'command': command_str,
                 'success': success,
-                'args': args
+                'args': safe_args
             }
             
             # Always add to local list first for immediate access
@@ -389,13 +441,26 @@ class CommandRegistry:
             # Try to add to database (but don't fail if it doesn't work)
             try:
                 if hasattr(self, 'history_manager') and self.history_manager:
-                    self.history_manager.add_command(command_str, args, success)
-            except Exception as db_error:
+                    persisted = self.history_manager.add_command(command_str, safe_args, success)
+                    if not persisted:
+                        logger.warning(
+                            "History manager rejected command history entry for %r; kept in memory only",
+                            command_name,
+                        )
+            except Exception:
                 # Database recording failed, but local history is saved
                 # This is fine - we have the local history as backup
-                pass
+                logger.warning(
+                    "Failed to persist command history entry for %r; kept in memory only",
+                    command_name,
+                    exc_info=True,
+                )
                 
-        except Exception as e:
+        except Exception:
             # If recording fails completely, log but continue
             # Don't print error to avoid cluttering output
-            pass
+            logger.warning(
+                "Failed to record command history entry for %r",
+                command_name,
+                exc_info=True,
+            )

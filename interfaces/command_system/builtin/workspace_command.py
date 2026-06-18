@@ -244,6 +244,8 @@ Examples:
     
     def _handle_switch(self, args, workspace_manager):
         """Handle switch action"""
+        if hasattr(self.framework, 'set_workspace'):
+            return self.framework.set_workspace(args.name)
         return workspace_manager.switch_workspace(args.name)
     
     def _handle_stats(self, args, workspace_manager):

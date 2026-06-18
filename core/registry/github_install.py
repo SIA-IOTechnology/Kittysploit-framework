@@ -36,6 +36,14 @@ DEFAULT_GITHUB_SOURCES: Dict[str, Dict[str, str]] = {
         "repo": "SIA-IOTechnology/KittyV8Debugger",
         "ref": "main",
     },
+    "kittyreport": {
+        "repo": "SIA-IOTechnology/KittyReport-Studio",
+        "ref": "main",
+    },
+    "kittysupply": {
+        "repo": "SIA-IOTechnology/KittySupply-Lens",
+        "ref": "main",
+    },
 }
 
 _GITHUB_SPEC_RE = re.compile(

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any
 from core.session import Session, SessionData
 from core.output_handler import print_error
 from core.models.models import Session as DBSession
+from core.utils.paths import sound_notify_path
 from datetime import datetime
 
 def _make_json_serializable(obj):
@@ -111,15 +112,46 @@ class SessionManager:
         if not clean_startup:
             self._load_sessions_from_db()
     
+    def _get_workspace_id(self) -> Optional[int]:
+        """Return the current workspace ID from the framework, if available."""
+        if not self.framework:
+            return None
+        try:
+            workspace_manager = getattr(self.framework, 'workspace_manager', None)
+            if workspace_manager:
+                current_workspace = workspace_manager.get_current_workspace()
+                if current_workspace:
+                    return current_workspace.id
+        except Exception:
+            pass
+        return None
+
+    def _get_db_session(self):
+        """Return the SQLAlchemy session for the current workspace context."""
+        if self.framework and hasattr(self.framework, 'get_db_session'):
+            return self.framework.get_db_session()
+        if self.db_manager:
+            return self.db_manager.get_session("default")
+        return None
+
+    def reload_for_current_workspace(self) -> None:
+        """Clear in-memory sessions and reload those for the current workspace."""
+        self.sessions.clear()
+        self.browser_sessions.clear()
+        self._session_metadata.clear()
+        self._load_sessions_from_db()
+    
     def _sync_session_to_db(self, session_id: str, session_data: SessionData) -> bool:
         """Sync a session to the database"""
         if not self.db_manager:
             return False
         
         try:
-            db_session = self.db_manager.get_session("default")
+            db_session = self._get_db_session()
             if not db_session:
                 return False
+
+            workspace_id = self._get_workspace_id()
                 
             # Check if session already exists in DB
             existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
@@ -135,6 +167,8 @@ class SessionManager:
                 existing_db_session.session_data = json.dumps(serializable_data)
                 existing_db_session.last_seen = datetime.utcnow()
                 existing_db_session.is_active = True
+                if workspace_id is not None:
+                    existing_db_session.workspace_id = workspace_id
             else:
                 # Create new session in DB
                 db_session_obj = DBSession(
@@ -145,7 +179,8 @@ class SessionManager:
                     session_data=json.dumps(serializable_data),
                     created_at=datetime.utcnow(),
                     last_seen=datetime.utcnow(),
-                    is_active=True
+                    is_active=True,
+                    workspace_id=workspace_id,
                 )
                 db_session.add(db_session_obj)
             
@@ -161,9 +196,11 @@ class SessionManager:
             return False
         
         try:
-            db_session = self.db_manager.get_session("default")
+            db_session = self._get_db_session()
             if not db_session:
                 return False
+
+            workspace_id = self._get_workspace_id()
                 
             # Check if session already exists in DB
             existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
@@ -184,6 +221,8 @@ class SessionManager:
                 existing_db_session.session_info = json.dumps(session_info)
                 existing_db_session.last_seen = datetime.utcnow()
                 existing_db_session.is_active = browser_session.get('active', True)
+                if workspace_id is not None:
+                    existing_db_session.workspace_id = workspace_id
             else:
                 # Create new session in DB
                 db_session_obj = DBSession(
@@ -193,7 +232,8 @@ class SessionManager:
                     session_info=json.dumps(session_info),
                     created_at=datetime.utcnow(),
                     last_seen=datetime.utcnow(),
-                    is_active=browser_session.get('active', True)
+                    is_active=browser_session.get('active', True),
+                    workspace_id=workspace_id,
                 )
                 db_session.add(db_session_obj)
             
@@ -209,22 +249,23 @@ class SessionManager:
             return
         
         try:
-            db_session = self.db_manager.get_session("default")
+            db_session = self._get_db_session()
             if not db_session:
                 return
             
-            # If clean_startup is True, don't load old sessions
-            if self.clean_startup:
-                return
-                
             # Only load sessions that are active and recent (created in last 7 days)
             from datetime import datetime, timedelta
             cutoff_date = datetime.utcnow() - timedelta(days=7)
-            
-            db_sessions = db_session.query(DBSession).filter(
+
+            workspace_id = self._get_workspace_id()
+            query = db_session.query(DBSession).filter(
                 DBSession.is_active == True,
                 DBSession.created_at >= cutoff_date
-            ).all()
+            )
+            if workspace_id is not None:
+                query = query.filter(DBSession.workspace_id == workspace_id)
+
+            db_sessions = query.all()
             
             for db_session_obj in db_sessions:
                 session_id = db_session_obj.session_id
@@ -332,33 +373,9 @@ class SessionManager:
             if self.framework and hasattr(self.framework, 'sound_enabled') and self.framework.sound_enabled:
                 try:
                     from nava import play
-                    import os
-                    # Try to find the sound file
-                    sound_file = None
-                    # Get the framework root directory
-                    # Try to get from framework if available, otherwise use current working directory
-                    if hasattr(self.framework, '__file__'):
-                        framework_root = os.path.abspath(os.path.join(os.path.dirname(self.framework.__file__), '..'))
-                    else:
-                        framework_root = os.getcwd()
-                    
-                    # Try multiple possible paths
-                    possible_paths = [
-                        os.path.join(framework_root, 'data/sound/notify.wav'),
-                        os.path.join(os.getcwd(), 'data/sound/notify.wav'),
-                        'data/sound/notify.wav',
-                    ]
-                    
-                    for path in possible_paths:
-                        abs_path = os.path.abspath(path)
-                        if os.path.exists(abs_path):
-                            sound_file = abs_path
-                            break
-                    
-                    # Play notification sound
+                    sound_file = sound_notify_path()
                     if sound_file:
-                        play(sound_file)
-                    # If file doesn't exist, we can't use nava without a file
+                        play(str(sound_file))
                 except ImportError:
                     # nava not installed, silently skip
                     pass
@@ -488,17 +505,22 @@ class SessionManager:
         
         try:
             from datetime import datetime, timedelta
-            db_session = self.db_manager.get_session("default")
+            db_session = self._get_db_session()
             if not db_session:
                 return 0
             
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            
-            # Mark old sessions as inactive
-            old_sessions = db_session.query(DBSession).filter(
+
+            workspace_id = self._get_workspace_id()
+            query = db_session.query(DBSession).filter(
                 DBSession.is_active == True,
                 DBSession.created_at < cutoff_date
-            ).all()
+            )
+            if workspace_id is not None:
+                query = query.filter(DBSession.workspace_id == workspace_id)
+
+            # Mark old sessions as inactive
+            old_sessions = query.all()
             
             count = 0
             for session in old_sessions:
@@ -519,7 +541,7 @@ class SessionManager:
             return False
         
         try:
-            db_session = self.db_manager.get_session("default")
+            db_session = self._get_db_session()
             if not db_session:
                 return False
                 

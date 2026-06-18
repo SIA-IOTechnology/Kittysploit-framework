@@ -7,15 +7,12 @@ Syscall command implementation
 
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
+from core.utils.paths import data_dir
 import sys
-import os
-from pathlib import Path
 
-# Add data directory to path
-current_file = Path(__file__).resolve()
-project_root = current_file.parent.parent.parent.parent
-data_dir = project_root / 'data'
-sys.path.insert(0, str(data_dir))
+_root_data_dir = data_dir()
+if str(_root_data_dir) not in sys.path:
+    sys.path.insert(0, str(_root_data_dir))
 
 try:
     from syscall import get_database, get_syscall, list_syscalls, search_syscalls

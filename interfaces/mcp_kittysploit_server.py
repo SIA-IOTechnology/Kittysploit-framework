@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, TypeVar
 
 from mcp.server.fastmcp import FastMCP
 
+from interfaces.api_security import MCPAuthorizer
 from interfaces.mcp_kittysploit_bridge import MCPCommandBridge, NaturalLanguagePlanner
 from interfaces.rpc_server import RpcServer
 
@@ -61,6 +62,10 @@ Rules:
   is more natural than raw module RPC calls.
 - `ks_execute_natural_request` can prepare and launch the best module through RPC when
   `allow_dangerous=true`; otherwise it returns a blocked pre-flight instead of guessing.
+- Risky tools (`ks_run_module`, `ks_execute_interpreter`, and dangerous command paths) also
+  require the MCP server to be started with explicit dangerous-action consent
+  (`--dangerous-consent` or `KITTYMCP_DANGEROUS_CONSENT=1`).
+- Tool invocations are recorded in a local audit journal; use `ks_mcp_audit` to inspect it.
 - The "discreet" operation profile adjusts common options (timeout, threads, verbose) when they exist on the module.
 - The interpreter tool runs Python inside KittySploit's context — use with extreme care.
 """
@@ -145,6 +150,8 @@ def create_mcp_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     stdio_transport: bool = False,
+    roles: Optional[List[str]] = None,
+    dangerous_consent: Optional[bool] = None,
 ) -> FastMCP:
     """
     Build a FastMCP server bound to an existing RpcServer instance (no need to start XML-RPC).
@@ -157,10 +164,19 @@ def create_mcp_server(
     )
 
     safe = _stdio_safe(stdio_transport)
+    authorizer = MCPAuthorizer(roles=roles, dangerous_consent=dangerous_consent)
     command_bridge = MCPCommandBridge(rpc.framework)
     natural_bridge = NaturalLanguagePlanner(rpc.framework, command_bridge=command_bridge)
     module_info_cache: Dict[str, Dict[str, Any]] = {}
     module_options_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _authorize(tool_name: str, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        blocked = authorizer.authorize_tool(tool_name, **kwargs)
+        return _safe_json(blocked) if blocked else None
+
+    def _finish(tool_name: str, result: Any, *, allow_dangerous: bool = False) -> Any:
+        authorizer.log_tool_result(tool_name, result, allow_dangerous=allow_dangerous)
+        return result
 
     def _invalidate_module_caches() -> None:
         natural_bridge.invalidate_caches()
@@ -171,22 +187,41 @@ def create_mcp_server(
     @safe
     def ks_health() -> Dict[str, Any]:
         """Framework status and capabilities (interpreter, runtime kernel)."""
-        raw_health = rpc.health()
+        blocked = _authorize("ks_health")
+        if blocked:
+            return blocked
+        raw_health = rpc.health(detailed=True)
         health = dict(raw_health) if isinstance(raw_health, dict) else {"raw": raw_health}
         health["state"] = command_bridge.get_state()
-        return _safe_json(health)
+        health["mcp_security"] = authorizer.to_dict()
+        return _finish("ks_health", _safe_json(health))
+
+    @mcp.tool()
+    @safe
+    def ks_security_context() -> Dict[str, Any]:
+        """Show MCP RBAC roles and resolved permissions for this server process."""
+        blocked = _authorize("ks_security_context")
+        if blocked:
+            return blocked
+        return _finish("ks_security_context", _safe_json(authorizer.to_dict()))
 
     @mcp.tool()
     @safe
     def ks_framework_state() -> Dict[str, Any]:
         """Current workspace, current module, and session counters."""
-        return _safe_json(command_bridge.get_state())
+        blocked = _authorize("ks_framework_state")
+        if blocked:
+            return blocked
+        return _finish("ks_framework_state", _safe_json(command_bridge.get_state()))
 
     @mcp.tool()
     @safe
     def ks_ollama_status() -> Dict[str, Any]:
         """Show whether Ollama-assisted planning is enabled for kittymcp."""
-        return _safe_json(natural_bridge.ollama_status())
+        blocked = _authorize("ks_ollama_status")
+        if blocked:
+            return blocked
+        return _finish("ks_ollama_status", _safe_json(natural_bridge.ollama_status()))
 
     @mcp.tool()
     @safe
@@ -197,37 +232,50 @@ def create_mcp_server(
         When `query` is provided, this uses the natural-language planner to score modules from
         path/name/description/tags/type hints instead of a raw substring filter.
         """
+        blocked = _authorize("ks_list_modules")
+        if blocked:
+            return blocked
         if query and query.strip():
-            return _safe_json(
-                natural_bridge.search_modules(
-                    query,
-                    max_candidates=max(1, min(limit, 500)),
-                )
+            return _finish(
+                "ks_list_modules",
+                _safe_json(
+                    natural_bridge.search_modules(
+                        query,
+                        max_candidates=max(1, min(limit, 500)),
+                    )
+                ),
             )
-        return _safe_json(
-            natural_bridge.list_modules(limit=max(1, min(limit, 500)))
+        return _finish(
+            "ks_list_modules",
+            _safe_json(natural_bridge.list_modules(limit=max(1, min(limit, 500)))),
         )
 
     @mcp.tool()
     @safe
     def ks_get_module_info(module_path: str) -> Dict[str, Any]:
         """Rich module metadata with normalized options and inferred option hints."""
+        blocked = _authorize("ks_get_module_info")
+        if blocked:
+            return blocked
         if module_path in module_info_cache:
-            return _safe_json(module_info_cache[module_path])
+            return _finish("ks_get_module_info", _safe_json(module_info_cache[module_path]))
         info = natural_bridge.get_module_details(module_path)
         if isinstance(info, dict) and "error" not in info:
             module_info_cache[module_path] = info
-        return _safe_json(info)
+        return _finish("ks_get_module_info", _safe_json(info))
 
     @mcp.tool()
     @safe
     def ks_get_module_options(module_path: str) -> Dict[str, Any]:
         """Normalized module option schema with required/missing sets and semantic roles."""
+        blocked = _authorize("ks_get_module_options")
+        if blocked:
+            return blocked
         if module_path in module_options_cache:
-            return _safe_json(module_options_cache[module_path])
+            return _finish("ks_get_module_options", _safe_json(module_options_cache[module_path]))
         details = natural_bridge.get_module_details(module_path)
         if "error" in details:
-            return _safe_json(details)
+            return _finish("ks_get_module_options", _safe_json(details))
         data = {
             "module_path": details.get("module_path"),
             "name": details.get("name"),
@@ -239,7 +287,7 @@ def create_mcp_server(
         }
         if isinstance(data, dict):
             module_options_cache[module_path] = data
-        return _safe_json(data)
+        return _finish("ks_get_module_options", _safe_json(data))
 
     @mcp.tool()
     @safe
@@ -255,13 +303,19 @@ def create_mcp_server(
         Resolves inferred options from a natural-language request, overlays explicit `options`,
         applies the optional operation profile, and reports whether required options are filled.
         """
-        return _safe_json(
-            natural_bridge.prepare_module_run(
-                module_path,
-                request=request,
-                options=options,
-                operation_profile=operation_profile,
-            )
+        blocked = _authorize("ks_prepare_module_run")
+        if blocked:
+            return blocked
+        return _finish(
+            "ks_prepare_module_run",
+            _safe_json(
+                natural_bridge.prepare_module_run(
+                    module_path,
+                    request=request,
+                    options=options,
+                    operation_profile=operation_profile,
+                )
+            ),
         )
 
     @mcp.tool()
@@ -279,22 +333,31 @@ def create_mcp_server(
         `operation_profile`: discreet = slower / quieter where supported; aggressive = shorter
         timeouts / more parallelism where supported.
         """
+        blocked = _authorize("ks_run_module")
+        if blocked:
+            return blocked
         merged = _merge_operation_profile(rpc, module_path, options, operation_profile)
         result = rpc.run_module(module_path, merged, use_runtime_kernel=use_runtime_kernel)
         out = _safe_json(result)
         _invalidate_module_caches()
         if isinstance(out, dict) and operation_profile:
             out["resolved_options"] = merged
-        return out if isinstance(out, dict) else {"result": out}
+        return _finish("ks_run_module", out if isinstance(out, dict) else {"result": out})
 
     @mcp.tool()
     @safe
     def ks_get_module_logs(client_id: str, decode_text: bool = True) -> Dict[str, Any]:
         """Fetch output from a run started with ks_run_module (stdout/stderr/errors)."""
+        blocked = _authorize("ks_get_module_logs")
+        if blocked:
+            return blocked
         raw = rpc.get_module_logs(client_id)
         if decode_text:
-            return _safe_json(_decode_module_logs(raw if isinstance(raw, dict) else {"outputs": []}))
-        return _safe_json(raw)
+            return _finish(
+                "ks_get_module_logs",
+                _safe_json(_decode_module_logs(raw if isinstance(raw, dict) else {"outputs": []})),
+            )
+        return _finish("ks_get_module_logs", _safe_json(raw))
 
     @mcp.tool()
     @safe
@@ -303,19 +366,31 @@ def create_mcp_server(
         Execute Python in the KittySploit interpreter (persistent state per session_id).
         Dangerous: can affect the framework and host depending on the code.
         """
-        return _safe_json(rpc.execute_interpreter(code, session_id=session_id))
+        blocked = _authorize("ks_execute_interpreter")
+        if blocked:
+            return blocked
+        return _finish(
+            "ks_execute_interpreter",
+            _safe_json(rpc.execute_interpreter(code, session_id=session_id)),
+        )
 
     @mcp.tool()
     @safe
     def ks_list_commands() -> Dict[str, Any]:
         """List native framework commands with usage, help text, and safety classification."""
-        return _safe_json(command_bridge.list_commands())
+        blocked = _authorize("ks_list_commands")
+        if blocked:
+            return blocked
+        return _finish("ks_list_commands", _safe_json(command_bridge.list_commands()))
 
     @mcp.tool()
     @safe
     def ks_get_command_help(command_name: str) -> Dict[str, Any]:
         """Detailed help for a native framework command."""
-        return _safe_json(command_bridge.get_command_help(command_name))
+        blocked = _authorize("ks_get_command_help")
+        if blocked:
+            return blocked
+        return _finish("ks_get_command_help", _safe_json(command_bridge.get_command_help(command_name)))
 
     @mcp.tool()
     @safe
@@ -326,13 +401,20 @@ def create_mcp_server(
         Dangerous or interactive commands are blocked unless `allow_dangerous=true`, and some
         interactive commands stay blocked entirely from MCP.
         """
+        blocked = _authorize("ks_execute_command", allow_dangerous=allow_dangerous)
+        if blocked:
+            return blocked
         result = command_bridge.execute_command(
             command_line,
             allow_dangerous=allow_dangerous,
         )
         if result.get("status") in ("ok", "failed"):
             _invalidate_module_caches()
-        return _safe_json(result)
+        return _finish(
+            "ks_execute_command",
+            _safe_json(result),
+            allow_dangerous=allow_dangerous,
+        )
 
     @mcp.tool()
     @safe
@@ -346,6 +428,9 @@ def create_mcp_server(
         Parse a free-form user request into intent, target, ranked modules, native commands,
         and recommended MCP tool calls.
         """
+        blocked = _authorize("ks_plan_natural_request")
+        if blocked:
+            return blocked
         result = natural_bridge.plan_request(
             request,
             max_candidates=max_candidates,
@@ -354,7 +439,7 @@ def create_mcp_server(
         )
         if result.get("executed_command"):
             _invalidate_module_caches()
-        return _safe_json(result)
+        return _finish("ks_plan_natural_request", _safe_json(result))
 
     @mcp.tool()
     @safe
@@ -374,6 +459,9 @@ def create_mcp_server(
         `safe_sequence` executes all recommended safe commands until a blocked/dangerous step.
         `first_command` preserves the older single-command behavior.
         """
+        blocked = _authorize("ks_execute_natural_request", allow_dangerous=allow_dangerous)
+        if blocked:
+            return blocked
         result = natural_bridge.plan_request(
             request,
             max_candidates=max_candidates,
@@ -383,7 +471,11 @@ def create_mcp_server(
         )
         if dry_run:
             result["execution"] = {"status": "dry_run"}
-            return _safe_json(result)
+            return _finish(
+                "ks_execute_natural_request",
+                _safe_json(result),
+                allow_dangerous=allow_dangerous,
+            )
 
         execution_mode = execution_mode or "module_rpc"
         result["execution_mode"] = execution_mode
@@ -401,14 +493,22 @@ def create_mcp_server(
                 result["execution"] = {"status": executed.get("status")}
                 if executed.get("status") in ("ok", "failed"):
                     _invalidate_module_caches()
-                return _safe_json(result)
+                return _finish(
+                    "ks_execute_natural_request",
+                    _safe_json(result),
+                    allow_dangerous=allow_dangerous,
+                )
 
             if parsed_info.get("intent") != "execute_module":
                 result["execution"] = {
                     "status": "planned_only",
                     "reason": "The request was not classified as a module execution request.",
                 }
-                return _safe_json(result)
+                return _finish(
+                    "ks_execute_natural_request",
+                    _safe_json(result),
+                    allow_dangerous=allow_dangerous,
+                )
 
             prepared = result.get("prepared_run")
             if not prepared and result.get("recommended_modules"):
@@ -425,7 +525,11 @@ def create_mcp_server(
                     "status": "blocked",
                     "reason": "No runnable module could be prepared from the request.",
                 }
-                return _safe_json(result)
+                return _finish(
+                    "ks_execute_natural_request",
+                    _safe_json(result),
+                    allow_dangerous=allow_dangerous,
+                )
 
             if prepared.get("missing_options"):
                 result["execution"] = {
@@ -433,7 +537,11 @@ def create_mcp_server(
                     "missing_options": prepared.get("missing_options"),
                     "reason": "Required options are still missing after inference.",
                 }
-                return _safe_json(result)
+                return _finish(
+                    "ks_execute_natural_request",
+                    _safe_json(result),
+                    allow_dangerous=allow_dangerous,
+                )
 
             if not allow_dangerous:
                 result["execution"] = {
@@ -441,7 +549,11 @@ def create_mcp_server(
                     "reason": "Launching a module can run scanners/exploits/listeners and requires allow_dangerous=true.",
                     "prepared_run": prepared,
                 }
-                return _safe_json(result)
+                return _finish(
+                    "ks_execute_natural_request",
+                    _safe_json(result),
+                    allow_dangerous=allow_dangerous,
+                )
 
             module_path = str(prepared.get("module_path") or "")
             operation_profile = str(prepared.get("operation_profile") or "normal")
@@ -464,7 +576,11 @@ def create_mcp_server(
                 "client_id": launched.get("client_id") if isinstance(launched, dict) else None,
             }
             _invalidate_module_caches()
-            return _safe_json(result)
+            return _finish(
+                "ks_execute_natural_request",
+                _safe_json(result),
+                allow_dangerous=allow_dangerous,
+            )
 
         if execution_mode == "safe_sequence":
             sequence = command_bridge.execute_command_sequence(
@@ -476,7 +592,11 @@ def create_mcp_server(
             result["execution"] = {"status": sequence.get("status"), "count": sequence.get("count")}
             if sequence.get("count"):
                 _invalidate_module_caches()
-            return _safe_json(result)
+            return _finish(
+                "ks_execute_natural_request",
+                _safe_json(result),
+                allow_dangerous=allow_dangerous,
+            )
 
         recommended = result.get("recommended_commands") or []
         if recommended:
@@ -491,31 +611,60 @@ def create_mcp_server(
                 _invalidate_module_caches()
         else:
             result["execution"] = {"status": "no_recommendation"}
-        return _safe_json(result)
+        return _finish(
+            "ks_execute_natural_request",
+            _safe_json(result),
+            allow_dangerous=allow_dangerous,
+        )
 
     @mcp.tool()
     @safe
     def ks_list_workspaces() -> Any:
         """List framework workspaces and identify the current one."""
-        return _safe_json(
-            {
-                "current": command_bridge.get_state().get("workspace"),
-                "workspaces": rpc.list_workspaces(),
-            }
+        blocked = _authorize("ks_list_workspaces")
+        if blocked:
+            return blocked
+        return _finish(
+            "ks_list_workspaces",
+            _safe_json(
+                {
+                    "current": command_bridge.get_state().get("workspace"),
+                    "workspaces": rpc.list_workspaces(),
+                }
+            ),
         )
 
     @mcp.tool()
     @safe
     def ks_switch_workspace(name: str) -> Any:
         """Switch the active workspace."""
+        blocked = _authorize("ks_switch_workspace")
+        if blocked:
+            return blocked
         result = rpc.switch_workspace(name)
         _invalidate_module_caches()
-        return _safe_json(
-            {
-                "result": result,
-                "current": command_bridge.get_state().get("workspace"),
-            }
+        return _finish(
+            "ks_switch_workspace",
+            _safe_json(
+                {
+                    "result": result,
+                    "current": command_bridge.get_state().get("workspace"),
+                }
+            ),
         )
+
+    @mcp.tool()
+    @safe
+    def ks_mcp_audit(limit: int = 20) -> Dict[str, Any]:
+        """Show recent MCP tool execution audit events for this server process."""
+        blocked = _authorize("ks_mcp_audit")
+        if blocked:
+            return blocked
+        payload = {
+            "audit_path": str(authorizer.journal.audit_path),
+            "events": authorizer.journal.read(limit=max(1, min(limit, 200))),
+        }
+        return _finish("ks_mcp_audit", _safe_json(payload))
 
     return mcp
 
@@ -525,6 +674,8 @@ def run_mcp_server(
     transport: Literal["stdio", "sse", "streamable-http"] = "stdio",
     host: str = "127.0.0.1",
     port: int = 8765,
+    roles: Optional[List[str]] = None,
+    dangerous_consent: Optional[bool] = None,
 ) -> None:
     """Run blocking MCP transport (stdio by default for Cursor / Claude Desktop)."""
     app = create_mcp_server(
@@ -532,6 +683,8 @@ def run_mcp_server(
         host=host,
         port=port,
         stdio_transport=(transport == "stdio"),
+        roles=roles,
+        dangerous_consent=dangerous_consent,
     )
     logger.info("Starting KittySploit MCP transport=%s host=%s port=%s", transport, host, port)
     app.run(transport=transport)

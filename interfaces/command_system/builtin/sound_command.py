@@ -7,6 +7,7 @@ Sound command implementation
 
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
+from core.utils.paths import sound_notify_path
 import os
 
 class SoundCommand(BaseCommand):
@@ -94,39 +95,13 @@ Examples:
             # Try nava first (cross-platform)
             try:
                 from nava import play
-                # Play notification sound
-                try:
-                    # Try to find the sound file
-                    sound_file = None
-                    # Get the framework root directory (parent of interfaces directory)
-                    # os is already imported at the top of the file
-                    framework_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
-                    
-                    # Try multiple possible paths
-                    possible_paths = [
-                        os.path.join(framework_root, 'data/sound/notify.wav'),
-                        os.path.join(os.getcwd(), 'data/sound/notify.wav'),
-                        'data/sound/notify.wav',
-                    ]
-                    
-                    for path in possible_paths:
-                        abs_path = os.path.abspath(path)
-                        if os.path.exists(abs_path):
-                            sound_file = abs_path
-                            break
-                    
-                    if sound_file:
-                        # Play the sound file
-                        play(sound_file)
-                        sound_played = True
-                        print_success(f"Sound played successfully using nava (file: {sound_file})")
-                    else:
-                        # If file doesn't exist, we can't use nava without a file
-                        print_warning("Sound file not found, cannot use nava")
-                except Exception as e:
-                    # Error with nava, show error
-                    print_warning(f"nava error: {str(e)}")
-                    pass
+                sound_file = sound_notify_path()
+                if sound_file:
+                    play(str(sound_file))
+                    sound_played = True
+                    print_success(f"Sound played successfully using nava (file: {sound_file})")
+                else:
+                    print_warning("Sound file not found, cannot use nava")
             except ImportError as e:
                 # nava not installed, try Windows fallback
                 print_warning(f"nava not available: {str(e)}")

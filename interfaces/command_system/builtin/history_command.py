@@ -7,10 +7,16 @@ History command implementation - Display command history
 
 import os
 import json
+import logging
 import time
 from datetime import datetime
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
+from core.history_manager import redact_history_args, redact_history_command
+
+
+logger = logging.getLogger(__name__)
+
 
 class HistoryCommand(BaseCommand):
     """Command to display command history"""
@@ -29,7 +35,7 @@ class HistoryCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "history [--clear] [--save] [--load] [--limit <num>] [--search <term>]"
+        return "history [--clear] [--save] [--load] [--export <file>] [--limit <num>] [--search <term>]"
     
     @property
     def help_text(self) -> str:
@@ -42,8 +48,11 @@ This command displays the history of executed commands with timestamps and resul
 
 Options:
     --clear              Clear the command history
-    --save               Save current history to file
+    --save               Export current redacted history to the default history file
     --load               Load history from file
+    --export <file>      Export redacted history to a JSON or CSV file
+    --format <json|csv>  Export format (default: json)
+    --force              Allow export to overwrite an existing file
     --limit <num>        Limit number of commands to show (default: 50)
     --search <term>      Search for commands containing the term
     --json               Output in JSON format
@@ -53,9 +62,11 @@ Examples:
     history --limit 10          # Show last 10 commands
     history --search "use"      # Search for commands containing "use"
     history --clear             # Clear history
+    history --export history.json --force
+    history --export history.csv --format csv
     history --json              # Output in JSON format
 
-Note: History is automatically saved and loaded between sessions.
+Note: Stored and exported history redacts obvious secrets such as passwords, API keys and tokens.
         """
     
     def execute(self, args, **kwargs) -> bool:
@@ -77,6 +88,8 @@ Note: History is automatically saved and loaded between sessions.
                 return self._save_history(command_registry)
             elif options['load']:
                 return self._load_history(command_registry)
+            elif options['export']:
+                return self._export_history(command_registry, options)
             else:
                 return self._display_history(command_registry, options)
             
@@ -90,6 +103,9 @@ Note: History is automatically saved and loaded between sessions.
             'clear': False,
             'save': False,
             'load': False,
+            'export': None,
+            'format': 'json',
+            'force': False,
             'limit': 50,
             'search': None,
             'json': False
@@ -105,6 +121,15 @@ Note: History is automatically saved and loaded between sessions.
                 i += 1
             elif args[i] == '--load':
                 options['load'] = True
+                i += 1
+            elif args[i] == '--export' and i + 1 < len(args):
+                options['export'] = args[i + 1]
+                i += 2
+            elif args[i] == '--format' and i + 1 < len(args):
+                options['format'] = args[i + 1]
+                i += 2
+            elif args[i] == '--force':
+                options['force'] = True
                 i += 1
             elif args[i] == '--limit' and i + 1 < len(args):
                 try:
@@ -140,9 +165,8 @@ Note: History is automatically saved and loaded between sessions.
                             'success': entry.get('success', True),
                             'args': entry.get('args', [])
                         })
-            except Exception as e:
-                # If database fails, fall back to local history
-                pass
+            except Exception:
+                logger.debug("Failed to load command history from database; using fallbacks", exc_info=True)
         
         # Fallback to local history if database is empty or failed
         if not history and hasattr(command_registry, 'command_history'):
@@ -163,14 +187,26 @@ Note: History is automatically saved and loaded between sessions.
                         return history
                     file_history = json.loads(content)
                     if file_history:
-                        history = file_history
+                        history = self._sanitize_history(command_registry, file_history)
             except (json.JSONDecodeError, ValueError):
-                # Invalid JSON, skip file
-                pass
+                logger.debug("Invalid history file JSON: %s", self.history_file, exc_info=True)
             except Exception:
-                pass
+                logger.debug("Failed to load history file: %s", self.history_file, exc_info=True)
         
         return history
+
+    def _sanitize_history(self, command_registry, history):
+        """Ensure fallback/file history is redacted before display or reuse."""
+        sanitizer = getattr(getattr(command_registry, 'history_manager', None), 'sanitize_entry', None)
+        if sanitizer:
+            return [sanitizer(entry) for entry in history]
+        sanitized = []
+        for entry in history or []:
+            safe_entry = dict(entry)
+            safe_entry['command'] = redact_history_command(safe_entry.get('command', ''))
+            safe_entry['args'] = redact_history_args(safe_entry.get('args'))
+            sanitized.append(safe_entry)
+        return sanitized
     
     def _clear_history(self, command_registry):
         """Clear command history"""
@@ -186,9 +222,16 @@ Note: History is automatically saved and loaded between sessions.
         return True
     
     def _save_history(self, command_registry):
-        """Save history to file"""
+        """Save redacted history to the legacy default file."""
+        if hasattr(command_registry, 'history_manager'):
+            return command_registry.history_manager.export_history(
+                self.history_file,
+                format='json',
+                limit=1000,
+                force=True,
+            )
         try:
-            history = self._get_history(command_registry)
+            history = self._sanitize_history(command_registry, self._get_history(command_registry))
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, indent=2, ensure_ascii=False)
             print_success(f"History saved to {self.history_file}")
@@ -196,6 +239,19 @@ Note: History is automatically saved and loaded between sessions.
         except Exception as e:
             print_error(f"Error saving history: {e}")
             return False
+
+    def _export_history(self, command_registry, options):
+        """Export redacted history through HistoryManager controls."""
+        if not hasattr(command_registry, 'history_manager') or not command_registry.history_manager:
+            print_error("History manager not available")
+            return False
+        return command_registry.history_manager.export_history(
+            options['export'],
+            format=options.get('format') or 'json',
+            limit=options.get('limit') or 1000,
+            force=options.get('force', False),
+            search_term=options.get('search'),
+        )
     
     def _load_history(self, command_registry):
         """Load history from file"""
@@ -204,7 +260,7 @@ Note: History is automatically saved and loaded between sessions.
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     history = json.load(f)
                 if hasattr(command_registry, 'command_history'):
-                    command_registry.command_history = history
+                    command_registry.command_history = self._sanitize_history(command_registry, history)
                     print_success(f"History loaded from {self.history_file}")
                 else:
                     print_warning("Command registry does not support history")
@@ -240,8 +296,7 @@ Note: History is automatically saved and loaded between sessions.
                             'args': entry.get('args', [])
                         })
             except Exception:
-                # If database search fails, use local history
-                pass
+                logger.debug("Failed to search command history from database; using local history", exc_info=True)
         
         # Filter by search term if provided and not using database search
         if options['search'] and history:
@@ -253,8 +308,8 @@ Note: History is automatically saved and loaded between sessions.
             # Sort by timestamp (newest first) if timestamps are available
             try:
                 history.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
-            except:
-                pass
+            except Exception:
+                logger.debug("Failed to sort command history by timestamp", exc_info=True)
             history = history[:options['limit']]
         
         if not history:
@@ -295,12 +350,12 @@ Note: History is automatically saved and loaded between sessions.
                     try:
                         dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                         time_str = dt.strftime('%d/%m/%Y %H:%M:%S')
-                    except:
+                    except Exception:
                         # Try parsing as Unix timestamp string
                         try:
                             dt = datetime.fromtimestamp(float(timestamp))
                             time_str = dt.strftime('%d/%m/%Y %H:%M:%S')
-                        except:
+                        except Exception:
                             time_str = timestamp[:19] if len(timestamp) > 19 else timestamp
                 else:
                     time_str = str(timestamp)

@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-import sys
+import difflib
 import importlib
+import importlib.util
+import inspect
+import json
 import logging
-from typing import List, Dict, Any, Optional
+import os
+import re
+import sys
+import traceback
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import List, Dict, Any, Optional, Tuple
+
 from core.framework.base_module import BaseModule
 from core.utils.module_static_metadata import (
     extract_module_search_metadata,
     infer_module_type_from_path,
     search_text_matches_title_description,
+    validate_static_module_contract,
 )
+from core.module_search import ModuleSearchFilters, apply_module_search_filters, extract_search_facets
 
 # Import du PolicyEngine pour la validation
 try:
@@ -20,6 +31,30 @@ try:
     POLICY_ENGINE_AVAILABLE = True
 except ImportError:
     POLICY_ENGINE_AVAILABLE = False
+
+
+class LoadFailureKind(str, Enum):
+    NOT_FOUND = "not_found"
+    CONTRACT = "contract"
+    POLICY = "policy"
+    POLICY_REJECTED = "policy_rejected"
+    MISSING_DEPENDENCY = "missing_dependency"
+    IMPORT_ERROR = "import_error"
+    NO_MODULE_CLASS = "no_module_class"
+    TYPE_ERROR = "type_error"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class ModuleLoadFailure:
+    module_path: str
+    kind: LoadFailureKind
+    detail: str
+    cause: str = ""
+    suggestions: List[str] = field(default_factory=list)
+    contract_errors: List[str] = field(default_factory=list)
+    missing_package: str = ""
+
 
 def _default_modules_path() -> str:
     """Resolve modules directory: use installed package location if available, else 'modules' (cwd)."""
@@ -32,12 +67,21 @@ def _default_modules_path() -> str:
 
 class ModuleLoader:
     
-    def __init__(self, modules_path: str = None, sync_manager=None, enable_policy_validation: bool = True):
+    def __init__(
+        self,
+        modules_path: str = None,
+        sync_manager=None,
+        enable_policy_validation: bool = True,
+        enable_contract_validation: bool = True,
+        strict_contract_validation: bool = False,
+    ):
         if modules_path is None:
             modules_path = _default_modules_path()
         self.modules_path = modules_path
         self.modules_cache = {}
         self.enable_policy_validation = enable_policy_validation and POLICY_ENGINE_AVAILABLE
+        self.enable_contract_validation = enable_contract_validation
+        self.strict_contract_validation = strict_contract_validation
         
         # Initialiser le validateur si disponible
         self.validator = None
@@ -48,6 +92,202 @@ class ModuleLoader:
                 logging.warning(f"Impossible d'initialiser le PolicyEngine: {e}")
                 self.enable_policy_validation = False
         self.sync_manager = sync_manager
+        self.last_load_failure: Optional[ModuleLoadFailure] = None
+        self._discovered_paths_cache: Optional[List[str]] = None
+
+    def _import_module_name(self, module_path: str) -> str:
+        import_path = module_path.replace("/", ".").lstrip(".")
+        return f"modules.{import_path}"
+
+    def _module_file_candidates(self, module_path: str) -> Tuple[str, str]:
+        normalized = module_path.strip().strip("/")
+        with_py = os.path.join(self.modules_path, normalized.replace("/", os.sep) + ".py")
+        without_py = os.path.join(self.modules_path, normalized.replace("/", os.sep))
+        return with_py, without_py
+
+    def _discovered_paths_list(self) -> List[str]:
+        if self._discovered_paths_cache is None:
+            self._discovered_paths_cache = sorted(self.discover_modules().keys())
+        return self._discovered_paths_cache
+
+    def invalidate_discovery_cache(self) -> None:
+        """Clear cached module paths (after sync, install, or reload)."""
+        self._discovered_paths_cache = None
+
+    def _suggest_module_paths(self, module_path: str, limit: int = 5) -> List[str]:
+        query = module_path.strip().strip("/")
+        if not query:
+            return []
+
+        candidates = self._discovered_paths_list()
+        if not candidates:
+            return []
+
+        basename = query.rsplit("/", 1)[-1]
+        suggestions: List[str] = []
+
+        lower_query = query.lower()
+        prefix_hits = [path for path in candidates if path.lower().startswith(lower_query)]
+        suggestions.extend(prefix_hits[:limit])
+
+        if len(suggestions) < limit:
+            fuzzy = difflib.get_close_matches(query, candidates, n=limit, cutoff=0.55)
+            suggestions.extend(path for path in fuzzy if path not in suggestions)
+
+        if len(suggestions) < limit and basename:
+            basename_hits = [
+                path for path in candidates
+                if path.rsplit("/", 1)[-1].lower() == basename.lower()
+            ]
+            suggestions.extend(path for path in basename_hits if path not in suggestions)
+
+        return suggestions[:limit]
+
+    def _missing_module_name(self, exc: BaseException) -> str:
+        name = getattr(exc, "name", None)
+        if name:
+            return str(name)
+        match = re.search(r"No module named '([^']+)'", str(exc))
+        return match.group(1) if match else ""
+
+    def _classify_import_error(self, module_path: str, exc: BaseException) -> Tuple[LoadFailureKind, str]:
+        missing_name = self._missing_module_name(exc)
+        if isinstance(exc, ModuleNotFoundError) and missing_name:
+            root_name = self._import_module_name(module_path)
+            if missing_name == root_name:
+                return (
+                    LoadFailureKind.IMPORT_ERROR,
+                    f"Module package could not be imported ({missing_name})",
+                )
+            if missing_name.startswith(root_name + "."):
+                return (
+                    LoadFailureKind.IMPORT_ERROR,
+                    f"Missing submodule inside module: {missing_name}",
+                )
+            if missing_name.startswith("modules."):
+                return (
+                    LoadFailureKind.IMPORT_ERROR,
+                    f"Broken internal KittySploit import: {missing_name}",
+                )
+            return (
+                LoadFailureKind.MISSING_DEPENDENCY,
+                f"Missing Python dependency: {missing_name}",
+            )
+        return LoadFailureKind.IMPORT_ERROR, str(exc)
+
+    def _pypi_name_hint(self, package_name: str) -> str:
+        mapping = {
+            "pil": "Pillow",
+            "cv2": "opencv-python",
+            "yaml": "PyYAML",
+            "dotenv": "python-dotenv",
+            "flask_cors": "flask-cors",
+            "flask_socketio": "flask-socketio",
+            "bs4": "beautifulsoup4",
+            "Crypto": "pycryptodome",
+        }
+        return mapping.get(package_name, package_name.replace("_", "-"))
+
+    def _report_failure(self, failure: ModuleLoadFailure, silent: bool = False) -> None:
+        self.last_load_failure = failure
+        if silent:
+            logging.debug(
+                "Module load failed (%s) for %s: %s",
+                failure.kind.value,
+                failure.module_path,
+                failure.detail,
+            )
+            return
+
+        from core.output_handler import print_error, print_info, print_warning
+
+        titles = {
+            LoadFailureKind.NOT_FOUND: f"Module path not found: '{failure.module_path}'",
+            LoadFailureKind.CONTRACT: f"Module contract invalid: '{failure.module_path}'",
+            LoadFailureKind.POLICY: f"Module policy validation failed: '{failure.module_path}'",
+            LoadFailureKind.POLICY_REJECTED: f"Module rejected by policy: '{failure.module_path}'",
+            LoadFailureKind.MISSING_DEPENDENCY: f"Missing dependency for '{failure.module_path}'",
+            LoadFailureKind.IMPORT_ERROR: f"Module import failed: '{failure.module_path}'",
+            LoadFailureKind.NO_MODULE_CLASS: f"Invalid module structure: '{failure.module_path}'",
+            LoadFailureKind.TYPE_ERROR: f"Module type error: '{failure.module_path}'",
+            LoadFailureKind.UNKNOWN: f"Failed to load module: '{failure.module_path}'",
+        }
+        print_error(titles.get(failure.kind, titles[LoadFailureKind.UNKNOWN]))
+
+        if failure.cause:
+            print_info(f"Cause: {failure.cause}")
+
+        if failure.contract_errors:
+            for error in failure.contract_errors:
+                print_info(f"  - {error}")
+
+        if failure.kind == LoadFailureKind.MISSING_DEPENDENCY:
+            package = failure.missing_package
+            if not package and failure.cause.startswith("Missing Python dependency: "):
+                package = failure.cause.split(": ", 1)[-1]
+            if package:
+                print_info(f"Install with: pip install {self._pypi_name_hint(package)}")
+
+        if failure.suggestions:
+            print_info("Did you mean:")
+            for suggestion in failure.suggestions:
+                print_info(f"  use {suggestion}")
+
+        if failure.kind == LoadFailureKind.NOT_FOUND:
+            print_info("Tip: run 'search <keyword>' to browse the module index")
+
+    def _fail(
+        self,
+        module_path: str,
+        kind: LoadFailureKind,
+        detail: str,
+        *,
+        cause: str = "",
+        suggestions: Optional[List[str]] = None,
+        contract_errors: Optional[List[str]] = None,
+        missing_package: str = "",
+        silent: bool = False,
+    ) -> None:
+        failure = ModuleLoadFailure(
+            module_path=module_path,
+            kind=kind,
+            detail=detail,
+            cause=cause or detail,
+            suggestions=suggestions or [],
+            contract_errors=contract_errors or [],
+            missing_package=missing_package,
+        )
+        if kind == LoadFailureKind.NOT_FOUND and not failure.suggestions:
+            failure.suggestions = self._suggest_module_paths(module_path)
+        self._report_failure(failure, silent=silent)
+
+    def _validate_module_contract(self, module_path: str, module_file_path: str, silent: bool = False) -> bool:
+        """Validate KittySploit module metadata/options before importing code."""
+        if not self.enable_contract_validation:
+            return True
+
+        result = validate_static_module_contract(module_path, module_file_path)
+        errors = result.get("errors") or []
+        warnings = result.get("warnings") or []
+
+        if errors:
+            if silent:
+                for error in errors:
+                    logging.debug("Module contract validation failed for %s: %s", module_path, error)
+            else:
+                self._fail(
+                    module_path,
+                    LoadFailureKind.CONTRACT,
+                    "Static module contract validation failed",
+                    cause=f"File: {module_file_path}",
+                    contract_errors=list(errors),
+                    silent=silent,
+                )
+        if warnings and not silent:
+            for warning in warnings:
+                logging.warning("Module %s: %s", module_path, warning)
+
+        return not errors or not self.strict_contract_validation
     
     def discover_modules(self) -> Dict[str, str]:
         modules = {}
@@ -66,7 +306,8 @@ class ModuleLoader:
         # Also discover modules from installed extensions (marketplace)
         extensions_modules = self._discover_extension_modules()
         modules.update(extensions_modules)
-        
+
+        self._discovered_paths_cache = sorted(modules.keys())
         return modules
     
     def _discover_extension_modules(self) -> Dict[str, str]:
@@ -141,130 +382,184 @@ class ModuleLoader:
             framework: Framework instance to pass to the module
             silent: If True, don't print error messages (useful for discovery)
         """
+        self.last_load_failure = None
         try:
-            # Check if this is a marketplace module (modules/marketplace/<type>/<module_id>)
             if module_path.startswith("modules/marketplace/"):
                 return self._load_extension_module(module_path, load_only, framework, silent)
-            
-            # Lire le code source du module pour validation
-            module_file_path = os.path.join(self.modules_path, module_path.replace("/", os.sep) + ".py")
-            if not os.path.exists(module_file_path):
-                # Essayer sans extension
-                module_file_path = os.path.join(self.modules_path, module_path.replace("/", os.sep))
-                if not os.path.exists(module_file_path):
-                    if not silent:
-                        logging.error(f"Module file not found: {module_path}")
-                    return None
-            
-            # Valider le module avec PolicyEngine si activé
+
+            module_file_path, module_file_alt = self._module_file_candidates(module_path)
+            if os.path.isfile(module_file_path):
+                resolved_file = module_file_path
+            elif os.path.isfile(module_file_alt):
+                resolved_file = module_file_alt
+            else:
+                self._fail(
+                    module_path,
+                    LoadFailureKind.NOT_FOUND,
+                    "No module file exists for this path",
+                    cause=f"Checked: {module_file_path} and {module_file_alt}",
+                    silent=silent,
+                )
+                return None
+
+            if not self._validate_module_contract(module_path, resolved_file, silent=silent):
+                return None
+
             if self.enable_policy_validation and self.validator:
                 try:
-                    with open(module_file_path, 'r', encoding='utf-8') as f:
+                    with open(resolved_file, "r", encoding="utf-8") as f:
                         module_code = f.read()
-                    
+
                     validation_result = self.validator.validate(module_path, module_code)
-                    
+
                     if not validation_result.get("valid", True):
                         errors = validation_result.get("errors", [])
-                        if not silent:
-                            logging.error(f"Module validation failed for {module_path}:")
-                            for error in errors:
-                                logging.error(f"  - {error}")
+                        self._fail(
+                            module_path,
+                            LoadFailureKind.POLICY,
+                            "Policy validation failed",
+                            contract_errors=list(errors),
+                            silent=silent,
+                        )
                         return None
-                    
-                    # Afficher les warnings si présents
+
                     warnings = validation_result.get("warnings", [])
                     if warnings and not silent:
                         for warning in warnings:
-                            logging.warning(f"Module {module_path}: {warning}")
-                    
-                    # Vérifier l'approbation si requise
-                    # Note: Par défaut, on ne bloque pas même si PENDING (mode permissif)
+                            logging.warning("Module %s: %s", module_path, warning)
+
                     approval_status = validation_result.get("approval_status")
                     if approval_status and approval_status not in ["approved", "auto_approved", "pending"]:
-                        # Seulement bloquer si explicitement REJECTED ou REVOKED
                         if approval_status in ["rejected", "revoked"]:
-                            if not silent:
-                                logging.error(f"Module {module_path} est {approval_status}")
+                            self._fail(
+                                module_path,
+                                LoadFailureKind.POLICY_REJECTED,
+                                f"Module approval status is {approval_status}",
+                                silent=silent,
+                            )
                             return None
-                        elif not silent:
-                            logging.warning(f"Module {module_path} requires approval (status: {approval_status})")
+                        if not silent:
+                            logging.warning(
+                                "Module %s requires approval (status: %s)",
+                                module_path,
+                                approval_status,
+                            )
                 except Exception as e:
                     if not silent:
-                        logging.warning(f"Erreur lors de la validation du module {module_path}: {e}")
-                    # Continuer le chargement même si la validation échoue (mode permissif)
-            
-            # Build the import path
-            import_path = module_path.replace("/", ".")
-            if import_path.startswith("."):
-                import_path = import_path[1:]
-            
-            # Import the module
+                        logging.warning("Policy validation error for %s: %s", module_path, e)
+
+            import_path = module_path.replace("/", ".").lstrip(".")
             module = importlib.import_module(f"modules.{import_path}")
-            
-            # Instancier la classe Module with framework if it accepts it
+
+            if not hasattr(module, "Module"):
+                self._fail(
+                    module_path,
+                    LoadFailureKind.NO_MODULE_CLASS,
+                    "Python file loaded but no Module class was found",
+                    cause="Expected a class named Module inheriting from BaseModule",
+                    silent=silent,
+                )
+                return None
+
             try:
-                # Try to instantiate with framework if __init__ accepts it
-                import inspect
                 sig = inspect.signature(module.Module.__init__)
-                if 'framework' in sig.parameters:
+                if "framework" in sig.parameters:
                     instance = module.Module(framework=framework)
                 else:
                     instance = module.Module()
-            except (TypeError, AttributeError):
-                # Fallback to default instantiation
-                instance = module.Module()
-            
-            # Set the reference to the framework (for modules that don't accept it in __init__)
+            except (TypeError, AttributeError) as exc:
+                try:
+                    instance = module.Module()
+                except Exception as inner_exc:
+                    self._fail(
+                        module_path,
+                        LoadFailureKind.IMPORT_ERROR,
+                        "Failed to instantiate Module class",
+                        cause=f"{type(inner_exc).__name__}: {inner_exc}",
+                        silent=silent,
+                    )
+                    return None
+                if not silent:
+                    logging.debug("Module %s init fallback after: %s", module_path, exc)
+
             if framework:
                 instance.framework = framework
-            
-            # Set the module name from the path if not defined
+
             if not instance.name:
                 instance.name = module_path
-            
-            # Verify that the instance is a BaseModule
+
             if not isinstance(instance, BaseModule):
-                raise TypeError(f"Le module {module_path} n'est pas une instance de BaseModule")
-            
-            # Cache the module if it's not a temporary load
+                self._fail(
+                    module_path,
+                    LoadFailureKind.TYPE_ERROR,
+                    "Module class is not a BaseModule subclass",
+                    cause=f"Got {type(instance).__name__}",
+                    silent=silent,
+                )
+                return None
+
             if not load_only:
                 self.modules_cache[module_path] = instance
-            
+
             return instance
-            
-        except ImportError as e:
-            # Only log as error if it's not a missing dependency
-            if "No module named" in str(e):
-                logging.debug(f"Skipping module {module_path} due to missing dependency: {str(e)}")
-                # Only print error if not in silent mode
-                if not silent:
-                    from core.output_handler import print_error
-                    print_error(f"Failed to load module '{module_path}': Missing dependency - {str(e)}")
+
+        except ModuleNotFoundError as e:
+            kind, cause = self._classify_import_error(module_path, e)
+            missing_package = self._missing_module_name(e)
+            if kind == LoadFailureKind.MISSING_DEPENDENCY:
+                logging.debug("Skipping module %s due to missing dependency: %s", module_path, e)
             else:
-                logging.error(f"Error importing module {module_path}: {str(e)}")
-                if not silent:
-                    from core.output_handler import print_error
-                    print_error(f"Failed to import module '{module_path}': {str(e)}")
+                logging.error("Import error in module %s: %s", module_path, e)
+            self._fail(
+                module_path,
+                kind,
+                cause,
+                cause=cause,
+                missing_package=missing_package if kind == LoadFailureKind.MISSING_DEPENDENCY else "",
+                silent=silent,
+            )
+        except ImportError as e:
+            kind, cause = self._classify_import_error(module_path, e)
+            missing_package = self._missing_module_name(e)
+            logging.error("Import error in module %s: %s", module_path, e)
+            self._fail(
+                module_path,
+                kind,
+                cause,
+                cause=cause,
+                missing_package=missing_package if kind == LoadFailureKind.MISSING_DEPENDENCY else "",
+                silent=silent,
+            )
         except AttributeError as e:
-            logging.error(f"Module {module_path} does not have a Module class: {str(e)}")
-            if not silent:
-                from core.output_handler import print_error
-                print_error(f"Module '{module_path}' does not have a Module class: {str(e)}")
+            logging.error("Module %s does not have a Module class: %s", module_path, e)
+            self._fail(
+                module_path,
+                LoadFailureKind.NO_MODULE_CLASS,
+                "Module class is missing or invalid",
+                cause=f"{type(e).__name__}: {e}",
+                silent=silent,
+            )
         except TypeError as e:
-            logging.error(f"Type error loading module {module_path}: {str(e)}")
-            if not silent:
-                from core.output_handler import print_error
-                print_error(f"Type error loading module '{module_path}': {str(e)}")
+            logging.error("Type error loading module %s: %s", module_path, e)
+            self._fail(
+                module_path,
+                LoadFailureKind.TYPE_ERROR,
+                "Module type error during load",
+                cause=f"{type(e).__name__}: {e}",
+                silent=silent,
+            )
         except Exception as e:
-            logging.error(f"Error loading module {module_path}: {str(e)}")
+            logging.error("Error loading module %s: %s", module_path, e)
+            self._fail(
+                module_path,
+                LoadFailureKind.UNKNOWN,
+                "Unexpected error while loading module",
+                cause=f"{type(e).__name__}: {e}",
+                silent=silent,
+            )
             if not silent:
-                from core.output_handler import print_error
-                import traceback
-                print_error(f"Failed to load module '{module_path}': {str(e)}")
-                # Print full traceback for debugging
-                print_error(f"Traceback: {traceback.format_exc()}")
-        
+                logging.debug("Traceback for %s:\n%s", module_path, traceback.format_exc())
+
         return None
     
     def _load_extension_module(self, module_path: str, load_only: bool = False, framework=None, silent: bool = False):
@@ -277,7 +572,13 @@ class ModuleLoader:
             
             if len(parts) < 2:
                 if not silent:
-                    logging.error(f"Invalid marketplace module path: {module_path}")
+                    self._fail(
+                        module_path,
+                        LoadFailureKind.NOT_FOUND,
+                        "Invalid marketplace module path",
+                        cause="Expected modules/marketplace/<type>/<module_id>",
+                        silent=silent,
+                    )
                 return None
             
             module_type = parts[0]
@@ -287,7 +588,14 @@ class ModuleLoader:
             module_dir = os.path.join(self.modules_path, "marketplace", module_type, module_id)
             if not os.path.exists(module_dir):
                 if not silent:
-                    logging.error(f"Marketplace module not found: {module_id}")
+                    self._fail(
+                        module_path,
+                        LoadFailureKind.NOT_FOUND,
+                        f"Marketplace module not installed: {module_id}",
+                        cause=f"Directory not found: {module_dir}",
+                        suggestions=self._suggest_module_paths(module_path),
+                        silent=silent,
+                    )
                 return None
             
             # Find the latest version or any version
@@ -367,6 +675,9 @@ class ModuleLoader:
                             break
                 
                 if not entry_file or not os.path.exists(entry_file):
+                    continue
+
+                if not self._validate_module_contract(module_path, entry_file, silent=silent):
                     continue
                 
                 # Add extension directory to Python path
@@ -505,20 +816,41 @@ class ModuleLoader:
         ]
         return any(type_patterns)
     
-    def search_modules_db(self, query: str = "", module_type: str = "", 
-                         author: str = "", cve: str = "", tags: str = "", limit: int = 100) -> List[Dict]:
-        """Search modules: use the workspace DB when configured, else static filesystem scan.
-
-        When a sync manager is present, results come only from the database (no disk walk).
-        Run ``sync`` / ``sync now`` to refresh the index after adding modules.
-        """
+    def search_modules_db(
+        self,
+        filters: ModuleSearchFilters = None,
+        query: str = "",
+        module_type: str = "",
+        author: str = "",
+        cve: str = "",
+        tags: str = "",
+        limit: int = 100,
+        platform: str = "",
+        protocol: str = "",
+        reliability: str = "",
+        since=None,
+        until=None,
+    ) -> List[Dict]:
+        """Search modules: use the workspace DB when configured, else static filesystem scan."""
+        if filters is None:
+            filters = ModuleSearchFilters(
+                query=query,
+                module_type=module_type,
+                author=author,
+                cve=cve,
+                tag=tags,
+                platform=platform,
+                protocol=protocol,
+                reliability=reliability,
+                since=since,
+                until=until,
+                limit=limit,
+            )
         if not self.sync_manager:
-            return self._search_modules_filesystem(query, module_type, author, cve, tags, limit)
+            return self._search_modules_filesystem(filters)
 
         try:
-            return self.sync_manager.search_modules(
-                query, module_type, author, cve, tags, limit
-            )
+            return self.sync_manager.search_modules(filters=filters)
         except Exception as e:
             logging.debug(f"search_modules_db: database search failed: {e}")
             return []
@@ -537,8 +869,7 @@ class ModuleLoader:
         
         return self.sync_manager.get_module_stats()
     
-    def _search_modules_filesystem(self, query: str = "", module_type: str = "", 
-                                  author: str = "", cve: str = "", tags: str = "", limit: int = 100) -> List[Dict]:
+    def _search_modules_filesystem(self, filters: ModuleSearchFilters) -> List[Dict]:
         """Filesystem search: parse __info__ from source only (no import / no payload init)."""
         results = []
         discovered_modules = self.discover_modules()
@@ -546,46 +877,28 @@ class ModuleLoader:
         for module_path, file_path in discovered_modules.items():
             try:
                 meta = extract_module_search_metadata(file_path)
-                name = str(meta.get("name") or "")
-                description = str(meta.get("description") or "")
-                if query and not search_text_matches_title_description(name, description, query):
-                    continue
-
-                mtype = infer_module_type_from_path(module_path)
-                if module_type and mtype != module_type:
-                    continue
-
-                meta_author = str(meta.get("author") or "")
-                if author and author.lower() not in meta_author.lower():
-                    continue
-
-                meta_cve = str(meta.get("cve") or "")
-                if cve and cve.lower() not in meta_cve.lower():
-                    continue
-
-                meta_tags = meta.get("tags") or []
-                if tags:
-                    lowered = [str(t).lower() for t in meta_tags]
-                    if tags.lower() not in lowered:
-                        continue
+                facets = extract_search_facets(meta, module_path)
+                tags_list = meta.get("tags") or []
+                opts = {"_search": {key: value for key, value in facets.items() if value}}
 
                 results.append({
-                    'name': name,
-                    'description': description,
-                    'type': mtype,
+                    'name': str(meta.get("name") or ""),
+                    'description': str(meta.get("description") or ""),
+                    'type': infer_module_type_from_path(module_path),
                     'path': module_path,
-                    'author': meta_author,
+                    'author': str(meta.get("author") or ""),
                     'version': '',
-                    'cve': meta_cve,
-                    'tags': meta_tags if isinstance(meta_tags, list) else [],
+                    'cve': str(meta.get("cve") or ""),
+                    'tags': tags_list if isinstance(tags_list, list) else [],
                     'references': [],
+                    'options': json.dumps(opts),
+                    'platform': facets.get('platform') or '',
+                    'protocol': facets.get('protocol') or '',
+                    'reliability': facets.get('reliability') or '',
                 })
-
-                if len(results) >= limit:
-                    break
 
             except Exception as e:
                 logging.debug(f"Static search skip {module_path}: {e}")
                 continue
 
-        return results
+        return apply_module_search_filters(results, filters)

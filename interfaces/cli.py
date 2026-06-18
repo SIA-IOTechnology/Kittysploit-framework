@@ -17,6 +17,7 @@ from core.session import Session
 from core.output_handler import OutputHandler, print_info, print_error, print_status, print_warning
 from interfaces.command_system.command_registry import CommandRegistry
 from interfaces.command_system.advanced_completer import AdvancedCompleter
+from interfaces.command_system.command_parser import split_command_line
 from core.config import Config
 
 
@@ -229,9 +230,11 @@ class CLI:
         if not command_input.strip():
             return
         
-        parts = command_input.strip().split()
+        parts = split_command_line(command_input)
+        if not parts:
+            return
         command_name = parts[0]
-        args = parts[1:] if len(parts) > 1 else []
+        args = parts[1:]
         
         try:
             # Try to execute with the new command system

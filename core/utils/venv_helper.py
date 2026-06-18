@@ -7,6 +7,20 @@ import subprocess
 from pathlib import Path
 
 
+def detect_virtualenv() -> str | None:
+    """Return the active virtualenv path, if any.
+
+    Detects both shell-activated venvs (``VIRTUAL_ENV``) and direct invocation
+    of a venv interpreter (``sys.prefix != sys.base_prefix``).
+    """
+    venv = os.environ.get("VIRTUAL_ENV")
+    if venv:
+        return venv
+    if hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix:
+        return sys.prefix
+    return None
+
+
 def ensure_venv(script_path=None):
     """
     Ensure we're running in the project's virtual environment.

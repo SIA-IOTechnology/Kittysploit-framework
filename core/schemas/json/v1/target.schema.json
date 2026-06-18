@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/target.schema.json",
+  "title": "KittySploit Target",
+  "description": "A normalized target or asset addressed by modules, jobs, sessions, findings, and reports.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "url",
+        "host",
+        "ip",
+        "cidr",
+        "domain",
+        "service",
+        "cloud_resource",
+        "container",
+        "mobile_device",
+        "repository",
+        "unknown"
+      ]
+    },
+    "raw": {
+      "type": "string",
+      "minLength": 1
+    },
+    "normalized": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scheme": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "address": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hostname": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "port": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "tcp",
+        "udp",
+        "http",
+        "https",
+        "ws",
+        "wss",
+        "icmp",
+        "ssh",
+        "ftp",
+        "smtp",
+        "unknown",
+        null
+      ]
+    },
+    "service": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unknown",
+            null
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "banner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "port",
+        "protocol"
+      ],
+      "additionalProperties": false
+    },
+    "os": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "os_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mac": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
+    },
+    "identifiers": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "default": {}
+    },
+    "scope": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "in_scope": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authorized_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engagement_id": {
+          "$ref": "common.schema.json#/$defs/nullable_id"
+        }
+      },
+      "required": [
+        "in_scope"
+      ],
+      "additionalProperties": false
+    },
+    "tags": {
+      "$ref": "common.schema.json#/$defs/tags"
+    },
+    "created_at": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "updated_at": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    }
+  },
+  "required": [
+    "type",
+    "raw"
+  ],
+  "additionalProperties": false
+}

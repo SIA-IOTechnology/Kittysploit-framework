@@ -21,7 +21,7 @@ class HelpCommand(BaseCommand):
             'use', 'search', 'show', 'set', 'run', 'back', 'check', 'reload'
         ],
         'Workspace & Data': [
-            'workspace', 'sync', 'host', 'vuln', 'history', 'portal'
+            'workspace', 'sync', 'host', 'vuln', 'history', 'portal', 'campaign'
         ],
         'Sessions & Shells': [
             'sessions', 'shell', 'msf', 'route'
@@ -33,7 +33,7 @@ class HelpCommand(BaseCommand):
             'network_discover', 'myip', 'http', 'proxy', 'debug_proxy', 'scanner', 'tor'
         ],
         'Development & Tools': [
-            'edit', 'generate', 'pattern', 'syscall', 'compatible_payloads'
+            'edit', 'generate', 'new', 'detection_pack', 'api_import', 'pattern', 'syscall', 'compatible_payloads', 'doctor'
         ],
         'Jobs & Background': [
             'jobs'
@@ -44,9 +44,17 @@ class HelpCommand(BaseCommand):
             'irc'
         ],
         'Advanced Features': [
-            'debug', 'browser_server', 'demo', 'guardian', 'market',
+            'debug', 'browser_server', 'demo', 'guardian', 'scope', 'market',
             'plugin', 'reset', 'sound'
         ]
+    }
+
+    STANDALONE_TOOLS = {
+        'kittyrelay': (
+            'Standalone P2P rendezvous hub (no framework, stdlib only). '
+            'Run on a VPS: kittyrelay --host 0.0.0.0 --port 9000. '
+            'Then use listeners/multi/p2p_relay with role=operator in KittySploit.'
+        ),
     }
     
     @property
@@ -117,6 +125,7 @@ class HelpCommand(BaseCommand):
             
             # Print footer
             self._print_footer(len(available_commands))
+            self._print_standalone_tools()
             
         except Exception as e:
             # Fallback to static help if registry fails
@@ -205,8 +214,24 @@ class HelpCommand(BaseCommand):
             print_info("    help use          - Show help for the 'use' command")
         print_info("")
     
+    def _print_standalone_tools(self):
+        """List CLI tools shipped beside the interactive console."""
+        if not self.STANDALONE_TOOLS:
+            return
+        print_info("┌─ Standalone tools (shell, not console commands)")
+        print_info("│")
+        for name, description in sorted(self.STANDALONE_TOOLS.items()):
+            line = self._format_command_single((name, description))
+            print_info(f"│  {line}")
+        print_info("│")
+        print_info("  Tip: help kittyrelay  —  details for the relay hub")
+        print_info("")
+    
     def _show_command_help(self, command_name: str):
         """Show help for a specific command"""
+        if command_name in self.STANDALONE_TOOLS:
+            self._print_standalone_tool_help(command_name)
+            return
         try:
             if hasattr(self, 'command_registry') and self.command_registry:
                 command = self.command_registry.get_command(command_name)
@@ -220,6 +245,27 @@ class HelpCommand(BaseCommand):
         except Exception as e:
             print_error(f"Error getting help for '{command_name}': {str(e)}")
     
+    def _print_standalone_tool_help(self, tool_name: str):
+        """Show help for a standalone shell tool."""
+        description = self.STANDALONE_TOOLS.get(tool_name, "")
+        print_info()
+        print_info(f"Standalone tool: {tool_name}")
+        print_info(f"Description: {description}")
+        print_info()
+        if tool_name == "kittyrelay":
+            print_info("Usage:")
+            print_info("  kittyrelay --host 0.0.0.0 --port 9000")
+            print_info("  python -m lib.relay --port 9000")
+            print_info("  python scripts/kittyrelay.py --port 9000   # git checkout, no pip install")
+            print_info()
+            print_info("KittySploit operator side:")
+            print_info("  use listeners/multi/p2p_relay")
+            print_info("  set role operator")
+            print_info("  set relay_host <hub-ip>")
+            print_info("  set relay_token <same-token-as-agent>")
+            print_info("  run")
+        print_info()
+
     def _print_command_details(self, command_name, command):
         """Print detailed help for a specific command"""
         print_info()
@@ -254,7 +300,7 @@ class HelpCommand(BaseCommand):
         
         print_info("╚" + "═" * 78 + "╝")
         print_info("")
-    
+
     def _print_wrapped_text(self, text, prefix="", width=76):
         """Print text with word wrapping"""
         words = text.split()

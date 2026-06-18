@@ -145,14 +145,10 @@ Examples:
         """Execute the market command"""
         try:
             if not args:
-                # If no arguments and no account, prompt for registration/login.
-                # A valid session can come from either legacy api_key or Bearer token.
+                # Prompt for account setup when unauthenticated, but still show the catalog.
                 if not self.token and not self.api_key:
                     self._prompt_account_setup()
-                    self.parser.print_help()
-                    return True
 
-                # When already authenticated, "market" should directly show modules.
                 parsed_args = argparse.Namespace(
                     action='list',
                     category=None,
@@ -444,7 +440,15 @@ Examples:
         except Exception:
             pass
     
-    def _make_request(self, endpoint: str, params: Dict = None, method: str = 'GET', requires_auth: bool = False, use_new_api: bool = False) -> Optional[Dict]:
+    def _make_request(
+        self,
+        endpoint: str,
+        params: Dict = None,
+        method: str = 'GET',
+        requires_auth: bool = False,
+        use_new_api: bool = False,
+        omit_auth: bool = False,
+    ) -> Optional[Dict]:
         """Make a request to the registry API"""
         try:
             # Use new API format if specified
@@ -458,7 +462,7 @@ Examples:
             # Authentication headers
             if use_new_api:
                 # Always send bearer token when available for new API (even for public endpoints)
-                if self.token:
+                if self.token and not omit_auth:
                     headers['Authorization'] = f'Bearer {self.token}'
                 elif requires_auth and self.api_key:
                     # Some deployments may still accept API keys - send if token missing
@@ -538,6 +542,48 @@ Examples:
             print_error(f"Invalid response from marketplace: {str(e)}")
             return None
     
+    def _fetch_catalog_data(self, params: Dict) -> Dict:
+        """Fetch marketplace catalog, falling back across API versions."""
+        data = self._make_request('market/modules', params, requires_auth=False, use_new_api=True)
+        if not data and self.token:
+            # Expired/invalid bearer tokens can block public catalog endpoints.
+            data = self._make_request(
+                'market/modules',
+                params,
+                requires_auth=False,
+                use_new_api=True,
+                omit_auth=True,
+            )
+        if not data:
+            data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
+        if not data:
+            print_warning("Could not reach marketplace catalog — showing official GitHub extensions only.")
+            return {"modules": [], "pagination": {}}
+        return data
+
+    def _remote_catalog_count(self, data: Dict) -> int:
+        if 'modules' in data:
+            return len(data.get('modules', []) or [])
+        return len(data.get('extensions', []) or [])
+
+    def _normalize_catalog_modules(
+        self,
+        data: Dict,
+        *,
+        search_query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> List[Dict]:
+        """Normalize registry responses and merge built-in GitHub extensions."""
+        if 'modules' in data:
+            remote_modules = data.get('modules', []) or []
+        else:
+            remote_modules = data.get('extensions', []) or []
+        return self._merge_official_github_modules(
+            remote_modules,
+            search_query=search_query,
+            category=category,
+        )
+
     def _browse_modules(self, args) -> bool:
         """Browse modules by category"""
         params = {
@@ -548,34 +594,23 @@ Examples:
         if args.category:
             params['type'] = args.category
         
-        # Try new API first, fallback to old API
-        data = self._make_request('market/modules', params, requires_auth=False, use_new_api=True)
-        
-        if not data:
-            # Fallback to old API
-            data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
-        
-        if not data:
-            print_warning("Could not reach marketplace catalog — showing official GitHub extensions only.")
-            data = {"modules": [], "pagination": {}}
+        data = self._fetch_catalog_data(params)
+        remote_count = self._remote_catalog_count(data)
+        modules = self._normalize_catalog_modules(
+            data,
+            category=getattr(args, 'category', None),
+        )
+        if remote_count == 0 and modules:
+            print_info("Remote catalog empty or unavailable — including official GitHub extensions.")
 
-        if 'modules' in data:
-            modules = self._merge_official_github_modules(
-                data.get('modules', []),
-                category=getattr(args, 'category', None),
-            )
-            pagination = dict(data.get('pagination', {}) or {})
-            pagination['total'] = len(modules)
-            total = pagination.get('total', len(modules))
-            self._display_modules_new_format(
-                modules,
-                f"Browse Results (Page {args.page}, Total: {total})",
-                pagination,
-            )
-        else:
-            extensions = data.get('extensions', [])
-            total = data.get('total', 0)
-            self._display_extensions(extensions, f"Browse Results (Page {args.page}, Total: {total})")
+        pagination = dict(data.get('pagination', {}) or {})
+        pagination['total'] = len(modules)
+        total = pagination.get('total', len(modules))
+        self._display_modules_new_format(
+            modules,
+            f"Browse Results (Page {args.page}, Total: {total})",
+            pagination,
+        )
         
         return True
     
@@ -590,34 +625,24 @@ Examples:
         if args.category:
             params['type'] = args.category
         
-        # Try new API first, fallback to old API
-        data = self._make_request('market/modules', params, requires_auth=False, use_new_api=True)
-        
-        if not data:
-            # Fallback to old API
-            data = self._make_request('extensions', params, requires_auth=False, use_new_api=False)
-        
-        if not data:
-            return False
-        
-        # Handle both new and old API response formats
-        if 'modules' in data:
-            modules = self._merge_official_github_modules(
-                data.get('modules', []),
-                search_query=args.query,
-                category=getattr(args, 'category', None),
-            )
-            pagination = dict(data.get('pagination', {}) or {})
-            pagination['total'] = len(modules)
-            total = pagination.get('total', len(modules))
-            self._display_modules_new_format(
-                modules,
-                f"Search Results for '{args.query}' (Page {args.page}, Total: {total})",
-                pagination,
-            )
-        else:
-            extensions = data.get('extensions', [])
-            self._display_extensions(extensions, f"Search Results for '{args.query}' (Page {args.page})")
+        data = self._fetch_catalog_data(params)
+        remote_count = self._remote_catalog_count(data)
+        modules = self._normalize_catalog_modules(
+            data,
+            search_query=args.query,
+            category=getattr(args, 'category', None),
+        )
+        if remote_count == 0 and modules:
+            print_info("Remote catalog empty or unavailable — including official GitHub extensions.")
+
+        pagination = dict(data.get('pagination', {}) or {})
+        pagination['total'] = len(modules)
+        total = pagination.get('total', len(modules))
+        self._display_modules_new_format(
+            modules,
+            f"Search Results for '{args.query}' (Page {args.page}, Total: {total})",
+            pagination,
+        )
         
         return True
 

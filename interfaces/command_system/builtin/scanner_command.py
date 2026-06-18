@@ -26,6 +26,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Set, Optional, Tuple
 import errno
 
+from core.scanner.result_dedup import deduplicate_scanner_results, enrich_scanner_result, group_scanner_results
+
 
 class ScannerCommand(BaseCommand):
     """Command to execute all scanner modules against a target URL"""
@@ -86,6 +88,7 @@ Options:
     --list               List all available scanner modules
     --verbose, -v        Show detailed output for each module
     --no-cache           Disable HTTP request caching
+    --no-dedup           Disable grouping/deduplication of identical findings
 
 Examples:
     scanner -u https://example.com
@@ -218,10 +221,14 @@ Examples:
             print_empty()
             
             # Execute modules
-            results = self._execute_modules(modules, target_info, options['threads'], options['verbose'])
+            raw_results = self._execute_modules(modules, target_info, options['threads'], options['verbose'])
+            if options.get('no_dedup'):
+                results = raw_results
+            else:
+                results = deduplicate_scanner_results(raw_results, target_info=target_info)
             
             # Display results
-            self._display_results(results, options['verbose'])
+            self._display_results(results, raw_results, options['verbose'], grouped=not options.get('no_dedup'))
             
             # Auto-exploit if enabled
             if options.get('auto_exploit'):
@@ -262,7 +269,8 @@ Examples:
             'module': None,
             'list': False,
             'verbose': False,
-            'no_cache': False
+            'no_cache': False,
+            'no_dedup': False,
         }
         
         i = 0
@@ -333,6 +341,9 @@ Examples:
                 i += 1
             elif arg in ['-v', '--verbose']:
                 options['verbose'] = True
+                i += 1
+            elif arg == '--no-dedup':
+                options['no_dedup'] = True
                 i += 1
             else:
                 # Try to interpret as URL if no URL set
@@ -635,7 +646,8 @@ Examples:
                 'status': 'error',
                 'vulnerable': False,
                 'message': '',
-                'details': {}
+                'details': {},
+                'host': target_info.get('hostname', ''),
             }
             
             try:
@@ -658,6 +670,9 @@ Examples:
                     hostname = target_info['hostname']
                     port = self._choose_port_for_module(module_path, target_info)
                     scheme = 'https' if port == 443 else 'http'
+                    result['port'] = port
+                    result['scheme'] = scheme
+                    result['host'] = hostname
 
                     # Set target (hostname or full URL) using set_option
                     if hasattr(module_instance, 'target'):
@@ -710,6 +725,9 @@ Examples:
                     # Severity: from __info__ or dynamic (for detection/vuln level)
                     result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
 
+                    if module_info.get('cve'):
+                        result['cve'] = module_info.get('cve')
+
                     # Version and other dynamic details
                     if dynamic_info.get('version'):
                         result['version'] = dynamic_info['version']
@@ -743,6 +761,7 @@ Examples:
                         k: v for k, v in dynamic_info.items()
                         if k not in ['reason', 'version', 'severity']
                     }
+                    enrich_scanner_result(result, target_info, port=port)
                 finally:
                     set_thread_output_quiet(False)
 
@@ -770,8 +789,14 @@ Examples:
         
         return results
     
-    def _display_results(self, results: List[Dict], verbose: bool):
-        """Display scan results"""
+    def _display_results(
+        self,
+        results: List[Dict],
+        raw_results: List[Dict],
+        verbose: bool,
+        grouped: bool = True,
+    ):
+        """Display scan results, optionally grouped by vulnerability/host/service/evidence."""
         print_empty()
         print_info("=" * 70)
         print_success("Scanner Results")
@@ -779,46 +804,44 @@ Examples:
         print_empty()
         
         # Count statistics
-        total = len(results)
-        vulnerable = sum(1 for r in results if r['vulnerable'])
-        safe = sum(1 for r in results if not r['vulnerable'] and r['status'] != 'error')
-        errors = sum(1 for r in results if r['status'] == 'error')
+        total = len(raw_results)
+        raw_vulnerable = sum(1 for r in raw_results if r.get('vulnerable'))
+        unique_vulnerable = sum(1 for r in results if r.get('vulnerable'))
+        safe = sum(1 for r in raw_results if not r.get('vulnerable') and r.get('status') != 'error')
+        errors = sum(1 for r in raw_results if r.get('status') == 'error')
         
         print_info(f"Total modules executed: {total}")
-        print_success(f"Vulnerabilities found: {vulnerable}")
+        if grouped and raw_vulnerable != unique_vulnerable:
+            print_success(
+                f"Vulnerabilities found: {unique_vulnerable} unique "
+                f"({raw_vulnerable} detections before deduplication)"
+            )
+        else:
+            print_success(f"Vulnerabilities found: {unique_vulnerable}")
         print_info(f"Safe: {safe}")
         if errors > 0:
             print_warning(f"Errors: {errors}")
         print_empty()
         
-        # Show vulnerable results first
-        vulnerable_results = [r for r in results if r['vulnerable']]
-        if vulnerable_results:
+        vulnerable_results = [r for r in results if r.get('vulnerable')]
+        if vulnerable_results and grouped:
+            finding_groups = group_scanner_results(results)
+            print_success("VULNERABILITIES DETECTED (grouped by host/service/evidence):")
+            print_info("-" * 70)
+            for group in finding_groups:
+                self._print_finding_group(group)
+                print_info("-" * 30)
+        elif vulnerable_results:
             print_success("VULNERABILITIES DETECTED:")
             print_info("-" * 70)
             for result in vulnerable_results:
-                # Remove any existing [+] prefix from module name (print_success adds it automatically)
-                module_name = result['module'].lstrip('[+]').strip()
-                print_success(module_name)
-                print_info(f"    Path: {result['path']}")
-                print_info(f"    Reason: {result['message']}")
-                if 'version' in result:
-                    print_info(f"    Version: {result['version']}")
-                if result.get('severity'):
-                    print_info(f"    Severity: {self._format_severity(result['severity'])}")
-                if result['details']:
-                    for key, value in result['details'].items():
-                        print_info(f"    {key}: {value}")
-                # Show associated exploit/auxiliary module
-                if 'exploit_module' in result:
-                    print_success(f"Exploit module: {result['exploit_module']}")
-                    print_info(f"    Use: use {result['exploit_module']}")
+                self._print_vulnerable_result(result)
                 print_info("-" * 30)
 
         
         # Show safe results if verbose
         if verbose:
-            safe_results = [r for r in results if not r['vulnerable'] and r['status'] != 'error']
+            safe_results = [r for r in raw_results if not r.get('vulnerable') and r.get('status') != 'error']
             if safe_results:
                 print_info("SAFE (No vulnerabilities detected):")
                 print_info("-" * 70)
@@ -827,7 +850,7 @@ Examples:
                 print_empty()
         
         # Show errors if any
-        error_results = [r for r in results if r['status'] == 'error']
+        error_results = [r for r in raw_results if r.get('status') == 'error']
         if error_results:
             print_warning("ERRORS:")
             print_info("-" * 70)
@@ -836,6 +859,65 @@ Examples:
             print_empty()
         
         print_info("=" * 70)
+
+    def _print_vulnerable_result(self, result: Dict[str, Any]):
+        module_name = str(result.get('module', '')).lstrip('[+]').strip()
+        print_success(module_name)
+        if result.get('host') or result.get('service'):
+            host = result.get('host') or 'unknown'
+            service = result.get('service') or 'unknown'
+            print_info(f"    Target: {host} ({service})")
+        print_info(f"    Path: {result.get('path', '')}")
+        print_info(f"    Reason: {result.get('message', '')}")
+        if result.get('evidence') and result.get('evidence') != result.get('message'):
+            print_info(f"    Evidence: {result['evidence']}")
+        if 'version' in result:
+            print_info(f"    Version: {result['version']}")
+        if result.get('cve'):
+            print_info(f"    CVE: {result['cve']}")
+        if result.get('severity'):
+            print_info(f"    Severity: {self._format_severity(result['severity'])}")
+        duplicate_count = int(result.get('duplicate_count') or 1)
+        if duplicate_count > 1:
+            sources = result.get('dedup_sources') or []
+            print_info(f"    Occurrences: {duplicate_count}")
+            if sources:
+                print_info(f"    Sources: {', '.join(sources)}")
+        details = result.get('details') or {}
+        if details:
+            for key, value in details.items():
+                print_info(f"    {key}: {value}")
+        if 'exploit_module' in result:
+            print_success(f"Exploit module: {result['exploit_module']}")
+            print_info(f"    Use: use {result['exploit_module']}")
+
+    def _print_finding_group(self, group):
+        title = group.title
+        if group.cve:
+            print_success(f"[{group.cve}] {title}")
+        else:
+            print_success(title)
+        if group.severity:
+            print_info(f"    Severity: {self._format_severity(group.severity)}")
+        if group.hosts:
+            print_info(f"    Hosts: {', '.join(group.hosts)}")
+        if group.services:
+            print_info(f"    Services: {', '.join(group.services)}")
+        if group.evidence:
+            preview = group.evidence[0]
+            if len(group.evidence) > 1:
+                preview = f"{preview} (+{len(group.evidence) - 1} variant(s))"
+            print_info(f"    Evidence: {preview}")
+        if group.module_paths:
+            print_info(f"    Modules: {', '.join(group.module_paths)}")
+        if group.occurrences > 1:
+            print_info(f"    Occurrences: {group.occurrences}")
+        representative = group.representative or {}
+        if representative.get('exploit_module'):
+            print_success(f"Exploit module: {representative['exploit_module']}")
+            print_info(f"    Use: use {representative['exploit_module']}")
+        if representative.get('message') and representative.get('message') not in (group.evidence or []):
+            print_info(f"    Reason: {representative['message']}")
     
     def _auto_exploit(self, results: List[Dict], target_info: Dict[str, Any]):
         """Automatically launch exploit modules for detected vulnerabilities"""

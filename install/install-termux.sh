@@ -266,7 +266,7 @@ echo
 
 # -- Group H: Platform-specific (unlikely to work on Android) ---------------
 echo -e "${YELLOW}[*]${NC} [8/8] Platform-specific packages (may be skipped)..."
-install_or_skip "asyncio-mqtt"     asyncio-mqtt
+install_or_skip "aiomqtt"          aiomqtt
 install_or_skip "bleak"            bleak
 install_or_skip "nava"             nava
 install_or_skip "pychromecast"     pychromecast

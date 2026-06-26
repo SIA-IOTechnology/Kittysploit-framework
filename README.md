@@ -42,6 +42,7 @@ While traditional tools struggle with modern web architectures and automated def
 
 <div align="center">
   <img src="docs/screenshots/banner.png" alt="Banner" width="100%">
+  <br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/banner.png">banner.png</a>
   <br><br>
   <table width="100%">
     <tr>
@@ -49,32 +50,32 @@ While traditional tools struggle with modern web architectures and automated def
       <td width="50%"><img src="docs/screenshots/kittyproxy-1.png" alt="KittyProxy"></td>
     </tr>
     <tr>
-      <td align="center"><i>Interactive CLI</i></td>
-      <td align="center"><i>Traffic Analysis Detail</i></td>
+      <td align="center"><i>Interactive CLI</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/cli-interface.png">cli-interface.png</a></td>
+      <td align="center"><i>Traffic Analysis Detail</i><br><a href="https://github.com/SIA-IOTechnology/KittyProtocol">kittyproxy-1.png</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/kittycollab.png" alt="KittyCollab"></td>
       <td width="50%"><img src="docs/screenshots/kittyosint.png" alt="KittyOsint"></td>
     </tr>
     <tr>
-      <td align="center"><i>Collaborative Editor</i></td>
-      <td align="center"><i>Intelligent OSINT Graph</i></td>
+      <td align="center"><i>Collaborative Editor</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittycollab.png">kittycollab.png</a></td>
+      <td align="center"><i>Intelligent OSINT Graph</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyosint.png">kittyosint.png</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/marketplace.png" alt="Marketplace"></td>
       <td width="50%"><img src="docs/screenshots/kittyproxy-2.png" alt="KittyProxy Detail"></td>
     </tr>
     <tr>
-      <td align="center"><i>GUI interface</i></td>
-      <td align="center"><i>AI-Powered Proxy</i></td>
+      <td align="center"><i>GUI interface</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/marketplace.png">marketplace.png</a></td>
+      <td align="center"><i>AI-Powered Proxy</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyproxy-2.png">kittyproxy-2.png</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/kittyv8.png" alt="Marketplace"></td>
       <td width="50%"><img src="docs/screenshots/kittyprotocol.png" alt="KittyProxy Detail"></td>
     </tr>
     <tr>
-      <td align="center"><i>V8 Engine Debugger</i></td>
-      <td align="center"><i>Protocol Analysis</i></td>
+      <td align="center"><i>V8 Engine Debugger</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyv8.png">kittyv8.png</a></td>
+      <td align="center"><i>Protocol Analysis</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyprotocol.png">kittyprotocol.png</a></td>
     </tr>
   </table>
 </div>
@@ -97,9 +98,9 @@ git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittys
 git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && install\install.bat
 ```
 
-**Start the Web UI:**
+**Start:**
 ```bash
-python launch_kittyproxy.py 
+python kittyconsole.py
 ```
 
 ---

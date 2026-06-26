@@ -14,6 +14,14 @@ class Module(Post, FTPClientMixin):
         "description": "Gathers detailed system information from FTP server including version, features, and capabilities",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     def check(self):

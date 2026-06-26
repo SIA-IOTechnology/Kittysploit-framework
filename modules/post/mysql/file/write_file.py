@@ -8,6 +8,14 @@ class Module(Post, MySQLClient):
 		"description": "Write files to filesystem using MySQL INTO OUTFILE - requires FILE privilege",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 
 	file_path = OptString("/tmp/test.txt", "File path to write", True)

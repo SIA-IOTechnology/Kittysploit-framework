@@ -13,6 +13,14 @@ class Module(Post, FTPClientMixin):
         "description": "Uploads a local file to the FTP server",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     local_file = OptFile("", "Local file path to upload", True)

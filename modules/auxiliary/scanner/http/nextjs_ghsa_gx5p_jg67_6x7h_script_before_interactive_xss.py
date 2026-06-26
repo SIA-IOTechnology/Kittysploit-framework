@@ -24,6 +24,14 @@ class Module(Auxiliary, Http_client):
         "author": ["KittySploit Team"],
         "references": ["https://github.com/advisories/GHSA-gx5p-jg67-6x7h"],
         "tags": ["http", "nextjs", "xss", "script", "ghsa"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     inject_param = OptString("tid", "Query parameter name carrying the URL-encoded payload", required=False)

@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -17,6 +18,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44581",
         "references": ["https://github.com/advisories/GHSA-ffhc-5mcf-pf4q"],
         "tags": ["scanner", "http", "nextjs", "xss", "csp"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     validation_token = OptString("VALIDATION_TOKEN", "Token in alert() and needle", required=False)
@@ -72,6 +81,8 @@ class Module(Scanner, Http_client):
         return "inconclusive"
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         _, needle = self._csp_and_needle()
         code, body, err = self._get_with_csp()
         if err:

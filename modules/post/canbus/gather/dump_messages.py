@@ -22,6 +22,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "version": "1.0.0",
         "session_type": SessionType.CANBUS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     output_file = OptString("canbus_dump.json", "Output file path", required=True)

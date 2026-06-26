@@ -23,6 +23,14 @@ class Module(Scanner, Tcp_scanner_client):
             "vendor": "redis",
         },
         "tags": ["redis", "network", "enum", "discovery"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(6379, "Target Redis port", True)

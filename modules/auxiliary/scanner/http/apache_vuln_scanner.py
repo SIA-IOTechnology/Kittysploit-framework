@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             'https://httpd.apache.org/security/',
             'https://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=apache',
             'https://owasp.org/www-project-web-security-testing-guide/'
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Known Apache CVEs and vulnerable versions

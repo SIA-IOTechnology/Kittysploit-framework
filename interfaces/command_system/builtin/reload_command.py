@@ -98,6 +98,9 @@ Examples:
                 return False
             
             print_info(f"Reloading module: {module_path}")
+
+            if hasattr(self.framework, "invalidate_module_caches"):
+                self.framework.invalidate_module_caches(module_path)
             
             # Build the import path
             import_path = module_path.replace("/", ".")

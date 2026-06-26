@@ -324,6 +324,16 @@ class Http_client(BaseModule):
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """Internal request method"""
         try:
+            agent_policy = None
+            try:
+                from interfaces.command_system.builtin.agent.runtime_policy import (
+                    active_runtime_policy,
+                )
+
+                agent_policy = active_runtime_policy()
+            except ImportError:
+                pass
+
             # Reconfigure session in case options changed
             self._configure_session()
             
@@ -354,8 +364,12 @@ class Http_client(BaseModule):
             
             # Set timeout and verify
             kwargs.setdefault('timeout', timeout)
-            # Always use verify_ssl option value (defaults to False for self-signed certificates)
-            kwargs['verify'] = verify_ssl
+            # Agent runs use their explicit TLS policy. Outside agent mode, retain
+            # the module's verify_ssl behavior for backward compatibility.
+            if agent_policy is not None:
+                kwargs["verify"] = agent_policy.tls_verify_value()
+            else:
+                kwargs["verify"] = verify_ssl
             
             # Debug logging (only if logger is configured for debug)
             if self.logger.isEnabledFor(logging.DEBUG):

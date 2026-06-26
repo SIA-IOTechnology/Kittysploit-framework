@@ -10,6 +10,14 @@ class Module(Post):
 		"arch": Arch.PHP,
 		"tags": ["php"],
 		"session_type": SessionType.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 		
 	def run(self):

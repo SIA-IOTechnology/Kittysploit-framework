@@ -33,6 +33,14 @@ class Module(Scanner, Tcp_scanner_client):
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "gtp", "3gpp", "mobile", "ran"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(2152, "GTP port (2152=GTP-U, 2123=GTP-C)", True)

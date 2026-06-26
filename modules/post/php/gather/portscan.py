@@ -6,6 +6,14 @@ class Module(Post):
 		"name": "PHP Port Scanner",
 		"description": "PHP Port Scanner",
 		"arch": Arch.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 	
 	target = OptString("127.0.0.1", "host", True)

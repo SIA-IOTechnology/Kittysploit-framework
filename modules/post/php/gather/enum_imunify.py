@@ -8,6 +8,14 @@ class Module(Post):
 		"description": "Extract MyImunify360 configuration, credentials, whitelist, and rules",
 		"author": "KittySploit Team",
 		"arch": Arch.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 	
 	def run(self):

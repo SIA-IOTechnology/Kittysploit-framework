@@ -2,19 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import json
-from pathlib import Path
 
-
-def _repo_root():
-    return Path(__file__).resolve().parents[2]
+from core.utils.paths import read_core_text
 
 
 def load_js_library(filename: str) -> str:
     """Load a JS library from core/browser_static/libs/."""
-    lib_path = _repo_root() / "core" / "browser_static" / "libs" / filename
-    if not lib_path.exists():
-        raise FileNotFoundError(f"JS library not found: {lib_path}")
-    return lib_path.read_text(encoding="utf-8")
+    return read_core_text("browser_static", "libs", filename)
 
 
 def load_generic_lib() -> str:

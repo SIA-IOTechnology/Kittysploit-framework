@@ -21,7 +21,15 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/vulnerabilities/Path_Traversal',
             'https://portswigger.net/web-security/file-path-traversal'
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     target = OptString("", "Target URL with LFI parameter (e.g., http://target.com/page.php?file=)", required=True)

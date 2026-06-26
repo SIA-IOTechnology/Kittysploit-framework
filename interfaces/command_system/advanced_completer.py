@@ -35,20 +35,27 @@ class AdvancedCompleter(Completer):
 
         self._command_cache: List[str] = []
         self._modules_cache: List[str] = []
+        self._payload_paths_cache: List[str] = []
+        self._obfuscator_paths_cache: List[str] = []
         self._subcommand_cache: Dict[str, List[str]] = {}
         self._logged_completion_errors: Set[str] = set()
 
         self._last_command_cache = 0.0
-        self._last_module_cache = 0.0
+        self._last_discovery_generation = -1
 
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
-    def refresh(self) -> None:
-        """Invalidate cached data."""
-        self._last_command_cache = 0.0
-        self._last_module_cache = 0.0
-        self._subcommand_cache.clear()
+    def refresh(self, *, modules: bool = True, commands: bool = True) -> None:
+        """Invalidate cached completion data."""
+        if commands:
+            self._last_command_cache = 0.0
+            self._subcommand_cache.clear()
+        if modules:
+            self._last_discovery_generation = -1
+            self._modules_cache = []
+            self._payload_paths_cache = []
+            self._obfuscator_paths_cache = []
 
     # ------------------------------------------------------------------ #
     # Completion entry point
@@ -349,21 +356,43 @@ class AdvancedCompleter(Completer):
             self._last_command_cache = now
         return self._command_cache
 
-    def _get_modules(self) -> List[str]:
-        now = time.time()
-        if not self._modules_cache or now - self._last_module_cache > self.CACHE_TTL:
-            try:
-                discovered = self.framework.module_loader.discover_modules()
+    def _discovery_generation(self) -> int:
+        module_loader = getattr(self.framework, "module_loader", None)
+        return getattr(module_loader, "_cache_generation", 0)
+
+    def _ensure_module_paths_cache(self) -> None:
+        generation = self._discovery_generation()
+        if self._modules_cache and generation == self._last_discovery_generation:
+            return
+        try:
+            module_loader = getattr(self.framework, "module_loader", None)
+            if module_loader is None:
+                self._modules_cache = []
+                self._payload_paths_cache = []
+                self._obfuscator_paths_cache = []
+            else:
+                discovered = module_loader.discover_modules()
                 module_paths = sorted(discovered.keys())
-            except Exception:
-                self._log_completion_error(
-                    "module-discovery",
-                    "Failed to discover modules for completion",
-                    level=logging.WARNING,
+                self._modules_cache = module_paths
+                self._payload_paths_cache = sorted(
+                    path for path in module_paths if path.startswith("payloads/")
                 )
-                module_paths = []
-            self._modules_cache = module_paths
-            self._last_module_cache = now
+                self._obfuscator_paths_cache = sorted(
+                    path for path in module_paths if path.startswith("obfuscators/")
+                )
+        except Exception:
+            self._log_completion_error(
+                "module-discovery",
+                "Failed to discover modules for completion",
+                level=logging.WARNING,
+            )
+            self._modules_cache = []
+            self._payload_paths_cache = []
+            self._obfuscator_paths_cache = []
+        self._last_discovery_generation = generation
+
+    def _get_modules(self) -> List[str]:
+        self._ensure_module_paths_cache()
         return self._modules_cache
 
     def _get_subcommands(self, command: str) -> List[str]:
@@ -462,27 +491,8 @@ class AdvancedCompleter(Completer):
 
     def _collect_payload_paths(self) -> List[str]:
         """Collect all available payload module paths"""
-        payload_paths: List[str] = []
-        
-        try:
-            if not hasattr(self.framework, 'module_loader'):
-                return payload_paths
-            
-            # Discover all modules
-            discovered_modules = self.framework.module_loader.discover_modules()
-            
-            # Filter payload modules (they start with "payloads/")
-            for module_path in discovered_modules.keys():
-                if module_path.startswith("payloads/"):
-                    payload_paths.append(module_path)
-        except Exception:
-            self._log_completion_error(
-                "payload-discovery",
-                "Failed to discover payload paths for completion",
-                level=logging.WARNING,
-            )
-
-        return sorted(set(filter(None, payload_paths)))
+        self._ensure_module_paths_cache()
+        return list(self._payload_paths_cache)
 
     def _get_metasploit_plugin(self):
         plugin_manager = getattr(self.framework, "plugin_manager", None)
@@ -499,25 +509,8 @@ class AdvancedCompleter(Completer):
 
     def _collect_obfuscator_paths(self) -> List[str]:
         """Collect all available obfuscator module paths"""
-        obfuscator_paths: List[str] = []
-        
-        try:
-            if not hasattr(self.framework, 'module_loader'):
-                return obfuscator_paths
-            
-            discovered_modules = self.framework.module_loader.discover_modules()
-            
-            for module_path in discovered_modules.keys():
-                if module_path.startswith("obfuscators/"):
-                    obfuscator_paths.append(module_path)
-        except Exception:
-            self._log_completion_error(
-                "obfuscator-discovery",
-                "Failed to discover obfuscator paths for completion",
-                level=logging.WARNING,
-            )
-        
-        return sorted(set(filter(None, obfuscator_paths)))
+        self._ensure_module_paths_cache()
+        return list(self._obfuscator_paths_cache)
 
     def _log_completion_error(self, key: str, message: str, level: int = logging.DEBUG) -> None:
         """Log noisy completion failures once so interactive typing stays usable."""

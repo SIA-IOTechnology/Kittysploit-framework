@@ -12,6 +12,14 @@ class Module(Post):
         "description": "Correlate AWS misconfigurations into practical compromise chains.",
         "author": "KittySploit Team",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     include_trust_analysis = OptBool(True, "Analyze role trust policies", False)

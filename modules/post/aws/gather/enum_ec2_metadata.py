@@ -22,6 +22,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "version": "1.0.0",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     imds_version = OptChoice("v1", "IMDS version (v1 or v2)", False, ["v1", "v2"])

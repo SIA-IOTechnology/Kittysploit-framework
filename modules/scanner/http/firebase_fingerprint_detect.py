@@ -49,6 +49,14 @@ class Module(Scanner, Http_client):
             "https://firebase.google.com/docs/projects/learn-more#config-files-objects",
         ],
         "tags": ["scanner", "http", "firebase", "hosting", "recon", "disclosure"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     probe_init_json = OptBool(True, "GET /__/firebase/init.json (Hosting reserved URL)", required=False)

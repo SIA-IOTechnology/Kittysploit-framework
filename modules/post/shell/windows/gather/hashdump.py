@@ -39,7 +39,15 @@ class Module(Post):
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [
             "https://attack.mitre.org/techniques/T1003/002/"
-        ]
+        ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     def check(self):

@@ -12,6 +12,14 @@ class Module(Post):
         "author": "Joe Bialek, Matt Graeber, KittySploit",
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     pe_file = OptFile("", "Local path to the PE file (DLL/EXE) to inject", True)

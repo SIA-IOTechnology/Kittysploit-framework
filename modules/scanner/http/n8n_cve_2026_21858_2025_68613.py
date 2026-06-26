@@ -22,6 +22,14 @@ class Module(Scanner, Http_client):
             "exploits/linux/http/n8n_full_chain_rce",
         ],
         "tags": ["web", "scanner", "n8n", "lfi", "jwt", "rce", "full-chain"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(5678, "Target port (n8n default)", True)

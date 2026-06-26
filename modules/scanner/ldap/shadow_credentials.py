@@ -13,6 +13,14 @@ class Module(Scanner, Ad_client):
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "shadow credentials", "keycredential", "pkinit"],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

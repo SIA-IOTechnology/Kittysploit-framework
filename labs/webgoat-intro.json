@@ -1,0 +1,59 @@
+{
+  "id": "webgoat-intro",
+  "name": "WebGoat Introduction",
+  "description": "OWASP WebGoat training environment with guided walkthrough and service checks.",
+  "environment": "docker_environments/webgoat",
+  "difficulty": "beginner",
+  "max_score": 100,
+  "tags": ["web", "training", "owasp"],
+  "environment_options": {
+    "container_name": "kittysploit_webgoat",
+    "webgoat_port": 8080,
+    "webwolf_port": 9090
+  },
+  "objectives": [
+    {
+      "id": "webgoat_port",
+      "title": "WebGoat port is open",
+      "points": 40,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 8080}
+    },
+    {
+      "id": "webwolf_port",
+      "title": "WebWolf port is open",
+      "points": 20,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 9090}
+    },
+    {
+      "id": "webgoat_http",
+      "title": "WebGoat landing page responds",
+      "points": 40,
+      "check": {
+        "type": "http",
+        "url": "http://127.0.0.1:8080/WebGoat",
+        "expect_status": 200
+      }
+    }
+  ],
+  "walkthrough": [
+    {
+      "step": 1,
+      "title": "Launch WebGoat",
+      "body": "Run `lab start webgoat-intro`. Startup can take up to three minutes."
+    },
+    {
+      "step": 2,
+      "title": "Sign in",
+      "body": "Open http://127.0.0.1:8080/WebGoat and login with guest / guest."
+    },
+    {
+      "step": 3,
+      "title": "Use WebWolf",
+      "body": "Open http://127.0.0.1:9090/WebWolf for the companion attacker workspace."
+    }
+  ],
+  "reset": {
+    "container_name": "kittysploit_webgoat",
+    "environment": "docker_environments/webgoat"
+  }
+}

@@ -6,11 +6,14 @@ Run command implementation
 """
 
 import argparse
-import socket
-import time
 from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
 from core.framework.option.base_option import Option as BaseOption
+from core.framework.module_executor import (
+    ModuleExecutionBlockReason,
+    ModuleExecutionRequest,
+    ModuleExecutor,
+)
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
 
 class RunCommand(BaseCommand):
@@ -105,289 +108,154 @@ Examples:
             return True
         
         try:
-            # Check if all required options are set
-            if not module.check_options():
-                missing = module.get_missing_options()
-                if missing:
-                    print_error(f"Missing required options: {', '.join(missing)}")
-                else:
-                    print_error("Not all required options are set")
-                print_info("Use 'show options' to see required options")
-                return False
+            module = self.framework.current_module
+            guardian = getattr(self.framework, "guardian_manager", None)
+            verbose_guardian = bool(
+                guardian and guardian.enabled and getattr(guardian, "verbose", False)
+            )
+            request = ModuleExecutionRequest(
+                module=module,
+                background=parsed_args.background,
+                skip_scope_confirm=parsed_args.yes,
+                use_runtime_kernel=False,
+                use_exploit_wrapper=True,
+                collect_metrics=True,
+                register_background_job=parsed_args.background,
+                verbose_guardian_debug=verbose_guardian,
+            )
 
-            scope_manager = getattr(self.framework, 'scope_manager', None)
-            if scope_manager and not scope_manager.ensure_execution_permitted(
-                module,
-                skip_confirm=parsed_args.yes,
-            ):
-                return False
-            
-            # Vérifier la blacklist du Guardian avant l'exécution
-            if hasattr(self.framework, 'guardian_manager') and self.framework.guardian_manager and self.framework.guardian_manager.enabled and self.framework.guardian_manager.verbose:
-                print_info(f"[GUARDIAN DEBUG] Checking guardian - has guardian_manager: {hasattr(self.framework, 'guardian_manager')}")
-                if hasattr(self.framework, 'guardian_manager'):
-                    print_info(f"[GUARDIAN DEBUG] guardian_manager exists: {self.framework.guardian_manager is not None}")
-                    if self.framework.guardian_manager:
-                        print_info(f"[GUARDIAN DEBUG] guardian_manager.enabled: {self.framework.guardian_manager.enabled}")
-                        print_info(f"[GUARDIAN DEBUG] blacklist size: {len(self.framework.guardian_manager.blacklist)}")
-                        print_info(f"[GUARDIAN DEBUG] blacklist contents: {list(self.framework.guardian_manager.blacklist.keys())}")
-            
-            if hasattr(self.framework, 'guardian_manager') and self.framework.guardian_manager and self.framework.guardian_manager.enabled:
-                target_ip = self.framework._extract_target_ip_from_module()
-                if self.framework.guardian_manager.verbose:
-                    print_info(f"[GUARDIAN DEBUG] Extracted target IP: {target_ip}")
-                if target_ip:
-                    # Vérifier si l'IP est dans la blacklist
-                    is_blacklisted = target_ip in self.framework.guardian_manager.blacklist
-                    if self.framework.guardian_manager.verbose:
-                        print_info(f"[GUARDIAN DEBUG] Is {target_ip} in blacklist? {is_blacklisted}")
-                    if is_blacklisted:
-                        blacklist_entry = self.framework.guardian_manager.blacklist[target_ip]
-                        reason = blacklist_entry.get('reason', 'Unknown reason')
-                        timestamp = blacklist_entry.get('timestamp', 'Unknown')
-                        
-                        print_error(f"[GUARDIAN] Module execution BLOCKED: Target IP {target_ip} is blacklisted")
-                        print_error(f"[GUARDIAN] Reason: {reason} (added: {timestamp})")
-                        
-                        # Créer une alerte Guardian via _create_alert pour mettre à jour les statistiques
-                        alert = self.framework.guardian_manager._create_alert(
-                            target=target_ip,
-                            severity="CRITICAL",
-                            issue=f"Module execution blocked: IP {target_ip} is blacklisted",
-                            confidence=100.0,
-                            recommendations=[
-                                "Remove IP from blacklist if this is intentional",
-                                "Verify target before removing from blacklist"
-                            ],
-                            evidence=[f"IP {target_ip} found in blacklist"]
-                        )
-                        # Marquer l'action comme prise
-                        alert.auto_action_taken = True
-                        alert.action_description = "Module execution blocked"
-                        
-                        return False
-            
-            # Check if module requires root privileges
             if module.requires_root:
                 print_warning("This module requires root privileges")
-                # In a real implementation, you might want to check actual privileges
-            
-            # Execute the module
+
             print_info(f"Executing module: {module.name}")
             print_info("=" * 50)
-            
-            # Check if it's a listener module
-            if hasattr(module, 'type') and module.type == 'listener':
-                # Check if run() method accepts background parameter
-                import inspect
-                run_signature = inspect.signature(module.run)
-                accepts_background = 'background' in run_signature.parameters
-                
-                if parsed_args.background:
-                    print_info("Listener module detected. Running in background mode.")
-                    try:
-                        # For background mode, use direct run() but still create session if result is a tuple
-                        if accepts_background:
-                            result = module.run(background=True)
-                        else:
-                            result = module.run()
-                        
-                        # If result is a tuple with (connection, target, port), create session automatically
-                        if isinstance(result, tuple) and len(result) >= 3:
-                            connection, target, port = result[0], result[1], result[2]
-                            additional_data = result[3] if len(result) > 3 else {}
-                            
-                            # Create session automatically using listener's _create_session_from_connection_data
-                            if hasattr(module, '_create_session_from_connection_data'):
-                                session_id = module._create_session_from_connection_data(
-                                    connection, target, port, additional_data
-                                )
-                                if session_id:
-                                    print_success(f"Session {session_id} created automatically")
-                                    # Convert result to boolean for command history
-                                    success = True
-                                else:
-                                    print_error("Failed to create session automatically")
-                                    success = False
-                            else:
-                                # Fallback: use run_with_auto_session if available
-                                if hasattr(module, 'run_with_auto_session'):
-                                    session_id = module.run_with_auto_session()
-                                    success = bool(session_id) if session_id else False
-                                else:
-                                    success = False
-                        # If result is a session ID (string), it's already created
-                        elif isinstance(result, str) and result:
-                            print_success(f"Session {result} created")
-                            success = True
-                        # Convert result to boolean for command history
-                        else:
-                            success = bool(result) if result is not None else False
-                        
-                        if success:
-                            print_success("Listener started in background")
-                            # Register as a background job
-                            self._register_background_job(module)
-                        else:
-                            print_error("Failed to start listener in background")
-                        return success
-                    except Exception as e:
-                        print_error(f"Error starting listener in background: {e}")
-                        return False
-                else:
-                    print_info("Listener module detected. Press Ctrl+C to stop.")
-                    try:
-                        # Use run_with_auto_session for listeners to automatically create sessions
-                        if hasattr(module, 'run_with_auto_session'):
-                            result = module.run_with_auto_session()
-                            
-                            # If result is a session_id (string), automatically start interactive session
-                            if isinstance(result, str) and result:
-                                session_id = result
-                                print_success(f"Session {session_id} created. Starting interactive shell...")
-                                
-                                # Automatically start interactive session
-                                return self._start_interactive_session_for_listener(session_id)
-                            
-                            # Convert result to boolean for command history
-                            success = bool(result) if result is not None else False
-                            if success:
-                                print_success("Module execution completed successfully")
-                            else:
-                                print_error("Module execution failed")
-                            return success
-                        else:
-                            # Fallback to direct run() if run_with_auto_session is not available
-                            if accepts_background:
-                                result = module.run(background=False)
-                            else:
-                                result = module.run()
-                            # Convert result to boolean for command history
-                            success = bool(result) if result is not None else False
-                            if success:
-                                print_success("Module execution completed successfully")
-                            else:
-                                print_error("Module execution failed")
-                            return success
-                    except KeyboardInterrupt:
-                        print_info("\n[!] Interrupted by user")
-                        # Call shutdown method if available
-                        if hasattr(module, 'shutdown'):
-                            try:
-                                module.shutdown()
-                                print_info("Listener stopped gracefully")
-                            except Exception as e:
-                                print_warning(f"Error during shutdown: {e}")
-                        return True
-            else:
-                # Check if it's a payload module
-                is_payload = (hasattr(module, 'type') and module.type == 'payload') or \
-                            (hasattr(module, 'TYPE_MODULE') and module.TYPE_MODULE == 'payload')
-                
-                if is_payload:
-                    # For payloads, use generate() instead of run()
-                    print_info("Payload module detected. Generating payload...")
-                    try:
-                        payload_result = module.generate()
-                        if payload_result:
-                            print_success("Payload generated successfully!")
-                            print_info(f"Payload: {payload_result}")
-                            return True
-                        else:
-                            print_error("Failed to generate payload")
-                            return False
-                    except Exception as e:
-                        print_error(f"Error generating payload: {e}")
-                        return False
-                
-                # Regular module execution
-                if parsed_args.background:
-                    print_info("Running module in background mode.")
-                    try:
-                        # Check if run() method accepts background parameter
-                        import inspect
+
+            if ModuleExecutor.is_listener(module) and not parsed_args.background:
+                print_info("Listener module detected. Press Ctrl+C to stop.")
+                try:
+                    execution = ModuleExecutor.execute(self.framework, request)
+                    if execution.session_id:
+                        print_success(
+                            f"Session {execution.session_id} created. Starting interactive shell..."
+                        )
+                        return self._start_interactive_session_for_listener(
+                            execution.session_id
+                        )
+                    return self._report_execution_result(execution, module)
+                except KeyboardInterrupt:
+                    print_info("\n[!] Interrupted by user")
+                    if hasattr(module, "shutdown"):
                         try:
-                            run_signature = inspect.signature(module.run)
-                            accepts_background = 'background' in run_signature.parameters
-                        except (ValueError, TypeError):
-                            # If signature inspection fails, assume no background parameter
-                            accepts_background = False
-                        
-                        if accepts_background:
-                            result = module.run(background=True)
-                        else:
-                            result = module.run()
-                        # Convert result to boolean for command history
-                        success = bool(result) if result is not None else False
-                        if success:
-                            print_success("Module started in background")
-                            # Register as a background job
-                            self._register_background_job(module)
-                        else:
-                            print_error("Failed to start module in background")
-                        return success
-                    except Exception as e:
-                        print_error(f"Error starting module in background: {e}")
-                        return False
-                else:
-                    result = module._exploit()
-                    
-                    # Convert result to boolean for command history
-                    success = bool(result) if result is not None else False
+                            module.shutdown()
+                            print_info("Listener stopped gracefully")
+                        except Exception as exc:
+                            print_warning(f"Error during shutdown: {exc}")
+                    return True
 
-                    # Scanner modules return False for "not detected"; that is not a run failure.
-                    is_scanner = getattr(module, 'TYPE_MODULE', None) == 'scanner'
-                    if is_scanner:
-                        if getattr(module, '_scan_error', False):
-                            print_error("Module execution failed.")
-                            return False
-                        if success:
-                            print_success("Module execution completed successfully.")
-                        else:
-                            print_success("Module execution completed (scan finished).")
-                        # Negative detection is not a CLI/command failure; only _scan_error is.
-                        return True
+            if ModuleExecutor.is_payload(module):
+                print_info("Payload module detected. Generating payload...")
 
-                    if success:
-                        print_success("Module execution completed successfully")
-                    else:
-                        print_error("Module execution failed")
-                    
-                    return success
-            
+            if ModuleExecutor.is_listener(module) and parsed_args.background:
+                print_info("Listener module detected. Running in background mode.")
+            elif parsed_args.background:
+                print_info("Running module in background mode.")
+
+            execution = ModuleExecutor.execute(self.framework, request)
+            return self._report_execution_result(
+                execution,
+                module,
+                background=parsed_args.background,
+            )
+
         except Exception as e:
             print_error(f"Error executing module: {str(e)}")
             return False
-    
-    def _register_background_job(self, module):
-        """Register a module as a background job"""
-        try:
-            from core.job_manager import global_job_manager
-            
-            # Generate job name based on module type and name
-            job_name = f"{module.type} {module.name}"
-            if hasattr(module, 'lhost') and hasattr(module, 'lport'):
-                # For listeners, include host and port
-                host = str(module.lhost.value)
-                port = int(module.lport.value)
-                job_name = f"{module.type} {module.name} on {host}:{port}"
-            
-            job_id = global_job_manager.add_job(
-                name=job_name,
-                description=f"{module.type} module: {module.name}",
-                module=module
-            )
-            
-            if job_id:
-                print_success(f"Module registered as background job [ID: {job_id}]")
-                # Store job_id in module for later reference
-                if hasattr(module, 'job_id'):
-                    module.job_id = job_id
+
+    def _report_execution_result(self, execution, module, *, background: bool = False) -> bool:
+        if execution.blocked:
+            if execution.block_reason == ModuleExecutionBlockReason.MISSING_OPTIONS:
+                if execution.missing_options:
+                    print_error(
+                        f"Missing required options: {', '.join(execution.missing_options)}"
+                    )
+                else:
+                    print_error("Not all required options are set")
+                print_info("Use 'show options' to see required options")
+            return False
+
+        if ModuleExecutor.is_payload(module):
+            if execution.success:
+                print_success("Payload generated successfully!")
+                print_info(f"Payload: {execution.result}")
             else:
-                print_warning("Failed to register module as background job")
-                
-        except Exception as e:
-            print_warning(f"Could not register module as background job: {e}")
+                print_error(execution.error or "Failed to generate payload")
+            return execution.command_success
+
+        if ModuleExecutor.is_scanner(module):
+            if execution.error == "scan_error":
+                print_error("Module execution failed.")
+                return False
+            if execution.success:
+                print_success("Module execution completed successfully.")
+            else:
+                print_success("Module execution completed (scan finished).")
+            self._print_module_result_details(execution)
+            return True
+
+        if execution.success:
+            if ModuleExecutor.is_listener(module) and background:
+                print_success("Listener started in background")
+            elif background:
+                print_success("Module started in background")
+            else:
+                print_success("Module execution completed successfully")
+        elif ModuleExecutor.is_listener(module) and background:
+            print_error("Failed to start listener in background")
+        elif background:
+            print_error("Failed to start module in background")
+        else:
+            print_error(execution.error or "Module execution failed")
+
+        self._print_module_result_details(execution)
+        return execution.command_success
+
+    def _print_module_result_details(self, execution) -> None:
+        """Print normalized finding, evidence, and session fields when present."""
+        if execution.session_id:
+            print_success(f"Session ID: {execution.session_id}")
+
+        if execution.finding is not None:
+            print_info("Findings:")
+            for line in self._format_result_items(execution.finding):
+                print_info(f"  {line}")
+
+        if execution.evidence is not None:
+            print_info("Evidence:")
+            for line in self._format_result_items(execution.evidence):
+                print_info(f"  {line}")
+
+    def _format_result_items(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if isinstance(value, dict):
+            title = value.get("title") or value.get("name") or value.get("summary")
+            if title:
+                lines = [str(title)]
+                for key in ("description", "severity", "status", "message", "detail"):
+                    extra = value.get(key)
+                    if extra:
+                        lines.append(f"{key}: {extra}")
+                return lines
+            return [f"{key}: {item}" for key, item in value.items() if item is not None]
+        if isinstance(value, (list, tuple, set)):
+            lines: List[str] = []
+            for item in value:
+                lines.extend(self._format_result_items(item))
+            return lines
+        return [str(value)]
     
     def _show_execution_preview(self, module, background: bool = False):
         """Show a non-executing pre-flight summary for the current module."""

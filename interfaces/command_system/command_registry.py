@@ -10,6 +10,7 @@ import importlib
 import inspect
 import time
 import logging
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Dict, List, Type, Any
 from interfaces.command_system.base_command import BaseCommand
@@ -103,6 +104,9 @@ class CommandRegistry:
             'msf',
             'check',
             'doctor',
+            'attack',
+            'inventory',
+            'lab',
             'sound',
             'pattern',
             'reset',
@@ -323,6 +327,20 @@ class CommandRegistry:
         Returns:
             bool: True if command executed successfully, False otherwise
         """
+        framework = kwargs.get('framework')
+        observability = getattr(framework, 'observability', None) if framework else None
+        track = (
+            observability.track_command(command_name, args)
+            if observability and observability.enabled
+            else nullcontext()
+        )
+        try:
+            with track:
+                return self._execute_command_impl(command_name, args, **kwargs)
+        except Exception:
+            raise
+
+    def _execute_command_impl(self, command_name: str, args: List[str], **kwargs) -> bool:
         try:
             # Debug: Check for blocked actions first
             framework = kwargs.get('framework')

@@ -83,6 +83,14 @@ class Module(Auxiliary, Http_client, Lfi):
             "CVE-2025-4524",
             "https://www.cve.org/CVERecord?id=CVE-2025-4524",
         ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     ajax_path = OptString(

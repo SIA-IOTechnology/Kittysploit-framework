@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 _WS_HEADERS = (
     "Upgrade: websocket\r\n"
@@ -38,6 +39,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44578",
         "references": ["https://github.com/advisories/GHSA-c4j6-fc7j-m34r"],
         "tags": ["scanner", "nextjs", "ssrf", "websocket"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     internal_target = OptString("127.0.0.1:9999", "Internal host:port to reach via SSRF", required=False)
@@ -132,6 +141,8 @@ class Module(Scanner, Http_client):
         return False
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         var = str(self._o(self.ssrf_variant) or "both").strip().lower()
         if var not in ("absolute", "host", "both"):
             self.set_info(reason="invalid ssrf_variant")

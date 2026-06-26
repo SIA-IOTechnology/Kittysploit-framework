@@ -8,6 +8,14 @@ class Module(Post, MySQLClient):
 		"description": "Check current MySQL user privileges and capabilities",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 
 	def run(self):

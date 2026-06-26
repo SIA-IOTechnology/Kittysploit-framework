@@ -314,6 +314,19 @@ pub fn main() !void {
         output_dir = self.output_dir
         auto_compile = self.auto_compile
         
+        # Resolve output directory inside workspace
+        from core.utils.paths import framework_root
+        root = (framework_root() or Path.cwd()).resolve()
+        raw_output = Path(output_dir or "output")
+        output_path = (root / raw_output).resolve() if not raw_output.is_absolute() else raw_output.resolve()
+        allowed_roots = [root, root / "output"]
+        if not any(
+            output_path == base.resolve() or output_path.is_relative_to(base.resolve())
+            for base in allowed_roots
+        ):
+            raise ValueError(f"output_dir must stay inside the workspace ({root})")
+        output_dir = str(output_path)
+        
         # Create output directory
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -451,12 +464,8 @@ pub fn main() !void {
         print_info(f"To compile manually: cd {output_dir} && bash compile.sh")
         print_info(f"To run: cd {output_dir} && ./shell")
 
-        return {
-            'source': str(zig_file),
-            'compile_script': str(compile_script),
-            'payload_script': str(payload_script),
-            'binary_path': str(binary_path),
-            'target': zig_target,
-            'connect_to': f"{lhost}:{lport}"
-        }
+        if auto_compile and binary_path.is_file():
+            return binary_path.read_bytes()
+
+        return zig_source
 

@@ -25,6 +25,7 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28.0",
+    "requests-ntlm>=1.2.0",
     "msgpack>=1.0.5",
     "colorama>=0.4.4",
     "cryptography>=3.4.8",
@@ -36,6 +37,7 @@ dependencies = [
     "dnslib>=0.9.0",
     "prompt_toolkit>=3.0.0",
     "flask>=2.0.0",
+    "waitress>=3.0.0",
     "flask-cors>=3.0.10",
     "flask-socketio>=5.3.0",
     "fastapi",
@@ -79,6 +81,8 @@ dependencies = [
     "python-whois",
     "dnspython",
     "reportlab",
+    "capstone>=5.0.0",
+    "yara-python>=4.5.0",
 ]
 
 [project.optional-dependencies]
@@ -104,11 +108,20 @@ py-modules = ["kittymcp_client", "kittymcp_server"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["core*", "interfaces*", "modules*", "lib*", "plugins*", "kittysploit*", "data*"]
+include = ["core*", "interfaces*", "modules*", "lib*", "plugins*", "kittysploit*", "data*", "docs*"]
 exclude = ["examples*", "scripts*", "install*", "tests*", "venv*", "apps*"]
 
 [tool.setuptools.package-data]
 "core.schemas" = ["json/v1/*.schema.json", "README.md"]
+"core" = [
+    "browser_static/libs/*.js",
+    "browser_static/icons/**/*.svg",
+    "browser_static/icons/**/.gitkeep",
+]
+"data" = ["**/*.json", "**/*.txt", "**/*.wav", "**/*.py"]
+"data.syscall" = ["*.json"]
+"interfaces.static" = ["img/**/*"]
+"docs" = ["screenshots/*", "*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

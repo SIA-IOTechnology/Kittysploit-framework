@@ -16,6 +16,14 @@ class Module(Auxiliary, Http_client):
         "author": ["KittySploit Team"],
         "references": ["https://github.com/advisories/GHSA-wfc6-r584-vfw7"],
         "tags": ["http", "nextjs", "rsc", "cache", "ghsa"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     rsc_header_value = OptString(

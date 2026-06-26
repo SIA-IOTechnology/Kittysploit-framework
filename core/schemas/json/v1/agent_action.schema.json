@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_action.schema.json",
+  "title": "KittySploit Agent Action",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "type": {
+      "type": "string",
+      "enum": ["prioritize", "run_followup", "run_exploit", "skip", "collect", "report"]
+    },
+    "path": {"type": ["string", "null"]},
+    "priority": {"type": "integer", "minimum": 0},
+    "risk": {
+      "type": "string",
+      "enum": ["read", "active", "intrusive", "destructive"]
+    },
+    "approval_required": {"type": "boolean"},
+    "approved": {"type": "boolean"},
+    "expected_requests": {"type": "integer", "minimum": 0},
+    "options": {"type": "object", "additionalProperties": true},
+    "reason": {"type": ["string", "null"]},
+    "status": {
+      "type": "string",
+      "enum": ["planned", "approved", "blocked", "running", "completed", "failed", "skipped"]
+    }
+  },
+  "required": ["schema_version", "id", "type", "risk", "approval_required", "approved", "status"],
+  "additionalProperties": true
+}

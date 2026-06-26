@@ -22,6 +22,14 @@ class Module(Post):
             "https://support.microsoft.com/en-us/topic/kb324737",
             "https://github.com/PowerShellMafia/PowerSploit",
         ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     domain = OptString("", "AD domain to query (default: USERDNSDOMAIN)", False)

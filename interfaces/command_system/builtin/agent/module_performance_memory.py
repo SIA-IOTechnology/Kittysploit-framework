@@ -13,11 +13,15 @@ File: ``reports/agent/module_performance.json``
 from __future__ import annotations
 
 import os
+import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from interfaces.command_system.builtin.agent.io_utils import atomic_write_json, load_json_dict
 from interfaces.command_system.builtin.agent.module_scoring import estimate_network_cost, information_score_kb
+from interfaces.command_system.builtin.agent.run_store import AgentPathService
+
+logger = logging.getLogger(__name__)
 
 MAX_RECORDS = 2000
 FILE_NAME = "module_performance.json"
@@ -96,14 +100,41 @@ def kb_light_copy(kb: Dict[str, Any]) -> Dict[str, Any]:
 class ModulePerformanceMemory:
     """Load/save rolling records and expose utility multipliers for :func:`module_utility`."""
 
-    def __init__(self) -> None:
-        self._path = os.path.join(os.getcwd(), "reports", "agent", FILE_NAME)
+    def __init__(self, paths: Optional[AgentPathService] = None) -> None:
+        self._paths = paths or AgentPathService()
+        self._paths.ensure()
+        self._path = str(self._paths.memory_dir / FILE_NAME)
         self._records: List[Dict[str, Any]] = []
         # (module_path, profile) -> {count, sum_reward}
         self._agg: Dict[Tuple[str, str], Dict[str, float]] = {}
         self._agg_path_only: Dict[str, Dict[str, float]] = {}
         self._recent_by_path: Dict[str, Dict[str, float]] = {}
         self._load()
+
+    def set_paths(self, paths: AgentPathService) -> None:
+        self._paths = paths
+        self._paths.ensure()
+        self._path = str(self._paths.memory_dir / FILE_NAME)
+        self._records = []
+        self._agg.clear()
+        self._agg_path_only.clear()
+        self._recent_by_path.clear()
+        self._load()
+
+    def reset(self) -> None:
+        self._records = []
+        self._agg.clear()
+        self._agg_path_only.clear()
+        self._recent_by_path.clear()
+        self._save()
+
+    def export_summary(self) -> Dict[str, Any]:
+        return {
+            "records": len(self._records),
+            "paths": len(self._agg_path_only),
+            "profiles": len(self._agg),
+            "path": self._path,
+        }
 
     def _load(self) -> None:
         try:
@@ -181,8 +212,8 @@ class ModulePerformanceMemory:
         }
         try:
             atomic_write_json(self._path, payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not persist agent performance memory: %s", exc)
 
     @staticmethod
     def _compute_reward(
@@ -250,19 +281,39 @@ class ModulePerformanceMemory:
             ("interactive_shell" in after_signals or "shell_obtained" in after_signals)
             and not ("interactive_shell" in before_signals or "shell_obtained" in before_signals)
         )
-        n = max(1, len(phase_results))
-        share_ep = d_ep / n
-        share_pa = d_pa / n
-        share_info = d_info / n
-        profile = classify_target_profile(kb_after if isinstance(kb_after, dict) else kb_before)
-
-        ts = datetime.now().isoformat()
+        weighted_rows = []
         for row in phase_results:
             if not isinstance(row, dict):
                 continue
+            details = row.get("details") if isinstance(row.get("details"), dict) else {}
+            endpoint_count = len(
+                details.get("discovered_endpoints")
+                or details.get("endpoints")
+                or []
+            )
+            param_count = len(
+                details.get("discovered_params")
+                or details.get("params")
+                or []
+            )
+            evidence_weight = 1.0 + min(8.0, endpoint_count * 0.7 + param_count * 0.9)
+            if bool(is_actionable(row)):
+                evidence_weight += 2.0
+            if bool(has_exploit_link(row)):
+                evidence_weight += 1.0
+            weighted_rows.append((row, evidence_weight, endpoint_count, param_count))
+        total_weight = sum(item[1] for item in weighted_rows) or 1.0
+        profile = classify_target_profile(kb_after if isinstance(kb_after, dict) else kb_before)
+
+        ts = datetime.now().isoformat()
+        for row, weight, endpoint_count, param_count in weighted_rows:
             path = str(row.get("path", "") or "").strip()
             if not path:
                 continue
+            ratio = weight / total_weight
+            share_ep = min(d_ep, float(endpoint_count)) if endpoint_count else d_ep * ratio
+            share_pa = min(d_pa, float(param_count)) if param_count else d_pa * ratio
+            share_info = d_info * ratio
             cost = float(estimate_network_cost(path.lower()))
             vuln = bool(row.get("vulnerable"))
             actionable = bool(is_actionable(row))

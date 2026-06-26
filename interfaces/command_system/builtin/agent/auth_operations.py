@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from interfaces.command_system.builtin.agent.agent_constants import (
@@ -17,6 +19,11 @@ from interfaces.command_system.builtin.agent.auth_strategies import (
     compose_auth_option_overrides,
     infer_bruteforce_field_overrides,
 )
+from interfaces.command_system.builtin.agent.agent_constants import (
+    EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS,
+)
+from interfaces.command_system.builtin.agent.identity_intel import write_agent_wordlist
+from interfaces.command_system.builtin.agent.run_store import AgentPathService, _safe_component
 from interfaces.command_system.builtin.agent.state import AgentState
 
 
@@ -347,6 +354,14 @@ class AuthContextOperations:
             return {}
         overrides: Dict[str, Dict[str, Any]] = {}
         bf_extras = infer_bruteforce_field_overrides(login_path)
+        persona_usernames = []
+        persona_passwords = []
+        expanded = bool(getattr(state, "expanded_surface", False)) or bool(
+            isinstance(kb, dict) and kb.get("expanded_surface")
+        )
+        if expanded and isinstance(kb, dict):
+            persona_usernames = list(kb.get("username_candidates") or [])
+            persona_passwords = list(kb.get("password_candidates") or [])
         for module in modules or []:
             path = str(module.get("path", "")).strip()
             if not path:
@@ -357,9 +372,33 @@ class AuthContextOperations:
                     "max_paths": 8,
                 }
             elif path == "auxiliary/scanner/http/login/admin_login_bruteforce":
-                overrides[path] = {
+                bf_opts: Dict[str, Any] = {
                     "path": login_path,
                     "max_attempts": 10,
                     **bf_extras,
                 }
+                if persona_usernames or persona_passwords:
+                    ws = _safe_component(getattr(state, "workspace", "default") or "default")
+                    agent_home = Path(
+                        os.environ.get("KITTYSPLOIT_AGENT_HOME", "~/.kittysploit/agent")
+                    ).expanduser()
+                    paths = AgentPathService(base_dir=str(agent_home / ws))
+                    run_id = str(getattr(state, "run_id", "") or "").strip()
+                    run_dir = paths.run_dir(run_id) if run_id else paths.root / "scratch"
+                    users_file = write_agent_wordlist(
+                        run_dir, "persona_usernames.txt", persona_usernames
+                    )
+                    passwords_file = write_agent_wordlist(
+                        run_dir, "persona_passwords.txt", persona_passwords
+                    )
+                    if users_file:
+                        bf_opts["usernames_file"] = users_file
+                    if passwords_file:
+                        bf_opts["passwords_file"] = passwords_file
+                    attempt_cap = min(
+                        EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS,
+                        max(10, len(persona_usernames) * max(1, min(len(persona_passwords), 6))),
+                    )
+                    bf_opts["max_attempts"] = attempt_cap
+                overrides[path] = bf_opts
         return overrides

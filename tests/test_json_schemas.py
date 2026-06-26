@@ -21,6 +21,15 @@ SCHEMA_FILES = {
     "job": "job.schema.json",
     "session": "session.schema.json",
     "report": "report.schema.json",
+    "agent_action": "agent_action.schema.json",
+    "agent_observation": "agent_observation.schema.json",
+    "agent_decision": "agent_decision.schema.json",
+    "agent_state": "agent_state.schema.json",
+    "agent_run": "agent_run.schema.json",
+    "kittyforge_error": "kittyforge_error.schema.json",
+    "generated_artifact": "generated_artifact.schema.json",
+    "kittyforge_graph": "kittyforge_graph.schema.json",
+    "signed_package": "signed_package.schema.json",
 }
 
 
@@ -218,6 +227,64 @@ def test_entity_samples_validate():
         "report": report,
     }
     for entity, sample in samples.items():
+        _validator(entity).validate(sample)
+
+
+def test_agent_schema_samples_validate():
+    agent_action = {
+        "schema_version": "1.0",
+        "id": "action-1",
+        "type": "run_followup",
+        "path": "scanner/http/passive_headers",
+        "priority": 1,
+        "risk": "read",
+        "approval_required": False,
+        "approved": True,
+        "status": "planned",
+    }
+    agent_observation = {
+        "schema_version": "1.0",
+        "id": "obs-1",
+        "run_id": "agent_test",
+        "phase": "scan",
+        "kind": "module_result",
+        "summary": "headers collected",
+        "collected_at": "2026-06-17T10:00:00Z",
+    }
+    agent_decision = {
+        "schema_version": "1.0",
+        "id": "dec-1",
+        "run_id": "agent_test",
+        "created_at": "2026-06-17T10:00:00Z",
+        "source": "heuristic",
+        "confidence": 0.8,
+        "reason": "validated signal",
+    }
+    agent_state = {
+        "schema_version": "1.0",
+        "state_version": 1,
+        "run_id": "agent_test",
+        "workspace": "default",
+        "raw_target": "https://example.test",
+        "current_phase": "scan",
+        "safety_profile": "safe",
+    }
+    agent_run = {
+        "schema_version": "1.0",
+        "id": "agent_test",
+        "workspace": "default",
+        "status": "completed",
+        "started_at": "2026-06-17T09:59:00Z",
+        "target": "https://example.test",
+        "state": agent_state,
+    }
+    for entity, sample in {
+        "agent_action": agent_action,
+        "agent_observation": agent_observation,
+        "agent_decision": agent_decision,
+        "agent_state": agent_state,
+        "agent_run": agent_run,
+    }.items():
         _validator(entity).validate(sample)
 
 

@@ -14,6 +14,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "tags": ["aws", "s3"],
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     bucket_name = OptString("", "S3 bucket name (REQUIRED)", True)

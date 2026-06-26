@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -16,6 +17,14 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "references": ["https://github.com/advisories/GHSA-3g8h-86w9-wvmq"],
         "tags": ["scanner", "http", "nextjs", "redirect", "cache"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def _o(self, opt):
@@ -63,6 +72,8 @@ class Module(Scanner, Http_client):
         return "inconclusive"
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         _, _, _, be = self._get()
         if be:
             self.set_info(reason=f"GET failed: {be}")

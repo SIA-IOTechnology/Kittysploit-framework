@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_decision.schema.json",
+  "title": "KittySploit Agent Decision",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "run_id": {"$ref": "common.schema.json#/$defs/id"},
+    "created_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "source": {"type": "string", "enum": ["heuristic", "llm_local", "operator", "policy"]},
+    "goal": {"type": ["string", "null"]},
+    "confidence": {"$ref": "common.schema.json#/$defs/confidence"},
+    "selected_action": {
+      "oneOf": [{"$ref": "agent_action.schema.json"}, {"type": "null"}]
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {"$ref": "agent_action.schema.json"}
+    },
+    "evidence": {"type": "array", "items": {"type": "string"}},
+    "reason": {"type": "string"},
+    "policy_result": {"type": ["string", "null"]}
+  },
+  "required": ["schema_version", "id", "run_id", "created_at", "source", "confidence", "reason"],
+  "additionalProperties": true
+}

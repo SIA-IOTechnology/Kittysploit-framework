@@ -22,6 +22,30 @@ class Module(Auxiliary):
         "references": [
             "https://attack.mitre.org/techniques/T1046/",
         ],
+        "attack": {
+            "tactics": ["TA0007", "Discovery"],
+            "techniques": ["T1046"],
+            "prerequisites": [
+                "Authorized network access to target host or CIDR",
+                "Outbound TCP connectivity from operator host",
+            ],
+            "detections": [
+                "Network IDS alert for horizontal port sweep",
+                "Sigma: multiple failed/successful TCP connection attempts across ports",
+            ],
+            "artifacts": [
+                "Firewall flow logs",
+                "Zeek conn.log / NetFlow records",
+            ],
+        },
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     rhosts = OptString("", "Target host, CIDR, or comma-separated list (e.g. 10.0.0.0/24)", required=True)

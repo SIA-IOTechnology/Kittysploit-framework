@@ -25,6 +25,14 @@ class Module(Scanner, Http_client):
             "exploits/multi/http/bricks_builder_cve_2024_25600_rce",
         ],
         "tags": ["web", "scanner", "wordpress", "bricks", "rce"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     base_path = OptString("/", "WordPress base path", required=False)

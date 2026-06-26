@@ -15,6 +15,14 @@ class Module(Post, FTPClientMixin):
         "description": "Enumerates FTP users, checks for anonymous access, and gathers connection information",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     check_anonymous = OptBool(True, "Check for anonymous FTP access", False)

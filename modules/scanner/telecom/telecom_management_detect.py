@@ -17,6 +17,14 @@ class Module(Scanner, Http_client):
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "management", "oss", "ran", "huawei", "ericsson", "nokia"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     # Mots longs / phrases : sous-chaîne OK (peu de collisions)

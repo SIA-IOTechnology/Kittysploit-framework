@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             'https://wordpress.org/support/article/faq-my-site-was-hacked/',
             'https://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=wordpress',
             'https://owasp.org/www-project-web-security-testing-guide/'
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Known WordPress CVEs

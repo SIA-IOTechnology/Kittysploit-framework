@@ -34,6 +34,14 @@ class Module(Auxiliary, Http_client, Http_login, Sqli):
             "https://github.com/digininja/DVWA",
             "https://owasp.org/www-community/attacks/SQL_Injection",
         ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     base_path = OptString("/", "DVWA base path (e.g. / or /dvwa)", required=False)

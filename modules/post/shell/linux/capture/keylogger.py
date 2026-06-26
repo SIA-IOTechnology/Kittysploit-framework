@@ -31,6 +31,14 @@ class Module(Post, System):
             SessionType.SSH,
         ],
         "references": [],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     method = OptChoice(

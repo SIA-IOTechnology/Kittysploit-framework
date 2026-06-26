@@ -36,6 +36,12 @@ class MarketCommand(BaseCommand):
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
         return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'register', 'login', 'buy']
+
+    def _refresh_module_catalog(self) -> None:
+        """Invalidate module discovery caches after marketplace changes."""
+        invalidate = getattr(self.framework, "invalidate_module_caches", None)
+        if callable(invalidate):
+            invalidate()
     
     @property
     def help_text(self) -> str:
@@ -1546,6 +1552,9 @@ Examples:
             else:
                 print_warning(f"Uninstallation completed with errors ({success_count}/{len(modules_to_uninstall)} successful)")
             print_info("=" * 70)
+
+            if success_count > 0:
+                self._refresh_module_catalog()
             
             return success_count == len(modules_to_uninstall)
             
@@ -2713,9 +2722,11 @@ Examples:
 
             if stub_created:
                 print_success(f"Extension '{manifest.name}' v{version} installed from local path")
+                self._refresh_module_catalog()
                 return True
             else:
                 print_warning("Stubs/launchers may not have been created correctly")
+                self._refresh_module_catalog()
                 return True  # Still consider it successful if files were copied
                 
         except Exception as e:
@@ -2746,6 +2757,7 @@ Examples:
             
             if success:
                 print_success(f"Extension '{module_name}' (ID: {extension_id}) installed successfully!")
+                self._refresh_module_catalog()
                 return True
             else:
                 print_error(f"Failed to install extension '{module_name}' (ID: {extension_id})")
@@ -3225,7 +3237,8 @@ Examples:
                 os.remove(tmp_path)
             except:
                 pass
-            
+
+            self._refresh_module_catalog()
             return True
             
         except requests.exceptions.HTTPError as e:

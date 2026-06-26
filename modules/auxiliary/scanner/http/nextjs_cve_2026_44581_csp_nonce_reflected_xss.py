@@ -17,6 +17,14 @@ class Module(Auxiliary, Http_client):
         "cve": "CVE-2026-44581",
         "references": ["https://github.com/advisories/GHSA-ffhc-5mcf-pf4q"],
         "tags": ["http", "nextjs", "xss", "csp", "nonce"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     validation_token = OptString(

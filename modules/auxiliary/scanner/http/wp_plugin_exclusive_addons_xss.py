@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             "CVE-2024-1234",
             "https://nvd.nist.gov/vuln/detail/CVE-2024-1234",
             "https://wordpress.org/plugins/exclusive-addons-for-elementor/"
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
     
     rhost = OptString("", "Target WordPress hostname or IP", required=True)

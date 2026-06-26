@@ -7,15 +7,9 @@ Syscall command implementation
 
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
-from core.utils.paths import data_dir
-import sys
-
-_root_data_dir = data_dir()
-if str(_root_data_dir) not in sys.path:
-    sys.path.insert(0, str(_root_data_dir))
 
 try:
-    from syscall import get_database, get_syscall, list_syscalls, search_syscalls
+    from data.syscall import get_database, get_syscall, list_syscalls, search_syscalls
     SYSCALL_AVAILABLE = True
     IMPORT_ERROR = None
 except ImportError as e:
@@ -67,7 +61,7 @@ Examples:
     def execute(self, args, **kwargs) -> bool:
         """Execute the syscall command"""
         if not SYSCALL_AVAILABLE:
-            print_error("Syscall database not available. Make sure data/syscall module is accessible.")
+            print_error("Syscall database not available. Install kittysploit with bundled data assets.")
             if IMPORT_ERROR:
                 print_error(f"Import error: {IMPORT_ERROR}")
             return False

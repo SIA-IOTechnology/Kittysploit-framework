@@ -24,6 +24,7 @@ Keys are module **basenames** (last segment of ``auxiliary/.../path``). Used as 
 from __future__ import annotations
 
 import os
+import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -34,6 +35,9 @@ from interfaces.command_system.builtin.agent.module_performance_memory import (
     kb_metrics_snapshot,
 )
 from interfaces.command_system.builtin.agent.module_scoring import estimate_network_cost
+from interfaces.command_system.builtin.agent.run_store import AgentPathService
+
+logger = logging.getLogger(__name__)
 
 FILE_NAME = "module_context_memory.json"
 MAX_CONTEXTS = 48
@@ -104,11 +108,31 @@ def _reward_to_unit_interval(reward: float) -> float:
 class ModuleContextMemory:
     """EMA scores per (context, module_basename); blends with optional priors."""
 
-    def __init__(self) -> None:
-        self._path = os.path.join(os.getcwd(), "reports", "agent", FILE_NAME)
+    def __init__(self, paths: Optional[AgentPathService] = None) -> None:
+        self._paths = paths or AgentPathService()
+        self._paths.ensure()
+        self._path = str(self._paths.memory_dir / FILE_NAME)
         self._contexts: Dict[str, Dict[str, Dict[str, float]]] = {}
         self._priors: Dict[str, Dict[str, float]] = dict(DEFAULT_MODULE_CONTEXT_PRIORS)
         self._load()
+
+    def set_paths(self, paths: AgentPathService) -> None:
+        self._paths = paths
+        self._paths.ensure()
+        self._path = str(self._paths.memory_dir / FILE_NAME)
+        self._contexts = {}
+        self._load()
+
+    def reset(self) -> None:
+        self._contexts = {}
+        self._save()
+
+    def export_summary(self) -> Dict[str, Any]:
+        return {
+            "contexts": len(self._contexts),
+            "modules": sum(len(value) for value in self._contexts.values()),
+            "path": self._path,
+        }
 
     def _load(self) -> None:
         try:
@@ -155,8 +179,8 @@ class ModuleContextMemory:
         }
         try:
             atomic_write_json(self._path, payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not persist agent context memory: %s", exc)
 
     def _prior_score(self, context: str, base: str) -> Optional[float]:
         row = self._priors.get(context) or {}

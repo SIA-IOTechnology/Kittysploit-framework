@@ -267,12 +267,18 @@ def extract_cve(result: Dict[str, Any]) -> str:
 def extract_evidence(result: Dict[str, Any]) -> str:
     parts: List[str] = []
     message = str(result.get("message") or "").strip()
-    if message:
-        parts.append(message)
-
+    module_description = str(result.get("module_description") or "").strip()
     details = result.get("details") or {}
+    detail_reason = ""
     if isinstance(details, dict):
-        for key in ("reason", "action", "confidence", "path", "url", "parameter", "probe", "version"):
+        detail_reason = str(details.get("reason") or "").strip()
+
+    finding = detail_reason or message
+    if finding and not _is_generic_module_description(finding, module_description):
+        parts.append(finding)
+
+    if isinstance(details, dict):
+        for key in ("action", "confidence", "path", "url", "parameter", "probe"):
             value = details.get(key)
             if value in (None, ""):
                 continue
@@ -282,7 +288,45 @@ def extract_evidence(result: Dict[str, Any]) -> str:
     if version:
         parts.append(f"version={version}")
 
+    if not parts and finding:
+        parts.append(finding)
+    elif not parts and message:
+        parts.append(message)
+
     return normalize_text(" | ".join(parts))[:400]
+
+
+def _is_generic_module_description(text: str, module_description: str = "") -> bool:
+    """True when *text* is only the static module blurb, not a concrete finding."""
+    norm = normalize_text(text)
+    if not norm:
+        return True
+    if module_description and norm == normalize_text(module_description):
+        return True
+    generic_prefixes = (
+        "detects if ",
+        "detects ",
+        "connects to a ",
+        "connects to ",
+    )
+    return any(norm.startswith(prefix) for prefix in generic_prefixes)
+
+
+def reason_redundant_with_evidence(reason: str, evidence: str) -> bool:
+    """Return True when a separate Reason line would repeat Evidence."""
+    r = normalize_text(reason)
+    e = normalize_text(evidence)
+    if not r:
+        return True
+    if not e:
+        return False
+    if r == e:
+        return True
+    if r in e or e in r:
+        return True
+    if e.startswith(r + " |") or e.startswith(r + "|"):
+        return True
+    return False
 
 
 def infer_protocol_from_result(result: Dict[str, Any], port: Optional[int], scheme: str = "") -> str:

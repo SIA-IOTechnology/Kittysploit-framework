@@ -22,6 +22,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "version": "1.0.0",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     role_arn = OptString("", "Role ARN to assume (format: arn:aws:iam::ACCOUNT:role/ROLE_NAME)", True)

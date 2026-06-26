@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             'https://wpscan.com/',
             'https://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=wordpress+plugin',
             'https://wordpress.org/plugins/',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Common WordPress plugins to check

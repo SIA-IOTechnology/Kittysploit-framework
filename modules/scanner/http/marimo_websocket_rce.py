@@ -30,6 +30,14 @@ class Module(Scanner, Websocket_client):
         ],
         "cve": "CVE-2026-39987",
         "tags": ["web", "scanner", "marimo", "websocket", "rce", "cve-2026-39987"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     path = OptString("/terminal/ws", "Target WebSocket endpoint path", True)

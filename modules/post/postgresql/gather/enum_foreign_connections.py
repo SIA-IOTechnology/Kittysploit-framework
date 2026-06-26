@@ -12,6 +12,14 @@ class Module(Post, PostgreSQLClient):
 		),
 		"author": "KittySploit Team",
 		"session_type": SessionType.POSTGRESQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	search_source = OptBool(True, "Search function bodies for host/user/password strings", False)

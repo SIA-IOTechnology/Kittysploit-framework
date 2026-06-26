@@ -19,6 +19,14 @@ class Module(Post):
             "https://docs.python.org/3/using/windows.html#windows-embeddable",
             "https://attack.mitre.org/techniques/T1064/"
         ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     session_id = OptString("", "Session ID", True)

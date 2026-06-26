@@ -36,6 +36,14 @@ class Module(Scanner, Tcp_scanner_client):
         "cve": "",
         "modules": [],
         "tags": ["scanner", "tcp", "llama.cpp", "rpc", "ai", "exposure"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(50052, "Target llama.cpp RPC server port", True)

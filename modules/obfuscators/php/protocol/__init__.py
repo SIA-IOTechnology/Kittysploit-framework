@@ -1,0 +1,1 @@
+# PHP protocol-mimic obfuscators.

@@ -27,10 +27,11 @@ class ObfuscatedSocketWrapper:
         try:
             encoded = self._obf.encode(data, self._encode_offset)
         except TypeError:
-            encoded = self._obf.encode(data)
+            self._sock.sendall(self._obf.encode(data))
         else:
+            self._sock.sendall(encoded)
             self._encode_offset += len(data)
-        return self._sock.send(encoded)
+        return len(data)
 
     def sendall(self, data):
         if isinstance(data, str):
@@ -41,7 +42,9 @@ class ObfuscatedSocketWrapper:
         except TypeError:
             encoded = self._obf.encode(data)
         else:
+            self._sock.sendall(encoded)
             self._encode_offset += len(data)
+            return None
         return self._sock.sendall(encoded)
 
     def recv(self, bufsize):

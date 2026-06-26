@@ -14,6 +14,14 @@ class Module(Post, FTPClientMixin):
         "description": "Searches for configuration files on FTP server that may contain sensitive information (passwords, API keys, database credentials, etc.)",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     remote_path = OptString(".", "Remote directory path to search", False)

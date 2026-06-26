@@ -8,6 +8,14 @@ class Module(Post, Reverse):
 		"description": "Reverse TCP shell in PHP using a reverse handler",
 		"author": "KittySploit Team",
 		"arch": Arch.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 		
 	def run(self):

@@ -13,6 +13,14 @@ class Module(Post, FTPClientMixin):
         "description": "Deletes files or directories from the FTP server",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     remote_path = OptString("", "Remote file or directory path to delete", True)

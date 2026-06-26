@@ -6,6 +6,7 @@ import time
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -20,6 +21,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44582",
         "references": ["https://github.com/advisories/GHSA-vfv6-92ff-j949"],
         "tags": ["scanner", "nextjs", "rsc", "cache", "hash"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     victim_prefetch = OptString("1", "Victim prefetch", required=False, advanced=True)
@@ -88,6 +97,8 @@ class Module(Scanner, Http_client):
         return None
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         vt = self._victim_tuple()
         th = self.legacy_hash(vt["prefetch"], vt["segment_prefetch"], vt["state_tree"], vt["next_url"])
         cap = max(1000, int(self._o(self.max_attempts)))

@@ -19,7 +19,15 @@ class Module(Auxiliary, Http_client):
             'https://docs.djangoproject.com/en/stable/topics/security/',
             'https://owasp.org/www-community/attacks/SQL_Injection',
             'https://portswigger.net/web-security/sql-injection',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # SQL injection payloads

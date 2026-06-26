@@ -23,6 +23,14 @@ class Module(Auxiliary, FTPClientMixin):
         "description": "Connect to FTP server and enumerate files, directories and server information (Direct mode - no session required)",
         "author": "KittySploit Team",
         "tags": ["ftp", "scanner", "enumeration"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
     
     # Configuration FTP (Mode Direct)

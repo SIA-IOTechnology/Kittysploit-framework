@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
+import os
 import re
 import time
 from collections import Counter
@@ -14,6 +17,13 @@ from urllib.parse import urlparse
 
 import requests
 import urllib3
+
+from interfaces.command_system.builtin.agent.network_budget import consume_network_request
+from interfaces.command_system.builtin.agent.runtime_policy import (
+    MUTATING_HTTP_METHODS,
+    active_runtime_policy,
+    active_scope_guard,
+)
 
 
 SAFE_REPLAY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -828,10 +838,23 @@ class HttpRequestIntelligence:
             return {"status": "skipped", "error": f"safe replay skips {method}"}
         if mode == "active" and method not in ACTIVE_REPLAY_METHODS:
             return {"status": "skipped", "error": f"unsupported replay method {method}"}
+        policy = active_runtime_policy()
+        if method in MUTATING_HTTP_METHODS and (
+            policy is None or not policy.approve_active_replay
+        ):
+            return {
+                "status": "skipped",
+                "error": "mutating HTTP replay requires explicit approval",
+            }
 
         url = str(candidate.get("url") or "").strip()
         if not url:
             return {"status": "error", "error": "missing URL"}
+        guard = active_scope_guard()
+        if guard is not None:
+            allowed, reason = guard.validate_url(url)
+            if not allowed:
+                return {"status": "blocked", "error": reason, "url": url}
 
         headers = self._clean_outgoing_headers(
             candidate.get("headers") or {},
@@ -845,11 +868,22 @@ class HttpRequestIntelligence:
             url, headers, body = self.evasion.apply_random(method, url, headers, body)
 
         proxies = self._build_proxy_dict()
-        verify = False if proxies else True
+        verify = policy.tls_verify_value() if policy is not None else True
         if not verify:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         started = time.time()
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "method": method,
+                    "url": url,
+                    "headers": sorted(headers),
+                    "body_sha256": hashlib.sha256(body).hexdigest(),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
         try:
             response = requests.request(
                 method=method,
@@ -857,11 +891,24 @@ class HttpRequestIntelligence:
                 headers=headers,
                 data=body if body else None,
                 timeout=max(1.0, float(timeout or 8.0)),
-                allow_redirects=True,
+                allow_redirects=False,
                 proxies=proxies or None,
                 verify=verify,
             )
             elapsed_ms = int((time.time() - started) * 1000)
+            if guard is not None:
+                allowed, reason = guard.validate_redirect_chain(
+                    url,
+                    str(response.url or url),
+                    response.history,
+                )
+                if not allowed:
+                    response.close()
+                    return {
+                        "status": "blocked",
+                        "error": reason,
+                        "request_hash": request_hash,
+                    }
             return {
                 "status": "ok",
                 "flow_id": candidate.get("flow_id"),
@@ -876,6 +923,7 @@ class HttpRequestIntelligence:
                 "final_url": str(response.url or ""),
                 "used_proxy": bool(proxies),
                 "original_status_code": candidate.get("status_code"),
+                "request_hash": request_hash,
                 "response_body": response.text if include_body else None,
             }
         except Exception as exc:
@@ -887,6 +935,7 @@ class HttpRequestIntelligence:
                 "path": candidate.get("path"),
                 "error": str(exc),
                 "used_proxy": bool(proxies),
+                "request_hash": request_hash,
             }
 
     def _clean_outgoing_headers(self, headers: Any, *, include_sensitive: bool) -> Dict[str, str]:
@@ -1096,8 +1145,14 @@ class HttpRequestIntelligence:
         - No markdown, just the payload string.
         """
         try:
-            # Assuming self._llm has a chat/complete method
-            response = self._llm.generate_response(prompt)
+            if not hasattr(self._llm, "query_text"):
+                return ""
+            response = self._llm.query_text(
+                "http://127.0.0.1:11434/api/generate",
+                "llama3.1:8b",
+                "Return one minimal test payload as plain text.",
+                {"context": context, "parameter": param_name},
+            )
             return str(response).strip().strip('`').strip()
         except Exception:
             return ""
@@ -1111,7 +1166,17 @@ class HttpRequestIntelligence:
         for ep in endpoints:
             url = base_url + ep
             try:
-                res = requests.get(url, cookies=cookies, timeout=5, allow_redirects=False, verify=False)
+                guard = active_scope_guard()
+                if guard is not None and not guard.validate_url(url)[0]:
+                    continue
+                policy = active_runtime_policy()
+                res = requests.get(
+                    url,
+                    cookies=cookies,
+                    timeout=5,
+                    allow_redirects=False,
+                    verify=policy.tls_verify_value() if policy is not None else True,
+                )
                 if res.status_code == 200 or (res.status_code == 302 and "/login" not in res.headers.get("Location", "")):
                     results[ep] = {
                         "status": "active",
@@ -1130,7 +1195,18 @@ class HttpRequestIntelligence:
         url = base_url + random_path
         
         try:
-            res = requests.get(url, timeout=5, allow_redirects=False, verify=False)
+            guard = active_scope_guard()
+            if guard is not None:
+                allowed, reason = guard.validate_url(url)
+                if not allowed:
+                    return {"error": reason}
+            policy = active_runtime_policy()
+            res = requests.get(
+                url,
+                timeout=5,
+                allow_redirects=False,
+                verify=policy.tls_verify_value() if policy is not None else True,
+            )
             return {
                 "status_code": res.status_code,
                 "length": len(res.content),
@@ -1151,7 +1227,14 @@ class HttpRequestIntelligence:
         Output only the names separated by commas.
         """
         try:
-            response = self._llm.generate_response(prompt)
+            if not hasattr(self._llm, "query_text"):
+                return []
+            response = self._llm.query_text(
+                "http://127.0.0.1:11434/api/generate",
+                "llama3.1:8b",
+                "Return at most five parameter names separated by commas.",
+                {"known_parameters": known_params},
+            )
             suggested = [p.strip() for p in str(response).split(",") if p.strip()]
             return suggested
         except Exception:

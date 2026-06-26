@@ -9,6 +9,14 @@ class Module(Post):
 		"author": "KittySploit Team",
 		"session_type": SessionType.PHP,
 		"arch": Arch.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 	
 	wp_config_path = OptString("wp-config.php", "Path to wp-config.php file", False)

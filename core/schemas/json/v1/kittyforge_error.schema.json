@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/kittyforge_error.schema.json",
+  "title": "KittyForge API Error",
+  "type": "object",
+  "required": ["code", "message", "request_id"],
+  "properties": {
+    "schema_version": { "$ref": "common.schema.json#/$defs/schema_version" },
+    "code": { "type": "string", "minLength": 1 },
+    "message": { "type": "string" },
+    "error": { "type": "string" },
+    "field": { "type": "string" },
+    "module": { "type": "string" },
+    "details": { "type": "object", "additionalProperties": true },
+    "request_id": { "type": "string", "minLength": 8 }
+  },
+  "additionalProperties": true
+}

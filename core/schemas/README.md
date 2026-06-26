@@ -19,6 +19,8 @@ Entities:
 - `Session`: runtime or persisted interactive channel.
 - `Report`: bundle of findings, targets, evidence, jobs, sessions, summary, and
   export metadata.
+- `AgentAction`, `AgentObservation`, `AgentDecision`, `AgentState`, `AgentRun`:
+  versioned autonomous workflow, checkpoint, replay, and audit contracts.
 
 Python callers can use:
 

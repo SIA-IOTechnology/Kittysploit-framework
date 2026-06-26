@@ -1,7 +1,6 @@
 from core.framework.option.base_option import Option
 from core.utils.exceptions import OptionValidationError
-from core.utils.paths import data_dir
-import os
+from core.utils.paths import data_resource_exists, read_data_text
 
 class OptFile(Option):
     """ Option file attribute """
@@ -22,11 +21,15 @@ class OptFile(Option):
             return None
         
         if path.startswith("file://"):
-            path = path.replace("file://", "")
-            path = str(data_dir().joinpath(*path.split('/')))
-            
-            if not os.path.exists(path):
-                raise OptionValidationError("File '{}' does not exist.".format(path))
+            rel_path = path.replace("file://", "")
+            parts = tuple(part for part in rel_path.split("/") if part)
+            if not data_resource_exists(*parts):
+                raise OptionValidationError("File 'data/{}' does not exist.".format(rel_path))
+            try:
+                content = read_data_text(*parts, errors="ignore").splitlines(keepends=True)
+                return content
+            except Exception as e:
+                raise OptionValidationError(f"Error reading file 'data/{rel_path}': {str(e)}")
         try:
             with open(path, "r") as f:
                 content = f.readlines()
@@ -40,10 +43,10 @@ class OptFile(Option):
         
         # If value starts with file://, validate the file exists
         if value and str(value).startswith("file://"):
-            path = str(value).replace("file://", "")
-            path = str(data_dir().joinpath(*path.split('/')))
-            if not os.path.exists(path):
-                raise OptionValidationError(f"File '{path}' does not exist.")
+            rel_path = str(value).replace("file://", "")
+            parts = tuple(part for part in rel_path.split("/") if part)
+            if not data_resource_exists(*parts):
+                raise OptionValidationError(f"File 'data/{rel_path}' does not exist.")
     
     def validate(self, instance=None):
         """

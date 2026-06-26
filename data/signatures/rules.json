@@ -1,0 +1,115 @@
+{
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "sig_syscall_x64",
+      "name": "x64 SYSCALL instruction",
+      "severity": "high",
+      "description": "Raw syscall opcode — common shellcode marker",
+      "type": "bytes",
+      "pattern": "0f05",
+      "tags": ["shellcode", "linux"]
+    },
+    {
+      "id": "sig_int80",
+      "name": "INT 0x80",
+      "severity": "high",
+      "description": "Linux x86 syscall interrupt",
+      "type": "bytes",
+      "pattern": "cd80",
+      "tags": ["shellcode", "linux", "x86"]
+    },
+    {
+      "id": "sig_bin_sh",
+      "name": "/bin/sh string",
+      "severity": "medium",
+      "description": "Classic execve shell string",
+      "type": "ascii",
+      "pattern": "/bin/sh",
+      "tags": ["execve"]
+    },
+    {
+      "id": "sig_cmd_exe",
+      "name": "cmd.exe string",
+      "severity": "medium",
+      "description": "Windows command interpreter reference",
+      "type": "ascii",
+      "pattern": "cmd.exe",
+      "tags": ["windows"]
+    },
+    {
+      "id": "sig_powershell",
+      "name": "PowerShell string",
+      "severity": "medium",
+      "description": "PowerShell identifier in payload",
+      "type": "ascii",
+      "pattern": "powershell",
+      "tags": ["windows", "script"]
+    },
+    {
+      "id": "sig_invoke",
+      "name": "PowerShell Invoke- cmdlet",
+      "severity": "medium",
+      "description": "PowerShell cmdlet prefix",
+      "type": "ascii",
+      "pattern": "Invoke-",
+      "tags": ["windows", "script"]
+    },
+    {
+      "id": "sig_peb_walk",
+      "name": "PEB access (GS/FS)",
+      "severity": "high",
+      "description": "Process Environment Block walk pattern",
+      "type": "bytes",
+      "pattern": "65488b0425",
+      "tags": ["evasion", "hellsgate"]
+    },
+    {
+      "id": "sig_getpc_call",
+      "name": "CALL/POP getpc",
+      "severity": "medium",
+      "description": "Position-independent code decoder",
+      "type": "bytes",
+      "pattern": "e8????????58",
+      "wildcard": true,
+      "tags": ["decoder"]
+    },
+    {
+      "id": "sig_nop_sled",
+      "name": "Long NOP sled",
+      "severity": "low",
+      "description": "Four or more consecutive NOPs",
+      "type": "bytes",
+      "pattern": "90909090",
+      "tags": ["nopsled"]
+    },
+    {
+      "id": "sig_virtualalloc",
+      "name": "VirtualAlloc string",
+      "severity": "high",
+      "description": "Windows memory allocation API",
+      "type": "ascii",
+      "pattern": "VirtualAlloc",
+      "tags": ["windows"]
+    },
+    {
+      "id": "sig_meterpreter",
+      "name": "Metsrv marker",
+      "severity": "high",
+      "description": "Common meterpreter staging marker",
+      "type": "ascii",
+      "pattern": "metsrv",
+      "tags": ["meterpreter"]
+    },
+    {
+      "id": "sig_null_heavy",
+      "name": "Null byte density",
+      "severity": "low",
+      "description": "More than 3 null bytes in first 64 bytes",
+      "type": "heuristic",
+      "heuristic": "null_density",
+      "threshold": 3,
+      "tags": ["badchar"]
+    }
+  ]
+}

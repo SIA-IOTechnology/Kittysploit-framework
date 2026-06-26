@@ -20,6 +20,14 @@ class Module(Auxiliary, Http_client):
         "cve": "CVE-2026-44573",
         "references": ["https://github.com/advisories/GHSA-36qx-fr4f-26g5"],
         "tags": ["http", "nextjs", "i18n", "middleware", "scanner", "pages-router"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     home_path = OptString("/", "Path to fetch for __NEXT_DATA__ buildId scrape (usually /)", required=False)

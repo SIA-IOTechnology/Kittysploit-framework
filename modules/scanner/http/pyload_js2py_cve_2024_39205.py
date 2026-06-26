@@ -41,6 +41,14 @@ class Module(Scanner, Http_client):
             "exploits/linux/http/pyload_js2py_rce_cve_2024_39205",
         ],
         "tags": ["web", "scanner", "pyload", "js2py", "cve-2024-39205", "cve-2024-28397"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(9666, "Pyload HTTP port", True)

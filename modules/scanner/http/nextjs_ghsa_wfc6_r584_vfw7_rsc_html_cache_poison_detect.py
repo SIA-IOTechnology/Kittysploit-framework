@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -16,6 +17,14 @@ class Module(Scanner, Http_client):
         "severity": "medium",
         "references": ["https://github.com/advisories/GHSA-wfc6-r584-vfw7"],
         "tags": ["scanner", "http", "nextjs", "rsc", "cache"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     rsc_header_value = OptString("text/x-component", "RSC header value for poison request", required=False, advanced=True)
@@ -61,6 +70,8 @@ class Module(Scanner, Http_client):
         return body.startswith(b"0:") or b"$react" in body or b'"$",' in body
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         _, _, _, e1 = self._get()
         if e1:
             self.set_info(reason=f"baseline: {e1}")

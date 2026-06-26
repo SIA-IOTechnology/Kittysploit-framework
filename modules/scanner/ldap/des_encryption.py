@@ -13,6 +13,14 @@ class Module(Scanner, Ad_client):
         "severity": "medium",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "kerberos", "des", "encryption"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

@@ -14,6 +14,14 @@ class Module(Scanner, Ad_client):
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "sid history", "persistence"],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

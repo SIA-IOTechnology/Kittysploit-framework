@@ -8,6 +8,7 @@ import requests
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -21,6 +22,14 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "references": ["https://github.com/advisories/GHSA-h64f-5h5j-jqjh"],
         "tags": ["scanner", "http", "nextjs", "dos", "image", "oom"],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     image_asset_path = OptString("/large.bin", "url= query path to large asset", required=False)
@@ -93,6 +102,8 @@ class Module(Scanner, Http_client):
         return code, nbytes, time.perf_counter() - t0, err
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         code, nbytes, wall, err = self._stream_get()
         if err or code in (500, 502, 503, 504):
             self.set_info(reason="crash/OOM/5xx or transport error", http=code, bytes_read=nbytes, wall=round(wall, 2))

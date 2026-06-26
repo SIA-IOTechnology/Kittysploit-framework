@@ -27,6 +27,14 @@ class Module(Scanner, Http_client):
             "exploits/http/fuxa_cve_2025_69985_rce",
         ],
         "tags": ["web", "scanner", "fuxa", "scada", "cve-2025-69985", "rce"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(1881, "Target port (FUXA default)", True)

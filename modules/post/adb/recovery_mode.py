@@ -6,6 +6,14 @@ class Module(Post):
         'description': 'Enter recovery mode on an Android device',
         'author': 'KittySploit Team',
         'session_type': SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     def run(self):
         try:

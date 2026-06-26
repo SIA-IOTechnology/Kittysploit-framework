@@ -5,6 +5,7 @@ import re
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -19,6 +20,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44573",
         "references": ["https://github.com/advisories/GHSA-36qx-fr4f-26g5"],
         "tags": ["scanner", "http", "nextjs", "i18n", "middleware"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     home_path = OptString("/", "Path to scrape for buildId (__NEXT_DATA__)", required=False)
@@ -96,6 +105,8 @@ class Module(Scanner, Http_client):
         return code == 200 and bool(needle) and needle in body.decode("utf-8", "replace")
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         needle = str(self._o(self.sentinel) or "").strip()
         if not needle:
             self.set_info(reason="Option `sentinel` is empty")

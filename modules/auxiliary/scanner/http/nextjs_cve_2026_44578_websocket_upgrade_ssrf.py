@@ -39,6 +39,14 @@ class Module(Auxiliary, Http_client):
         "cve": "CVE-2026-44578",
         "references": ["https://github.com/advisories/GHSA-c4j6-fc7j-m34r"],
         "tags": ["http", "nextjs", "ssrf", "websocket", "scanner"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     internal_target = OptString(

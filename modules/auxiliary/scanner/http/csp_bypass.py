@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             'https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP',
             'https://csp-evaluator.withgoogle.com/',
             'https://content-security-policy.com/',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # CSP bypass techniques

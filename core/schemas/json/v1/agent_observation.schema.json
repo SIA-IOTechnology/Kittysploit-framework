@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_observation.schema.json",
+  "title": "KittySploit Agent Observation",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "run_id": {"$ref": "common.schema.json#/$defs/id"},
+    "phase": {"type": "string", "minLength": 1},
+    "kind": {"type": "string", "minLength": 1},
+    "summary": {"type": "string", "minLength": 1},
+    "collected_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "target": {
+      "oneOf": [{"$ref": "target.schema.json"}, {"type": "string"}, {"type": "null"}]
+    },
+    "module": {"$ref": "common.schema.json#/$defs/module_ref"},
+    "evidence": {
+      "type": "array",
+      "items": {"oneOf": [{"$ref": "evidence.schema.json"}, {"type": "string"}]}
+    },
+    "metadata": {"$ref": "common.schema.json#/$defs/metadata"}
+  },
+  "required": ["schema_version", "id", "run_id", "phase", "kind", "summary", "collected_at"],
+  "additionalProperties": true
+}

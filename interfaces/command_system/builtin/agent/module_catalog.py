@@ -4,9 +4,12 @@
 """Discover on-disk modules and build capability metadata without loading exploit code."""
 
 import ast
+import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from interfaces.command_system.builtin.agent.agent_constants import (
     EXPANDED_SURFACE_MODULE_PREFIXES,
@@ -19,6 +22,36 @@ from interfaces.command_system.builtin.agent.agent_module_meta import normalize_
 RawModuleMap = Dict[str, str]
 
 
+def _extract_agent_from_info_node(info_node: Any) -> Any:
+    if not isinstance(info_node, ast.Dict):
+        return None
+    for key, value in zip(info_node.keys, info_node.values):
+        if isinstance(key, ast.Constant) and str(key.value) == "agent":
+            try:
+                agent_raw = ast.literal_eval(value)
+            except Exception:
+                return None
+            return normalize_agent_block(agent_raw)
+    return None
+
+
+def _partial_info_from_info_node(info_node: ast.Dict) -> Dict[str, Any]:
+    info: Dict[str, Any] = {}
+    for key, value in zip(info_node.keys, info_node.values):
+        if not isinstance(key, ast.Constant):
+            continue
+        field = str(key.value)
+        try:
+            parsed = ast.literal_eval(value)
+        except Exception:
+            if isinstance(value, ast.Constant):
+                parsed = value.value
+            else:
+                continue
+        info[field] = parsed
+    return info
+
+
 class ModuleCatalogService:
     """Side-effect-free views over `modules/` for planning and ranking."""
 
@@ -26,12 +59,30 @@ class ModuleCatalogService:
         self.framework = framework
         self._module_catalog_cache: Optional[RawModuleMap] = None
         self._agent_meta_cache: Dict[str, Any] = {}
+        self._inline_module_info: Dict[str, Any] = {}
 
     def _get_module_catalog(self) -> RawModuleMap:
         """Lazy in-memory cache of ``discover_modules()`` for this instance (one agent run)."""
         if self._module_catalog_cache is not None:
             return self._module_catalog_cache
         discovered = self.framework.module_loader.discover_modules()
+        if isinstance(discovered, list):
+            normalized: RawModuleMap = {}
+            for row in discovered:
+                if not isinstance(row, dict):
+                    continue
+                path = str(row.get("path", "")).strip()
+                if not path:
+                    continue
+                normalized[path] = str(row.get("file_path") or path)
+            self._module_catalog_cache = normalized
+            self._inline_module_info = {
+                str(row.get("path", "")).strip(): row.get("__info__", {})
+                for row in discovered
+                if isinstance(row, dict) and str(row.get("path", "")).strip()
+            }
+            return normalized
+        self._inline_module_info = {}
         self._module_catalog_cache = discovered
         return discovered
 
@@ -39,6 +90,7 @@ class ModuleCatalogService:
         """Drop cache (e.g. after module tree changes on disk)."""
         self._module_catalog_cache = None
         self._agent_meta_cache.clear()
+        self._inline_module_info.clear()
 
     def extract_static_module_metadata(self, file_path: str) -> Dict[str, Any]:
         metadata = {
@@ -75,7 +127,11 @@ class ModuleCatalogService:
         try:
             info = ast.literal_eval(info_node)
         except Exception:
-            return metadata
+            if isinstance(info_node, ast.Dict):
+                info = _partial_info_from_info_node(info_node)
+                metadata["agent"] = _extract_agent_from_info_node(info_node)
+            else:
+                return metadata
         if not isinstance(info, dict):
             return metadata
 
@@ -93,7 +149,8 @@ class ModuleCatalogService:
         if isinstance(modules, (list, tuple, set)):
             metadata["modules"] = [str(path).strip() for path in modules if str(path).strip()]
         metadata["severity"] = str(info.get("severity", "") or "")
-        metadata["agent"] = normalize_agent_block(info.get("agent")) if "agent" in info else None
+        if metadata.get("agent") is None:
+            metadata["agent"] = normalize_agent_block(info.get("agent")) if "agent" in info else None
         return metadata
 
     def get_agent_metadata(self, module_path: str) -> Any:
@@ -103,6 +160,11 @@ class ModuleCatalogService:
         key = str(module_path).strip()
         if key in self._agent_meta_cache:
             return self._agent_meta_cache[key]
+        inline = self._inline_module_info.get(key)
+        if isinstance(inline, dict) and "agent" in inline:
+            ag = normalize_agent_block(inline.get("agent"))
+            self._agent_meta_cache[key] = ag
+            return ag
         try:
             discovered = self._get_module_catalog()
             file_path = discovered.get(key)
@@ -146,6 +208,43 @@ class ModuleCatalogService:
         except Exception:
             return []
         return sorted(modules, key=lambda row: row["path"])
+
+    def audit_agent_metadata(self, *, limit_sample: int = 12) -> Dict[str, Any]:
+        from interfaces.command_system.builtin.agent.metadata_linter import lint_agent_block
+
+        discovered = self._get_module_catalog()
+        rows: List[Dict[str, Any]] = []
+        compliant = partial = missing = 0
+        by_risk: Dict[str, int] = {}
+        for module_path in sorted(discovered):
+            agent = self.get_agent_metadata(module_path)
+            issues = lint_agent_block(agent)
+            if agent is None:
+                status = "missing"
+                missing += 1
+            elif issues:
+                status = "partial"
+                partial += 1
+            else:
+                status = "compliant"
+                compliant += 1
+                risk = str((agent or {}).get("risk") or "unknown")
+                by_risk[risk] = int(by_risk.get(risk, 0)) + 1
+            if issues or status != "compliant":
+                rows.append({"path": module_path, "status": status, "issues": issues})
+        sample = rows[: max(0, int(limit_sample))]
+        total = len(discovered)
+        return {
+            "ok": compliant > 0 and missing < total,
+            "total_modules": total,
+            "compliant": compliant,
+            "partial": partial,
+            "missing": missing,
+            "coverage_ratio": round(compliant / total, 4) if total else 0.0,
+            "by_risk": by_risk,
+            "non_compliant_sample": sample,
+            "non_compliant_count": len(rows),
+        }
 
     def build_module_capability_catalog(self) -> Dict[str, Any]:
         catalog = {
@@ -210,8 +309,8 @@ class ModuleCatalogService:
                     row.get("path", ""),
                 ),
             )[:300]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Agent capability catalog build degraded: %s", exc)
         return catalog
 
     def _semantic_tokens(self, text: str) -> List[str]:

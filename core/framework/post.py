@@ -1,4 +1,4 @@
-from core.framework.base_module import BaseModule
+from core.framework.base_module import BaseModule, ModuleResult, normalize_module_result
 from core.framework.failure import ProcedureError, FailureType
 from core.framework.option.option_string import OptString
 from core.output_handler import print_error, print_info, print_status, print_success, print_warning
@@ -21,11 +21,7 @@ class Post(BaseModule):
 
     def _exploit(self):
         try:
-            result = self.run()
-            # Keep backward compatibility: if run() returns None, treat as success.
-            if result is None:
-                return True
-            return bool(result)
+            return normalize_module_result(self.run())
         except ProcedureError as e:
             raise e
         except Exception as e:

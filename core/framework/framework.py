@@ -21,6 +21,7 @@ from core.plugin_manager import PluginManager
 from core.config import Config
 from core.utils.validate import validate_module_type
 from core.framework.utils.metrics import MetricsCollector
+from core.observability.manager import ObservabilityManager
 from core.framework.utils.hooks import HookManager, HookPoint
 # Runtime Kernel - Couche N+1
 from core.framework.runtime import RuntimeKernel, EventBus, EventType
@@ -49,6 +50,7 @@ class Framework:
         self.output_handler = OutputHandler()
         self.shell_manager = ShellManager()
         self.metrics_collector = MetricsCollector()
+        self.observability = ObservabilityManager(self.metrics_collector)
         self.hook_manager = HookManager()
         
         # Runtime Kernel - Couche N+1
@@ -111,6 +113,7 @@ class Framework:
         
         # Initialize module loader with sync manager
         self.module_loader = ModuleLoader(sync_manager=self.module_sync_manager)
+        self.module_sync_manager.module_loader = self.module_loader
         
         # Initialize NOP manager
         self.nops = NopManager()
@@ -166,6 +169,11 @@ class Framework:
         
         # Initialize workspaces
         self._init_workspaces()
+
+        try:
+            self.observability.configure(workspace=self.current_workspace)
+        except Exception as exc:
+            self.output_handler.print_warning(f"Observability setup skipped: {exc}")
         
         self.current_collab: Optional[Any] = None
     
@@ -692,252 +700,117 @@ class Framework:
                 )
             return None
     
-    def execute_module(self, use_runtime_kernel: bool = True) -> Any:
+    def execute_module(
+        self,
+        use_runtime_kernel: bool = True,
+        skip_scope_confirm: bool = False,
+    ) -> Any:
         """
         Exécute le module actuellement chargé.
-        
+
         Args:
             use_runtime_kernel: Si True, utilise le Runtime Kernel pour l'exécution avec sandbox
-        
+            skip_scope_confirm: Si True, ignore la confirmation des actions destructives (scope)
+
         Returns:
             Any: Résultat de l'exécution du module ou False en cas d'erreur
         """
+        from core.framework.module_executor import (
+            ModuleExecutionBlockReason,
+            ModuleExecutionRequest,
+            ModuleExecutor,
+        )
+
         if not self.current_module:
             self.output_handler.print_warning("Tentative d'exécution sans module chargé")
             return False
-        
-        # Vérifier la blacklist du Guardian avant l'exécution
-        if hasattr(self, 'guardian_manager') and self.guardian_manager:
-            if not self.guardian_manager.enabled:
-                # Guardian existe mais n'est pas activé - on ne bloque pas
-                if self.guardian_manager.verbose:
-                    self.output_handler.print_info("[GUARDIAN] Guardian is not enabled, skipping blacklist check")
-            else:
-                target_ip = self._extract_target_ip_from_module()
-                # Debug: logger seulement si verbose est activé
-                if self.guardian_manager.verbose:
-                    self.output_handler.print_info(f"[GUARDIAN] Checking blacklist - Extracted target IP: {target_ip}")
-                    self.output_handler.print_info(f"[GUARDIAN] Guardian enabled: {self.guardian_manager.enabled}, Blacklist size: {len(self.guardian_manager.blacklist)}")
-                
-                if target_ip:
-                    # Vérifier si l'IP est dans la blacklist
-                    if self.guardian_manager.verbose:
-                        self.output_handler.print_info(f"[GUARDIAN] Checking if {target_ip} is in blacklist: {target_ip in self.guardian_manager.blacklist}")
-                    if target_ip in self.guardian_manager.blacklist:
-                        blacklist_entry = self.guardian_manager.blacklist[target_ip]
-                        reason = blacklist_entry.get('reason', 'Unknown reason')
-                        timestamp = blacklist_entry.get('timestamp', 'Unknown')
-                        
-                        self.output_handler.print_error(
-                            f"[GUARDIAN] Module execution BLOCKED: Target IP {target_ip} is blacklisted"
-                        )
-                        self.output_handler.print_error(
-                            f"[GUARDIAN] Reason: {reason} (added: {timestamp})"
-                        )
-                        
-                        # Créer une alerte Guardian via _create_alert pour mettre à jour les statistiques
-                        alert = self.guardian_manager._create_alert(
-                            target=target_ip,
-                            severity="CRITICAL",
-                            issue=f"Module execution blocked: IP {target_ip} is blacklisted",
-                            confidence=100.0,
-                            recommendations=[
-                                "Remove IP from blacklist if this is intentional",
-                                "Verify target before removing from blacklist"
-                            ],
-                            evidence=[f"IP {target_ip} found in blacklist"]
-                        )
-                        # Marquer l'action comme prise
-                        alert.auto_action_taken = True
-                        alert.action_description = "Module execution blocked"
-                        
-                        # Toujours bloquer si l'IP est dans la blacklist (même si auto_action n'est pas activé)
-                        self.output_handler.print_error(
-                            "[GUARDIAN] Execution blocked: IP is blacklisted"
-                        )
-                        
-                        return False
 
-        if hasattr(self, 'scope_manager') and self.scope_manager:
-            if not self.scope_manager.ensure_execution_permitted(self.current_module):
-                return False
-        
-        # Utiliser le Runtime Kernel si demandé
-        if use_runtime_kernel:
-            module_path = getattr(self.current_module, '__module__', 'unknown')
-            module_id = f"{module_path}_{int(time.time() * 1000)}"
-            
-            # Publier événement avant exécution
-            self.event_bus.publish(
-                EventType.MODULE_EXECUTING,
-                {"module_path": module_path, "module_id": module_id},
-                source="framework"
-            )
-            
-            # Exécuter via le Runtime Kernel
-            context = self.runtime_kernel.execute_module(
-                module_path=module_path,
-                module_instance=self.current_module,
-                module_id=module_id,
-                sandbox_config=None,  # Peut être configuré via les policies
-                resource_limits=None,  # Peut être configuré
-                timeout=None
-            )
-            
-            # Attendre la fin de l'exécution
-            if context.execution_thread:
-                context.execution_thread.join(timeout=300)  # Timeout de 5 minutes
-            
-            # Publier événement après exécution
-            if context.status == "completed":
-                self.event_bus.publish(
-                    EventType.MODULE_EXECUTED,
-                    {"module_path": module_path, "module_id": module_id, "result": context.result},
-                    source="framework"
-                )
-                return context.result
-            else:
-                self.event_bus.publish(
-                    EventType.MODULE_FAILED,
-                    {"module_path": module_path, "module_id": module_id, "error": context.error},
-                    source="framework"
-                )
-                return False
-        
-        # Debug: Check for blocked actions first
-        if self.debug_manager.is_active:
-            # Check if any module_execute_start actions are blocked
-            blocked_actions = [action for action in self.debug_manager.actions 
-                             if action.type == "module_execute_start" and action.blocked]
-            
+        if not use_runtime_kernel and self.debug_manager.is_active:
+            blocked_actions = [
+                action
+                for action in self.debug_manager.actions
+                if action.type == "module_execute_start" and action.blocked
+            ]
             if blocked_actions:
-                # Find the most recent blocked module_execute_start action
-                latest_blocked = max(blocked_actions, key=lambda x: x.timestamp)
+                latest_blocked = max(blocked_actions, key=lambda item: item.timestamp)
                 self.debug_manager.add_action(
                     "module_execute_blocked",
                     f"Module execution blocked: {getattr(self.current_module, 'name', 'unknown')}",
-                    {"module": getattr(self.current_module, 'name', 'unknown'), "blocked_action_id": latest_blocked.id}
+                    {
+                        "module": getattr(self.current_module, "name", "unknown"),
+                        "blocked_action_id": latest_blocked.id,
+                    },
                 )
                 return False
-            
-            # If not blocked, create the action
-            action_id = self.debug_manager.add_action(
+
+            self.debug_manager.add_action(
                 "module_execute_start",
                 f"Starting execution of module: {getattr(self.current_module, 'name', 'unknown')}",
-                {"module_path": getattr(self.current_module, '__module__', 'unknown')}
+                {"module_path": getattr(self.current_module, "__module__", "unknown")},
             )
-        
-        # Vérifier que toutes les options requises sont définies
-        if not self.current_module.check_options():
-            missing = self.current_module.get_missing_options()
-            if missing:
-                self.output_handler.print_error(f"Exécution impossible: options requises manquantes: {', '.join(missing)}")
-            else:
-                self.output_handler.print_error("Exécution impossible: toutes les options requises ne sont pas définies")
-            
-            # Debug: Capture options check failure
-            if self.debug_manager.is_active:
-                self.debug_manager.add_action(
-                    "module_execute_failed",
-                    "Module execution failed: missing required options",
-                    {"module": getattr(self.current_module, 'name', 'unknown')}
-                )
-            return False
-        
-        try:
-            # Reset auto-return flags for BrowserAuxiliary modules before execution
-            try:
-                from core.framework.browserauxiliary import BrowserAuxiliary
-                if isinstance(self.current_module, BrowserAuxiliary):
-                    self.current_module._reset_auto_return_flags()
-            except ImportError:
-                pass  # BrowserAuxiliary not available
-            
-            # Record module execution start time
-            start_time = time.time()
-            
-            # Définir le contexte de métadonnées pour les métriques
-            module_name = getattr(self.current_module, 'name', 'unknown')
-            module_type = getattr(self.current_module, 'module_type', 'unknown')
-            workspace = self.get_current_workspace_name()
-            
-            self.metrics_collector.set_metadata_context(
-                module=module_name,
-                module_type=module_type,
-                workspace=workspace
-            )
-            
-            result = self.current_module.run()
-            duration = time.time() - start_time
-            
-            self.metrics_collector.record_timing("module.execution.duration", duration, {
-                "module": module_name,
-                "module_type": module_type,
-                "workspace": workspace
-            })
-            self.metrics_collector.increment("module.execution.success", metadata={
-                "module": module_name,
-                "module_type": module_type,
-                "workspace": workspace
-            })
-            
-            # Effacer le contexte après l'exécution
-            self.metrics_collector.clear_metadata_context()
-            # Auto-return handling for BrowserAuxiliary modules
-            # If run() returns None but execute_js was called, use the stored result
-            try:
-                from core.framework.browserauxiliary import BrowserAuxiliary
-                if result is None and isinstance(self.current_module, BrowserAuxiliary):
-                    # Check if execute_js was actually called (not just initialized)
-                    if hasattr(self.current_module, '_execute_js_called') and self.current_module._execute_js_called:
-                        # Use the stored result from execute_js
-                        result = self.current_module._last_js_result
-                        # Clear the flags for next execution
-                        self.current_module._last_js_result = None
-                        self.current_module._execute_js_called = False
-            except ImportError:
-                pass  # BrowserAuxiliary not available, skip auto-return
-            except Exception as e:
-                # Don't let auto-return handling break module execution
+
+        guardian = getattr(self, "guardian_manager", None)
+        verbose_guardian = bool(
+            guardian and guardian.enabled and getattr(guardian, "verbose", False)
+        )
+
+        request = ModuleExecutionRequest(
+            module=self.current_module,
+            use_runtime_kernel=use_runtime_kernel,
+            use_exploit_wrapper=False,
+            skip_scope_confirm=skip_scope_confirm,
+            collect_metrics=not use_runtime_kernel,
+            verbose_guardian_debug=verbose_guardian,
+        )
+        execution = ModuleExecutor.execute(self, request)
+
+        if execution.blocked:
+            if execution.block_reason == ModuleExecutionBlockReason.MISSING_OPTIONS:
+                if execution.missing_options:
+                    self.output_handler.print_error(
+                        "Exécution impossible: options requises manquantes: "
+                        f"{', '.join(execution.missing_options)}"
+                    )
+                else:
+                    self.output_handler.print_error(
+                        "Exécution impossible: toutes les options requises ne sont pas définies"
+                    )
                 if self.debug_manager.is_active:
-                    print_debug(f"Error in auto-return handling: {e}")
-                pass
-            
-            # Debug: Capture successful execution
-            if self.debug_manager.is_active:
-                self.debug_manager.add_action(
-                    "module_execute_success",
-                    f"Module executed successfully: {getattr(self.current_module, 'name', 'unknown')}",
-                    {"module": getattr(self.current_module, 'name', 'unknown'), "result": str(result)}
-                )
-            
-            return result
-        except Exception as e:
-            self.output_handler.print_error(f"Erreur lors de l'exécution du module: {str(e)}")
-            
-            # Enregistrer l'échec dans les métriques
-            module_name = getattr(self.current_module, 'name', 'unknown') if self.current_module else 'unknown'
-            module_type = getattr(self.current_module, 'module_type', 'unknown') if self.current_module else 'unknown'
-            workspace = self.get_current_workspace_name()
-            
-            self.metrics_collector.increment("module.execution.failure", metadata={
-                "module": module_name,
-                "module_type": module_type,
-                "workspace": workspace,
-                "error": str(e)
-            })
-            
-            # Effacer le contexte
-            self.metrics_collector.clear_metadata_context()
-            
-            # Debug: Capture execution error
+                    self.debug_manager.add_action(
+                        "module_execute_failed",
+                        "Module execution failed: missing required options",
+                        {"module": getattr(self.current_module, "name", "unknown")},
+                    )
+            return False
+
+        if execution.error and not execution.success:
+            self.output_handler.print_error(
+                f"Erreur lors de l'exécution du module: {execution.error}"
+            )
             if self.debug_manager.is_active:
                 self.debug_manager.add_action(
                     "module_execute_error",
-                    f"Module execution error: {module_name}",
-                    {"module": module_name, "error": str(e)}
+                    f"Module execution error: {getattr(self.current_module, 'name', 'unknown')}",
+                    {
+                        "module": getattr(self.current_module, "name", "unknown"),
+                        "error": execution.error,
+                    },
                 )
             return False
+
+        if execution.success and self.debug_manager.is_active:
+            self.debug_manager.add_action(
+                "module_execute_success",
+                f"Module executed successfully: {getattr(self.current_module, 'name', 'unknown')}",
+                {
+                    "module": getattr(self.current_module, "name", "unknown"),
+                    "result": str(execution.result),
+                },
+            )
+
+        if execution.success:
+            return execution.result
+        return False
     
     def get_module_options(self) -> Dict[str, Any]:
         """
@@ -1144,6 +1017,9 @@ class Framework:
 
             if hasattr(self, 'scope_manager') and self.scope_manager:
                 self.scope_manager.set_workspace(name)
+
+            if hasattr(self, 'observability') and self.observability:
+                self.observability.update_workspace(name)
         
         return success
     
@@ -1435,6 +1311,10 @@ class Framework:
     def sync_modules_now(self) -> Dict[str, int]:
         """Perform immediate module synchronization"""
         return self.module_sync_manager.sync_modules(force=True)
+
+    def invalidate_module_caches(self, module_path: Optional[str] = None) -> None:
+        """Invalidate module discovery/loader caches after sync, marketplace, or reload."""
+        self.module_loader.invalidate_caches(module_path=module_path)
     
     def get_module_sync_status(self) -> Dict:
         """Get module synchronization status"""

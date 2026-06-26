@@ -18,7 +18,15 @@ class Module(Auxiliary, Http_client):
             'https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing',
             'https://portswigger.net/web-security/xxe',
             'https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # XXE payloads

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Set
 
 from interfaces.command_system.builtin.agent.agent_module_meta import has_agent_planner_meta
+from interfaces.command_system.builtin.agent.attack_chain_memory import capabilities_satisfied
 from interfaces.command_system.builtin.agent.module_scoring import estimate_network_cost, module_path_lower
 
 
@@ -56,6 +57,13 @@ def module_matches_state(agent: Optional[Dict[str, Any]], kb: Dict[str, Any]) ->
         return False
 
     if bool(req.get("auth_session", False)) and "authenticated_session" not in signals:
+        return False
+
+    if not capabilities_satisfied(
+        kb,
+        req.get("capabilities_any") or [],
+        req.get("capabilities_all") or [],
+    ):
         return False
 
     return True

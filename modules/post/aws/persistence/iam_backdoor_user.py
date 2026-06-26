@@ -23,6 +23,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "version": "1.0.0",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     username = OptString("kittysploit_backdoor", "Username for backdoor user", False)

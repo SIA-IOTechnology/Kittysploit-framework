@@ -15,6 +15,7 @@ The compiled binary can run on the target without any dependencies!
 """
 
 from kittysploit import *
+from core.payload_generation import GeneratedArtifact
 import os
 import subprocess
 from pathlib import Path
@@ -1191,18 +1192,53 @@ pub fn main() !void {
             if os.name != 'nt':
                 os.chmod(compile_script, 0o755)
             
+            compiled = False
+            warnings = []
             if self.auto_compile:
                 print_info("Auto-compiling...")
-                if self._compile():
+                compiled = self._compile()
+                if compiled:
                     print_success("Compilation successful!")
                 else:
                     print_warning("Compilation failed, but source files are ready")
-            
-            return True
+                    warnings.append(
+                        "Zig compilation failed; the generated source and compile script are available."
+                    )
+
+            binary_exists = binary_path.is_file()
+            content = binary_path.read_bytes() if compiled and binary_exists else zig_source.encode("utf-8")
+            content_type = "application/octet-stream" if compiled and binary_exists else "text/x-zig"
+
+            artifacts = {
+                "source": str(output_source),
+                "compile_script": str(compile_script),
+            }
+            if binary_exists:
+                artifacts["binary_path"] = str(binary_path)
+
+            return GeneratedArtifact(
+                content=content,
+                display_content=content,
+                content_type=content_type,
+                artifacts=artifacts,
+                metadata={
+                    "compiled": compiled and binary_exists,
+                    "target_os": str(self.target_os),
+                    "target_arch": str(self.target_arch),
+                    "optimization": str(self.optimization),
+                    "lhost": str(self.lhost),
+                    "lport": int(self.lport),
+                },
+                warnings=warnings,
+                logs=[
+                    f"Source generated at {output_source}",
+                    f"Compile script generated at {compile_script}",
+                ],
+            )
 
         except Exception as e:
             print_error(f"Error generating Zig payload: {e}")
-            return None
+            raise
     
     def _get_platform_dir(self, target_os: str) -> str:
         platform_map = {

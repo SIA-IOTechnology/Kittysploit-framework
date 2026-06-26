@@ -54,6 +54,8 @@ Examples:
   guardian alerts                    # Show recent alerts
   guardian config                    # Show Guardian configuration
   guardian test 192.168.1.50        # Test host for anomalies
+  guardian identities show           # Show suspected AD honeytokens
+  guardian identities ack DOMAIN\\svc_backup  # Mark identity as safe
             """
         )
         
@@ -103,6 +105,28 @@ Examples:
         ack_parser = subparsers.add_parser('ack', help='Mark a host as safe (acknowledge false positive)')
         ack_parser.add_argument('host', help='Host to acknowledge as safe')
         ack_parser.add_argument('--note', help='Optional operator note to store with the acknowledgement')
+
+        # AD identity / honeytoken subcommands
+        identities_parser = subparsers.add_parser(
+            'identities',
+            help='Manage suspected AD honeytokens (lastLogon oracle)',
+        )
+        identities_sub = identities_parser.add_subparsers(
+            dest='identities_action',
+            help='Identity actions',
+        )
+        identities_show = identities_sub.add_parser('show', help='Show suspected AD identities')
+        identities_show.add_argument(
+            '--min-score',
+            type=float,
+            default=None,
+            help='Minimum honeytoken score (default: suspicious threshold)',
+        )
+        identities_show.add_argument('--count', type=int, default=25, help='Maximum rows to display')
+        identities_ack = identities_sub.add_parser('ack', help='Mark an AD identity as safe')
+        identities_ack.add_argument('identity', help='sAMAccountName or DOMAIN\\\\account')
+        identities_ack.add_argument('--domain', help='Domain name if identity is bare sAMAccountName')
+        identities_ack.add_argument('--note', help='Optional operator note')
         
         return parser
     
@@ -132,6 +156,8 @@ Examples:
                 return self._test_host(parsed_args)
             elif parsed_args.action == 'ack':
                 return self._acknowledge_host(parsed_args)
+            elif parsed_args.action == 'identities':
+                return self._manage_identities(parsed_args)
             else:
                 self.parser.print_help()
                 return True
@@ -337,6 +363,9 @@ Examples:
             print_info(f"  Auto-actions: {config['auto_action']}")
             print_info(f"  Response time threshold: {config['response_time_threshold']}ms")
             print_info(f"  Honeypot confidence threshold: {config['honeypot_threshold']}%")
+            print_info(f"  AD honeytoken threshold: {config.get('identity_honeytoken_threshold', 75)}%")
+            print_info(f"  Identity profiles tracked: {config.get('identity_profiles', 0)}")
+            print_info(f"  Identity blacklist size: {config.get('identity_blacklist_size', 0)}")
             print_info(f"  Learning mode: {config['learning_mode']}")
             print_info(f"  Blacklist size: {config['blacklist_size']}")
             
@@ -384,9 +413,67 @@ Examples:
             print_error(f"Failed to test host: {e}")
             return False
     
+    def _manage_identities(self, args):
+        """Show or acknowledge suspected AD honeytokens."""
+        try:
+            if args.identities_action == 'show':
+                rows = self.guardian_manager.get_suspected_identities(
+                    min_score=args.min_score,
+                    limit=args.count,
+                )
+                if not rows:
+                    print_info("No suspected AD honeytokens recorded")
+                    print_info(
+                        "Run: use scanner/ldap/honeytoken_hunt then run "
+                        "(or register findings via Guardian-enabled scans)"
+                    )
+                    return True
+
+                print_info(f"Suspected AD identities (showing {len(rows)}):")
+                print_empty()
+                for row in rows:
+                    key = row.get('domain', '')
+                    sam = row.get('sam_account', '')
+                    label = f"{key}\\{sam}" if key else sam
+                    print_warning(
+                        f"  [{row.get('verdict', '?')}] {label} "
+                        f"({row.get('honeytoken_score', 0):.0f}%)"
+                    )
+                    signals = row.get('signals') or []
+                    for signal in signals[:3]:
+                        print_info(f"    - {signal}")
+                    if row.get('never_logged_on'):
+                        print_info("    - lastLogon oracle: never authenticated")
+                    print_empty()
+                return True
+
+            if args.identities_action == 'ack':
+                identity = args.identity
+                domain = args.domain or ""
+                if "\\" in identity:
+                    domain, _, identity = identity.partition("\\")
+                ok = self.guardian_manager.acknowledge_identity(
+                    identity,
+                    domain=domain,
+                    note=args.note or "",
+                )
+                if ok:
+                    print_success(f"Identity {identity} acknowledged as safe")
+                    if args.note:
+                        print_info(f"Note recorded: {args.note}")
+                    return True
+                print_warning(f"No Guardian identity profile found for {args.identity}")
+                return False
+
+            self.parser.parse_args(['identities', '--help'])
+            return True
+        except Exception as e:
+            print_error(f"Failed to manage identities: {e}")
+            return False
+
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
         return [
-            'enable', 'disable', 'status', 'learn', 'blacklist', 
-            'alerts', 'config', 'test', 'ack'
+            'enable', 'disable', 'status', 'learn', 'blacklist',
+            'alerts', 'config', 'test', 'ack', 'identities',
         ]

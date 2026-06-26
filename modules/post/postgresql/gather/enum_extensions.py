@@ -9,6 +9,14 @@ class Module(Post, PostgreSQLClient):
 		"description": "List installed extensions and versions (pgcrypto, etc.)",
 		"author": "KittySploit Team",
 		"session_type": SessionType.POSTGRESQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	database = OptString("", "Connect to database before listing (empty = current)", False)

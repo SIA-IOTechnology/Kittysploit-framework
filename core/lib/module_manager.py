@@ -56,6 +56,10 @@ class ModuleManager:
     def get_listeners(self) -> Dict[str, Any]:
         """Get all listener modules"""
         return self.get_modules_by_type("listener")
+
+    def get_obfuscators(self) -> Dict[str, Any]:
+        """Get all obfuscator modules"""
+        return self.get_modules_by_type("obfuscator")
     
     def get_environments(self) -> Dict[str, Any]:
         """Get all environment modules"""
@@ -95,7 +99,7 @@ class ModuleManager:
         # Get modules by type
         module_types = [
             "exploit", "auxiliary", "payload", "listener", 
-            "environment", "browser_auxiliary", "browser_exploit"
+            "obfuscator", "environment", "browser_auxiliary", "browser_exploit"
         ]
         
         for module_type in module_types:

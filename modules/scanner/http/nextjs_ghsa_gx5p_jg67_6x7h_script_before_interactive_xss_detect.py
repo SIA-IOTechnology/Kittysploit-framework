@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 _DEFAULT_FRAGMENT = '</script><script>window.__pwn=true;alert("VALIDATION_TOKEN")</script><x x="'
 _PUSH = "(self.__next_s=self.__next_s||[]).push("
@@ -23,6 +24,14 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "references": ["https://github.com/advisories/GHSA-gx5p-jg67-6x7h"],
         "tags": ["scanner", "http", "nextjs", "xss"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     inject_param = OptString("tid", "Query parameter for encoded payload", required=False)
@@ -67,6 +76,8 @@ class Module(Scanner, Http_client):
         return "inconclusive"
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         try:
             r = self.get(self._probe_url(), timeout=float(self._o(self.timeout)))
         except Exception as e:

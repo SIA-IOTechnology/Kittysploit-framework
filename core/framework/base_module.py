@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from itertools import chain
 from six import iteritems, with_metaclass
@@ -13,6 +13,110 @@ import shutil
 from core.output_handler import print_success, print_error, print_status
 import random
 import string
+
+
+@dataclass
+class ModuleResult:
+    """Normalized return value for module ``run()`` / ``_exploit()``."""
+
+    success: bool = True
+    finding: Any = None
+    evidence: Any = None
+    error: Optional[str] = None
+    session_id: Optional[str] = None
+    data: Any = None
+
+    def __bool__(self) -> bool:
+        return self.success
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"success": self.success}
+        if self.finding is not None:
+            payload["finding"] = self.finding
+        if self.evidence is not None:
+            payload["evidence"] = self.evidence
+        if self.error:
+            payload["error"] = self.error
+        if self.session_id:
+            payload["session_id"] = self.session_id
+        if self.data is not None:
+            payload["data"] = self.data
+        return payload
+
+
+def normalize_module_result(value: Any) -> ModuleResult:
+    """Coerce legacy module return values into a ``ModuleResult``."""
+    if value is None:
+        return ModuleResult(success=True)
+    if isinstance(value, ModuleResult):
+        return value
+    if isinstance(value, bool):
+        return ModuleResult(success=value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ModuleResult(success=False, error="Empty result")
+        lowered = text.lower()
+        if lowered in {"false", "failed", "failure", "error", "no"}:
+            return ModuleResult(success=False, error=text)
+        return ModuleResult(success=True, session_id=text, data=text)
+    if isinstance(value, dict):
+        success = value.get("success")
+        if success is None:
+            success = value.get("ok")
+        if success is None and "status" in value:
+            success = str(value.get("status")).lower() in {
+                "success",
+                "ok",
+                "completed",
+                "vulnerable",
+            }
+        if success is None:
+            success = not bool(value.get("error") or value.get("failed"))
+        finding = value.get("finding", value.get("findings"))
+        evidence = value.get("evidence")
+        session_id = value.get("session_id", value.get("session"))
+        error = value.get("error") or value.get("message")
+        if isinstance(error, str) and error.lower() in {"scan_error"}:
+            return ModuleResult(
+                success=False,
+                finding=finding,
+                evidence=evidence,
+                error=error,
+                session_id=session_id,
+                data=value,
+            )
+        return ModuleResult(
+            success=bool(success),
+            finding=finding,
+            evidence=evidence,
+            error=str(error) if error else None,
+            session_id=str(session_id) if session_id else None,
+            data=value.get("data", value.get("result", value)),
+        )
+    if isinstance(value, tuple):
+        if not value:
+            return ModuleResult(success=False, error="Empty tuple result")
+        if len(value) >= 3 and not isinstance(value[0], bool):
+            return ModuleResult(success=True, data=value)
+        if len(value) == 1:
+            return normalize_module_result(value[0])
+        if isinstance(value[0], bool):
+            result = ModuleResult(success=bool(value[0]), data=value)
+            if len(value) > 1:
+                second = value[1]
+                if isinstance(second, str) and result.success and not result.session_id:
+                    result.session_id = second.strip() or None
+                elif isinstance(second, str) and not result.success and not result.error:
+                    result.error = second
+                elif second is not None and result.finding is None:
+                    result.finding = second
+            if len(value) > 2 and result.evidence is None:
+                result.evidence = value[2]
+            return result
+        return ModuleResult(success=bool(value[0]), data=value)
+    return ModuleResult(success=bool(value), data=value)
+
 
 class ModuleOptionsAggregator(type):
     """Metaclass that dynamically aggregates the options of modules."""
@@ -200,11 +304,35 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
     def run(self):
         """
         Execute the module. Must be implemented by derived classes.
-        
+
+        Returns:
+            ModuleResult | bool | str | dict | tuple | None: Execution outcome.
+            Prefer returning ``ModuleResult`` or ``self.module_result(...)``.
+
         Raises:
             NotImplementedError: If the method is not implemented
         """
         raise NotImplementedError("Modules must implement the run() method")
+
+    @staticmethod
+    def module_result(
+        *,
+        success: bool = True,
+        finding: Any = None,
+        evidence: Any = None,
+        error: Optional[str] = None,
+        session_id: Optional[str] = None,
+        data: Any = None,
+    ) -> ModuleResult:
+        """Build a normalized module return value."""
+        return ModuleResult(
+            success=success,
+            finding=finding,
+            evidence=evidence,
+            error=error,
+            session_id=session_id,
+            data=data,
+        )
 
     def vulnerable(self):
         """Hook when a module confirms the target is vulnerable (same messaging as ExploitBase)."""
@@ -217,17 +345,12 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
         fail.NotVulnerable()
 
     def _exploit(self):
-
         try:
-            result = self.run()
-            # Keep backward compatibility: if run() returns None, treat as success.
-            if result is None:
-                return True
-            return bool(result)
-        except ProcedureError as e:
-            return False
-        except Exception as e:
-            return False
+            return normalize_module_result(self.run())
+        except ProcedureError:
+            return ModuleResult(success=False)
+        except Exception:
+            return ModuleResult(success=False)
     
     def get_info(self) -> Dict[str, Any]:
         """

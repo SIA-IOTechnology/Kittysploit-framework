@@ -1,4 +1,4 @@
-from core.framework.base_module import BaseModule
+from core.framework.base_module import BaseModule, ModuleResult, normalize_module_result
 from core.framework.failure import ProcedureError, FailureType
 
 class Auxiliary(BaseModule):
@@ -16,11 +16,8 @@ class Auxiliary(BaseModule):
     
     def _exploit(self):
         try:
-            result = self.run()
-            if result is None:
-                return True
-            return bool(result)
+            return normalize_module_result(self.run())
         except ProcedureError:
-            return False
+            return ModuleResult(success=False)
         except Exception:
-            return False
+            return ModuleResult(success=False)

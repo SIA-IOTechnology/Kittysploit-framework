@@ -26,6 +26,14 @@ class Module(Scanner, Http_client):
             "https://github.com/bludit/bludit/archive/refs/tags/3.18.2.zip",
             "https://www.bludit.com/",
         ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     token = OptString("", "Bludit API token", required=True)

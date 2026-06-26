@@ -13,6 +13,14 @@ class Module(Auxiliary, Http_client):
         'description': "Try to bypass 403 (forbidden) on a web resource using common tricks.",
         'author': 'KittySploit Team',
         'tags': ['web', 'scanner', 'bypass', '403'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     path = OptString("/admin", "Chemin ou ressource à tester", required=True)

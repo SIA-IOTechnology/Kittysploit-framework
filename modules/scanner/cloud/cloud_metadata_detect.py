@@ -28,6 +28,14 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "modules": [],
         "tags": ["cloud", "scanner", "metadata", "aws", "azure", "gcp", "ssrf", "imds"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

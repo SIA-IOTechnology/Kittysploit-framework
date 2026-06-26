@@ -44,6 +44,61 @@ class Wordpress(BaseModule):
     def wp_version_to_tuple(version: str):
         return tuple(int(part) for part in re.findall(r"\d+", version or ""))
 
+    @staticmethod
+    def wp_version_in_range(version: str, low: tuple, high: tuple) -> bool:
+        """Return True when *version* is within [*low*, *high*] (inclusive, numeric tuple compare)."""
+        current = Wordpress.wp_version_to_tuple(version)
+        low_p = tuple(low) + (0,) * max(0, 3 - len(low))
+        high_p = tuple(high) + (0,) * max(0, 3 - len(high))
+        while len(current) < 3:
+            current = current + (0,)
+        return low_p[:3] <= current[:3] <= high_p[:3]
+
+    def wp_json_index_path(self, base_path: str = None) -> str:
+        root = Wordpress.wp_normalize_base_path(
+            base_path if base_path is not None else getattr(self, "path", "/")
+        )
+        return f"{root}/wp-json/" if root != "/" else "/wp-json/"
+
+    def wp_rest_has_namespace(self, namespace: str, base_path: str = None) -> bool:
+        """True when ``/wp-json/`` lists the given REST namespace."""
+        import json
+
+        response = self.http_request(
+            method="GET",
+            path=self.wp_json_index_path(base_path),
+            allow_redirects=True,
+            timeout=float(getattr(self, "timeout", None) or 15),
+        )
+        if not response or response.status_code != 200:
+            return False
+        try:
+            payload = response.json()
+        except Exception:
+            try:
+                payload = json.loads(response.text or "")
+            except Exception:
+                return False
+        namespaces = payload.get("namespaces") or []
+        return namespace in namespaces
+
+    def wp_plugin_version(self, plugin_slug: str, base_path: str = None) -> str:
+        """Read plugin version from readme.txt (Stable tag / Version)."""
+        path = self.wp_plugin_path(
+            base_path if base_path is not None else getattr(self, "path", "/"),
+            plugin_slug,
+            "readme.txt",
+        )
+        response = self.http_request(
+            method="GET",
+            path=path,
+            allow_redirects=True,
+            timeout=float(getattr(self, "timeout", None) or 15),
+        )
+        if not response or response.status_code != 200:
+            return ""
+        return self.wp_extract_version_from_readme(response.text or "") or ""
+
     # Backward-compatible aliases
     normalize_base_path = wp_normalize_base_path
     plugin_path = wp_plugin_path

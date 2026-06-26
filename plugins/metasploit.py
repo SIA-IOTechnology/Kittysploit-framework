@@ -18,6 +18,8 @@ import time
 import signal
 import re
 import termios
+
+from core.utils.paths import data_dir
 import shlex as shell_lex
 from requests import HTTPError
 from requests.exceptions import RequestException
@@ -150,12 +152,12 @@ class MetasploitPlugin(Plugin):
         "dependencies": ["requests"],
     }
 
-    DEFAULT_CONFIG = os.path.join("data", "metasploit", "rpc_config.json")
+    DEFAULT_CONFIG = ("metasploit", "rpc_config.json")
 
     def __init__(self, framework=None):
         super().__init__(framework)
         self.client: Optional[MetasploitRpcClient] = None
-        self.config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), self.DEFAULT_CONFIG)
+        self.config_path = str(data_dir().joinpath(*self.DEFAULT_CONFIG))
         self.msfconsole_process: Optional[subprocess.Popen] = None
         self.msfconsole_fd: Optional[int] = None
         self.msfconsole_path: Optional[str] = None

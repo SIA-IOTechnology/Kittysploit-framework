@@ -17,6 +17,14 @@ class Module(Scanner, Http_client):
         'severity': 'info',
         'modules': ['auxiliary/scanner/http/login/admin_login_bruteforce'],
         'tags': ['web', 'scanner', 'admin', 'login', 'panel'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

@@ -10,6 +10,14 @@ class Module(Post, System):
         "platform": Platform.LINUX,
         "author": "Alberto Rafael Rodriguez Iglesias, KittySploit Team",
         "session_type": [SessionType.SHELL, SessionType.METERPRETER, SessionType.SSH],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     def run(self):

@@ -8,6 +8,7 @@ import requests
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -22,6 +23,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-23870",
         "references": ["https://github.com/advisories/GHSA-8h8q-6873-q5fj"],
         "tags": ["scanner", "http", "nextjs", "dos", "rsc"],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     next_action = OptString(
@@ -107,6 +116,8 @@ class Module(Scanner, Http_client):
             return -1, time.perf_counter() - t0, str(e)
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         rows = max(100, int(self._o(self.check_rows)))
         to = float(self._o(self.post_timeout))
         bc, _, be = self._get_baseline()

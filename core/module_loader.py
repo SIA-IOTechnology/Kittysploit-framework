@@ -93,7 +93,9 @@ class ModuleLoader:
                 self.enable_policy_validation = False
         self.sync_manager = sync_manager
         self.last_load_failure: Optional[ModuleLoadFailure] = None
+        self._discovered_modules_cache: Optional[Dict[str, str]] = None
         self._discovered_paths_cache: Optional[List[str]] = None
+        self._cache_generation: int = 0
 
     def _import_module_name(self, module_path: str) -> str:
         import_path = module_path.replace("/", ".").lstrip(".")
@@ -110,9 +112,21 @@ class ModuleLoader:
             self._discovered_paths_cache = sorted(self.discover_modules().keys())
         return self._discovered_paths_cache
 
-    def invalidate_discovery_cache(self) -> None:
-        """Clear cached module paths (after sync, install, or reload)."""
+    def invalidate_caches(self, module_path: Optional[str] = None) -> None:
+        """Clear discovery and loaded-module caches (after sync, install, or reload)."""
+        self._discovered_modules_cache = None
         self._discovered_paths_cache = None
+        if module_path:
+            self.modules_cache.pop(module_path, None)
+            import_name = self._import_module_name(module_path)
+            sys.modules.pop(import_name, None)
+        else:
+            self.modules_cache.clear()
+        self._cache_generation += 1
+
+    def invalidate_discovery_cache(self) -> None:
+        """Backward-compatible alias for full cache invalidation."""
+        self.invalidate_caches()
 
     def _suggest_module_paths(self, module_path: str, limit: int = 5) -> List[str]:
         query = module_path.strip().strip("/")
@@ -125,55 +139,185 @@ class ModuleLoader:
 
         basename = query.rsplit("/", 1)[-1]
         suggestions: List[str] = []
+        seen = set()
+
+        def _add(paths: List[str]) -> None:
+            for path in paths:
+                if path in seen:
+                    continue
+                seen.add(path)
+                suggestions.append(path)
+                if len(suggestions) >= limit:
+                    return
 
         lower_query = query.lower()
-        prefix_hits = [path for path in candidates if path.lower().startswith(lower_query)]
-        suggestions.extend(prefix_hits[:limit])
+        query_parts = [part for part in lower_query.split("/") if part]
+
+        _add([path for path in candidates if path.lower() == lower_query])
+        _add([path for path in candidates if path.lower().startswith(lower_query)])
+        _add([path for path in candidates if lower_query in path.lower()])
+
+        if query_parts:
+            segment_hits = sorted(
+                (
+                    path for path in candidates
+                    if all(part in path.lower() for part in query_parts)
+                ),
+                key=lambda path: (path.lower().count(lower_query), len(path)),
+                reverse=True,
+            )
+            _add(list(segment_hits))
 
         if len(suggestions) < limit:
-            fuzzy = difflib.get_close_matches(query, candidates, n=limit, cutoff=0.55)
-            suggestions.extend(path for path in fuzzy if path not in suggestions)
+            fuzzy = difflib.get_close_matches(query, candidates, n=limit, cutoff=0.45)
+            _add(fuzzy)
 
         if len(suggestions) < limit and basename:
             basename_hits = [
                 path for path in candidates
                 if path.rsplit("/", 1)[-1].lower() == basename.lower()
             ]
-            suggestions.extend(path for path in basename_hits if path not in suggestions)
+            _add(basename_hits)
+
+        if len(suggestions) < limit and basename:
+            basename_fuzzy = difflib.get_close_matches(
+                basename,
+                [path.rsplit("/", 1)[-1] for path in candidates],
+                n=limit,
+                cutoff=0.5,
+            )
+            if basename_fuzzy:
+                basename_to_paths: Dict[str, List[str]] = {}
+                for path in candidates:
+                    basename_to_paths.setdefault(path.rsplit("/", 1)[-1], []).append(path)
+                for hit in basename_fuzzy:
+                    _add(basename_to_paths.get(hit, []))
 
         return suggestions[:limit]
 
+    def _import_name_to_module_path(self, import_name: str) -> str:
+        if import_name.startswith("modules."):
+            return import_name[len("modules."):].replace(".", "/")
+        return import_name.replace(".", "/")
+
     def _missing_module_name(self, exc: BaseException) -> str:
-        name = getattr(exc, "name", None)
-        if name:
-            return str(name)
+        root = exc
+        while True:
+            if isinstance(root, ModuleNotFoundError):
+                name = getattr(root, "name", None)
+                if name:
+                    return str(name)
+            cause = root.__cause__ or root.__context__
+            if cause is None or cause is root:
+                break
+            root = cause
+
         match = re.search(r"No module named '([^']+)'", str(exc))
         return match.group(1) if match else ""
 
-    def _classify_import_error(self, module_path: str, exc: BaseException) -> Tuple[LoadFailureKind, str]:
+    def _format_import_exception(
+        self,
+        module_path: str,
+        exc: BaseException,
+    ) -> Tuple[str, str, Optional[str]]:
+        """Return (summary, detailed_cause, source_location)."""
+        root = exc
+        while True:
+            cause = root.__cause__ or root.__context__
+            if cause is None or cause is root:
+                break
+            root = cause
+
+        summary = f"{type(exc).__name__}: {exc}"
+        details = [summary]
+        if root is not exc:
+            details.append(f"Root cause: {type(root).__name__}: {root}")
+
+        location = self._import_error_location(module_path, exc)
+        if location:
+            details.append(f"Location: {location}")
+
+        return summary, "\n".join(details), location
+
+    def _import_error_location(
+        self,
+        module_path: str,
+        exc: BaseException,
+    ) -> Optional[str]:
+        module_slug = module_path.replace("/", os.sep)
+        module_import = self._import_module_name(module_path)
+        candidates = {
+            module_slug,
+            module_slug + ".py",
+            module_import.replace(".", os.sep),
+            module_import.replace(".", os.sep) + ".py",
+        }
+
+        for current in (exc, exc.__cause__, exc.__context__):
+            if current is None:
+                continue
+            tb = current.__traceback__
+            if tb is None:
+                continue
+            for frame in reversed(traceback.extract_tb(tb)):
+                normalized = frame.filename.replace("\\", "/")
+                if any(token in normalized for token in candidates):
+                    return f"{frame.filename}:{frame.lineno} ({frame.name})"
+                if "/modules/" in normalized or normalized.endswith("modules"):
+                    return f"{frame.filename}:{frame.lineno} ({frame.name})"
+        return None
+
+    def _classify_import_error(
+        self,
+        module_path: str,
+        exc: BaseException,
+    ) -> Tuple[LoadFailureKind, str, str, List[str]]:
+        """Classify an import failure and return kind, summary, detailed cause, suggestions."""
+        summary, detailed_cause, _location = self._format_import_exception(module_path, exc)
         missing_name = self._missing_module_name(exc)
+        suggestions: List[str] = []
+
+        if isinstance(exc, SyntaxError):
+            return (
+                LoadFailureKind.IMPORT_ERROR,
+                "Module source contains a syntax error",
+                detailed_cause,
+                suggestions,
+            )
+
         if isinstance(exc, ModuleNotFoundError) and missing_name:
             root_name = self._import_module_name(module_path)
             if missing_name == root_name:
                 return (
                     LoadFailureKind.IMPORT_ERROR,
-                    f"Module package could not be imported ({missing_name})",
+                    "Module file exists but Python could not import it as a package",
+                    detailed_cause,
+                    suggestions,
                 )
             if missing_name.startswith(root_name + "."):
                 return (
                     LoadFailureKind.IMPORT_ERROR,
-                    f"Missing submodule inside module: {missing_name}",
+                    f"Missing internal submodule: {missing_name}",
+                    detailed_cause,
+                    suggestions,
                 )
             if missing_name.startswith("modules."):
+                broken_path = self._import_name_to_module_path(missing_name)
+                suggestions = self._suggest_module_paths(broken_path)
                 return (
                     LoadFailureKind.IMPORT_ERROR,
-                    f"Broken internal KittySploit import: {missing_name}",
+                    f"Broken KittySploit import: {missing_name}",
+                    detailed_cause,
+                    suggestions,
                 )
             return (
                 LoadFailureKind.MISSING_DEPENDENCY,
                 f"Missing Python dependency: {missing_name}",
+                detailed_cause,
+                suggestions,
             )
-        return LoadFailureKind.IMPORT_ERROR, str(exc)
+
+        return LoadFailureKind.IMPORT_ERROR, summary, detailed_cause, suggestions
 
     def _pypi_name_hint(self, package_name: str) -> str:
         mapping = {
@@ -202,7 +346,7 @@ class ModuleLoader:
         from core.output_handler import print_error, print_info, print_warning
 
         titles = {
-            LoadFailureKind.NOT_FOUND: f"Module path not found: '{failure.module_path}'",
+            LoadFailureKind.NOT_FOUND: f"KittySploit module not found: '{failure.module_path}'",
             LoadFailureKind.CONTRACT: f"Module contract invalid: '{failure.module_path}'",
             LoadFailureKind.POLICY: f"Module policy validation failed: '{failure.module_path}'",
             LoadFailureKind.POLICY_REJECTED: f"Module rejected by policy: '{failure.module_path}'",
@@ -213,6 +357,9 @@ class ModuleLoader:
             LoadFailureKind.UNKNOWN: f"Failed to load module: '{failure.module_path}'",
         }
         print_error(titles.get(failure.kind, titles[LoadFailureKind.UNKNOWN]))
+
+        if failure.detail and failure.detail != failure.cause:
+            print_info(f"Reason: {failure.detail}")
 
         if failure.cause:
             print_info(f"Cause: {failure.cause}")
@@ -235,6 +382,8 @@ class ModuleLoader:
 
         if failure.kind == LoadFailureKind.NOT_FOUND:
             print_info("Tip: run 'search <keyword>' to browse the module index")
+        elif failure.kind in {LoadFailureKind.IMPORT_ERROR, LoadFailureKind.MISSING_DEPENDENCY}:
+            print_info("Tip: this path exists on disk but failed during import (not a missing module path)")
 
     def _fail(
         self,
@@ -289,7 +438,10 @@ class ModuleLoader:
 
         return not errors or not self.strict_contract_validation
     
-    def discover_modules(self) -> Dict[str, str]:
+    def discover_modules(self, *, force: bool = False) -> Dict[str, str]:
+        if not force and self._discovered_modules_cache is not None:
+            return self._discovered_modules_cache
+
         modules = {}
         
         # Recursively walk through the modules directory
@@ -307,6 +459,7 @@ class ModuleLoader:
         extensions_modules = self._discover_extension_modules()
         modules.update(extensions_modules)
 
+        self._discovered_modules_cache = modules
         self._discovered_paths_cache = sorted(modules.keys())
         return modules
     
@@ -396,7 +549,7 @@ class ModuleLoader:
                 self._fail(
                     module_path,
                     LoadFailureKind.NOT_FOUND,
-                    "No module file exists for this path",
+                    "No module file exists at this path",
                     cause=f"Checked: {module_file_path} and {module_file_alt}",
                     silent=silent,
                 )
@@ -503,8 +656,19 @@ class ModuleLoader:
 
             return instance
 
+        except SyntaxError as e:
+            kind, detail, cause, suggestions = self._classify_import_error(module_path, e)
+            logging.error("Syntax error in module %s: %s", module_path, e)
+            self._fail(
+                module_path,
+                kind,
+                detail,
+                cause=cause,
+                suggestions=suggestions,
+                silent=silent,
+            )
         except ModuleNotFoundError as e:
-            kind, cause = self._classify_import_error(module_path, e)
+            kind, detail, cause, suggestions = self._classify_import_error(module_path, e)
             missing_package = self._missing_module_name(e)
             if kind == LoadFailureKind.MISSING_DEPENDENCY:
                 logging.debug("Skipping module %s due to missing dependency: %s", module_path, e)
@@ -513,20 +677,22 @@ class ModuleLoader:
             self._fail(
                 module_path,
                 kind,
-                cause,
+                detail,
                 cause=cause,
+                suggestions=suggestions,
                 missing_package=missing_package if kind == LoadFailureKind.MISSING_DEPENDENCY else "",
                 silent=silent,
             )
         except ImportError as e:
-            kind, cause = self._classify_import_error(module_path, e)
+            kind, detail, cause, suggestions = self._classify_import_error(module_path, e)
             missing_package = self._missing_module_name(e)
             logging.error("Import error in module %s: %s", module_path, e)
             self._fail(
                 module_path,
                 kind,
-                cause,
+                detail,
                 cause=cause,
+                suggestions=suggestions,
                 missing_package=missing_package if kind == LoadFailureKind.MISSING_DEPENDENCY else "",
                 silent=silent,
             )

@@ -9,6 +9,14 @@ class Module(Post):
         "description": "Audit Android network posture: interfaces, IPs, routes, DNS, Wi-Fi, proxy, VPN",
         "author": "KittySploit Team",
         "session_type": SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     verbose = OptBool(False, "Show additional network diagnostics", False)

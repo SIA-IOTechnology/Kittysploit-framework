@@ -7,6 +7,14 @@ class Module(Post):
         'description': 'Manage WiFi connections on an Android device',
         'author': 'KittySploit Team',
         'session_type': SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     action = OptChoice("status", "Action: status/enable/disable", True, ["status", "enable", "disable"])

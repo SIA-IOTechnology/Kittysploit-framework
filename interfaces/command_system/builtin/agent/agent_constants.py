@@ -286,6 +286,29 @@ EXPANDED_SURFACE_RECON_SKIP_SUBSTR: Final[Tuple[str, ...]] = (
 DERIVED_HOST_SCAN_MAX_HOSTS: Final[int] = 10
 DERIVED_HOST_SCAN_MODULES_PER_HOST: Final[int] = 8
 
+# ``agent --all``: ordered passive intel before HTTP campaign (subdomains → identities).
+EXPANDED_SURFACE_SUBDOMAIN_MODULES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/domain_crtsh",
+    "auxiliary/osint/domain_dns",
+    "auxiliary/osint/domain_surface_mapper",
+)
+
+EXPANDED_SURFACE_IDENTITY_MODULES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/email_infra_pivot",
+    "auxiliary/osint/identity_handle_hunter",
+    "auxiliary/osint/breach_exposure_score",
+    "auxiliary/osint/advanced_exposed_credentials_detector",
+)
+
+EXPANDED_SURFACE_INTEL_MODULES: Final[Tuple[str, ...]] = (
+    EXPANDED_SURFACE_SUBDOMAIN_MODULES + EXPANDED_SURFACE_IDENTITY_MODULES
+)
+
+EXPANDED_SURFACE_INTEL_MAX_MODULES: Final[int] = 7
+EXPANDED_SURFACE_USERNAME_CANDIDATE_MAX: Final[int] = 24
+EXPANDED_SURFACE_PASSWORD_CANDIDATE_MAX: Final[int] = 32
+EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS: Final[int] = 36
+
 # Cookie name substrings preferred when seeding session from auth_context["cookies"]
 SESSION_COOKIE_NAME_MARKERS: Final[Tuple[str, ...]] = (
     "session",

@@ -12,6 +12,14 @@ class Module(Post, System):
         "session_type": [SessionType.SHELL, 
                         SessionType.METERPRETER,
                         SessionType.SSH],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     network_range = OptString("", "Network range to scan (e.g., 192.168.1.0/24 or 10.0.0.0/24)", required=True)

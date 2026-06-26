@@ -9,6 +9,14 @@ class Module(Post, MySQLClient):
 		"description": "Read files from filesystem using MySQL LOAD_FILE() - requires FILE privilege",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 
 	file_path = OptString("/etc/passwd", "File path to read", True)

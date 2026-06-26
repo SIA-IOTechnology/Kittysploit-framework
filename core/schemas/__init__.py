@@ -21,6 +21,15 @@ ENTITY_SCHEMAS = {
     "job": "job.schema.json",
     "session": "session.schema.json",
     "report": "report.schema.json",
+    "agent_action": "agent_action.schema.json",
+    "agent_observation": "agent_observation.schema.json",
+    "agent_decision": "agent_decision.schema.json",
+    "agent_state": "agent_state.schema.json",
+    "agent_run": "agent_run.schema.json",
+    "kittyforge_error": "kittyforge_error.schema.json",
+    "generated_artifact": "generated_artifact.schema.json",
+    "kittyforge_graph": "kittyforge_graph.schema.json",
+    "signed_package": "signed_package.schema.json",
 }
 
 

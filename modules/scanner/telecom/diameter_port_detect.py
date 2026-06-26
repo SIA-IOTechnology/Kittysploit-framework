@@ -17,6 +17,14 @@ class Module(Scanner, Tcp_scanner_client):
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "diameter", "3gpp", "mobile"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def _likely_diameter_not_misconfigured_http(self, host: str, port: int) -> bool:

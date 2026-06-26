@@ -13,8 +13,9 @@ from prompt_toolkit.shortcuts import prompt, CompleteStyle
 import os
 import difflib
 import re
-from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+from core.utils.paths import data_resource_exists, read_data_lines
 
 
 class Lfi(BaseModule):
@@ -22,11 +23,11 @@ class Lfi(BaseModule):
     file_read = OptString("/etc/passwd", "file to read in lfi", required=True)
     shell_lfi = OptBool(False, "Start lfi pseudo shell", required=False)
     
-    # Wordlist paths configuration
+    # Wordlist paths configuration (relative to data/)
     WORDLIST_PATHS = {
-        'win_small': "data/wordlists/lfi/win_small.txt",
-        'win_big': "data/wordlists/lfi/win_big.txt", 
-        'linux': "data/wordlists/lfi/linux.txt"
+        'win_small': ("wordlists", "lfi", "win_base.txt"),
+        'win_big': ("wordlists", "lfi", "win.txt"),
+        'linux': ("wordlists", "lfi", "linux.txt"),
     }
     
     # Poisoning payloads
@@ -65,33 +66,29 @@ class Lfi(BaseModule):
             print_error(f"Unknown wordlist: {wordlist_name}")
             return
             
-        wordlist_path = self.WORDLIST_PATHS[wordlist_name]
-        
+        wordlist_parts = self.WORDLIST_PATHS[wordlist_name]
+        wordlist_label = "/".join(wordlist_parts)
+
         try:
-            if not Path(wordlist_path).exists():
-                print_error(f"Wordlist file not found: {wordlist_path}")
+            if not data_resource_exists(*wordlist_parts):
+                print_error(f"Wordlist file not found: data/{wordlist_label}")
                 return
-                
-            with open(wordlist_path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-                print_status(f"Files found with {len(lines)} lines")
-                
-                for line in lines:
-                    file_path = line.strip()
-                    if not file_path:  # Skip empty lines
-                        continue
-                        
-                    try:
-                        output = self.execute(file_path)
-                        if output and self._is_valid_output(output):
-                            print_success(file_path)
-                    except Exception as e:
-                        print_error(f"Error testing {file_path}: {e}")
-                        
+
+            lines = read_data_lines(*wordlist_parts)
+            print_status(f"Files found with {len(lines)} lines")
+
+            for file_path in lines:
+                try:
+                    output = self.execute(file_path)
+                    if output and self._is_valid_output(output):
+                        print_success(file_path)
+                except Exception as e:
+                    print_error(f"Error testing {file_path}: {e}")
+
         except FileNotFoundError:
-            print_error(f"File {wordlist_path} not found")
+            print_error(f"File data/{wordlist_label} not found")
         except PermissionError:
-            print_error(f"Permission denied accessing {wordlist_path}")
+            print_error(f"Permission denied accessing data/{wordlist_label}")
         except Exception as e:
             print_error(f"Unexpected error: {e}")
 

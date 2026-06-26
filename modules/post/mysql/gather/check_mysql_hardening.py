@@ -9,6 +9,14 @@ class Module(Post, MySQLClient):
 		"description": "Audit common MySQL security hardening controls and risky configurations",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	include_system = OptBool(False, "Include system/internal accounts in account checks", False)

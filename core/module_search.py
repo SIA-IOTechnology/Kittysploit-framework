@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 
-from core.utils.module_static_metadata import infer_module_type_from_path
+from core.utils.module_static_metadata import infer_module_type_from_path, normalize_module_type
 
 
 SUPPORTED_TYPES = {
@@ -28,6 +28,7 @@ SUPPORTED_TYPES = {
     "listeners",
     "listener",
     "obfuscator",
+    "obfuscators",
     "payloads",
     "payload",
     "post",
@@ -81,16 +82,7 @@ class ModuleSearchFilters:
     limit: int = 50
 
     def normalized_type(self) -> str:
-        value = (self.module_type or "").strip().lower()
-        remap = {
-            "exploit": "exploits",
-            "payload": "payloads",
-            "listener": "listeners",
-            "encoder": "encoders",
-            "scan": "scanner",
-            "scanners": "scanner",
-        }
-        return remap.get(value, value)
+        return normalize_module_type((self.module_type or "").strip())
 
     def normalized_reliability(self) -> str:
         value = (self.reliability or "").strip().lower()

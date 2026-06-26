@@ -9,6 +9,14 @@ class Module(Post, MySQLClient):
 		"description": "Enumerate MySQL users, hosts, password status, and privileges",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	include_system = OptBool(False, "Include system/internal accounts when possible", False)

@@ -11,6 +11,14 @@ class Module(Post):
         "description": "Audit AWS account security posture (IAM, root safeguards, MFA, and S3 public exposure)",
         "author": "KittySploit Team",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     check_iam_summary = OptBool(True, "Check IAM account summary and root safeguards", False)

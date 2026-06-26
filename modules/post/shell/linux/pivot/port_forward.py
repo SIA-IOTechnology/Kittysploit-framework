@@ -14,6 +14,14 @@ class Module(Post, System):
         "session_type": [SessionType.SHELL, 
                         SessionType.METERPRETER,
                         SessionType.SSH],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     forward_type = OptString("local", "Forward type: local (local->remote) or remote (remote->local)", required=True)

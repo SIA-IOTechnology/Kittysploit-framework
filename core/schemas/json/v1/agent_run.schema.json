@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_run.schema.json",
+  "title": "KittySploit Agent Run",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "workspace": {"type": "string", "minLength": 1},
+    "status": {
+      "type": "string",
+      "enum": ["planned", "running", "completed", "failed", "cancelled", "stopped"]
+    },
+    "started_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "completed_at": {
+      "oneOf": [{"$ref": "common.schema.json#/$defs/timestamp"}, {"type": "null"}]
+    },
+    "target": {
+      "oneOf": [{"$ref": "target.schema.json"}, {"type": "string"}]
+    },
+    "state": {"$ref": "agent_state.schema.json"},
+    "actions": {"type": "array", "items": {"$ref": "agent_action.schema.json"}},
+    "observations": {"type": "array", "items": {"$ref": "agent_observation.schema.json"}},
+    "decisions": {"type": "array", "items": {"$ref": "agent_decision.schema.json"}},
+    "report_path": {"type": ["string", "null"]},
+    "stop_reason": {"type": ["string", "null"]}
+  },
+  "required": ["schema_version", "id", "workspace", "status", "started_at", "target", "state"],
+  "additionalProperties": true
+}

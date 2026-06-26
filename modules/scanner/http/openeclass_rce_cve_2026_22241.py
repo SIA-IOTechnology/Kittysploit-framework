@@ -24,6 +24,14 @@ class Module(Scanner, Http_client):
             "exploits/http/openeclass_rce_cve_2026_22241",
         ],
         "tags": ["web", "scanner", "openeclass", "rce", "cve-2026-22241"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def _version_lt(self, v1: str, v2: str) -> bool:

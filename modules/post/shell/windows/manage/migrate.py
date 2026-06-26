@@ -20,6 +20,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     def __init__(self):

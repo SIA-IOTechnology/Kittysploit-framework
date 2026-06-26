@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kittysploit.local/schemas/v1/signed_package.json",
+  "title": "KittyForge signed package manifest",
+  "type": "object",
+  "required": ["schema_version", "kittysploit_package", "checksums", "signature", "signature_alg"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "kittysploit_package": { "type": "boolean" },
+    "package_id": { "type": "string" },
+    "created_at": { "type": "string" },
+    "checksums": { "type": "object", "additionalProperties": { "type": "string" } },
+    "files": { "type": "array" },
+    "signature_alg": { "type": "string", "enum": ["HMAC-SHA256"] },
+    "signature": { "type": "string" }
+  }
+}

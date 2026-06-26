@@ -15,7 +15,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from core.utils.paths import data_dir, framework_root, sound_notify_path
+from core.utils.paths import (
+    data_dir,
+    data_resource,
+    data_resource_exists,
+    framework_root,
+    shared_static_img_dir,
+    sound_notify_path,
+)
 from core.utils.venv_helper import detect_virtualenv
 
 try:
@@ -87,21 +94,25 @@ ALL_CATEGORIES = (
     "marketplace",
 )
 
-_REQUIRED_ASSETS: Sequence[tuple[str, bool]] = (
-    ("data/syscall/syscalls.json", True),
-    ("data/syscall/x86_64.json", True),
-    ("data/vendors/oui.json", True),
-    ("data/default_password.json", True),
-    ("data/metasploit/rpc_config.json", False),
-    ("data/sound/notify.wav", False),
+_REQUIRED_ASSETS: Sequence[tuple[tuple[str, ...], bool]] = (
+    (("syscall", "syscalls.json"), True),
+    (("syscall", "x86_64.json"), True),
+    (("vendors", "oui.json"), True),
+    (("default_password.json",), True),
+    (("metasploit", "rpc_config.json"), False),
+    (("sound", "notify.wav"), False),
 )
 
-_KNOWN_WORDLISTS: Sequence[str] = (
-    "data/wordlists/dns.txt",
-    "data/wordlists/lfi/linux.txt",
-    "data/wordlists/lfi/win.txt",
-    "data/wordlists/lfi/win_base.txt",
+_KNOWN_WORDLISTS: Sequence[tuple[str, ...]] = (
+    ("wordlists", "dns.txt"),
+    ("wordlists", "lfi", "linux.txt"),
+    ("wordlists", "lfi", "win.txt"),
+    ("wordlists", "lfi", "win_base.txt"),
 )
+
+
+def _data_asset_label(parts: tuple[str, ...]) -> str:
+    return "data/" + "/".join(parts)
 
 
 def _add(report: DoctorReport, result: CheckResult) -> None:
@@ -139,18 +150,9 @@ def _load_pyproject_deps(root: Path) -> List[str]:
 
 
 def _find_zig() -> Optional[str]:
-    for candidate in ("zig", "zig.exe"):
-        if shutil.which(candidate):
-            return candidate
-    root = framework_root()
-    if root is None:
-        return None
-    bundled = root / "core" / "lib" / "compiler" / "zig_executable" / (
-        "zig.exe" if platform.system() == "Windows" else "zig"
-    )
-    if bundled.is_file() and (bundled.parent / "lib").is_dir():
-        return str(bundled)
-    return None
+    from core.lib.compiler.zig_paths import find_zig_executable
+
+    return find_zig_executable()
 
 
 def _zig_version(zig_path: str) -> str:
@@ -551,16 +553,16 @@ class Doctor:
 
         missing_required: List[str] = []
         missing_optional: List[str] = []
-        for rel_path, required in _REQUIRED_ASSETS:
-            path = self.root / rel_path
-            if path.is_file():
+        for parts, required in _REQUIRED_ASSETS:
+            label = _data_asset_label(parts)
+            if data_resource_exists(*parts):
                 continue
             if required:
-                missing_required.append(rel_path)
+                missing_required.append(label)
             else:
-                missing_optional.append(rel_path)
+                missing_optional.append(label)
 
-        static_img = self.root / "interfaces" / "static" / "img"
+        static_img = shared_static_img_dir()
         if not static_img.is_dir():
             try:
                 rel = str(static_img.relative_to(self.root))
@@ -686,14 +688,18 @@ class Doctor:
         present = 0
         missing: List[str] = []
         empty: List[str] = []
-        for rel_path in _KNOWN_WORDLISTS:
-            path = self.root / rel_path
-            if not path.is_file():
-                missing.append(rel_path)
+        for parts in _KNOWN_WORDLISTS:
+            label = _data_asset_label(parts)
+            if not data_resource_exists(*parts):
+                missing.append(label)
                 continue
             present += 1
-            if path.stat().st_size == 0:
-                empty.append(rel_path)
+            try:
+                size = data_resource(*parts).stat().st_size
+            except (OSError, AttributeError, TypeError):
+                size = 1
+            if size == 0:
+                empty.append(label)
 
         if missing:
             _add(

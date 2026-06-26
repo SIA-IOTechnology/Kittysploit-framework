@@ -23,6 +23,14 @@ class Module(Post):
             "http://obscuresecurity.blogspot.com/2012/12/finding-simple-av-signatures-with.html",
             "https://github.com/mattifestation/PowerSploit",
         ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     target_path = OptString("", "Target binary path on remote host", True)

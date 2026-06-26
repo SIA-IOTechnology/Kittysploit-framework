@@ -8,7 +8,10 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Callable, Dict
+
+from interfaces.command_system.builtin.agent.run_store import file_lock
 
 
 def load_json_dict(path: str) -> Dict[str, Any]:
@@ -41,3 +44,18 @@ def atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
         except Exception:
             pass
         raise
+
+
+def update_json_dict(
+    path: str,
+    updater: Callable[[Dict[str, Any]], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Read-modify-write a JSON object under an inter-process lock."""
+    lock_path = Path(path).with_suffix(Path(path).suffix + ".lock")
+    with file_lock(lock_path):
+        current = load_json_dict(path)
+        updated = updater(dict(current))
+        if not isinstance(updated, dict):
+            raise TypeError("JSON updater must return a dictionary")
+        atomic_write_json(path, updated)
+        return updated

@@ -33,7 +33,7 @@ class HelpCommand(BaseCommand):
             'network_discover', 'myip', 'http', 'proxy', 'debug_proxy', 'scanner', 'tor'
         ],
         'Development & Tools': [
-            'edit', 'generate', 'new', 'detection_pack', 'api_import', 'pattern', 'syscall', 'compatible_payloads', 'doctor'
+            'edit', 'generate', 'new', 'detection_pack', 'api_import', 'pattern', 'syscall', 'compatible_payloads', 'doctor', 'inventory', 'attack', 'lab'
         ],
         'Jobs & Background': [
             'jobs'

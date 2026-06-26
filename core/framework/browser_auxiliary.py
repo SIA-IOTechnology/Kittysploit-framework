@@ -9,7 +9,7 @@ from difflib import SequenceMatcher
 
 class BrowserAuxiliary(BaseModule):
 
-    TYPE_MODULE = "browserauxiliary"
+    TYPE_MODULE = "browser_auxiliary"
 
     session_id = OptString("", "Target browser session ID", required=True)
     fingerprint_match = OptInteger(0, "Similarity threshold for fingerprint matching (0-100, default: 0 = no matching)", required=False, advanced=True)

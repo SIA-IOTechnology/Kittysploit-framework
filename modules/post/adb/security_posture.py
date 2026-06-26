@@ -8,6 +8,14 @@ class Module(Post):
         "description": "Assess Android security posture (debug, root, encryption, boot integrity, network exposure)",
         "author": "KittySploit Team",
         "session_type": SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     verbose = OptBool(False, "Show additional diagnostic values", False)

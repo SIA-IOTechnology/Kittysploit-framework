@@ -28,6 +28,7 @@ except Exception:
 
 from interfaces.command_system.builtin.agent.state import (
     AgentState,
+    agent_state_checkpoint_dict,
     agent_state_from_dict,
     agent_state_to_dict,
 )
@@ -69,6 +70,7 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     DRUPAL_BLOB_MARKERS,
     DERIVED_HOST_SCAN_MAX_HOSTS,
     DERIVED_HOST_SCAN_MODULES_PER_HOST,
+    EXPANDED_SURFACE_INTEL_MAX_MODULES,
     EXPANDED_SURFACE_MODULE_PREFIXES,
     EXPANDED_SURFACE_RECON_SKIP_SUBSTR,
     HTTP_REDIRECT_STATUSES,
@@ -92,6 +94,22 @@ from interfaces.command_system.builtin.agent.report_service import ReportService
 from interfaces.command_system.builtin.agent.http_intelligence import HttpRequestIntelligence
 from interfaces.command_system.builtin.agent.post_exploit_intelligence import PostExploitIntelligence
 from interfaces.command_system.builtin.agent.auth_operations import AuthContextOperations
+from interfaces.command_system.builtin.agent.identity_intel import (
+    build_intel_option_overrides,
+    build_persona_password_candidates,
+    build_username_candidates,
+    harvest_identities_from_results,
+    harvest_subdomains_from_results,
+    merge_intel_into_knowledge_base,
+    organization_root_domain,
+    pick_intel_modules,
+)
+from interfaces.command_system.builtin.agent.attack_chain_memory import (
+    build_chain_option_overrides,
+    export_chain_summary,
+    poison_kb_from_results,
+    suggest_chain_module_paths,
+)
 from interfaces.command_system.builtin.agent.io_utils import atomic_write_json, load_json_dict
 from interfaces.command_system.builtin.agent.module_scoring import (
     ModuleScoreRules,
@@ -126,6 +144,27 @@ from interfaces.command_system.builtin.agent.compiled_patterns import (
     TAG_RE,
     WORD_RE,
 )
+from interfaces.command_system.builtin.agent.network_budget import (
+    NetworkBudgetExceeded,
+    consume_network_request,
+    install_requests_budget_hook,
+    module_budget_units,
+    network_budget_context,
+    sync_metrics_from_budget,
+    try_consume_budget,
+)
+from interfaces.command_system.builtin.agent.redaction import sanitize_nested
+from interfaces.command_system.builtin.agent.run_lifecycle import RunLifecycle
+from interfaces.command_system.builtin.agent.runtime_policy import (
+    assess_module_risk,
+    module_policy_decision,
+    runtime_policy_context,
+)
+from interfaces.command_system.builtin.agent.execution_service import AgentModuleExecutionService
+from interfaces.command_system.builtin.agent.module_runner import (
+    AgentModuleRunner,
+    WorkflowModuleRunnerHooks,
+)
 
 
 class AgentWorkflowCore:
@@ -138,10 +177,45 @@ class AgentWorkflowCore:
         self._llm = LocalLLMService()
         self._report = ReportService()
         self._http_intel = HttpRequestIntelligence(framework)
+        self._http_intel._llm = self._llm
         self._post_intel = PostExploitIntelligence(framework)
         self._auth_ops = AuthContextOperations(self._normalize_relative_path)
         self._module_perf = ModulePerformanceMemory()
         self._module_ctx = ModuleContextMemory()
+        self._lifecycle = RunLifecycle()
+        self._module_runner = AgentModuleRunner(WorkflowModuleRunnerHooks(self))
+        self._module_executor = AgentModuleExecutionService(framework)
+        self._paths = None
+
+    def _memory_path(self, filename: str) -> str:
+        if self._paths is not None:
+            self._paths.ensure()
+            return str(self._paths.memory_dir / filename)
+        return os.path.expanduser(f"~/.kittysploit/agent/default/memory/{filename}")
+
+    def _record_agent_error(
+        self,
+        state: AgentState,
+        component: str,
+        exc: Any,
+        *,
+        fatal: bool = False,
+        phase: str = "",
+    ) -> None:
+        self._lifecycle.record_error(
+            state,
+            component,
+            exc,
+            fatal=fatal,
+            phase=phase,
+            append_timeline=self._append_timeline_event,
+        )
+
+    def _checkpoint_state(self, state: AgentState, phase: str) -> None:
+        self._lifecycle.checkpoint_state(state, phase)
+
+    def _phase_stop_reason(self, state: AgentState, phase: str) -> Optional[str]:
+        return self._lifecycle.phase_stop_reason(state, phase)
 
     def _network_error_markers(self) -> Tuple[str, ...]:
         return (
@@ -178,8 +252,13 @@ class AgentWorkflowCore:
         return random.choice(chrome_uas)
 
 
-    def _create_spoofed_ssl_context(self) -> Any:
-        ctx = ssl.create_default_context()
+    def _create_spoofed_ssl_context(self, state: Optional[AgentState] = None) -> Any:
+        policy = getattr(state, "runtime_policy", None) if state is not None else None
+        if policy is not None and not getattr(policy, "tls_verify", True):
+            ctx = ssl._create_unverified_context()
+        else:
+            cafile = getattr(policy, "tls_ca_bundle", None) if policy is not None else None
+            ctx = ssl.create_default_context(cafile=cafile)
         # Chrome JA3-like ciphers
         ctx.set_ciphers('TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA:AES256-SHA')
         try:
@@ -193,13 +272,19 @@ class AgentWorkflowCore:
 
     async def _async_http_probe_one(
         self,
+        state: AgentState,
         session: Any,
         url: str,
         timeout_s: float,
         read_bytes: int,
     ) -> Dict[str, Any]:
         try:
-            async with session.get(url, timeout=timeout_s, allow_redirects=True) as response:
+            guard = getattr(state, "scope_guard", None)
+            if guard is not None:
+                allowed, reason = guard.validate_url(url)
+                if not allowed:
+                    return {"url": url, "status": 0, "headers": {}, "body": "", "final_url": "", "error": reason}
+            async with session.get(url, timeout=timeout_s, allow_redirects=False) as response:
                 raw = await response.content.read(read_bytes)
                 return {
                     "url": url,
@@ -221,8 +306,16 @@ class AgentWorkflowCore:
     ) -> List[Dict[str, Any]]:
         timeout = aiohttp.ClientTimeout(total=timeout_s) if HAS_AIOHTTP else None
         headers = self._agent_http_headers(state)
-        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            tasks = [self._async_http_probe_one(session, url, timeout_s, read_bytes) for url in urls]
+        policy = getattr(state, "runtime_policy", None)
+        connector = None
+        if policy is not None:
+            connector = aiohttp.TCPConnector(
+                ssl=self._create_spoofed_ssl_context(state)
+                if getattr(policy, "tls_verify", True)
+                else False
+            )
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout, connector=connector) as session:
+            tasks = [self._async_http_probe_one(state, session, url, timeout_s, read_bytes) for url in urls]
             return list(await asyncio.gather(*tasks))
 
     def _run_async_http_probe_many(
@@ -260,29 +353,32 @@ class AgentWorkflowCore:
             method="GET",
         )
         try:
+            guard = getattr(state, "scope_guard", None)
+            if guard is not None:
+                allowed, reason = guard.validate_url(url)
+                if not allowed:
+                    raise PermissionError(reason)
+            consume_network_request(f"GET {url}")
+
+            class _NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    return None
+
+            handlers = [_NoRedirect()]
             if url.startswith("https://"):
-                ctx = self._create_spoofed_ssl_context()
-                with urllib.request.urlopen(request, timeout=timeout_s, context=ctx) as response:
-                    body = response.read(read_bytes).decode("utf-8", errors="ignore")
-                    return {
-                        "url": url,
-                        "status": int(getattr(response, "status", 0) or response.getcode() or 0),
-                        "headers": {k.lower(): str(v) for k, v in response.headers.items()},
-                        "body": body,
-                        "final_url": str(response.geturl() or ""),
-                        "error": "",
-                    }
-            else:
-                with urllib.request.urlopen(request, timeout=timeout_s) as response:
-                    body = response.read(read_bytes).decode("utf-8", errors="ignore")
-                    return {
-                        "url": url,
-                        "status": int(getattr(response, "status", 0) or response.getcode() or 0),
-                        "headers": {k.lower(): str(v) for k, v in response.headers.items()},
-                        "body": body,
-                        "final_url": str(response.geturl() or ""),
-                        "error": "",
-                    }
+                ctx = self._create_spoofed_ssl_context(state)
+                handlers.append(urllib.request.HTTPSHandler(context=ctx))
+            opener = urllib.request.build_opener(*handlers)
+            with opener.open(request, timeout=timeout_s) as response:
+                body = response.read(read_bytes).decode("utf-8", errors="ignore")
+                return {
+                    "url": url,
+                    "status": int(getattr(response, "status", 0) or response.getcode() or 0),
+                    "headers": {k.lower(): str(v) for k, v in response.headers.items()},
+                    "body": body,
+                    "final_url": str(response.geturl() or ""),
+                    "error": "",
+                }
         except urllib.error.HTTPError as exc:
             try:
                 body = exc.read(read_bytes).decode("utf-8", errors="ignore")
@@ -336,7 +432,11 @@ class AgentWorkflowCore:
                 fetch_urls = fetch_urls[:allowed_count]
                 for skipped_url in skipped_urls:
                     key = self._normalize_probe_url(skipped_url)
-                    state.metrics.network_units_skipped += 1
+                    budget = getattr(state, "network_budget", None)
+                    if budget is not None:
+                        budget.record_skipped(1)
+                    else:
+                        state.metrics.network_units_skipped += 1
                     output_by_key[key] = {
                         "url": skipped_url,
                         "status": 0,
@@ -345,23 +445,6 @@ class AgentWorkflowCore:
                         "final_url": "",
                         "error": "request budget exhausted before HTTP probe",
                     }
-
-        if fetch_urls:
-            # Reserve one budget unit per actual HTTP probe. Module-owned internal requests
-            # are budgeted at launch time; these are agent-owned probes.
-            if not self._consume_network_units(state, len(fetch_urls)):
-                for url in fetch_urls:
-                    key = self._normalize_probe_url(url)
-                    output_by_key[key] = {
-                        "url": url,
-                        "status": 0,
-                        "headers": {},
-                        "body": "",
-                        "final_url": "",
-                        "error": "request budget exhausted before HTTP probe",
-                    }
-                fetch_urls = []
-                fetch_keys = []
 
         fetched_rows: List[Dict[str, Any]] = []
         if fetch_urls:
@@ -407,34 +490,42 @@ class AgentWorkflowCore:
         return self._normalized_safety_profile(state) == "discreet"
 
     def _request_budget_remaining(self, state: AgentState) -> Optional[int]:
+        budget = getattr(state, "network_budget", None)
+        if budget is not None and budget.bounded:
+            return budget.remaining
         try:
-            budget = int(getattr(state, "request_budget", 0) or 0)
+            limit = int(getattr(state, "request_budget", 0) or 0)
         except Exception:
-            budget = 0
-        if budget <= 0:
+            limit = 0
+        if limit <= 0:
             return None
         used = int(getattr(state.metrics, "network_units_used", 0) or 0)
-        return max(0, budget - used)
+        return max(0, limit - used)
 
-    def _consume_network_units(self, state: AgentState, units: int = 1) -> bool:
-        units = max(1, int(units or 1))
-        remaining = self._request_budget_remaining(state)
-        if remaining is not None and remaining < units:
-            state.metrics.network_units_skipped += units
-            return False
-        state.metrics.network_units_used += units
-        return True
+    def _consume_network_units(
+        self,
+        state: AgentState,
+        units: int = 1,
+        *,
+        reason: str = "non-HTTP agent network operation",
+        module: Any = None,
+        module_path: str = "",
+    ) -> bool:
+        if module is not None or module_path:
+            units = module_budget_units(module if module is not None else {"path": module_path}, module_path, units)
+        return try_consume_budget(
+            state,
+            units,
+            reason=reason,
+            phase=state.current_phase,
+        )
+
+    @staticmethod
+    def _module_uses_http_client(module: Any) -> bool:
+        return AgentModuleRunner.module_uses_http_client(module)
 
     def _budget_skip_result(self, module: Dict[str, Any], phase_name: str) -> Dict[str, Any]:
-        path = module.get("path", "") if isinstance(module, dict) else ""
-        return {
-            "module": module.get("name", path) if isinstance(module, dict) else str(path),
-            "path": path,
-            "status": "skipped",
-            "vulnerable": False,
-            "message": f"{phase_name}: request budget exhausted before module launch",
-            "details": {"reason": "request_budget_exhausted"},
-        }
+        return self._module_runner.budget_skip_result(module, phase_name)
 
     def _limit_modules_by_request_budget(
         self,
@@ -442,18 +533,67 @@ class AgentWorkflowCore:
         modules: List[Dict[str, Any]],
         phase_name: str,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        remaining = self._request_budget_remaining(state)
-        if remaining is None:
-            return list(modules or []), []
-        if remaining <= 0:
-            skipped = [self._budget_skip_result(m, phase_name) for m in modules or []]
-            state.metrics.network_units_skipped += len(skipped)
-            return [], skipped
-        allowed = list((modules or [])[:remaining])
-        skipped_modules = list((modules or [])[remaining:])
-        skipped = [self._budget_skip_result(m, phase_name) for m in skipped_modules]
-        state.metrics.network_units_skipped += len(skipped)
-        return allowed, skipped
+        return self._module_runner.limit_modules_by_request_budget(state, modules, phase_name)
+
+    def _elite_auto_correct_modules(
+        self,
+        state: AgentState,
+        scanner: Any,
+        batch_results: List[Dict[str, Any]],
+        phase_name: str,
+    ) -> None:
+        if not getattr(state, "llm_local", False):
+            return
+        for res in batch_results:
+            if res.get("status") == "error" and not res.get("vulnerable"):
+                message = str(res.get("message", "")).lower()
+                if "filter" not in message and "blocked" not in message:
+                    continue
+                module_path = res.get("path")
+                print_status(f"Elite: Attempting auto-correction for failed module `{module_path}`...")
+                try:
+                    suggestion = self._llm.query_text(
+                        state.llm_endpoint,
+                        state.llm_model,
+                        (
+                            "Suggest one bounded, non-destructive parameter adjustment. "
+                            "Do not suggest bypassing scope, approvals, authentication, or rate limits."
+                        ),
+                        {
+                            "module": module_path,
+                            "error": res.get("message"),
+                        },
+                    )
+                    if not suggestion:
+                        continue
+                    print_info(f"LLM suggestion: {suggestion}")
+                    res["auto_correction_attempted"] = True
+                    res["llm_suggestion"] = suggestion
+                except Exception as exc:
+                    self._record_agent_error(state, "llm_auto_correction", exc, phase=phase_name)
+
+    def _execute_agent_modules(
+        self,
+        state: AgentState,
+        scanner,
+        modules: List[Dict[str, Any]],
+        target_info: Dict[str, Any],
+        threads: int,
+        verbose: bool,
+        phase_name: str = "phase",
+    ) -> List[Dict[str, Any]]:
+        return self._module_runner.execute_agent_modules(
+            state,
+            scanner,
+            modules,
+            target_info,
+            threads,
+            verbose,
+            phase_name,
+            elite_auto_correct=lambda st, sc, rows: self._elite_auto_correct_modules(
+                st, sc, rows, phase_name
+            ),
+        )
 
     def _normalize_probe_url(self, url: str) -> str:
         try:
@@ -495,34 +635,27 @@ class AgentWorkflowCore:
             print_info(f"Rate limit: sleeping {delay:.2f}s{suffix}")
         time.sleep(delay)
 
-    def _module_block_reason_for_profile(self, state: AgentState, module_path: Any) -> str:
-        profile = self._normalized_safety_profile(state)
-        low = str(module_path or "").lower()
-        if profile == "safe":
-            for token in SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
-                if token in low:
-                    return f"safe profile blocks noisy module token `{token}`"
+    def _module_block_reason_for_profile(
+        self,
+        state: AgentState,
+        module_path: Any,
+        module_info: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        path = str(module_path or "")
+        info = module_info if isinstance(module_info, dict) else {}
+        if not info:
+            try:
+                info = dict(self._catalog._get_module_catalog().get(path) or {})
+            except Exception:
+                info = {}
+        risk = assess_module_risk(info, path)
+        policy = getattr(state, "runtime_policy", None)
+        if policy is None:
             return ""
-        if profile == "discreet":
-            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
-            signals = {str(x).lower() for x in kb.get("risk_signals", []) or []}
-            has_auth_or_login = bool(
-                signals.intersection({
-                    "authenticated_session",
-                    "credentials_obtained",
-                    "login_form_detected",
-                    "login_redirect_detected",
-                    "login_surface_detected",
-                })
-                or kb.get("login_paths")
-            )
-            for token in DISCREET_PROFILE_BLOCKED_MODULE_SUBSTRINGS:
-                if token in low:
-                    return f"discreet profile blocks high-volume module token `{token}`"
-            for token in DISCREET_PROFILE_EXPENSIVE_MODULE_SUBSTRINGS:
-                if token in low and not has_auth_or_login:
-                    return f"discreet profile defers expensive module token `{token}` until stronger evidence"
-        return ""
+        allowed, reason = module_policy_decision(policy, risk)
+        if allowed:
+            return ""
+        return reason
 
     def _filter_modules_for_safety_profile(
         self,
@@ -533,7 +666,7 @@ class AgentWorkflowCore:
         skipped: List[Dict[str, Any]] = []
         for module in modules or []:
             path = module.get("path") if isinstance(module, dict) else ""
-            reason = self._module_block_reason_for_profile(state, path)
+            reason = self._module_block_reason_for_profile(state, path, module)
             if reason:
                 skipped.append({
                     "module": module.get("name", path) if isinstance(module, dict) else str(path),
@@ -621,80 +754,6 @@ class AgentWorkflowCore:
                 print_warning(state.campaign_stop_reason)
             return True
         return False
-
-    def _execute_agent_modules(
-        self,
-        state: AgentState,
-        scanner,
-        modules: List[Dict[str, Any]],
-        target_info: Dict[str, Any],
-        threads: int,
-        verbose: bool,
-        phase_name: str = "phase",
-    ) -> List[Dict[str, Any]]:
-        allowed, skipped = self._filter_modules_for_safety_profile(state, modules)
-        allowed, budget_skipped = self._limit_modules_by_request_budget(state, allowed, phase_name)
-        skipped.extend(budget_skipped)
-        if not allowed:
-            return skipped
-
-        profile = self._normalized_safety_profile(state)
-        effective_threads = 1 if profile in ("safe", "discreet") else max(1, int(threads or 1))
-        results: List[Dict[str, Any]] = list(skipped)
-
-        if profile in ("safe", "discreet"):
-            for module in allowed:
-                if not self._consume_network_units(state, 1):
-                    results.append(self._budget_skip_result(module, phase_name))
-                    continue
-                self._sleep_between_agent_actions(state, f"{phase_name}:{module.get('path', '')}")
-                batch_results = scanner._execute_modules([module], target_info, 1, verbose)
-                results.extend(batch_results)
-                self._adapt_rate_limit_from_results(state, batch_results)
-                if self._record_waf_signals_from_results(state, batch_results, phase_name):
-                    break
-            return results
-
-        if not self._consume_network_units(state, len(allowed)):
-            results.extend([self._budget_skip_result(module, phase_name) for module in allowed])
-            return results
-        self._sleep_between_agent_actions(state, phase_name)
-        batch_results = scanner._execute_modules(allowed, target_info, effective_threads, verbose)
-        
-        # Elite: Exploit Auto-Correction Loop
-        if getattr(state, "llm_local", False):
-            for i, res in enumerate(batch_results):
-                if res.get("status") == "error" and not res.get("vulnerable"):
-                    # Check if it was "promising" (e.g., high severity or specific error)
-                    if "filter" in res.get("message", "").lower() or "blocked" in res.get("message", "").lower():
-                        module_path = res.get("path")
-                        print_status(f"Elite: Attempting auto-correction for failed module `{module_path}`...")
-                        
-                        prompt = f"""
-                        The security module '{module_path}' failed with message: '{res.get('message')}'.
-                        The target seems to have a filter or WAF.
-                        Suggest ONE specific modification to the payload or parameters to bypass this.
-                        Output only the suggestion in a few words.
-                        """
-                        try:
-                            suggestion = self._http_intel._llm.generate_response(prompt)
-                            print_info(f"Elite: LLM Suggestion: {suggestion}")
-                            # In a real implementation, we would re-run the module with modified params.
-                            # For now, we mark it as 'retrying' in the results.
-                            res["auto_correction_attempted"] = True
-                            res["llm_suggestion"] = suggestion
-                        except Exception:
-                            pass
-
-        results.extend(batch_results)
-        self._adapt_rate_limit_from_results(state, batch_results)
-        self._record_waf_signals_from_results(state, batch_results, phase_name)
-        
-        # Predatory Intrusion: Trigger Post-Exploitation if new sessions are detected
-        if state.new_sessions:
-            self._post_exploitation_loop(state)
-            
-        return results
 
     def _has_proxy_request_intel(self, state: AgentState) -> bool:
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
@@ -1077,38 +1136,57 @@ class AgentWorkflowCore:
         return None
 
     def _post_exploitation_loop(self, state: AgentState):
-        """Autonomous loop for LPE, secret mining, and persistence."""
+        """Run explicitly approved, read-only post-exploitation collection."""
         if not state.new_sessions:
             return
-            
-        print_status(f"Predatory Intrusion: starting autonomous post-exploitation for {len(state.new_sessions)} session(s)...")
-        
+
+        policy = getattr(state, "runtime_policy", None)
+        if policy is None or not getattr(policy, "approve_post_exploit", False):
+            return
+        print_status(
+            f"Starting approved read-only post-exploitation for {len(state.new_sessions)} session(s)..."
+        )
+
         for session_id in state.new_sessions:
-            # 1. Local Recon
+            if not self._post_intel.supports_command_session(str(session_id)):
+                self._append_timeline_event(
+                    state,
+                    "post-exploit",
+                    f"Session {session_id} skipped: incompatible with command collection.",
+                    kind="policy",
+                )
+                continue
             recon = self._post_intel.run_local_recon(session_id)
             print_info(f"Local Recon ({session_id}): {recon.get('current_user', 'unknown')}")
-            
-            # 2. Secret Mining
+
             secrets = self._post_intel.mine_secrets(session_id)
             if secrets:
-                print_success(f"Secret Mining ({session_id}): extracted {len(secrets)} sensitive file(s)!")
+                print_success(
+                    f"Sensitive-file presence ({session_id}): observed {len(secrets)} file(s); content redacted."
+                )
                 kb = state.knowledge_base
                 found_secrets = kb.get("extracted_secrets", [])
                 for s in secrets:
-                    found_secrets.append({"type": "file", "source": s["file"], "value": s["content_preview"]})
+                    found_secrets.append(
+                        {
+                            "type": "file",
+                            "source": s["file"],
+                            "value": "[redacted]",
+                            "bytes_observed": s.get("bytes_observed", 0),
+                        }
+                    )
                 kb["extracted_secrets"] = found_secrets
                 state.knowledge_base = kb
-            
-            # 3. Persistence (only in shell hunter mode)
-            if state.shell_hunter:
-                print_status(f"Predatory Intrusion: installing persistence for session {session_id}...")
-                self._post_intel.install_persistence(session_id)
-                
-            # 4. Stealth Cleanup
-            self._post_intel.stealth_cleanup(session_id)
-            print_status(f"Predatory Intrusion: cleanup completed for session {session_id}")
-
-
+            self._append_timeline_event(
+                state,
+                "post-exploit",
+                f"Read-only post-exploitation completed for session {session_id}.",
+                kind="collection",
+                extra={
+                    "recon_fields": sorted(recon),
+                    "sensitive_files_observed": len(secrets),
+                },
+            )
 
     def _append_timeline_event(
         self,
@@ -1121,46 +1199,16 @@ class AgentWorkflowCore:
         results: Optional[List[Dict[str, Any]]] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> None:
-        timeline = state.decision_timeline if isinstance(state.decision_timeline, list) else []
-        module_paths: List[str] = []
-        if isinstance(modules, list):
-            for row in modules:
-                if isinstance(row, dict):
-                    path = str(row.get("path", "")).strip()
-                else:
-                    path = str(row or "").strip()
-                if path:
-                    module_paths.append(path)
-        result_summary: Dict[str, Any] = {}
-        if isinstance(results, list):
-            vuln = [r for r in results if isinstance(r, dict) and r.get("vulnerable")]
-            errors = [r for r in results if isinstance(r, dict) and r.get("status") == "error"]
-            actionable = [r for r in results if isinstance(r, dict) and self._is_actionable_finding(r)]
-            result_summary = {
-                "total_results": len(results),
-                "vulnerable": len(vuln),
-                "actionable": len(actionable),
-                "errors": len(errors),
-                "top_paths": [
-                    str(r.get("path", "")).strip()
-                    for r in actionable[:4]
-                    if isinstance(r, dict) and str(r.get("path", "")).strip()
-                ],
-            }
-        event = {
-            "ts": datetime.now().isoformat(),
-            "kind": kind,
-            "phase": phase,
-            "summary": summary,
-        }
-        if module_paths:
-            event["modules"] = module_paths
-        if result_summary:
-            event["result_summary"] = result_summary
-        if extra:
-            event["extra"] = extra
-        timeline.append(event)
-        state.decision_timeline = timeline
+        self._lifecycle.append_timeline_event(
+            state,
+            phase,
+            summary,
+            kind=kind,
+            modules=modules,
+            results=results,
+            extra=extra,
+            is_actionable_finding=self._is_actionable_finding,
+        )
 
     def _print_timeline_preview(self, state: AgentState, tail: int = 6) -> None:
         rows = state.decision_timeline[-tail:] if isinstance(state.decision_timeline, list) else []
@@ -1311,7 +1359,7 @@ class AgentWorkflowCore:
         state.knowledge_base = kb
 
     def _load_host_profiles(self):
-        profile_path = os.path.join(os.getcwd(), "reports", "agent", "host_profiles.json")
+        profile_path = self._memory_path("host_profiles.json")
         return load_json_dict(profile_path)
 
     def _update_host_profile_cache(self, state: AgentState) -> None:
@@ -1320,7 +1368,7 @@ class AgentWorkflowCore:
         if not host:
             return
 
-        profile_path = os.path.join(os.getcwd(), "reports", "agent", "host_profiles.json")
+        profile_path = self._memory_path("host_profiles.json")
         os.makedirs(os.path.dirname(profile_path), exist_ok=True)
         profiles = self._load_host_profiles()
         kb = state.knowledge_base
@@ -1338,8 +1386,13 @@ class AgentWorkflowCore:
         }
         try:
             atomic_write_json(profile_path, profiles)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._record_agent_error(
+                state,
+                "host_profile_persistence",
+                exc,
+                phase="report",
+            )
 
     def _update_tech_confidence(self, knowledge_base, tech_key: str, delta: float) -> None:
         if not isinstance(knowledge_base, dict) or not tech_key:
@@ -2949,10 +3002,22 @@ class AgentWorkflowCore:
         state.knowledge_base = kb
 
     def _run_agent_flow(self, state: AgentState) -> AgentState:
-        if HAS_LANGGRAPH:
-            return self._run_with_langgraph(state)
-        print_warning("LangGraph not installed, using built-in linear workflow.")
-        return self._run_linear_fallback(state)
+        install_requests_budget_hook()
+        store = getattr(state, "run_store", None)
+        if store is not None:
+            self._paths = store.paths
+            self._report.set_paths(store.paths)
+            self._module_perf.set_paths(store.paths)
+            self._module_ctx.set_paths(store.paths)
+        with network_budget_context(getattr(state, "network_budget", None)), runtime_policy_context(
+            getattr(state, "runtime_policy", None),
+            getattr(state, "scope_guard", None),
+        ):
+            if HAS_LANGGRAPH and state.current_phase in {"", "init", "scan"}:
+                return self._run_with_langgraph(state)
+            if not HAS_LANGGRAPH:
+                print_warning("LangGraph not installed, using built-in linear workflow.")
+            return self._run_linear_fallback(state)
 
     def _run_with_langgraph(self, state: AgentState) -> AgentState:
         graph = StateGraph(dict)
@@ -2960,7 +3025,14 @@ class AgentWorkflowCore:
         def _wrap(fn):
             def _inner(raw: Dict[str, Any]) -> Dict[str, Any]:
                 st = agent_state_from_dict(raw)
+                phase = fn.__name__.replace("_node_", "")
+                st.phase_started_at = time.monotonic()
+                if st.error and phase != "report":
+                    return agent_state_to_dict(st)
+                if phase != "report" and self._phase_stop_reason(st, phase):
+                    return agent_state_to_dict(st)
                 out = fn(st)
+                self._checkpoint_state(out, phase)
                 return agent_state_to_dict(out)
 
             return _inner
@@ -2981,22 +3053,89 @@ class AgentWorkflowCore:
         return agent_state_from_dict(app.invoke(agent_state_to_dict(state)))
 
     def _run_linear_fallback(self, state: AgentState) -> AgentState:
-        state = self._node_scan(state)
-        if state.error:
-            return state
-        state = self._node_analyze(state)
-        if state.error:
-            return state
-        state = self._node_reason(state)
-        if state.error:
-            return state
-        state = self._node_exploit(state)
-        if state.error:
-            return state
-        return self._node_report(state)
+        phases = (
+            ("scan", self._node_scan),
+            ("analyze", self._node_analyze),
+            ("reason", self._node_reason),
+            ("exploit", self._node_exploit),
+            ("report", self._node_report),
+        )
+        names = [name for name, _fn in phases]
+        start = state.current_phase if state.current_phase in names else "scan"
+        start_index = names.index(start)
+        for phase, fn in phases[start_index:]:
+            state.phase_started_at = time.monotonic()
+            if phase != "report" and self._phase_stop_reason(state, phase):
+                continue
+            state.current_phase = phase
+            try:
+                state = fn(state)
+            except KeyboardInterrupt:
+                raise
+            except Exception as exc:
+                self._record_agent_error(state, phase, exc, fatal=True, phase=phase)
+                state.error = f"{phase}: {exc}"
+            self._checkpoint_state(state, phase)
+            if state.error and phase != "report":
+                break
+        if state.current_phase != "report":
+            state = self._node_report(state)
+            self._checkpoint_state(state, "report")
+        return state
 
     def _node_scan(self, state: AgentState) -> AgentState:
         state.metrics.deterministic_steps += 1
+        if state.dry_run:
+            print_status("Building agent dry-run plan...")
+            all_modules = self._catalog.discover_campaign_modules(
+                expanded=bool(getattr(state, "expanded_surface", False)),
+            )
+            modules = self._select_modules_for_target(state, all_modules)
+            selected = list(modules[: max(1, int(state.max_modules or 1))])
+            state.results = [
+                {
+                    "module": row.get("name", row.get("path")),
+                    "path": row.get("path"),
+                    "status": "planned",
+                    "vulnerable": False,
+                    "message": "dry-run: no module executed",
+                    "details": {
+                        "risk": assess_module_risk(
+                            row,
+                            str(row.get("path", "")),
+                        ).level,
+                    },
+                }
+                for row in selected
+            ]
+            state.execution_plan = {
+                "next_actions": [
+                    {
+                        "type": "prioritize",
+                        "path": row.get("path"),
+                        "priority": index,
+                    }
+                    for index, row in enumerate(selected, start=1)
+                ],
+                "max_requests_next_phase": 0,
+                "stop_conditions": ["dry_run_complete"],
+                "reasoning_confidence": 1.0,
+                "skip_exploitation": True,
+            }
+            state.llm_plan = {
+                "selected_paths": [row.get("path") for row in selected if row.get("path")],
+                "rationale": "Dry-run plan generated without network traffic.",
+                "next_best_action": None,
+            }
+            state.campaign_stop_reason = "dry_run_complete"
+            self._append_timeline_event(
+                state,
+                "scan",
+                f"Dry-run selected {len(selected)} module(s); no traffic sent.",
+                kind="plan",
+                modules=selected,
+            )
+            return state
         print_status("Scanning target...")
         request_intel_results = self._ingest_http_request_intelligence(state)
         reachable, reason = self._probe_target_reachability(state)
@@ -3107,6 +3246,10 @@ class AgentWorkflowCore:
             return state
 
         results = list(request_intel_results)
+        if getattr(state, "expanded_surface", False):
+            intel_results = self._run_expanded_surface_intel_phase(state, all_modules)
+            results.extend(intel_results)
+
         scan_results = self._run_scan_campaign(state, modules, scanner)
         results.extend(scan_results)
         if not results:
@@ -3647,6 +3790,7 @@ class AgentWorkflowCore:
                     selected_paths,
                     followup_hints,
                     set(),
+                    phase="follow-up",
                 )
                 self._record_module_performance_phase(state, kb_pre_followup, followup_results, "follow-up")
                 self._append_timeline_event(
@@ -4114,7 +4258,16 @@ class AgentWorkflowCore:
 
         return False, no_novelty_streak, ""
 
-    def _update_knowledge_base_from_results(self, knowledge_base, results, module_paths, tech_hints, specializations):
+    def _update_knowledge_base_from_results(
+        self,
+        knowledge_base,
+        results,
+        module_paths,
+        tech_hints,
+        specializations,
+        *,
+        phase: str = "",
+    ):
         if not isinstance(knowledge_base, dict):
             return
 
@@ -4383,11 +4536,54 @@ class AgentWorkflowCore:
         knowledge_base["post_auth_catalog_paths"] = sorted(post_auth_catalog_paths)[:40]
         knowledge_base["post_auth_exploit_paths"] = sorted(post_auth_exploit_paths)[:20]
 
+        meta_map: Dict[str, Any] = {}
+        for result in results or []:
+            if not isinstance(result, dict):
+                continue
+            path = str(result.get("path", "") or "").strip()
+            if path and path not in meta_map:
+                meta_map[path] = self._catalog.get_agent_metadata(path) or {}
+        poison_kb_from_results(
+            knowledge_base,
+            results or [],
+            phase=phase,
+            module_agent_meta=meta_map,
+        )
+        if knowledge_base.get("expanded_surface"):
+            root = organization_root_domain(
+                str(knowledge_base.get("target_hostname") or "")
+            )
+            if not root:
+                root = ""
+            identities = harvest_identities_from_results(results or [], root_domain=root)
+            subdomains = harvest_subdomains_from_results(results or [], root_domain=root)
+            if identities or subdomains:
+                merge_intel_into_knowledge_base(
+                    knowledge_base,
+                    identities=identities,
+                    subdomains=subdomains,
+                    username_candidates=build_username_candidates(identities),
+                    password_candidates=build_persona_password_candidates(
+                        identities,
+                        root_domain=root,
+                    ),
+                )
+        knowledge_base["attack_chain_summary"] = export_chain_summary(knowledge_base)
+
     def _select_best_login_path(self, knowledge_base):
         return self._auth_ops.select_best_login_path(knowledge_base)
 
     def _build_inferred_option_overrides(self, modules, state: AgentState):
-        return self._auth_ops.build_inferred_option_overrides(modules, state)
+        overrides = self._auth_ops.build_inferred_option_overrides(modules, state)
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        chain_overrides = build_chain_option_overrides(modules, kb)
+        for path, opts in chain_overrides.items():
+            if not isinstance(opts, dict) or not opts:
+                continue
+            merged = dict(overrides.get(path) or {})
+            merged.update(opts)
+            overrides[path] = merged
+        return overrides
 
     def _extract_endpoint_candidates(self, text):
         candidates = set()
@@ -4734,6 +4930,8 @@ class AgentWorkflowCore:
                 break
 
         for module_info in modules:
+            if self._phase_stop_reason(state, "targeted"):
+                break
             module_path = module_info.get("path")
             result = {
                 "module": module_info.get("name", module_path),
@@ -5013,6 +5211,9 @@ class AgentWorkflowCore:
         for token in detection_tokens:
             for path in token_map.get(token, ()):
                 wanted.add(path)
+
+        for path in suggest_chain_module_paths(kb):
+            wanted.add(path)
 
         if auth_session:
             auth_skip_tokens = ("login_page_detector", "admin_login_bruteforce")
@@ -5294,6 +5495,17 @@ class AgentWorkflowCore:
         hosts = self._harvest_derived_hosts(seed, primary_results)
         kb = state.knowledge_base
         if isinstance(kb, dict):
+            kb_candidates = list(kb.get("subdomain_candidates") or [])
+            seen = {h.lower() for h in hosts}
+            seed_l = seed.lower().strip(".")
+            for candidate in kb_candidates:
+                hl = str(candidate).lower().strip(".")
+                if not hl or hl == seed_l or hl in seen:
+                    continue
+                if not self._hostname_in_seed_family(seed, hl):
+                    continue
+                seen.add(hl)
+                hosts.append(hl)
             kb["derived_target_candidates"] = list(hosts)
             kb.setdefault("derived_host_scans", [])
         if not hosts:
@@ -5360,6 +5572,85 @@ class AgentWorkflowCore:
                 })
             ran += 1
         return aggregated
+
+    def _run_expanded_surface_intel_phase(
+        self,
+        state: AgentState,
+        all_modules: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """``--all``: subdomain enum, identity OSINT, persona wordlists for auth."""
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        hostname = str((state.target_info or {}).get("hostname", "") or "").strip()
+        if not hostname:
+            return []
+        root = organization_root_domain(hostname)
+        if isinstance(state.knowledge_base, dict):
+            state.knowledge_base["expanded_surface"] = True
+            state.knowledge_base["target_hostname"] = hostname
+        intel_modules = pick_intel_modules(
+            all_modules,
+            max_modules=min(
+                EXPANDED_SURFACE_INTEL_MAX_MODULES,
+                max(3, int(state.recon_modules or 12) // 2),
+            ),
+        )
+        if not intel_modules:
+            return []
+        identities = {
+            "emails": list(kb.get("identity_emails") or []),
+            "handles": list(kb.get("identity_handles") or []),
+            "names": list(kb.get("identity_names") or []),
+        }
+        option_overrides: Dict[str, Dict[str, Any]] = {}
+        for row in intel_modules:
+            path = str(row.get("path", "")).strip()
+            if not path:
+                continue
+            option_overrides[path] = build_intel_option_overrides(
+                path,
+                root_domain=root,
+                identities=identities,
+            )
+        if bool(state.verbose):
+            print_info(
+                f"Expanded surface: running {len(intel_modules)} OSINT module(s) "
+                f"(subdomains, identities) on {root}"
+            )
+        self._append_timeline_event(
+            state,
+            "scan",
+            f"Expanded OSINT phase: {len(intel_modules)} module(s) on {root}",
+            kind="plan",
+            modules=intel_modules,
+        )
+        results = self._execute_plan_modules_with_options(
+            intel_modules,
+            state,
+            option_overrides=option_overrides,
+            verbose=bool(state.verbose),
+        )
+        harvested_id = harvest_identities_from_results(results, root_domain=root)
+        harvested_sub = harvest_subdomains_from_results(results, root_domain=root)
+        merge_intel_into_knowledge_base(
+            state.knowledge_base if isinstance(state.knowledge_base, dict) else {},
+            identities=harvested_id,
+            subdomains=harvested_sub,
+            username_candidates=build_username_candidates(harvested_id),
+            password_candidates=build_persona_password_candidates(
+                harvested_id,
+                root_domain=root,
+            ),
+        )
+        if isinstance(state.knowledge_base, dict):
+            self._update_knowledge_base_from_results(
+                state.knowledge_base,
+                results,
+                [row.get("path") for row in intel_modules],
+                list(state.knowledge_base.get("tech_hints") or []),
+                list(state.scan_specializations or []),
+                phase="expanded-osint",
+            )
+        return results
 
     def _filter_modules_by_protocol(self, modules, protocol):
         protocol = str(protocol or "").strip().lower()
@@ -5745,6 +6036,7 @@ class AgentWorkflowCore:
                 "false_positive_penalty": round(false_positive_penalty, 3),
             }
             annotated["context_hints"] = matching_hints
+            annotated["validation_status"] = self._finding_validation_status(annotated)
             annotated["decision_class"] = self._finding_decision_class(annotated)
             annotated["importance"] = self._finding_importance_label(annotated)
             contextual.append(annotated)
@@ -5807,9 +6099,15 @@ class AgentWorkflowCore:
         severity = str(finding.get("severity", "")).lower()
         details = finding.get("details", {}) or {}
         exploit_path = self._catalog.normalize_exploit_module_path(finding.get("exploit_module"))
+        validation_status = str(
+            finding.get("validation_status")
+            or self._finding_validation_status(finding)
+        ).lower()
 
-        if exploit_path:
+        if exploit_path and validation_status == "exploitable":
             return "exploit"
+        if exploit_path:
+            return "followup"
         if isinstance(details, dict) and (
             details.get("authenticated_as")
             or details.get("post_login_snippet")
@@ -5834,6 +6132,34 @@ class AgentWorkflowCore:
         )):
             return "followup"
         return "info"
+
+    def _finding_validation_status(self, finding: Dict[str, Any]) -> str:
+        """Classify signal strength before allowing exploitation."""
+        if not isinstance(finding, dict):
+            return "signal"
+        exploit_path = self._catalog.normalize_exploit_module_path(
+            finding.get("exploit_module")
+        )
+        details = finding.get("details") if isinstance(finding.get("details"), dict) else {}
+        strong_runtime = bool(
+            details.get("authenticated_as")
+            or details.get("command_output")
+            or details.get("file_read")
+            or details.get("reflection_confirmed")
+            or details.get("proof")
+            or finding.get("session_id")
+        )
+        explicit = strong_runtime or self._result_has_explicit_evidence(finding)
+        if explicit and exploit_path:
+            return "exploitable"
+        if explicit:
+            return "confirmed"
+        if finding.get("vulnerable") and (
+            str(finding.get("severity", "")).lower() in {"critical", "high", "medium"}
+            or float(finding.get("context_score", 0.0) or 0.0) >= 2.0
+        ):
+            return "probable"
+        return "signal"
 
     def _finding_importance_label(self, finding: Dict[str, Any]) -> str:
         score = float(finding.get("context_score", 0.0) or 0.0)
@@ -7145,6 +7471,8 @@ class AgentWorkflowCore:
         scheme = target_info.get("scheme")
 
         for module_info in modules:
+            if self._phase_stop_reason(state, "plan-followup"):
+                break
             module_path = module_info.get("path")
             result = {
                 "module": module_info.get("name", module_path),
@@ -7160,9 +7488,6 @@ class AgentWorkflowCore:
                 result["message"] = block_reason
                 result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
                 results.append(result)
-                continue
-            if not self._consume_network_units(state, 1):
-                results.append(self._budget_skip_result(module_info, "plan-followup"))
                 continue
             announced_bruteforce = False
             if "admin_login_bruteforce" in str(module_path).lower():
@@ -7192,7 +7517,33 @@ class AgentWorkflowCore:
                 merged_options.update(option_overrides.get(module_path, {}))
                 self._apply_safe_module_options(module_instance, merged_options)
 
-                run_result = module_instance.run()
+                if not self._module_uses_http_client(module_instance) and not self._consume_network_units(
+                    state,
+                    module=module_instance,
+                    module_path=module_path,
+                    reason=f"module {module_path}",
+                ):
+                    results.append(self._budget_skip_result(module_info, "plan-followup"))
+                    continue
+                outcome = self._module_executor.execute(
+                    module_instance,
+                    module_path,
+                    state,
+                    phase="plan-followup",
+                    use_exploit_wrapper=False,
+                )
+                if outcome.get("blocked"):
+                    result["status"] = "skipped"
+                    result["message"] = outcome.get("error") or "Blocked by agent policy"
+                    result["details"] = {
+                        "risk": getattr(outcome.get("risk"), "level", "unknown"),
+                    }
+                    results.append(result)
+                    continue
+                execution = outcome.get("execution")
+                run_result = execution.result if execution is not None else None
+                if execution is not None and execution.error and not execution.command_success:
+                    raise RuntimeError(execution.error)
                 result["vulnerable"] = bool(run_result)
                 result["status"] = "vulnerable" if result["vulnerable"] else "safe"
 
@@ -7461,15 +7812,13 @@ class AgentWorkflowCore:
         failed_paths = set()
         attempted_paths = set()
         for exploit_path in sorted(exploit_paths):
+            if isinstance(state, AgentState) and self._phase_stop_reason(state, "exploit"):
+                break
             if isinstance(state, AgentState):
                 block_reason = self._module_block_reason_for_profile(state, exploit_path)
                 if block_reason:
                     failed_paths.add(exploit_path)
                     print_warning(f"Exploit skipped [{exploit_path}]: {block_reason}")
-                    continue
-                if not self._consume_network_units(state, 1):
-                    failed_paths.add(exploit_path)
-                    print_warning(f"Exploit skipped [{exploit_path}]: request budget exhausted")
                     continue
             attempted_paths.add(exploit_path)
             try:
@@ -7529,10 +7878,30 @@ class AgentWorkflowCore:
                     sessions_before = set(self.framework.session_manager.sessions.keys())
                     browser_before = set(self.framework.session_manager.browser_sessions.keys())
                 self.framework.current_module = exploit_instance
-                # Important: exploit modules must go through ``_exploit()`` so payload
-                # handling can start the correct listener/handler before ``run()``.
-                if hasattr(exploit_instance, "_exploit"):
-                    success = exploit_instance._exploit()
+                if (
+                    isinstance(state, AgentState)
+                    and not self._module_uses_http_client(exploit_instance)
+                    and not self._consume_network_units(state, 1)
+                ):
+                    failed_paths.add(exploit_path)
+                    print_warning(f"Exploit skipped [{exploit_path}]: request budget exhausted")
+                    continue
+                if isinstance(state, AgentState):
+                    outcome = self._module_executor.execute(
+                        exploit_instance,
+                        exploit_path,
+                        state,
+                        phase="exploit",
+                        use_exploit_wrapper=True,
+                    )
+                    if outcome.get("blocked"):
+                        failed_paths.add(exploit_path)
+                        print_warning(
+                            f"Exploit blocked [{exploit_path}]: {outcome.get('error')}"
+                        )
+                        continue
+                    execution = outcome.get("execution")
+                    success = bool(execution and execution.success)
                 else:
                     success = self.framework.execute_module()
                 sessions_after = set()
@@ -7542,6 +7911,11 @@ class AgentWorkflowCore:
                     browser_after = set(self.framework.session_manager.browser_sessions.keys())
                 new_standard = sorted(sessions_after - sessions_before)
                 new_browser = sorted(browser_after - browser_before)
+                if isinstance(state, AgentState) and (new_standard or new_browser):
+                    provenance = state.knowledge_base.setdefault("session_provenance", {})
+                    if isinstance(provenance, dict):
+                        for session_id in new_standard + new_browser:
+                            provenance[str(session_id)] = exploit_path
                 reverse_callback_missing = False
                 set_thread_output_quiet(False)
                 if verbose:
@@ -7601,6 +7975,17 @@ class AgentWorkflowCore:
 
     def _node_exploit(self, state: AgentState) -> AgentState:
         state.metrics.deterministic_steps += 1
+        if state.dry_run or state.plan_only:
+            reason = "dry-run" if state.dry_run else "plan-only"
+            print_info(f"Exploitation skipped: {reason}.")
+            self._append_timeline_event(
+                state,
+                "exploit",
+                f"Exploitation skipped by {reason} policy.",
+                kind="execution",
+            )
+            state.new_sessions = []
+            return state
         if state.target_reachable is False:
             print_info("Exploitation skipped: target unreachable.")
             state.new_sessions = []
@@ -7806,6 +8191,13 @@ class AgentWorkflowCore:
 
         if new_sessions:
             print_success("Got shell")
+            policy = getattr(state, "runtime_policy", None)
+            if policy is not None and getattr(policy, "approve_post_exploit", False):
+                self._post_exploitation_loop(state)
+            else:
+                print_info(
+                    "Post-exploitation not started: explicit --approve-post-exploit is required."
+                )
         else:
             print_warning("No new shell/session detected")
         self._append_timeline_event(
@@ -7826,6 +8218,7 @@ class AgentWorkflowCore:
             "Generating Markdown and JSON campaign reports.",
             kind="report",
         )
+        sync_metrics_from_budget(state)
         state.report_path = self._report.generate_report(
             state.raw_target,
             state.target_info,
@@ -7837,10 +8230,27 @@ class AgentWorkflowCore:
             state.execution_plan,
             state.contextual_findings,
             state.decision_timeline,
+            run_id=state.run_id,
+            workspace=state.workspace,
+            metrics=state.metrics.__dict__,
+            campaign_stop_reason=state.campaign_stop_reason,
+            network_budget=sync_metrics_from_budget(state),
+            runtime_policy={
+                "safety_profile": state.safety_profile,
+                "dry_run": state.dry_run,
+                "plan_only": state.plan_only,
+                "tls_verify": bool(
+                    getattr(getattr(state, "runtime_policy", None), "tls_verify", True)
+                ),
+                "session_policy": state.session_policy,
+                "random_seed": state.random_seed,
+            },
+            decision_source=state.decision_source,
         )
         self._report.update_history_scores(
             state.contextual_findings,
             state.new_sessions,
+            (state.knowledge_base or {}).get("session_provenance", {}),
         )
         self._update_host_profile_cache(state)
         self._print_timeline_preview(state)

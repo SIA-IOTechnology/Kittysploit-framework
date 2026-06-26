@@ -23,6 +23,14 @@ class Module(Auxiliary, Http_client):
         "cve": "CVE-2026-44582",
         "references": ["https://github.com/advisories/GHSA-vfv6-92ff-j949"],
         "tags": ["http", "nextjs", "rsc", "cache", "hash", "collision"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     victim_prefetch = OptString("1", "Victim tuple: Next-Router-Prefetch", required=False, advanced=True)

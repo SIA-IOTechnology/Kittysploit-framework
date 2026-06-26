@@ -8,6 +8,14 @@ class Module(Auxiliary, Http_client):
         'name': 'Wordpress user enumeration',
         'description': "Try to extract wordpress user enumeration",
         'tags': ['web', 'scanner', 'wordpress', 'enum'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
     
     def check(self):

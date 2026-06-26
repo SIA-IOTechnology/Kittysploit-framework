@@ -14,6 +14,14 @@ class Module(Scanner, Smb_scanner_client):
         "severity": "high",
         "modules": [],
         "tags": ["smb", "scanner", "smbv1", "eternalblue", "legacy"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

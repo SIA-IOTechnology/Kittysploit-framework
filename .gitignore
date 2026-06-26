@@ -6,6 +6,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 venv/*
+.venv/*
+docs/*
+artifacts/*
 
 # Python package files
 *.egg-info/
@@ -82,5 +85,9 @@ launch_*.py
 modules/browser_exploits/multi/chrome_font_feature_uaf.py
 
 apps/*
+!apps/kittysploit-ai/
+!apps/kittysploit-ai/**
 artifacts/*
 TODO.md
+
+tests/*

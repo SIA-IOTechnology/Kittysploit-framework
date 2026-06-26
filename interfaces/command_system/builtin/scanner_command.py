@@ -22,11 +22,18 @@ from core.output_handler import (
 from urllib.parse import urlparse
 import threading
 import socket
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Set, Optional, Tuple
 import errno
 
-from core.scanner.result_dedup import deduplicate_scanner_results, enrich_scanner_result, group_scanner_results
+from core.scanner.result_dedup import (
+    deduplicate_scanner_results,
+    enrich_scanner_result,
+    group_scanner_results,
+    reason_redundant_with_evidence,
+)
+from core.framework.module_executor import ModuleExecutionRequest, ModuleExecutor
 
 
 class ScannerCommand(BaseCommand):
@@ -110,13 +117,18 @@ Examples:
     def execute(self, args, **kwargs) -> bool:
         """Execute the scanner command"""
         try:
-            # Check for help flag first
-            if '--help' in args or '-h' in args:
+            raw = list(args or [])
+            if (
+                not raw
+                or raw[0].lower() in ("help", "--help", "-h")
+                or "--help" in raw
+                or "-h" in raw
+            ):
                 print_info(self.help_text)
                 return True
-            
+
             # Parse arguments
-            options = self._parse_args(args)
+            options = self._parse_args(raw)
             
             if options['list']:
                 return self._list_modules()
@@ -696,8 +708,23 @@ Examples:
                     if target_info.get('path') and hasattr(module_instance, 'path'):
                         module_instance.set_option('path', target_info['path'])
 
-                    # Execute run(); merge dict returns (common for OSINT/aux) into dynamic details.
-                    run_return = module_instance.run()
+                    execution = ModuleExecutor.execute(
+                        self.framework,
+                        ModuleExecutionRequest(
+                            module=module_instance,
+                            use_runtime_kernel=False,
+                            use_exploit_wrapper=False,
+                            collect_metrics=True,
+                        ),
+                    )
+                    if execution.blocked:
+                        result["status"] = "blocked"
+                        result["message"] = execution.error or "Module execution blocked"
+                        return result
+                    if execution.error and not execution.command_success:
+                        raise RuntimeError(execution.error)
+                    # Merge dict returns (common for OSINT/aux) into dynamic details.
+                    run_return = execution.result
 
                     # Get info from __info__ (static) and vulnerability_info (dynamic)
                     module_info = getattr(module_instance, '__info__', {})
@@ -719,8 +746,21 @@ Examples:
                         result['vulnerable'] = bool(run_return)
                     result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
 
-                    # Reason: dynamic first, then from __info__ description
-                    result['message'] = dynamic_info.get('reason') or module_info.get('description', '')
+                    # Reason: dynamic finding text; avoid static module description as output.
+                    reason = dynamic_info.get("reason")
+                    module_description = str(module_info.get("description") or "").strip()
+                    if reason:
+                        result["message"] = reason
+                    elif result.get("vulnerable"):
+                        label = str(module_info.get("name") or module_path).strip()
+                        version = dynamic_info.get("version")
+                        if version:
+                            result["message"] = f"{label} confirmed (version={version})"
+                        else:
+                            result["message"] = f"{label} confirmed"
+                    else:
+                        result["message"] = module_description
+                    result["module_description"] = module_description
 
                     # Severity: from __info__ or dynamic (for detection/vuln level)
                     result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
@@ -775,7 +815,7 @@ Examples:
         # Execute modules with thread pool
         with ThreadPoolExecutor(max_workers=threads) as executor:
             future_to_module = {
-                executor.submit(execute_module, module): module 
+                executor.submit(copy_context().run, execute_module, module): module
                 for module in modules
             }
             
@@ -868,9 +908,14 @@ Examples:
             service = result.get('service') or 'unknown'
             print_info(f"    Target: {host} ({service})")
         print_info(f"    Path: {result.get('path', '')}")
-        print_info(f"    Reason: {result.get('message', '')}")
-        if result.get('evidence') and result.get('evidence') != result.get('message'):
-            print_info(f"    Evidence: {result['evidence']}")
+        message = str(result.get("message") or "").strip()
+        evidence = str(result.get("evidence") or "").strip()
+        if evidence:
+            print_info(f"    Evidence: {evidence}")
+        elif message:
+            print_info(f"    Evidence: {message}")
+        if message and not reason_redundant_with_evidence(message, evidence or message):
+            print_info(f"    Reason: {message}")
         if 'version' in result:
             print_info(f"    Version: {result['version']}")
         if result.get('cve'):
@@ -916,8 +961,10 @@ Examples:
         if representative.get('exploit_module'):
             print_success(f"Exploit module: {representative['exploit_module']}")
             print_info(f"    Use: use {representative['exploit_module']}")
-        if representative.get('message') and representative.get('message') not in (group.evidence or []):
-            print_info(f"    Reason: {representative['message']}")
+        rep_message = str(representative.get("message") or "").strip()
+        rep_evidence = str((group.evidence or [""])[0] or representative.get("evidence") or "").strip()
+        if rep_message and not reason_redundant_with_evidence(rep_message, rep_evidence):
+            print_info(f"    Reason: {rep_message}")
     
     def _auto_exploit(self, results: List[Dict], target_info: Dict[str, Any]):
         """Automatically launch exploit modules for detected vulnerabilities"""

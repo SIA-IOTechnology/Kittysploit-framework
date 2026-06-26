@@ -12,11 +12,11 @@ import ipaddress
 import subprocess
 import platform
 import re
-import os
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
+from core.utils.paths import data_resource_exists, read_data_text
 
 class NetworkDiscoverCommand(BaseCommand):
     """Command to discover hosts on the network"""
@@ -30,16 +30,11 @@ class NetworkDiscoverCommand(BaseCommand):
     def _load_oui_database(self):
         """Load OUI (MAC vendor) database"""
         try:
-            # Get the path to oui.json relative to this file
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            oui_path = os.path.join(current_dir, '..', '..', '..', 'data', 'vendors', 'oui.json')
-            oui_path = os.path.normpath(oui_path)
-            
-            if os.path.exists(oui_path):
-                with open(oui_path, 'r', encoding='utf-8') as f:
-                    self.oui_db = json.load(f)
-            else:
-                print_warning(f"OUI database not found at {oui_path}")
+            if not data_resource_exists("vendors", "oui.json"):
+                print_warning("OUI database not found (data/vendors/oui.json)")
+                return
+
+            self.oui_db = json.loads(read_data_text("vendors", "oui.json"))
         except Exception as e:
             print_warning(f"Failed to load OUI database: {e}")
     

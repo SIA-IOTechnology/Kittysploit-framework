@@ -24,6 +24,14 @@ class Module(Scanner, Tcp_scanner_client):
             "vendor": "oracle",
         },
         "tags": ["mysql", "network", "enum", "discovery"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(3306, "Target MySQL port", True)

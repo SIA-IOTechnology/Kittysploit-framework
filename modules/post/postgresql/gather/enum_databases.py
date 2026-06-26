@@ -9,6 +9,14 @@ class Module(Post, PostgreSQLClient):
 		"description": "Enumerate databases and tables/schemas in the current database",
 		"author": "KittySploit Team",
 		"session_type": SessionType.POSTGRESQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	schema = OptString("", "Limit to one schema (empty = all user schemas)", False)

@@ -9,6 +9,14 @@ class Module(Post, PostgreSQLClient):
 		"description": "Write a file on the server via COPY TO (requires superuser)",
 		"author": "KittySploit Team",
 		"session_type": SessionType.POSTGRESQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}
 
 	file_path = OptString("/tmp/kittysploit.txt", "Absolute path on the PostgreSQL server", True)

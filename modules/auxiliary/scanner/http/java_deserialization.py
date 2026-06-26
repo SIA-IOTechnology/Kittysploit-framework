@@ -20,7 +20,15 @@ class Module(Auxiliary, Http_client):
             'https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data',
             'https://github.com/frohoff/ysoserial',
             'https://portswigger.net/web-security/deserialization',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Java deserialization indicators

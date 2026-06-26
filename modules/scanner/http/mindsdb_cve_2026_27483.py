@@ -26,6 +26,14 @@ class Module(Scanner, Http_client):
             "exploits/linux/http/mindsdb_cve_2026_27483_path_traversal_rce",
         ],
         "tags": ["web", "scanner", "mindsdb", "path-traversal", "cve-2026-27483"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(47334, "Target port (MindsDB default)", True)

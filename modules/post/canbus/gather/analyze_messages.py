@@ -22,6 +22,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "version": "1.0.0",
         "session_type": SessionType.CANBUS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     analyze_duration = OptInteger(60, "Duration to analyze messages in seconds", required=True)

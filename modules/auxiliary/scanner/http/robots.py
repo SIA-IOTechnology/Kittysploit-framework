@@ -10,6 +10,14 @@ class Module(Auxiliary, Http_client):
         'description': 'Crawl a web site and store information about what was found',	
         'author': 'KittySploit Team',
         'tags': ['web', 'scanner'],
+        'agent': {
+            'risk': 'active',
+            'effects': ['network_probe'],
+            'expected_requests': 2,
+            'reversible': True,
+            'approval_required': False,
+            'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        },
         }
     
     def default_options(self):

@@ -14,6 +14,14 @@ class Module(Post, FTPClientMixin):
         "description": "Downloads entire directory structure from FTP server recursively",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     remote_path = OptString(".", "Remote directory path to download", False)

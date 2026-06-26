@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/generated_artifact.schema.json",
+  "title": "KittyForge Generated Artifact",
+  "type": "object",
+  "required": ["schema_version", "content_type", "content_size"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "content_type": { "type": "string" },
+    "content_size": { "type": "integer", "minimum": 0 },
+    "display_size": { "type": "integer", "minimum": 0 },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "metadata": { "type": "object", "additionalProperties": true },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "logs": { "type": "array", "items": { "type": "string" } },
+    "legacy_return_type": { "type": "string" }
+  },
+  "additionalProperties": false
+}

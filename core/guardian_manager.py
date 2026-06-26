@@ -49,6 +49,30 @@ class HostProfile:
     last_alert: Optional[str] = None
     operator_notes: List[str] = field(default_factory=list)
 
+
+@dataclass
+class IdentityProfile:
+    """AD identity behavioural profile (honeytoken / honeyaccount detection)."""
+    sam_account: str
+    domain: str
+    account_type: str  # user | computer
+    honeytoken_score: float
+    verdict: str
+    signals: List[str] = field(default_factory=list)
+    never_logged_on: bool = False
+    logon_count: int = 0
+    admin_count: int = 0
+    source: str = "ldap"
+    last_assessed: str = ""
+    acknowledged_safe: bool = False
+    operator_notes: List[str] = field(default_factory=list)
+
+    @property
+    def identity_key(self) -> str:
+        sam = self.sam_account.lower()
+        dom = (self.domain or "").lower()
+        return f"{dom}\\{sam}" if dom else sam
+
 class GuardianManager:
     """Guardian behavioral analysis and anomaly detection manager"""
     
@@ -71,7 +95,9 @@ class GuardianManager:
             'baseline_smoothing': 0.2,
             'response_deviation_factor': 2.0,
             'minimum_samples_for_baseline': 5,
-            'suspicious_indicator_threshold': 3
+            'suspicious_indicator_threshold': 3,
+            'identity_honeytoken_threshold': 75.0,
+            'identity_suspicious_threshold': 50.0,
         }
         
         self.risk_weights: Dict[str, float] = {
@@ -88,6 +114,9 @@ class GuardianManager:
         self.blacklist: Dict[str, Dict[str, Any]] = {}
         self.operation_history: List[Dict[str, Any]] = []
         self.whitelist: Set[str] = set()
+        self.identity_profiles: Dict[str, IdentityProfile] = {}
+        self.identity_blacklist: Dict[str, Dict[str, Any]] = {}
+        self.identity_whitelist: Set[str] = set()
         
         # Statistics
         self.stats = {
@@ -95,6 +124,7 @@ class GuardianManager:
             'alerts_generated': 0,
             'auto_actions': 0,
             'honeypots_detected': 0,
+            'honeytokens_detected': 0,
             'false_positives': 0,
             'total_operations': 0,
             'validated_operations': 0,
@@ -360,6 +390,145 @@ class GuardianManager:
             profile.operator_notes.append(note)
         self.whitelist.add(host)
         return True
+
+    @staticmethod
+    def _identity_key(sam_account: str, domain: str = "") -> str:
+        sam = str(sam_account or "").strip().lower()
+        dom = str(domain or "").strip().lower()
+        if "\\" in sam:
+            return sam
+        return f"{dom}\\{sam}" if dom else sam
+
+    def register_identity_assessments(self, assessments: List[Dict[str, Any]]) -> int:
+        """
+        Enregistre des évaluations AD (oracle lastLogon, historique vide).
+        Retourne le nombre de profils mis à jour.
+        """
+        updated = 0
+        probable_threshold = self.config['identity_honeytoken_threshold']
+
+        for row in assessments:
+            sam = str(row.get('sam_account') or '').strip()
+            if not sam:
+                continue
+
+            domain = str(row.get('domain') or '').strip()
+            key = self._identity_key(sam, domain)
+            if key in self.identity_whitelist:
+                continue
+
+            try:
+                score = float(row.get('score') or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+
+            verdict = str(row.get('verdict') or 'CLEAN').upper()
+            signals = row.get('signals') or []
+            if not isinstance(signals, list):
+                signals = [str(signals)]
+
+            profile = IdentityProfile(
+                sam_account=sam,
+                domain=domain,
+                account_type=str(row.get('account_type') or 'user'),
+                honeytoken_score=min(100.0, max(0.0, score)),
+                verdict=verdict,
+                signals=[str(s) for s in signals if s],
+                never_logged_on=bool(row.get('never_logged_on')),
+                logon_count=int(row.get('logon_count') or 0),
+                admin_count=int(row.get('admin_count') or 0),
+                source=str(row.get('source') or 'ldap'),
+                last_assessed=datetime.now().isoformat(),
+            )
+
+            existing = self.identity_profiles.get(key)
+            if existing and existing.acknowledged_safe:
+                profile.acknowledged_safe = True
+                profile.honeytoken_score = min(profile.honeytoken_score, existing.honeytoken_score * 0.5)
+
+            self.identity_profiles[key] = profile
+            updated += 1
+
+            was_blacklisted = key in self.identity_blacklist
+            if profile.honeytoken_score >= probable_threshold and not profile.acknowledged_safe:
+                reason = (
+                    f"Probable AD honeytoken ({profile.honeytoken_score:.0f}%): "
+                    f"{', '.join(profile.signals[:2])}"
+                )
+                self.identity_blacklist[key] = {
+                    'reason': reason,
+                    'timestamp': profile.last_assessed,
+                    'added_by': 'guardian',
+                    'verdict': profile.verdict,
+                    'score': profile.honeytoken_score,
+                }
+                if not was_blacklisted:
+                    self.stats['honeytokens_detected'] += 1
+                if self.auto_action and self.enabled and not was_blacklisted:
+                    self._create_alert(
+                        target=key,
+                        severity="CRITICAL",
+                        issue="Probable AD honeytoken (never logged on)",
+                        confidence=profile.honeytoken_score,
+                        recommendations=[
+                            "Do not authenticate against or query this account directly",
+                            "Treat as a defensive tripwire until manually verified",
+                            "Prefer SAMR/LSA collection over targeted LDAP reads when re-checking",
+                        ],
+                        evidence=profile.signals[:5],
+                    )
+
+        return updated
+
+    def get_suspected_identities(
+        self,
+        min_score: Optional[float] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Liste les identités AD suspectes triées par score."""
+        threshold = min_score if min_score is not None else self.config['identity_suspicious_threshold']
+        rows = [
+            profile for profile in self.identity_profiles.values()
+            if profile.honeytoken_score >= threshold and not profile.acknowledged_safe
+        ]
+        rows.sort(key=lambda p: (-p.honeytoken_score, p.identity_key))
+        return [asdict(profile) for profile in rows[:limit]]
+
+    def is_identity_blacklisted(self, sam_account: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """Vérifie si une identité AD est blacklistée (probable honeytoken)."""
+        key = self._identity_key(sam_account, domain)
+        if key in self.identity_whitelist:
+            return False, None
+        entry = self.identity_blacklist.get(key)
+        if entry:
+            return True, entry
+        bare = sam_account.strip().lower()
+        for stored_key, stored_entry in self.identity_blacklist.items():
+            if stored_key.endswith(f"\\{bare}") or stored_key == bare:
+                return True, stored_entry
+        return False, None
+
+    def acknowledge_identity(self, sam_account: str, domain: str = "", note: str = "") -> bool:
+        """Marque une identité AD comme légitime (faux positif honeytoken)."""
+        key = self._identity_key(sam_account, domain)
+        profile = self.identity_profiles.get(key)
+        if not profile:
+            for stored_key, stored_profile in self.identity_profiles.items():
+                if stored_key.endswith(f"\\{sam_account.strip().lower()}"):
+                    key = stored_key
+                    profile = stored_profile
+                    break
+        if not profile:
+            return False
+
+        profile.acknowledged_safe = True
+        profile.honeytoken_score = max(0.0, profile.honeytoken_score * 0.5)
+        self.identity_whitelist.add(key)
+        self.identity_blacklist.pop(key, None)
+        self.stats['false_positives'] += 1
+        if note:
+            profile.operator_notes.append(note)
+        return True
     
     def get_status(self) -> Dict[str, Any]:
         """Get Guardian status"""
@@ -483,7 +652,10 @@ class GuardianManager:
             'response_time_threshold': self.config['response_time_threshold'],
             'honeypot_threshold': self.config['honeypot_threshold'],
             'learning_mode': self.learning_mode,
-            'blacklist_size': len(self.blacklist)
+            'blacklist_size': len(self.blacklist),
+            'identity_profiles': len(self.identity_profiles),
+            'identity_blacklist_size': len(self.identity_blacklist),
+            'identity_honeytoken_threshold': self.config['identity_honeytoken_threshold'],
         }
     
     def test_host(self, host: str, deep: bool = False) -> Dict[str, Any]:

@@ -119,6 +119,9 @@ class ModuleSyncManager:
                 
             self.is_syncing = True
             start_time = time.time()
+
+            if self.module_loader is not None:
+                self.module_loader.invalidate_caches()
             
             # Ensure database constraint is up to date (includes 'workflow' type)
             try:

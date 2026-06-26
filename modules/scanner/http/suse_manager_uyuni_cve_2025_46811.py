@@ -29,6 +29,14 @@ class Module(Scanner, Websocket_client):
             "exploits/multi/http/suse_manager_uyuni_cve_2025_46811_ws_rce",
         ],
         "tags": ["web", "scanner", "suse", "uyuni", "websocket", "cve-2025-46811"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     path = OptString(

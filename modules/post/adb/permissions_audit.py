@@ -9,6 +9,14 @@ class Module(Post):
         "description": "Audit installed apps for sensitive Android permissions and risky flags",
         "author": "KittySploit Team",
         "session_type": SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     third_party_only = OptBool(True, "Audit only third-party apps (pm list packages -3)", False)

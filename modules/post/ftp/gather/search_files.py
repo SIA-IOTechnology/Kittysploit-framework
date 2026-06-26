@@ -14,6 +14,14 @@ class Module(Post, FTPClientMixin):
         "description": "Searches for files on FTP server by name pattern, extension, or content keywords",
         "author": "KittySploit Team",
         "session_type": SessionType.FTP,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
     
     search_path = OptString(".", "Remote directory path to search", False)

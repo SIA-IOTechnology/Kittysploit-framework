@@ -21,6 +21,7 @@ from interfaces.command_system.builtin.agent.module_scoring import (
 )
 from interfaces.command_system.builtin.agent.module_state_match import compute_generic_module_score
 from interfaces.command_system.builtin.agent.action_planner import planner_alignment_bonus
+from interfaces.command_system.builtin.agent.attack_chain_memory import chain_readiness_bonus
 
 
 def _scanner_basename(path_lower: str) -> str:
@@ -126,6 +127,10 @@ def module_utility(
             pass
     try:
         u += planner_alignment_bonus(module, kb if isinstance(kb, dict) else {})
+    except Exception:
+        pass
+    try:
+        u += chain_readiness_bonus(module, kb if isinstance(kb, dict) else {})
     except Exception:
         pass
     return u

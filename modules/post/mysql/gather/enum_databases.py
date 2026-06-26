@@ -8,6 +8,14 @@ class Module(Post, MySQLClient):
 		"description": "Enumerate all databases, tables, and columns in MySQL",
 		"author": "KittySploit Team",
 		"session_type": SessionType.MYSQL,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 
 	database = OptString("", "Specific database to enumerate (all if empty)", False)

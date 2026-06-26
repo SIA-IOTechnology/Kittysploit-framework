@@ -16,7 +16,15 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/vulnerabilities/Information_exposure_through_debug_information',
             'https://portswigger.net/web-security/information-disclosure'
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Options du module

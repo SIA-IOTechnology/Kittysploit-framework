@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -19,6 +20,14 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44574",
         "references": ["https://github.com/advisories/GHSA-492v-c6pp-mqqv"],
         "tags": ["scanner", "http", "nextjs", "middleware", "injection"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     protected_base = OptString("/admin", "Dynamic route prefix (e.g. /admin for /admin/[slug])", required=False)
@@ -71,6 +80,8 @@ class Module(Scanner, Http_client):
         return code == 200 and bool(needle) and needle in body.decode("utf-8", "replace")
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         needle = str(self._o(self.sentinel) or "").strip()
         if not needle:
             self.set_info(reason="sentinel is empty")

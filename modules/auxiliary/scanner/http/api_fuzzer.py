@@ -19,7 +19,15 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-project-api-security/',
             'https://portswigger.net/web-security/api',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # Common API endpoints to fuzz

@@ -48,14 +48,24 @@ class Config:
         'control_host': '127.0.0.1',
         'control_port': 9051
     }
+
+    DEFAULT_OBSERVABILITY_CONFIG = {
+        'enabled': True,
+        'structured_logs': True,
+        'metrics_jsonl': True,
+        'logs_jsonl': True,
+        'dir': '~/.kittysploit/observability',
+        'log_level': 'INFO',
+        'include_console': False,
+    }
     
     PROXY_CONFIG = DEFAULT_PROXY_CONFIG.copy()
     TOR_CONFIG = DEFAULT_TOR_CONFIG.copy()
     
-    # Valid module types
+    # Valid module types (canonical DB/search forms; aliases normalized at validation)
     VALID_MODULE_TYPES = [
         'exploit', 'payload', 'encoder', 'nop', 'auxiliary',
-        'post', 'listener', 'browser_exploit', 'browser_auxiliary',
+        'post', 'listener', 'browser_exploits', 'browser_auxiliary',
         'workflow', 'backdoor'
     ]
     
@@ -65,16 +75,23 @@ class Config:
     def __init__(self, config_file: Optional[str] = None):
         """Initialize configuration"""
         if config_file is None:
-            # Try to find config file
-            current_dir = Path.cwd()
-            config_file = self._find_config_file(current_dir)
-        
+            config_file = self._find_config_file(Path.cwd())
+
         self.config_file = config_file
         self.config: Dict[str, Any] = {}
         self.load_config()
-    
-    def _find_config_file(self, start_dir: Path) -> str:
-        """Find config file in current or parent directories"""
+
+    @staticmethod
+    def default_config_path() -> Path:
+        """Preferred user-level config path when none exists yet."""
+        return Path.home() / ".kittysploit" / "config.toml"
+
+    def _find_config_file(self, start_dir: Path) -> Optional[str]:
+        """Find an existing config file; return None when none is present."""
+        env_path = os.environ.get("KITTYSPLOIT_CONFIG")
+        if env_path:
+            return os.path.expanduser(env_path)
+
         for directory in [start_dir] + list(start_dir.parents):
             for candidate in ["config.toml", "config/kittysploit.toml", "kittysploit.toml"]:
                 config_path = directory / candidate
@@ -83,16 +100,28 @@ class Config:
                         return str(config_path)
                 except (PermissionError, OSError):
                     continue
-        # Return default path
-        return str(start_dir / "config.toml")
+
+        user_config = self.default_config_path()
+        try:
+            if user_config.exists():
+                return str(user_config)
+        except (PermissionError, OSError):
+            pass
+
+        return None
     
     def load_config(self):
-        """Load configuration from file"""
+        """Load configuration from file, or use in-memory defaults."""
         if tomllib is None:
-            # Use defaults if TOML not available
             self.config = self._get_default_config()
+            self._update_class_attributes()
             return
-        
+
+        if not self.config_file:
+            self.config = self._get_default_config()
+            self._update_class_attributes()
+            return
+
         try:
             config_path = Path(self.config_file)
             try:
@@ -100,15 +129,25 @@ class Config:
             except (PermissionError, OSError):
                 exists = False
             if not exists:
-                self._create_default_config_file(config_path)
+                self.config = self._get_default_config()
+                self._update_class_attributes()
+                return
             with open(config_path, 'rb') as f:
                 self.config = tomllib.load(f)
         except Exception as e:
             print(f"Warning: Failed to load configuration from {self.config_file}: {e}")
             self.config = self._get_default_config()
-        
-        # Update class attributes from loaded config
+
         self._update_class_attributes()
+
+    def ensure_config_file(self, path: Optional[str] = None) -> str:
+        """Create a default config file on disk when explicitly requested."""
+        target = Path(path) if path else Path(self.config_file or self.default_config_path())
+        if not target.exists():
+            self._create_default_config_file(target)
+        self.config_file = str(target)
+        self.load_config()
+        return str(target)
 
     def _create_default_config_file(self, config_path: Path) -> None:
         """Create default config.toml if it does not exist"""
@@ -130,7 +169,8 @@ class Config:
                 'default_workspace': self.DEFAULT_WORKSPACE,
             },
             'proxy': self.DEFAULT_PROXY_CONFIG.copy(),
-            'tor': self.DEFAULT_TOR_CONFIG.copy()
+            'tor': self.DEFAULT_TOR_CONFIG.copy(),
+            'observability': self.DEFAULT_OBSERVABILITY_CONFIG.copy(),
         }
     
     def _update_class_attributes(self):
@@ -174,17 +214,18 @@ class Config:
     
     @staticmethod
     def validate_module_type(module_type: str) -> bool:
-        """Validate if module type is valid"""
-        return module_type.lower() in Config.VALID_MODULE_TYPES
+        """Validate if module type is valid (accepts canonical and legacy aliases)."""
+        from core.utils.module_static_metadata import normalize_module_type
+        if not module_type:
+            return False
+        canonical = normalize_module_type(module_type)
+        allowed = {normalize_module_type(t) for t in Config.VALID_MODULE_TYPES}
+        return canonical in allowed
     
     @classmethod
     def get_instance(cls) -> 'Config':
-        """Get or create global config instance"""
+        """Get or create global config instance (lazy, not on import)."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-
-
-# Create global instance on import
-Config._instance = Config()
     

@@ -12,6 +12,14 @@ class Module(Auxiliary, Http_client):
         'description': 'Scans for common CORS (Cross-Origin Resource Sharing) misconfigurations that could allow unauthorized cross-origin requests',
         'author': 'KittySploit Team',
         'tags': ['web', 'cors', 'scanner', 'security'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     def check(self):

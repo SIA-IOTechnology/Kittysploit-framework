@@ -5,17 +5,20 @@ class OptBool(Option):
     def __init__(self, value, description, required=False, advanced=False):
         super().__init__(default=value, description=description, required=required, advanced=advanced)
     
-    def __set__(self, instance, value):
-        super().__set__(instance, value)
+    def _coerce_bool(self, value):
+        if isinstance(value, bool):
+            return value
         if isinstance(value, str):
-            if value.lower() in ('true', 'yes', 'y', '1'):
-                self.value = True
-            elif value.lower() in ('false', 'no', 'n', '0'):
-                self.value = False
-        elif isinstance(value, bool):
-            self.value = value
-        else:
-            raise OptionValidationError(f"The value '{value}' is not a valid boolean")
+            lowered = value.lower()
+            if lowered in ('true', 'yes', 'y', '1', 'on'):
+                return True
+            if lowered in ('false', 'no', 'n', '0', 'off'):
+                return False
+        raise OptionValidationError(f"The value '{value}' is not a valid boolean")
+
+    def __set__(self, instance, value):
+        coerced = self._coerce_bool(value)
+        super().__set__(instance, coerced)
 
     def validate(self):
         super().validate()

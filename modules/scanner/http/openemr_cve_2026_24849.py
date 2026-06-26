@@ -32,6 +32,14 @@ class Module(Scanner, Http_client):
             "exploits/multi/http/openemr_cve_2026_24849_file_read",
         ],
         "tags": ["web", "scanner", "openemr", "authenticated", "file-read", "cve-2026-24849"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(80, "OpenEMR HTTP port", True)

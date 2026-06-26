@@ -19,6 +19,14 @@ class Module(Scanner, Http_client):
             "auxiliary/azure/azure_exposure_path_prioritizer",
         ],
         "tags": ["cloud", "scanner", "azure", "blob", "misconfig", "public"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     blob_path = OptString("/index.html", "Blob path to test (e.g. /dump.sql)", required=False)

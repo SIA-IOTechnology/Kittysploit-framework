@@ -97,7 +97,47 @@ def detect_drupal(response) -> bool:
     return False
 
 
-def detect_version(response, pattern: str) -> Optional[str]:
+def php_stack_likely(response) -> bool:
+    """True when headers/body strongly suggest PHP — not a Node/Next.js stack."""
+    if not response or not hasattr(response, "headers"):
+        return False
+    xpb = (response.headers.get("X-Powered-By") or "").lower()
+    if any(
+        marker in xpb
+        for marker in ("php", "laravel", "symfony", "cakephp", "zend", "yii", "wordpress")
+    ):
+        return True
+    hdr = str(response.headers).lower()
+    if "phpsessid" in hdr or "php_sess" in hdr:
+        return True
+    snippet = (getattr(response, "text", None) or "")[:20000]
+    if "<?php" in snippet:
+        return True
+    return False
+
+
+def evidence_nextjs(response) -> Optional[str]:
+    """Return 'Next.js' only when response shows credible Next.js signals."""
+    if not response or php_stack_likely(response) or detect_wordpress(response):
+        return None
+
+    powered = (response.headers.get("X-Powered-By") or "").lower()
+    body = getattr(response, "text", None) or ""
+    body_lower = body[:50000].lower()
+
+    if "next.js" in powered or "nextjs" in powered:
+        return "Next.js"
+    if "__next_data__" in body_lower or "__next_f" in body_lower:
+        return "Next.js"
+    if "/_next/static/" in body_lower or 'id="__next_data__"' in body_lower:
+        return "Next.js"
+    if re.search(r"/_next/data/[^\"'\s>]+", body_lower):
+        return "Next.js"
+    return None
+
+
+def is_nextjs(response) -> bool:
+    return evidence_nextjs(response) == "Next.js"
     """Détecte une version avec un pattern regex"""
     if not response:
         return None

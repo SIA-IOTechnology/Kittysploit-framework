@@ -43,6 +43,14 @@ class Module(Scanner, Http_client):
         "author": ["KittySploit Team"],
         "severity": "critical",
         "tags": ["scanner", "http", "credentials", "disclosure", "secrets", "proxy"],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     path = OptString("/", "Request path when fetching live (ignored if captured body is set)", required=False)

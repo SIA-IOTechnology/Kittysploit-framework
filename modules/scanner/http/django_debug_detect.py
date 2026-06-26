@@ -53,6 +53,14 @@ class Module(Scanner, Http_client):
         'severity': 'high',
         'modules': ['exploits/http/django_debug_rce'],
         'tags': ['web', 'scanner', 'django', 'debug', 'rce'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     def run(self):

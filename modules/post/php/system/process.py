@@ -6,6 +6,14 @@ class Module(Post):
 		"name": "List running processes",
 		"description": "List running processes",
 		"arch": Arch.PHP,
+	'agent': {
+	    'risk': 'intrusive',
+	    'effects': ['active_exploitation'],
+	    'expected_requests': 2,
+	    'reversible': False,
+	    'approval_required': True,
+	    'produces': ['risk_signals'],
+	},
 	}	
 		
 	def run(self):

@@ -14,6 +14,14 @@ class Module(Auxiliary, Http_client):
         'author': 'KittySploit Team',
         'modules': ['auxiliary/scanner/http/login/admin_login_bruteforce'],
         'tags': ['web', 'scanner', 'login', 'auth', 'admin'],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     scan_common_paths = OptBool(True, "Scan common login paths", required=False)

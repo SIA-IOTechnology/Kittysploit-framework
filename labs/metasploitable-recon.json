@@ -1,0 +1,67 @@
+{
+  "id": "metasploitable-recon",
+  "name": "Metasploitable Recon",
+  "description": "Reconnaissance and service validation lab on the Metasploitable2 Docker image.",
+  "environment": "docker_environments/metasploitable",
+  "difficulty": "intermediate",
+  "max_score": 100,
+  "tags": ["network", "recon", "linux"],
+  "environment_options": {
+    "container_name": "kittysploit_metasploitable",
+    "ssh_port": 2222,
+    "web_port": 80,
+    "ftp_port": 21,
+    "mysql_port": 3306
+  },
+  "objectives": [
+    {
+      "id": "ssh_open",
+      "title": "SSH service is reachable",
+      "points": 25,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 2222}
+    },
+    {
+      "id": "web_open",
+      "title": "HTTP service is reachable",
+      "points": 25,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 80}
+    },
+    {
+      "id": "ftp_open",
+      "title": "FTP service is reachable",
+      "points": 25,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 21}
+    },
+    {
+      "id": "portscan",
+      "title": "TCP port scan finds open services",
+      "points": 25,
+      "check": {
+        "type": "module",
+        "module": "auxiliary/scanner/portscan/tcp",
+        "options": {"rhosts": "127.0.0.1", "ports": "21,22,80,2222", "threads": 20}
+      }
+    }
+  ],
+  "walkthrough": [
+    {
+      "step": 1,
+      "title": "Start Metasploitable",
+      "body": "Run `lab start metasploitable-recon` and wait for all mapped ports to come up."
+    },
+    {
+      "step": 2,
+      "title": "Verify SSH",
+      "body": "Connect with `ssh msfadmin@127.0.0.1 -p 2222` using password msfadmin."
+    },
+    {
+      "step": 3,
+      "title": "Run recon modules",
+      "body": "Use KittySploit scanners against 127.0.0.1, then score the lab with `lab score metasploitable-recon`."
+    }
+  ],
+  "reset": {
+    "container_name": "kittysploit_metasploitable",
+    "environment": "docker_environments/metasploitable"
+  }
+}

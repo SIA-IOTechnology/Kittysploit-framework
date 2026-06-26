@@ -28,6 +28,14 @@ class Module(Post):
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.SHELL],
         "references": [],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     session_id = OptString("", "Session ID (shell)", True)

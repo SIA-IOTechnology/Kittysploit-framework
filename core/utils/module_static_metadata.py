@@ -29,6 +29,29 @@ SUPPORTED_MODULE_TYPES: Set[str] = {
     "workflow",
 }
 
+# Map legacy or singular aliases to canonical DB/search types (see SUPPORTED_MODULE_TYPES).
+MODULE_TYPE_ALIASES: Dict[str, str] = {
+    "browserexploit": "browser_exploits",
+    "browser_exploit": "browser_exploits",
+    "browserauxiliary": "browser_auxiliary",
+    "exploit": "exploits",
+    "payload": "payloads",
+    "listener": "listeners",
+    "encoder": "encoders",
+    "obfuscators": "obfuscator",
+    "backdoor": "backdoors",
+    "scan": "scanner",
+    "scanners": "scanner",
+}
+
+
+def normalize_module_type(module_type: str) -> str:
+    """Map variant module type strings to canonical DB/search form."""
+    if not module_type:
+        return module_type
+    key = str(module_type).strip().lower()
+    return MODULE_TYPE_ALIASES.get(key, key)
+
 MODULE_BASE_TYPES: Dict[str, str] = {
     "Analysis": "analysis",
     "Auxiliary": "auxiliary",
@@ -202,19 +225,28 @@ def _option_call_info(assign: ast.Assign) -> Optional[Dict[str, Any]]:
         description = _string_ast_value(assign.value.args[1]) or ""
     if len(assign.value.args) >= 3:
         required = _truthy_required_arg(assign.value.args[2])
+    choices: List[str] = []
     for keyword in assign.value.keywords:
         if keyword.arg == "required":
             required = _truthy_required_arg(keyword.value)
         elif keyword.arg == "description":
             description = _string_ast_value(keyword.value) or description
+        elif keyword.arg == "choices" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+            for element in keyword.value.elts:
+                choice = _string_ast_value(element)
+                if choice is not None:
+                    choices.append(choice)
 
-    return {
+    result = {
         "labels": labels,
         "option_class": option_class,
         "required": bool(required),
         "description": description,
         "default": default_repr,
     }
+    if choices:
+        result["choices"] = choices
+    return result
 
 
 def _collect_class_options(module_class: Optional[ast.ClassDef]) -> Dict[str, Dict[str, Any]]:
@@ -654,6 +686,9 @@ def infer_module_type_from_path(module_path: str) -> str:
             "scanner": "scanner",
             "listener": "listeners",
             "encoder": "encoders",
+            "browser_exploit": "browser_exploits",
+            "browserexploit": "browser_exploits",
+            "browserauxiliary": "browser_auxiliary",
         }
         return remap.get(first, first)
     return "auxiliary"

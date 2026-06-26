@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_state.schema.json",
+  "title": "KittySploit Agent State",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "state_version": {"type": "integer", "const": 1},
+    "run_id": {"$ref": "common.schema.json#/$defs/id"},
+    "workspace": {"type": "string", "minLength": 1},
+    "raw_target": {"type": "string", "minLength": 1},
+    "current_phase": {
+      "type": "string",
+      "enum": ["init", "scan", "analyze", "reason", "exploit", "report"]
+    },
+    "safety_profile": {
+      "type": "string",
+      "enum": ["safe", "discreet", "normal", "aggressive"]
+    },
+    "request_budget": {"type": "integer", "minimum": 0},
+    "llm_budget": {"type": "integer", "minimum": 0},
+    "knowledge_base": {"type": "object", "additionalProperties": true},
+    "execution_plan": {"type": "object", "additionalProperties": true},
+    "decision_timeline": {"type": "array", "items": {"type": "object"}},
+    "campaign_stop_reason": {"type": ["string", "null"]},
+    "error": {"type": ["string", "null"]}
+  },
+  "required": [
+    "schema_version",
+    "state_version",
+    "run_id",
+    "workspace",
+    "raw_target",
+    "current_phase",
+    "safety_profile"
+  ],
+  "additionalProperties": true
+}

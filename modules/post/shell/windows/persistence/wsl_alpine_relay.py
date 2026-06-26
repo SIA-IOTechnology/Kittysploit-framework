@@ -20,6 +20,14 @@ class Module(Post):
         "author": "KittySploit Team",
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     lhost = OptString("", "Listener IP address for the reverse relay", True)

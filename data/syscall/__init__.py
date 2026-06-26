@@ -7,9 +7,11 @@ Provides easy access to syscall information for different architectures
 """
 
 import json
-import os
-from pathlib import Path
+from importlib import resources
 from typing import Dict, List, Optional, Any
+
+_PACKAGE = __package__
+
 
 class SyscallDatabase:
     """Database for syscall information"""
@@ -19,30 +21,29 @@ class SyscallDatabase:
         Initialize the syscall database
         
         Args:
-            data_dir: Directory containing syscall data (default: current directory)
+            data_dir: Unused legacy parameter (syscall JSON is loaded via importlib.resources)
         """
-        if data_dir is None:
-            data_dir = Path(__file__).parent
-        else:
-            data_dir = Path(data_dir)
-        
-        self.data_dir = data_dir
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._load_all()
     
+    def _read_json(self, filename: str) -> Optional[Dict[str, Any]]:
+        ref = resources.files(_PACKAGE).joinpath(filename)
+        if not ref.is_file():
+            return None
+        with ref.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    
     def _load_all(self):
         """Load all syscall data files"""
-        json_file = self.data_dir / 'syscalls.json'
-        if json_file.exists():
-            with open(json_file, 'r', encoding='utf-8') as f:
-                self._cache = json.load(f)
-        else:
-            # Load individual files
-            for arch in ['x86_64', 'x86', 'arm64', 'arm32']:
-                arch_file = self.data_dir / f'{arch}.json'
-                if arch_file.exists():
-                    with open(arch_file, 'r', encoding='utf-8') as f:
-                        self._cache[arch] = json.load(f)
+        combined = self._read_json("syscalls.json")
+        if combined is not None:
+            self._cache = combined
+            return
+
+        for arch in ['x86_64', 'x86', 'arm64', 'arm32']:
+            arch_data = self._read_json(f"{arch}.json")
+            if arch_data is not None:
+                self._cache[arch] = arch_data
     
     def get_architectures(self) -> List[str]:
         """Get list of available architectures"""

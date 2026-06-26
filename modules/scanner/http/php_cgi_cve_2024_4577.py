@@ -23,6 +23,14 @@ class Module(Scanner, Http_client):
             "exploits/linux/http/php_cgi_cve_2024_4577_rce",
         ],
         "tags": ["web", "scanner", "php", "cgi", "argument-injection", "rce"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     target_path = OptString("/index.php", "Path to PHP-CGI entrypoint", required=False)

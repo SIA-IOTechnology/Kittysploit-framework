@@ -4,9 +4,10 @@
 from kittysploit import *
 import shlex
 import re
-import os
 import json
 from typing import List, Dict, Optional
+
+from core.utils.paths import data_resource_exists, read_data_text
 
 class DefaultPasswordPlugin(Plugin):
     """Plugin to search for default passwords in routers and devices"""
@@ -21,17 +22,15 @@ class DefaultPasswordPlugin(Plugin):
 
     def __init__(self, framework=None):
         super().__init__(framework)
-        self.json_path = os.path.join("data", "default_password.json")
 
     def _load_database(self) -> Dict[str, Dict]:
         """Load JSON database from file"""
         try:
-            if not os.path.exists(self.json_path):
-                print_error(f"Database file not found: {self.json_path}")
+            if not data_resource_exists("default_password.json"):
+                print_error("Database file not found: data/default_password.json")
                 return {}
-            
-            with open(self.json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+
+            data = json.loads(read_data_text("default_password.json"))
                 # Handle nested structure with "_default" key
                 if "_default" in data and isinstance(data["_default"], dict):
                     return data["_default"]

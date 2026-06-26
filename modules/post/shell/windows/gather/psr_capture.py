@@ -31,6 +31,14 @@ class Module(Post):
             "https://learn.microsoft.com/windows-server/administration/windows-commands/psr",
         ],
         "tags": ["psr", "powershell", "screen"],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     out_dir = OptString(r"C:\Temp", "Remote directory for temporary PSR ZIP files", False)

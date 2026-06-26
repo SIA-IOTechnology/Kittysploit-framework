@@ -12,6 +12,14 @@ class Module(Post, System):
         "session_type": [SessionType.SHELL, 
                         SessionType.METERPRETER,
                         SessionType.SSH],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     SYSTEMD_VIRT_MAPPING = {

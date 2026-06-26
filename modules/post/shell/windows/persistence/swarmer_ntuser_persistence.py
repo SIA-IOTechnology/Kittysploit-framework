@@ -146,6 +146,14 @@ class Module(Post, File, Registry):
         "references": [
             "Swarmer workflow (RegLoadAppKeyW + Offreg)",
         ],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     session_id = OptString("", "Session ID (shell or meterpreter)", True)

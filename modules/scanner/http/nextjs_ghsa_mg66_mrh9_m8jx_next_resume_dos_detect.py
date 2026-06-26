@@ -8,6 +8,7 @@ import requests
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.nextjs_probe import ensure_nextjs_target
 
 
 class Module(Scanner, Http_client):
@@ -21,6 +22,14 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "references": ["https://github.com/advisories/GHSA-mg66-mrh9-m8jx"],
         "tags": ["scanner", "http", "nextjs", "dos", "ppr"],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     body_size_mb = OptInteger(5, "POST body size in MiB (smaller default for scans)", required=False)
@@ -119,6 +128,8 @@ class Module(Scanner, Http_client):
         return wall > thr or code in (413, 500, 502)
 
     def run(self):
+        if not ensure_nextjs_target(self):
+            return False
         _, be = self._baseline_get()
         if be and "Connection" in str(be):
             self.set_info(reason=f"baseline: {be}")

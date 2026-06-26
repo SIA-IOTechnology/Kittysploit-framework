@@ -28,6 +28,14 @@ class Module(Scanner, Tcp_scanner_client):
             "exploits/android/adb/adbd_tls_auth_bypass_cve_2026_0073",
         ],
         "tags": ["scanner", "tcp", "android", "adb", "adbd", "auth-bypass"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     port = OptPort(5555, "Target adbd TCP port", True)

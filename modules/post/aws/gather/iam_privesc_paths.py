@@ -12,6 +12,14 @@ class Module(Post):
         "description": "Identify practical IAM privilege escalation paths for the current principal",
         "author": "KittySploit Team",
         "session_type": SessionType.AWS,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     include_inline = OptBool(True, "Include inline user/role policies", False)

@@ -70,7 +70,8 @@ class CLI:
         # Add a binding for F5 to refresh the prompt
         @kb.add('f5')
         def _(event):
-            self.update_completer()
+            self.framework.invalidate_module_caches()
+            self.update_completer(modules=True)
             get_app().invalidate()
         
         # Create the prompt session with the key bindings
@@ -90,9 +91,9 @@ class CLI:
             'workspace': 'ansiyellow bold'
         })
         
-    def update_completer(self):
-        """Update the completer caches."""
-        self.advanced_completer.refresh()
+    def update_completer(self, *, modules: bool = False):
+        """Refresh dynamic completer state; module paths follow loader cache invalidation."""
+        self.advanced_completer.refresh(modules=modules)
     
     def get_prompt(self):
         """Generate the prompt based on the current context"""

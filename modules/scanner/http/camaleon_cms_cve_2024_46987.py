@@ -36,6 +36,14 @@ class Module(Scanner, Http_client):
             "auxiliary/admin/http/camaleon_cms_cve_2024_46987_traversal",
         ],
         "tags": ["web", "scanner", "camaleon", "rails", "lfi", "path-traversal", "cve-2024-46987"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     base_path = OptString("/", "Camaleon base URL path", required=False)

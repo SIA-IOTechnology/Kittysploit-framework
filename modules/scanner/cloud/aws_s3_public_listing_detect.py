@@ -20,6 +20,14 @@ class Module(Scanner, Http_client):
             "auxiliary/aws/aws_s3_exposure_path_prioritizer",
         ],
         "tags": ["cloud", "scanner", "aws", "s3", "misconfig", "public"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     timeout = OptString("5", "HTTP timeout in seconds", required=False)

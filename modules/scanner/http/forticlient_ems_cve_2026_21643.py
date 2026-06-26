@@ -38,6 +38,14 @@ class Module(Scanner, Http_client):
             "exposure",
             "cve-2026-21643",
         ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+    },
     }
 
     @staticmethod

@@ -1,0 +1,78 @@
+{
+  "id": "dvwa-basics",
+  "name": "DVWA Basics",
+  "description": "Introductory lab using the Damn Vulnerable Web Application Docker environment.",
+  "environment": "docker_environments/dvwa",
+  "difficulty": "beginner",
+  "max_score": 100,
+  "tags": ["web", "docker", "training"],
+  "environment_options": {
+    "host_port": 80,
+    "container_name": "kittysploit_dvwa"
+  },
+  "objectives": [
+    {
+      "id": "service_up",
+      "title": "DVWA HTTP service is reachable",
+      "points": 30,
+      "check": {"type": "tcp", "host": "127.0.0.1", "port": 80}
+    },
+    {
+      "id": "login_page",
+      "title": "DVWA login page responds",
+      "points": 30,
+      "check": {
+        "type": "http",
+        "url": "http://127.0.0.1/login.php",
+        "expect_status": 200,
+        "expect_body_contains": "Login"
+      }
+    },
+    {
+      "id": "setup_page",
+      "title": "DVWA setup page is accessible",
+      "points": 20,
+      "check": {
+        "type": "http",
+        "url": "http://127.0.0.1/setup.php",
+        "expect_status": 200
+      }
+    },
+    {
+      "id": "banner_scan",
+      "title": "HTTP banner scan succeeds against the lab target",
+      "points": 20,
+      "check": {
+        "type": "module",
+        "module": "scanner/http/server_banner_detect",
+        "options": {"rhost": "127.0.0.1", "rport": 80, "ssl": false}
+      }
+    }
+  ],
+  "walkthrough": [
+    {
+      "step": 1,
+      "title": "Start the lab environment",
+      "body": "Run `lab start dvwa-basics` to launch the DVWA container, or `use docker_environments/dvwa` then `run`."
+    },
+    {
+      "step": 2,
+      "title": "Open DVWA",
+      "body": "Browse to http://127.0.0.1/ and sign in with admin / password."
+    },
+    {
+      "step": 3,
+      "title": "Complete the setup wizard",
+      "body": "If prompted, finish the DVWA database setup via /setup.php before running exercises."
+    },
+    {
+      "step": 4,
+      "title": "Validate progress",
+      "body": "Run `lab score dvwa-basics` or `lab run dvwa-basics --skip-start` after the environment is up."
+    }
+  ],
+  "reset": {
+    "container_name": "kittysploit_dvwa",
+    "environment": "docker_environments/dvwa"
+  }
+}

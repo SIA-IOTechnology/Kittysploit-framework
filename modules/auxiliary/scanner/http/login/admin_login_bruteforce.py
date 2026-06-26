@@ -15,6 +15,14 @@ class Module(Auxiliary, Http_client):
         'description': 'Bruteforce an admin login page with username/password wordlists.',
         'author': 'KittySploit Team',
         'tags': ['web', 'scanner', 'login', 'bruteforce', 'admin'],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     path = OptString("/admin/login", "Path to the login page", required=True)

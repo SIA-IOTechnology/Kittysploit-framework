@@ -19,7 +19,15 @@ class Module(Auxiliary, Http_client):
             'https://owasp.org/www-community/attacks/xss/',
             'https://portswigger.net/web-security/cross-site-scripting',
             'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html',
-        ]
+        ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     # XSS payloads

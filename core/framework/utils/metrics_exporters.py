@@ -80,10 +80,10 @@ class StdoutExporter(MetricsExporter):
                 "type": "metric",
                 "metric_type": metric_type,
                 "metric_name": metric_name,
-                "value": value
+                "value": value,
             }
-            
             if metadata:
+                event.update({k: v for k, v in metadata.items() if k not in event})
                 event["metadata"] = metadata
             
             if self.pretty:
@@ -150,10 +150,10 @@ class JSONLFileExporter(MetricsExporter):
                 "type": "metric",
                 "metric_type": metric_type,
                 "metric_name": metric_name,
-                "value": value
+                "value": value,
             }
-            
             if metadata:
+                event.update({k: v for k, v in metadata.items() if k not in event})
                 event["metadata"] = metadata
             
             with self.lock:
@@ -243,10 +243,10 @@ class SocketExporter(MetricsExporter):
                 "type": "metric",
                 "metric_type": metric_type,
                 "metric_name": metric_name,
-                "value": value
+                "value": value,
             }
-            
             if metadata:
+                event.update({k: v for k, v in metadata.items() if k not in event})
                 event["metadata"] = metadata
             
             data = json.dumps(event, ensure_ascii=False).encode('utf-8')
@@ -366,8 +366,10 @@ class MetricsAggregator:
         with self.lock:
             module_metrics = {}
             for metric_name, agg in self.aggregations.items():
-                if 'module' in agg.get("metadata", {}):
-                    modules = agg["metadata"]["module"]
+                module_meta = agg.get("metadata", {})
+                module_key = "module_name" if "module_name" in module_meta else "module"
+                if module_key in module_meta:
+                    modules = module_meta[module_key]
                     if module_name in modules:
                         stats = self.get_stats(metric_name)
                         if stats:

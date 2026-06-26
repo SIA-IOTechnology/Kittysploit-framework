@@ -19,6 +19,14 @@ class Module(Auxiliary, Http_client):
         "cve": "CVE-2026-44574",
         "references": ["https://github.com/advisories/GHSA-492v-c6pp-mqqv"],
         "tags": ["http", "nextjs", "app-router", "middleware", "injection"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     protected_base = OptString("/admin", "Dynamic route prefix (e.g. /admin for /admin/[slug])", required=False)

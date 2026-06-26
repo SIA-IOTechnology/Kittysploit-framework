@@ -8,25 +8,36 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from core.output_handler import print_error
-from interfaces.command_system.builtin.agent.io_utils import atomic_write_json, load_json_dict
-
-
-SENSITIVE_KEY_MARKERS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "authorization",
-    "cookie",
-    "set-cookie",
-    "csrf",
+from interfaces.command_system.builtin.agent.io_utils import (
+    atomic_write_json,
+    load_json_dict,
+    update_json_dict,
 )
+from interfaces.command_system.builtin.agent.redaction import (
+    SENSITIVE_KEY_MARKERS,
+    is_sensitive_key,
+    sanitize_nested,
+)
+from interfaces.command_system.builtin.agent.run_store import AgentPathService, new_run_id
 
 
 class ReportService:
     """Persist campaign reports and rolling per-path detection scores."""
+
+    def __init__(self, paths: AgentPathService = None) -> None:
+        self.paths = paths
+
+    def set_paths(self, paths: AgentPathService) -> None:
+        self.paths = paths
+
+    def _memory_path(self, filename: str) -> str:
+        if self.paths is not None:
+            self.paths.ensure()
+            return str(self.paths.memory_dir / filename)
+        return os.path.join(
+            os.path.expanduser("~/.kittysploit/agent/default/memory"),
+            filename,
+        )
 
     @staticmethod
     def _shorten(value: Any, limit: int = 180) -> str:
@@ -52,6 +63,7 @@ class ReportService:
         llm_plan: Dict[str, Any],
         execution_plan: Dict[str, Any],
         knowledge_base: Dict[str, Any],
+        decision_source: str = "heuristic",
     ) -> Dict[str, Any]:
         findings = [row for row in (contextual_findings or []) if isinstance(row, dict)]
         findings = sorted(findings, key=self._finding_sort_key)
@@ -107,7 +119,7 @@ class ReportService:
             "decision_counts": decision_counts,
             "important_findings": important_findings,
             "decision_summary": {
-                "source": "LLM" if execution_plan.get("reasoning_confidence", 0.0) and llm_plan.get("rationale") else "Heuristic",
+                "source": "LLM" if decision_source == "llm_local" else "Heuristic",
                 "goal": execution_plan.get("campaign_goal"),
                 "next_best_action": next_best_action if isinstance(next_best_action, dict) else {},
                 "planned_actions": planned_actions,
@@ -118,46 +130,64 @@ class ReportService:
         }
 
     def load_history_scores(self) -> Dict[str, Any]:
-        history_path = os.path.join(os.getcwd(), "reports", "agent", "history_scores.json")
+        history_path = self._memory_path("history_scores.json")
         return load_json_dict(history_path)
 
-    def update_history_scores(self, contextual_findings, new_sessions) -> None:
-        history_path = os.path.join(os.getcwd(), "reports", "agent", "history_scores.json")
-        history = self.load_history_scores()
-        had_shell = bool(new_sessions)
+    def update_history_scores(
+        self,
+        contextual_findings,
+        new_sessions,
+        session_provenance=None,
+    ) -> None:
+        history_path = self._memory_path("history_scores.json")
+        provenance = session_provenance if isinstance(session_provenance, dict) else {}
+        confirmed_paths = {
+            str(path).lower()
+            for session_id, path in provenance.items()
+            if str(session_id) in {str(value) for value in (new_sessions or [])}
+            and str(path).strip()
+        }
 
-        for finding in contextual_findings:
-            path = str(finding.get("path", "")).lower()
-            if not path:
-                continue
-            entry = history.get(path, {})
-            entry["detections"] = int(entry.get("detections", 0)) + 1
-            entry["last_seen"] = datetime.now().isoformat()
-            entry["confirmed_hits"] = int(entry.get("confirmed_hits", 0)) + (1 if had_shell else 0)
-
-            likely_fp = False
-            severity = str(finding.get("severity", "")).lower()
-            if not had_shell and not finding.get("exploit_module") and severity in ("low", "info"):
-                likely_fp = True
-            if finding.get("context_score", 0) < 1.2 and not had_shell:
-                likely_fp = True
-            if likely_fp:
-                entry["likely_false_positives"] = int(entry.get("likely_false_positives", 0)) + 1
-            else:
-                entry["likely_false_positives"] = int(entry.get("likely_false_positives", 0))
-
-            history[path] = entry
+        def _update(history):
+            for finding in contextual_findings:
+                path = str(finding.get("path", "")).lower()
+                if not path:
+                    continue
+                related_paths = {path}
+                exploit_path = str(finding.get("exploit_module", "") or "").lower()
+                if exploit_path:
+                    related_paths.add(exploit_path)
+                related_paths.update(
+                    str(value).lower()
+                    for value in (finding.get("linked_modules") or [])
+                    if str(value).strip()
+                )
+                confirmed = bool(related_paths.intersection(confirmed_paths))
+                entry = history.get(path, {})
+                entry["detections"] = int(entry.get("detections", 0)) + 1
+                entry["last_seen"] = datetime.now().isoformat()
+                entry["confirmed_hits"] = int(entry.get("confirmed_hits", 0)) + (1 if confirmed else 0)
+                severity = str(finding.get("severity", "")).lower()
+                likely_fp = (
+                    not confirmed
+                    and (
+                        (not finding.get("exploit_module") and severity in ("low", "info"))
+                        or finding.get("context_score", 0) < 1.2
+                    )
+                )
+                entry["likely_false_positives"] = int(
+                    entry.get("likely_false_positives", 0)
+                ) + (1 if likely_fp else 0)
+                history[path] = entry
+            return history
 
         try:
-            atomic_write_json(history_path, history)
+            update_json_dict(history_path, _update)
         except Exception:
-            pass
+            return
 
     def _is_sensitive_key(self, key: Any) -> bool:
-        low = str(key).strip().lower()
-        if not low:
-            return False
-        return any(marker in low for marker in SENSITIVE_KEY_MARKERS)
+        return is_sensitive_key(key)
 
     def _redact_sensitive_value(self, value: Any) -> Any:
         if isinstance(value, dict):
@@ -169,18 +199,7 @@ class ReportService:
         return "[redacted]"
 
     def _sanitize_nested(self, value: Any, parent_key: str = "") -> Any:
-        if self._is_sensitive_key(parent_key):
-            return self._redact_sensitive_value(value)
-        if isinstance(value, dict):
-            return {
-                key: self._sanitize_nested(item, str(key))
-                for key, item in value.items()
-            }
-        if isinstance(value, list):
-            return [self._sanitize_nested(item, parent_key) for item in value]
-        if isinstance(value, tuple):
-            return [self._sanitize_nested(item, parent_key) for item in value]
-        return value
+        return sanitize_nested(value, parent_key)
 
     def sanitize_report_result(self, result):
         if not isinstance(result, dict):
@@ -204,13 +223,26 @@ class ReportService:
         execution_plan,
         contextual_findings=None,
         decision_timeline=None,
+        *,
+        run_id=None,
+        workspace="default",
+        metrics=None,
+        campaign_stop_reason=None,
+        network_budget=None,
+        runtime_policy=None,
+        decision_source="heuristic",
     ):
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            reports_dir = os.path.join(os.getcwd(), "reports", "agent")
+            run_id = str(run_id or new_run_id())
+            if self.paths is not None:
+                self.paths.ensure()
+                reports_dir = str(self.paths.reports_dir)
+            else:
+                reports_dir = os.path.expanduser("~/.kittysploit/agent/default/reports")
             os.makedirs(reports_dir, exist_ok=True)
 
-            base_name = f"agent_report_{timestamp}"
+            base_name = f"agent_report_{timestamp}_{run_id[-10:]}"
             md_path = os.path.join(reports_dir, f"{base_name}.md")
             json_path = os.path.join(reports_dir, f"{base_name}.json")
 
@@ -222,17 +254,25 @@ class ReportService:
             safe_error_results = [self.sanitize_report_result(r) for r in error_results]
             safe_contextual_findings = [self.sanitize_report_result(r) for r in (contextual_findings or [])]
             safe_decision_timeline = [self.sanitize_report_result(r) for r in (decision_timeline or [])]
+            safe_llm_plan = self._sanitize_nested(dict(llm_plan or {}))
+            safe_execution_plan = self._sanitize_nested(dict(execution_plan or {}))
+            safe_network_budget = self._sanitize_nested(dict(network_budget or {}))
             report_summary = self._build_report_summary(
                 safe_contextual_findings,
-                dict(llm_plan or {}),
-                dict(execution_plan or {}),
+                safe_llm_plan,
+                safe_execution_plan,
                 safe_knowledge_base,
+                decision_source=str(decision_source or "heuristic"),
             )
 
             payload = {
-                "target": raw_target,
-                "resolved_target": target_info,
+                "schema_version": "1.0",
+                "run_id": run_id,
+                "workspace": workspace,
+                "target": self._sanitize_nested(raw_target, "target_url"),
+                "resolved_target": self._sanitize_nested(target_info),
                 "generated_at": datetime.now().isoformat(),
+                "campaign_stop_reason": campaign_stop_reason,
                 "stats": {
                     "executed_modules": len(results),
                     "vulnerabilities": len(vulnerable_results),
@@ -245,9 +285,12 @@ class ReportService:
                         else 0
                     ),
                 },
-                "llm_plan": llm_plan,
+                "network_budget": safe_network_budget,
+                "metrics": self._sanitize_nested(metrics or {}),
+                "runtime_policy": self._sanitize_nested(runtime_policy or {}),
+                "llm_plan": safe_llm_plan,
                 "knowledge_base": safe_knowledge_base,
-                "execution_plan": execution_plan,
+                "execution_plan": safe_execution_plan,
                 "report_summary": report_summary,
                 "decision_timeline": safe_decision_timeline,
                 "new_sessions": new_sessions,
@@ -261,12 +304,26 @@ class ReportService:
 
             with open(md_path, "w", encoding="utf-8") as report_md:
                 report_md.write("# KittySploit Agent Report\n\n")
-                report_md.write(f"- Target: `{raw_target}`\n")
+                report_md.write(f"- Target: `{payload['target']}`\n")
+                report_md.write(f"- Run ID: `{run_id}`\n")
+                report_md.write(f"- Workspace: `{workspace}`\n")
                 report_md.write(f"- Generated at: `{payload['generated_at']}`\n")
                 report_md.write(f"- Executed modules: `{len(results)}`\n")
                 report_md.write(f"- Vulnerabilities found: `{len(vulnerable_results)}`\n")
                 report_md.write(f"- SQL injection findings: `{len(sql_findings)}`\n")
-                report_md.write(f"- New sessions: `{len(new_sessions)}`\n\n")
+                report_md.write(f"- New sessions: `{len(new_sessions)}`\n")
+                if safe_network_budget:
+                    report_md.write("\n## Network Budget\n")
+                    report_md.write(f"- Limit: `{safe_network_budget.get('limit', 0)}`\n")
+                    report_md.write(f"- Used: `{safe_network_budget.get('used', 0)}`\n")
+                    report_md.write(f"- Skipped: `{safe_network_budget.get('skipped', 0)}`\n")
+                    if safe_network_budget.get("phase"):
+                        report_md.write(f"- Last phase: `{safe_network_budget.get('phase')}`\n")
+                    if safe_network_budget.get("last_action"):
+                        report_md.write(
+                            f"- Last action: {self._shorten(safe_network_budget.get('last_action'), 220)}\n"
+                        )
+                report_md.write("\n")
 
                 report_md.write("## Knowledge Context\n")
                 report_md.write(f"- Tech hints: `{len(safe_knowledge_base.get('tech_hints', []))}`\n")
@@ -327,8 +384,8 @@ class ReportService:
                         )
                 else:
                     report_md.write("- Next best action: none\n")
-                report_md.write(f"- Rationale: {self._shorten(llm_plan.get('rationale', 'N/A'), 240)}\n")
-                selected = llm_plan.get("selected_paths", [])
+                report_md.write(f"- Rationale: {self._shorten(safe_llm_plan.get('rationale', 'N/A'), 240)}\n")
+                selected = safe_llm_plan.get("selected_paths", [])
                 if selected:
                     report_md.write("- Prioritized scanner paths:\n")
                     for path in selected:
@@ -336,10 +393,10 @@ class ReportService:
                 else:
                     report_md.write("- Prioritized scanner paths: None\n")
                 report_md.write(
-                    f"- Execution confidence: {execution_plan.get('reasoning_confidence', 0.0)}\n"
+                    f"- Execution confidence: {safe_execution_plan.get('reasoning_confidence', 0.0)}\n"
                 )
                 report_md.write(
-                    f"- Execution max requests next phase: {execution_plan.get('max_requests_next_phase', 0)}\n"
+                    f"- Execution max requests next phase: {safe_execution_plan.get('max_requests_next_phase', 0)}\n"
                 )
                 planned_actions = decision_summary.get("planned_actions", []) or []
                 if planned_actions:

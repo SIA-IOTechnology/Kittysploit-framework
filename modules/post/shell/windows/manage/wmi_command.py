@@ -12,6 +12,14 @@ class Module(Post):
         "author": "Matthew Graeber, KittySploit",
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     payload = OptFile("", "Local path to the powershell payload script to execute", True)

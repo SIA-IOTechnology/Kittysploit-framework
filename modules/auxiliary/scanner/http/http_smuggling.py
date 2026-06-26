@@ -24,6 +24,14 @@ class Module(Auxiliary):
             "https://portswigger.net/web-security/request-smuggling",
             "https://cwe.mitre.org/data/definitions/444.html",
         ],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+    },
     }
 
     target = OptString("", "Target host (IP or hostname)", True)

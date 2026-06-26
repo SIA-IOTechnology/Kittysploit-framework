@@ -16,6 +16,14 @@ class Module(Post, System):
             SessionType.METERPRETER,
             SessionType.SSH,
         ],
+    'agent': {
+        'risk': 'destructive',
+        'effects': ['target_modification'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     max_results = OptInteger(40, "Maximum lines to print per check", False)

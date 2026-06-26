@@ -16,6 +16,14 @@ class Module(Post):
             "http://clymb3r.wordpress.com/",
             "https://github.com/clymb3r/PowerShell",
         ],
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     to_string = OptBool(True, "Return plain-text output instead of JSON", False)

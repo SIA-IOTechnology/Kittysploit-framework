@@ -7,6 +7,14 @@ class Module(Post):
         'description': 'Install an APK on an Android device',
         'author': 'KittySploit Team',
         'session_type': SessionType.ANDROID,
+    'agent': {
+        'risk': 'intrusive',
+        'effects': ['active_exploitation'],
+        'expected_requests': 2,
+        'reversible': False,
+        'approval_required': True,
+        'produces': ['risk_signals'],
+    },
     }
 
     apk_path = OptString("", "Path to the APK file", required=True)

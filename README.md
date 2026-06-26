@@ -50,7 +50,7 @@ While traditional tools struggle with modern web architectures and automated def
       <td width="50%"><img src="docs/screenshots/kittyproxy-1.png" alt="KittyProxy"></td>
     </tr>
     <tr>
-      <td align="center"><i>Interactive CLI</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/cli-interface.png">cli-interface.png</a></td>
+      <td align="center"><i>Interactive CLI</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/cli-interface.png">KittySploit Framework</a></td>
       <td align="center"><i>Traffic Analysis Detail</i><br><a href="https://github.com/SIA-IOTechnology/KittyProxy">Extension KittyProxy</a></td>
     </tr>
     <tr>
@@ -58,7 +58,7 @@ While traditional tools struggle with modern web architectures and automated def
       <td width="50%"><img src="docs/screenshots/kittyosint.png" alt="KittyOsint"></td>
     </tr>
     <tr>
-      <td align="center"><i>Collaborative Editor</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittycollab.png">kittycollab.png</a></td>
+      <td align="center"><i>Collaborative Editor</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittycollab.png">KittyCollab</a></td>
       <td align="center"><i>Intelligent OSINT Graph</i><br><a href="https://github.com/SIA-IOTechnology/KittyOsint">Extension KittyOsint</a></td>
     </tr>
     <tr>

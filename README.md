@@ -51,7 +51,7 @@ While traditional tools struggle with modern web architectures and automated def
     </tr>
     <tr>
       <td align="center"><i>Interactive CLI</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/cli-interface.png">cli-interface.png</a></td>
-      <td align="center"><i>Traffic Analysis Detail</i><br><a href="https://github.com/SIA-IOTechnology/KittyProtocol">kittyproxy-1.png</a></td>
+      <td align="center"><i>Traffic Analysis Detail</i><br><a href="https://github.com/SIA-IOTechnology/KittyProxy">Extension KittyProxy</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/kittycollab.png" alt="KittyCollab"></td>
@@ -59,23 +59,23 @@ While traditional tools struggle with modern web architectures and automated def
     </tr>
     <tr>
       <td align="center"><i>Collaborative Editor</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittycollab.png">kittycollab.png</a></td>
-      <td align="center"><i>Intelligent OSINT Graph</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyosint.png">kittyosint.png</a></td>
+      <td align="center"><i>Intelligent OSINT Graph</i><br><a href="https://github.com/SIA-IOTechnology/KittyOsint">Extension KittyOsint</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/marketplace.png" alt="Marketplace"></td>
       <td width="50%"><img src="docs/screenshots/kittyproxy-2.png" alt="KittyProxy Detail"></td>
     </tr>
     <tr>
-      <td align="center"><i>GUI interface</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/marketplace.png">marketplace.png</a></td>
-      <td align="center"><i>AI-Powered Proxy</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyproxy-2.png">kittyproxy-2.png</a></td>
+      <td align="center"><i>GUI interface</i><br><a href="https://github.com/SIA-IOTechnology/KittyCosmic">Extension KittyCosmic</a></td>
+      <td align="center"><i>AI-Powered Proxy</i><br><a href="https://github.com/SIA-IOTechnology/KittyProxy">Extension KittyProxy</a></td>
     </tr>
     <tr>
       <td width="50%"><img src="docs/screenshots/kittyv8.png" alt="Marketplace"></td>
       <td width="50%"><img src="docs/screenshots/kittyprotocol.png" alt="KittyProxy Detail"></td>
     </tr>
     <tr>
-      <td align="center"><i>V8 Engine Debugger</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyv8.png">kittyv8.png</a></td>
-      <td align="center"><i>Protocol Analysis</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittyprotocol.png">kittyprotocol.png</a></td>
+      <td align="center"><i>V8 Engine Debugger</i><br><a href="https://github.com/SIA-IOTechnology/KittyV8Debugger">Extension KittyV8DEbugger</a></td>
+      <td align="center"><i>Protocol Analysis</i><br><a href="https://github.com/SIA-IOTechnology/KittyProtocol">Extension KittyProtocol</a></td>
     </tr>
   </table>
 </div>

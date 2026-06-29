@@ -5,12 +5,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 BUILD_ROOT="${DIST_DIR}/deb_build"
 
+if [ -x "${ROOT_DIR}/venv/bin/python3" ]; then
+  PYTHON="${ROOT_DIR}/venv/bin/python3"
+elif [ -x "${ROOT_DIR}/.venv/bin/python3" ]; then
+  PYTHON="${ROOT_DIR}/.venv/bin/python3"
+else
+  PYTHON="python3"
+fi
+
 if ! command -v dpkg-deb >/dev/null 2>&1; then
   echo "Error: dpkg-deb is required but not installed."
   exit 1
 fi
 
-VERSION="$(python3 - <<'PY'
+VERSION="$("${PYTHON}" - <<'PY'
 from pathlib import Path
 content = Path("pyproject.toml").read_text(encoding="utf-8")
 version = None
@@ -37,7 +45,7 @@ OUTPUT_DEB="${DIST_DIR}/${PKG_DIR_NAME}.deb"
 rm -rf "${PKG_ROOT}"
 mkdir -p "${DEBIAN_DIR}" "${OPT_DIR}" "${BIN_DIR}" "${DIST_DIR}"
 
-python3 - "${ROOT_DIR}" "${OPT_DIR}" <<'PY'
+"${PYTHON}" - "${ROOT_DIR}" "${OPT_DIR}" <<'PY'
 import os
 import shutil
 import sys
@@ -58,12 +66,16 @@ ignore_names = {
     "build",
     "venv",
     ".venv",
+    "apps",
+    "extensions",
 }
 
 def should_skip(path: Path) -> bool:
     if any(part in ignore_names for part in path.parts):
         return True
     name = path.name
+    if name.startswith("launch_kitty") and name.endswith(".py"):
+        return True
     if name.endswith((".pyc", ".pyo", ".pyd", ".deb")):
         return True
     return False
@@ -82,48 +94,11 @@ for entry in root.iterdir():
             dirs_exist_ok=True,
             ignore=shutil.ignore_patterns(
                 "__pycache__", "*.pyc", "*.pyo", "*.pyd", ".git", ".pytest_cache",
-                ".mypy_cache", "venv", ".venv", "*.deb"
+                ".mypy_cache", "venv", ".venv", "*.deb", "apps", "extensions"
             ),
         )
     else:
         shutil.copy2(entry, target)
-PY
-
-python3 - "${OPT_DIR}" <<'PY'
-import os
-import shutil
-import sys
-from pathlib import Path
-
-opt = Path(sys.argv[1]).resolve()
-sys.path.insert(0, str(opt))
-os.chdir(opt)
-
-from core.registry.client import ExtensionClient
-from core.registry.manifest import ManifestParser
-
-OFFICIAL_APPS = ("kittyproxy", "kittyosint", "kittyprotocol")
-client = ExtensionClient(extensions_dir=str(opt / "extensions"))
-
-for app_id in OFFICIAL_APPS:
-    app_src = opt / "apps" / app_id
-    if not app_src.is_dir():
-        raise SystemExit(f"apps/{app_id} missing")
-
-    target = opt / "extensions" / app_id / app_id / "latest"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        shutil.rmtree(target)
-    shutil.copytree(app_src, target)
-
-    manifest = ManifestParser.parse(str(target / "extension.toml"))
-    if not manifest:
-        raise SystemExit(f"Invalid extension.toml for {app_id}")
-
-    if not client._create_stub_files(manifest, str(target), "latest", marketplace_id=app_id):
-        raise SystemExit(f"Failed to create launcher for {app_id}")
-
-    print(f"Bundled extension {app_id} -> {target}")
 PY
 
 cat > "${DEBIAN_DIR}/control" <<EOF
@@ -180,26 +155,8 @@ export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/dat
 exec /opt/kittysploit/venv/bin/python /opt/kittysploit/kittymcp_server.py "$@"
 EOF
 
-cat > "${BIN_DIR}/kittyproxy" <<'EOF'
-#!/usr/bin/env bash
-export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyproxy.py "$@"
-EOF
-
-cat > "${BIN_DIR}/kittyosint" <<'EOF'
-#!/usr/bin/env bash
-export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyosint.py "$@"
-EOF
-
-cat > "${BIN_DIR}/kittyprotocol" <<'EOF'
-#!/usr/bin/env bash
-export KITTYSPLOIT_DB_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/kittysploit/database/database.db"
-exec /opt/kittysploit/venv/bin/python /opt/kittysploit/launch_kittyprotocol.py "$@"
-EOF
-
 chmod 755 "${DEBIAN_DIR}/postinst" "${DEBIAN_DIR}/prerm"
-chmod 755 "${BIN_DIR}/kittysploit" "${BIN_DIR}/kittymcp" "${BIN_DIR}/kittyproxy" "${BIN_DIR}/kittyosint" "${BIN_DIR}/kittyprotocol"
+chmod 755 "${BIN_DIR}/kittysploit" "${BIN_DIR}/kittymcp"
 
 DPKG_HELP="$(dpkg-deb --help || true)"
 if [[ "${DPKG_HELP}" == *"--root-owner-group"* ]]; then

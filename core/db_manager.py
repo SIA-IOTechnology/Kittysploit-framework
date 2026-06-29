@@ -44,7 +44,7 @@ class DatabaseManager:
             
             # Import registry models to ensure they're registered with Base
             try:
-                import core.registry  # noqa: F401
+                import core.registry.models  # noqa: F401
             except ImportError:
                 pass  # Registry not available, continue without it
             

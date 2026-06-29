@@ -102,7 +102,7 @@ class RpcServer:
         if self.registry_mode == 'server':
             # Mode serveur : ce framework peut servir de registry pour d'autres clients
             try:
-                import core.registry  # noqa: F401
+                import core.registry.models  # noqa: F401
                 from core.registry.signature import RegistrySignatureManager
                 from core.registry.service import RegistryService
                 

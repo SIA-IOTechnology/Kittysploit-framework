@@ -186,6 +186,7 @@ Examples:
         if ModuleExecutor.is_payload(module):
             if execution.success:
                 print_success("Payload generated successfully!")
+                self._print_payload_listener_hint(module)
                 print_info(f"Payload: {execution.result}")
             else:
                 print_error(execution.error or "Failed to generate payload")
@@ -218,6 +219,21 @@ Examples:
 
         self._print_module_result_details(execution)
         return execution.command_success
+
+    def _print_payload_listener_hint(self, module) -> None:
+        info = getattr(module, '__info__', {}) or {}
+        listener = self._stringify(info.get('listener')).strip()
+        session_type = self._stringify(info.get('session_type')).strip().lower()
+
+        if not listener:
+            return
+
+        print_info(f"Required listener: {listener}")
+        if session_type == "meterpreter":
+            print_warning(
+                "Meterpreter payloads require the Meterpreter listener; "
+                "do not use listeners/multi/reverse_tcp (Generic Reverse TCP Listener)."
+            )
 
     def _print_module_result_details(self, execution) -> None:
         """Print normalized finding, evidence, and session fields when present."""

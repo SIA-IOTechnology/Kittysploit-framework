@@ -437,7 +437,29 @@ class MeterpreterShell(BaseShell):
             else:
                 return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
         
-        # Check if command is a local Meterpreter command (should be handled locally)
+        remote_meterpreter_commands = {
+            'sysinfo', 'getuid', 'getpid', 'pwd', 'cd', 'ls', 'cat',
+            'ps', 'whoami', 'download', 'upload', 'execute',
+        }
+
+        if cmd in remote_meterpreter_commands:
+            if not self.connection:
+                self._initialize_connection()
+            if not self.connection:
+                return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
+
+            result = self._send_command(cmd, args)
+            if cmd == 'pwd' and result.get('status') == 0 and result.get('output'):
+                self.current_directory = result['output'].strip()
+                self.environment_vars['PWD'] = self.current_directory
+            elif cmd == 'cd' and result.get('status') == 0:
+                pwd_result = self._send_command('pwd', [])
+                if pwd_result.get('status') == 0 and pwd_result.get('output'):
+                    self.current_directory = pwd_result['output'].strip()
+                    self.environment_vars['PWD'] = self.current_directory
+            return result
+
+        # Check if command is a local Meterpreter command (session control/help/etc.)
         if cmd in self.meterpreter_commands:
             try:
                 result = self.meterpreter_commands[cmd](args)
@@ -1149,27 +1171,27 @@ class MeterpreterShell(BaseShell):
         
         # Try to find base64 data in output
         match = re.search(r'\[SCREENSHOT_DATA_START\]\n(.*?)\n\[SCREENSHOT_DATA_END\]', output, re.DOTALL)
-        if match:
-            base64_data = match.group(1).strip()
+        base64_data = match.group(1).strip() if match else output.strip()
+        if base64_data:
             try:
                 # Decode base64 data
                 img_data = base64.b64decode(base64_data)
                 
-                # Check if data is already PNG (PowerShell method) or RGBA (direct API method)
+                # Check if data is already an image file (PNG/BMP/XWD) or RGBA (direct API method)
                 is_png = img_data[:8] == b'\x89PNG\r\n\x1a\n'  # PNG signature
+                is_bmp = img_data[:2] == b'BM'
+                is_xwd = len(img_data) > 4 and struct.unpack('>I', img_data[:4])[0] in (100, 104, 107)
                 
-                if is_png:
-                    # Data is already PNG from PowerShell - use directly
+                if is_png or is_bmp or is_xwd:
                     png_data = img_data
                     # Parse PNG dimensions from IHDR chunk (no PIL needed)
-                    # PNG structure: signature (8 bytes) + IHDR chunk
-                    # IHDR: length (4) + type "IHDR" (4) + width (4) + height (4) + ...
-                    if len(png_data) >= 24:
+                    if is_png and len(png_data) >= 24:
                         # Width and height are at bytes 16-23 (after signature + chunk header)
                         width = struct.unpack('>I', png_data[16:20])[0]  # Big-endian 32-bit
                         height = struct.unpack('>I', png_data[20:24])[0]  # Big-endian 32-bit
                     else:
-                        return {'output': '', 'status': 1, 'error': 'PNG data too short to parse dimensions'}
+                        width = 0
+                        height = 0
                 else:
                     # Data is RGBA from direct Windows API - convert to PNG
                     if not PIL_AVAILABLE:
@@ -1200,7 +1222,12 @@ class MeterpreterShell(BaseShell):
                 png_base64 = base64.b64encode(png_data).decode('utf-8')
                 
                 # Save screenshot info
-                screenshot_filename = f"screenshot_{int(time.time())}.png"
+                ext = ".png"
+                if is_bmp:
+                    ext = ".bmp"
+                elif is_xwd:
+                    ext = ".xwd"
+                screenshot_filename = f"screenshot_{int(time.time())}{ext}"
                 
                 # Save screenshot to disk in output/screenshots/ directory
                 screenshot_dir = os.path.join("output", "screenshots")
@@ -1225,7 +1252,8 @@ class MeterpreterShell(BaseShell):
                 })
                 
                 # Return success with PNG data
-                output_msg = f"[*] Screenshot captured: {width}x{height} pixels\n"
+                dims = f"{width}x{height} pixels" if width and height else f"{len(png_data)} bytes"
+                output_msg = f"[*] Screenshot captured: {dims}\n"
                 output_msg += f"[*] PNG size: {len(png_data)} bytes\n"
                 output_msg += f"[*] Filename: {screenshot_filename}\n"
                 if saved_path:
@@ -1403,14 +1431,15 @@ class MeterpreterShell(BaseShell):
     # Privilege Escalation
     
     def _cmd_getsystem(self, args: List[str]) -> Dict[str, Any]:
-        """Attempt to get system privileges using Named Pipe Impersonation"""
+        """Attempt to get system privileges or suggest relevant post modules."""
         if not self.connection:
             self._initialize_connection()
         
         if not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
         
-        # Send getsystem command to remote client (Zig meterpreter)
+        # Send getsystem command to remote client. Python Meterpreter payloads may
+        # report this as unsupported; in that case we provide module suggestions.
         result = self._send_command('getsystem', [])
         
         # Update local state if successful
@@ -1419,8 +1448,66 @@ class MeterpreterShell(BaseShell):
             if 'SUCCESS' in output or 'Successfully obtained SYSTEM' in output:
                 self.is_root = True
                 self.username = 'SYSTEM'
+            return result
+
+        suggestion = self._get_getsystem_suggestions()
+        error = result.get('error') or result.get('output') or 'getsystem is not available for this session'
+        return {
+            'output': suggestion,
+            'status': result.get('status', 1),
+            'error': error
+        }
         
-        return result
+    def _get_getsystem_suggestions(self) -> str:
+        """Return safe post-module suggestions for privilege escalation workflows."""
+        os_hint = self._remote_os_hint()
+        session_arg = f"set session {self.session_id}"
+
+        if os_hint == "windows":
+            modules = [
+                ("modules/post/shell/windows/gather/enum_system", "enumerate OS, user, token and privilege context"),
+                ("modules/post/shell/windows/exploits/fodhelper_uac_bypass", "try a UAC bypass when the session is already a local admin"),
+                ("modules/post/shell/windows/exploits/bypassuac", "review available UAC bypass techniques"),
+                ("modules/post/shell/windows/manage/migrate", "move into a more stable/high-value process after privilege changes"),
+            ]
+        elif os_hint == "linux":
+            modules = [
+                ("modules/post/shell/linux/gather/enum_protections", "check kernel and hardening settings"),
+                ("modules/post/shell/linux/gather/enum_users", "enumerate users, groups and sudo-related hints"),
+                ("modules/post/shell/linux/gather/package_vuln_hint", "look for vulnerable package/kernel hints"),
+                ("modules/post/shell/linux/exploits/copy_fail_cve_2026_31431", "lab/CVE-specific local escalation module"),
+                ("modules/post/shell/linux/exploits/dirty_frag_lpe", "lab/CVE-specific local escalation module"),
+                ("modules/post/shell/linux/exploits/cve_2026_41651", "lab/CVE-specific local escalation module"),
+            ]
+        else:
+            modules = [
+                ("modules/post/shell/multi/gather/process_analyzer", "inspect interesting processes"),
+                ("modules/post/shell/multi/gather/credential_exposure_check", "look for credential exposure safely"),
+            ]
+
+        lines = [
+            "",
+            "[*] getsystem is not implemented as an automatic technique for this Python Meterpreter session.",
+            "[*] Suggested modules:",
+        ]
+        for module_path, reason in modules:
+            lines.append(f"    use {module_path}")
+            lines.append(f"      {session_arg}")
+            lines.append(f"      run    # {reason}")
+        return "\n".join(lines) + "\n"
+
+    def _remote_os_hint(self) -> str:
+        """Best-effort remote OS classification using sysinfo."""
+        try:
+            result = self._send_command('sysinfo', [])
+            text = ((result or {}).get('output') or '').lower()
+            if 'windows' in text:
+                return "windows"
+            if any(value in text for value in ('linux', 'ubuntu', 'debian', 'red hat', 'centos', 'fedora')):
+                return "linux"
+        except Exception:
+            pass
+        return "unknown"
     
     def _cmd_getprivs(self, args: List[str]) -> Dict[str, Any]:
         """Get current privileges"""
@@ -1563,4 +1650,3 @@ Priv: Elevate Commands
             output_lines.append(f"{i:4d}  {cmd}")
         
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
-

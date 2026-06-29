@@ -26,7 +26,7 @@ class Module(Payload):
         'category': 'singles',
         'arch': Arch.PYTHON,
         'platform': Platform.WINDOWS,
-        'listener': 'listeners/multi/meterpreter',
+        'listener': 'listeners/multi/meterpreter_reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.METERPRETER,
         'references': []
@@ -516,6 +516,9 @@ class MeterpreterClient:
                     return "", 1, "Command timed out (interactive commands may block)"
                 except Exception as e:
                     return "", 1, f"shell error: {str(e)}"
+
+            elif cmd == 'getsystem':
+                return "", 1, "getsystem is not implemented by the Python Meterpreter payload"
             
             else:
                 command = cmd + (' ' + ' '.join(args) if args else '')

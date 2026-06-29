@@ -8,6 +8,7 @@ Generate command implementation - Generate payloads
 import os
 import argparse
 from interfaces.command_system.base_command import BaseCommand
+from core.payload_generation import GeneratedArtifact, artifact_to_bytes
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class GenerateCommand(BaseCommand):
@@ -280,6 +281,9 @@ Examples:
     def _format_payload(self, payload, format_type):
         """Format payload according to specified format"""
         try:
+            if isinstance(payload, GeneratedArtifact):
+                payload = artifact_to_bytes(payload)
+
             # Convert string to bytes if needed
             if isinstance(payload, str):
                 payload_bytes = payload.encode('utf-8')
@@ -316,6 +320,9 @@ Examples:
     
     def _display_payload(self, payload, format_type):
         """Display the generated payload"""
+        if isinstance(payload, GeneratedArtifact):
+            payload = artifact_to_bytes(payload)
+
         print_info(f"\nGenerated Payload ({format_type} format):")
         print_info("=" * 50)
         
@@ -344,6 +351,9 @@ Examples:
     def _save_payload(self, payload, filename, format_type):
         """Save payload to file"""
         try:
+            if isinstance(payload, GeneratedArtifact):
+                payload = artifact_to_bytes(payload)
+
             with open(filename, 'wb' if format_type == "raw" else 'w') as f:
                 if format_type == "raw" and isinstance(payload, str):
                     # Convert hex string back to bytes

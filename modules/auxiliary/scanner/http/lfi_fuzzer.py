@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
+from lib.scanner.http.module_result import finalize_http_scanner_run, target_base_url
 from lib.protocols.http.http_client import Http_client
 import os
 import re
@@ -439,4 +440,19 @@ class Module(Auxiliary, Http_client):
             for i, result in enumerate(self.successful_payloads, 1):
                 print_info(f"  {i}. {result.get('payload')}")
                 print_info(f"     Indicator: {result.get('indicator')}")
-        return True
+        return finalize_http_scanner_run(
+            self,
+            self.successful_payloads,
+            title="Local File Inclusion",
+            severity="high",
+            category="lfi",
+            findings_key="lfi_findings",
+            hit_mapper=lambda hit: {
+                "payload": hit.get("payload"),
+                "method": "GET",
+                "request_url": target_base_url(self),
+                "status_code": hit.get("status_code"),
+                "evidence_snippet": hit.get("content_preview") or hit.get("indicator"),
+                "indicators": [hit.get("indicator")] if hit.get("indicator") else [],
+            },
+        )

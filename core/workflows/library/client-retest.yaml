@@ -1,0 +1,66 @@
+id: client-retest
+version: "1"
+name: Client Retest
+description: >
+  Re-run priority HTTP checks against a previously assessed target. Use --from-workspace
+  to pull the primary host from the active workspace, or pass --target explicitly.
+tags: [retest, client, quick-win]
+continue_on_failure: true
+variables:
+  target:
+    description: Target URL or hostname (optional if using workspace resolution)
+    required: false
+  port: "443"
+  ssl: "true"
+start_step: resolve_target
+steps:
+  resolve_target:
+    type: builtin
+    action: workspace_primary_target
+    description: Resolve primary target from workspace when --target is omitted
+    on_success: login_retest
+    on_failure: login_retest
+  login_retest:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Retest login surface exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: sql_retest
+    on_failure: sql_retest
+  sql_retest:
+    module: auxiliary/scanner/http/sql_injection
+    description: Retest SQL injection
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: xss_retest
+    on_failure: xss_retest
+  xss_retest:
+    module: auxiliary/scanner/http/xss_scanner
+    description: Retest XSS
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: cors_retest
+    on_failure: cors_retest
+  cors_retest:
+    module: auxiliary/scanner/http/cors_misconfig
+    description: Retest CORS configuration
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: retest_summary
+    on_failure: retest_summary
+  retest_summary:
+    type: builtin
+    action: client_retest_summary
+    description: Write retest summary JSON for client delivery
+    options:
+      output_dir: artifacts/retest
+    on_success: null
+    on_failure: null

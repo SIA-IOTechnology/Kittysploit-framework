@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run, target_base_url
 import json
 import urllib.parse
 import random
@@ -27,6 +28,9 @@ class Module(Auxiliary, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'requires': {
+            'min_endpoints': 1,
+        },
     },
     }
 
@@ -399,4 +403,20 @@ class Module(Auxiliary, Http_client):
         else:
             print_info("No obvious vulnerabilities detected during fuzzing.")
 
-        return True
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="API Fuzzing Finding",
+            severity="medium",
+            category="api",
+            findings_key="api_findings",
+            dedupe_keys=("endpoint", "type"),
+            hit_mapper=lambda hit: {
+                "endpoint": hit.get("endpoint"),
+                "method": hit.get("method", "GET"),
+                "request_url": target_base_url(self, path=str(hit.get("endpoint") or "/")),
+                "status_code": hit.get("status_code"),
+                "type": hit.get("type"),
+                "evidence_snippet": ", ".join(hit.get("indicators") or []) or hit.get("type"),
+            },
+        )

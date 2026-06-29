@@ -1,0 +1,59 @@
+id: dvwa-lab
+version: "1"
+name: DVWA Lab Workflow
+description: >
+  Authorized DVWA lab assessment — login detection, SQLi lab module, XSS, and LFI checks.
+  Set username/password for DVWA admin (default admin/password).
+tags: [lab, dvwa, training]
+continue_on_failure: true
+variables:
+  target:
+    description: DVWA host (e.g. 127.0.0.1)
+    required: true
+  port: "80"
+  ssl: "false"
+  username: "admin"
+  password: "password"
+  base_path: "/"
+start_step: login_surface
+steps:
+  login_surface:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Confirm DVWA login surface
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: dvwa_sqli
+    on_failure: dvwa_sqli
+  dvwa_sqli:
+    module: auxiliary/scanner/http/dvwa_sqli_shell
+    description: DVWA SQL injection lab validation
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      username: "${username}"
+      password: "${password}"
+      base_path: "${base_path}"
+      shell_sqli: "false"
+    on_success: xss
+    on_failure: xss
+  xss:
+    module: auxiliary/scanner/http/xss_scanner
+    description: XSS checks on DVWA
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: lfi
+    on_failure: lfi
+  lfi:
+    module: auxiliary/scanner/http/lfi_fuzzer
+    description: Local file inclusion fuzzing
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

@@ -18,6 +18,25 @@ from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
 
+
+class _ExtensionLaunchHandle:
+    """Job-manager hook to terminate a background extension subprocess."""
+
+    def __init__(self, process):
+        self.process = process
+
+    def shutdown(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
+
+
 class MarketCommand(BaseCommand):
     """Command to browse and install modules from the marketplace"""
     
@@ -31,11 +50,11 @@ class MarketCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "market [list|search|install|update|uninstall|info|installed|register|login|buy]"
+        return "market [list|search|install|update|uninstall|info|installed|launch|register|login|buy]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
-        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'register', 'login', 'buy']
+        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'launch', 'register', 'login', 'buy']
 
     def _refresh_module_catalog(self) -> None:
         """Invalidate module discovery caches after marketplace changes."""
@@ -58,6 +77,7 @@ Subcommands:
     install [id]  Install by ID, local path, or github:owner/repo (or --all-free)
     info <id>     Show detailed information about a module
     installed     List installed modules
+    launch [id]   Launch a UI/interface extension without leaving the console
     update [id]   Update installed modules (all or specific module)
     uninstall [id] Uninstall a module (all if --all flag, or specific module)
     register      Register a new account
@@ -71,6 +91,9 @@ Examples:
     market install --all-free       # Install all free modules from marketplace
     market info test-module          # Show info about module test-module
     market installed                 # List installed modules
+    market launch                    # List launchable UI/interface extensions
+    market launch example-web-ui     # Start extension in background
+    market launch --stop example-web-ui  # Stop a running extension
     market update                    # Update all installed modules
     market update test-module        # Update specific module
     market uninstall test-module    # Uninstall specific module
@@ -134,6 +157,27 @@ Examples:
         
         # Installed command
         subparsers.add_parser('installed', help='List installed extensions')
+
+        # Launch command (UI/interface extensions with a launcher)
+        launch_parser = subparsers.add_parser(
+            'launch',
+            help='Launch installed UI/interface extensions in background',
+        )
+        launch_parser.add_argument(
+            'extension_id',
+            nargs='?',
+            help='Extension ID or name (omit to list launchable extensions)',
+        )
+        launch_parser.add_argument(
+            '--stop',
+            action='store_true',
+            help='Stop a running extension instead of starting it',
+        )
+        launch_parser.add_argument(
+            '--foreground',
+            action='store_true',
+            help='Run in foreground and wait until the extension exits',
+        )
         
         # Register command
         subparsers.add_parser('register', help='Register a new account')
@@ -162,7 +206,16 @@ Examples:
                     limit=20,
                 )
                 return self._browse_modules(parsed_args)
-            
+
+            if args[0].lower() in ['help', '--help', '-h']:
+                self.show_help()
+                return True
+
+            # market install help -> market install --help (argparse subcommand help)
+            if len(args) >= 2 and args[1].lower() in ['help', '--help', '-h']:
+                args = list(args)
+                args[1] = '--help'
+
             parsed_args = self.parser.parse_args(args)
             
             if not parsed_args.action:
@@ -193,6 +246,8 @@ Examples:
                 return self._show_module_info(parsed_args)
             elif parsed_args.action == 'installed':
                 return self._list_installed_extensions()
+            elif parsed_args.action == 'launch':
+                return self._launch_extension(parsed_args)
             elif parsed_args.action == 'register':
                 return self._register_account()
             elif parsed_args.action == 'login':
@@ -669,6 +724,57 @@ Examples:
             )
         except Exception:
             return modules
+
+    @staticmethod
+    def _looks_like_filesystem_path(spec: str) -> bool:
+        """True when the install target is meant as a local directory or archive."""
+        text = (spec or "").strip()
+        if not text:
+            return False
+        if text.lower().startswith("github:"):
+            return False
+        if text.startswith(("./", "../")) or text.startswith(("/", "~")):
+            return True
+        if os.sep in text:
+            return True
+        if os.altsep and os.altsep in text:
+            return True
+        if text.lower().endswith((".zip", ".kext")):
+            return True
+        return False
+
+    def _try_install_local_target(self, module_id: str) -> Optional[bool]:
+        """
+        Install from a local directory or archive.
+
+        Returns True/False when handled as a filesystem target, None for registry flow.
+        """
+        if not self._looks_like_filesystem_path(module_id):
+            return None
+
+        local_path = os.path.abspath(os.path.expanduser(module_id))
+
+        if os.path.isdir(local_path):
+            manifest_path = os.path.join(local_path, "extension.toml")
+            if os.path.isfile(manifest_path):
+                return self._install_from_local_path(
+                    {"name": module_id, "id": module_id},
+                    local_path,
+                    "latest",
+                )
+            print_error(f"Directory found but missing extension.toml: {local_path}")
+            return False
+
+        if os.path.isfile(local_path):
+            if local_path.lower().endswith((".zip", ".kext")):
+                return self._install_from_zip_bundle(local_path)
+            print_error(f"Not a supported extension archive: {local_path}")
+            print_info("Expected a .zip or .kext bundle")
+            return False
+
+        print_error(f"Local path not found: {local_path}")
+        print_info("Check the path and try again, e.g.: market install ./apps/KittyProxy")
+        return False
     
     def _install_module(self, args) -> bool:
         """Install a module or all free modules"""
@@ -686,12 +792,9 @@ Examples:
 
         module_id = args.module_id.strip()
 
-        local_path = os.path.abspath(os.path.expanduser(module_id))
-        if os.path.isdir(local_path) and os.path.isfile(os.path.join(local_path, "extension.toml")):
-            return self._install_from_local_path({"name": module_id, "id": module_id}, local_path, "latest")
-
-        if os.path.isfile(local_path) and local_path.lower().endswith((".zip", ".kext")):
-            return self._install_from_zip_bundle(local_path)
+        local_result = self._try_install_local_target(module_id)
+        if local_result is not None:
+            return local_result
 
         from core.registry.github_install import get_github_source, parse_github_spec
 
@@ -1495,6 +1598,11 @@ Examples:
                 module_path = module['path']
                 
                 print_info(f"Uninstalling {module_id} ({module_name}, v{module['version']})...")
+
+                launch_info = self._get_extension_launch(module_id)
+                if launch_info and self._is_extension_process_running(launch_info):
+                    print_info(f"Stopping running extension before uninstall...")
+                    self._stop_extension_launch(module_id)
                 
                 try:
                     # Try using ExtensionClient for proper cleanup (removes launchers, stubs, etc.)
@@ -1793,6 +1901,20 @@ Examples:
                     print_info(f"   Uninstall: market uninstall {' or '.join(uninstall_ids)}")
                 else:
                     print_info(f"   Uninstall: market uninstall {ext['id']}")
+
+                ext_type = str(ext.get('type') or '').lower()
+                if ext_type in ('ui', 'interface'):
+                    try:
+                        from core.registry.client import ExtensionClient
+                        client = ExtensionClient(registry_url=self.registry_url)
+                        if client.get_launcher_path(ext['id']):
+                            running = self._get_extension_launch(ext['id'])
+                            if running and self._is_extension_process_running(running):
+                                print_info(f"   Running (pid {running['process'].pid}) — stop: market launch --stop {ext['id']}")
+                            else:
+                                print_info(f"   Launch: market launch {ext['id']}")
+                    except Exception:
+                        print_info(f"   Launch: market launch {ext['id']}")
                 print_empty()
             
             return True
@@ -1801,6 +1923,163 @@ Examples:
             print_error(f"Failed to list installed extensions: {str(e)}")
             import traceback
             traceback.print_exc()
+            return False
+
+    def _get_extension_launches(self) -> Dict[str, Dict]:
+        if not hasattr(self.framework, 'extension_launches'):
+            self.framework.extension_launches = {}
+        return self.framework.extension_launches
+
+    def _get_extension_launch(self, extension_id: str) -> Optional[Dict]:
+        return self._get_extension_launches().get(extension_id)
+
+    def _is_extension_process_running(self, launch_info: Dict) -> bool:
+        process = launch_info.get('process')
+        return bool(process and process.poll() is None)
+
+    def _launch_extension(self, args) -> bool:
+        """Launch or stop a UI/interface extension from the console."""
+        try:
+            from core.registry.client import ExtensionClient
+
+            client = ExtensionClient(registry_url=self.registry_url)
+
+            if args.stop:
+                if not args.extension_id:
+                    print_error("Specify an extension ID to stop: market launch --stop <extension_id>")
+                    return False
+                return self._stop_extension_launch(args.extension_id)
+
+            if not args.extension_id:
+                launchable = client.list_launchable_extensions()
+                if not launchable:
+                    print_info("No launchable UI/interface extensions installed")
+                    print_info("Install one with: market install <extension_id>")
+                    return True
+
+                print_info("=" * 70)
+                print_info(f"Launchable Extensions ({len(launchable)}):")
+                print_info("=" * 70)
+                print_empty()
+                for ext in launchable:
+                    running = self._get_extension_launch(ext['id'])
+                    status = "running" if running and self._is_extension_process_running(running) else "stopped"
+                    print_info(f"{ext['id']} - {ext['name']} [{status}]")
+                    print_info(f"   Launch: market launch {ext['id']}")
+                    print_empty()
+                return True
+
+            ext = client.find_installed_extension(args.extension_id)
+            if not ext:
+                print_error(f"Extension '{args.extension_id}' is not installed")
+                print_info("Use 'market installed' to see installed extensions")
+                return False
+
+            existing = self._get_extension_launch(ext['id'])
+            if existing and self._is_extension_process_running(existing):
+                print_warning(
+                    f"Extension '{ext.get('name', ext['id'])}' is already running "
+                    f"(pid {existing['process'].pid})"
+                )
+                print_info(f"Stop it with: market launch --stop {ext['id']}")
+                return True
+
+            result = client.launch_extension(
+                args.extension_id,
+                background=not args.foreground,
+            )
+            if not result:
+                return False
+
+            if args.foreground:
+                self._get_extension_launches().pop(ext['id'], None)
+                return True
+
+            process = result['process']
+            handle = _ExtensionLaunchHandle(process)
+            job_id = None
+            try:
+                from core.job_manager import global_job_manager
+
+                job_id = global_job_manager.add_job(
+                    name=f"extension:{ext.get('name', ext['id'])}",
+                    description=f"Marketplace extension launcher ({result.get('launcher', '')})",
+                    target=ext['id'],
+                    module=handle,
+                )
+                if job_id:
+                    job = global_job_manager.get_job(job_id)
+                    if job is not None:
+                        job['pid'] = process.pid
+            except Exception:
+                pass
+
+            self._get_extension_launches()[ext['id']] = {
+                'process': process,
+                'job_id': job_id,
+                'name': ext.get('name', ext['id']),
+                'launcher': result.get('launcher'),
+            }
+
+            print_success(
+                f"Extension '{ext.get('name', ext['id'])}' started in background (pid {process.pid})"
+            )
+            print_info("The KittySploit console stays active.")
+            if job_id:
+                print_info(f"Registered as job #{job_id} — stop with: jobs --kill {job_id}")
+            print_info(f"Or stop with: market launch --stop {ext['id']}")
+            return True
+
+        except ImportError:
+            print_error("ExtensionClient not available")
+            return False
+        except Exception as e:
+            print_error(f"Failed to launch extension: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _stop_extension_launch(self, extension_id: str) -> bool:
+        """Stop a background extension launch."""
+        try:
+            from core.registry.client import ExtensionClient
+
+            client = ExtensionClient(registry_url=self.registry_url)
+            ext = client.find_installed_extension(extension_id)
+            if not ext:
+                print_error(f"Extension '{extension_id}' is not installed")
+                return False
+
+            launch_info = self._get_extension_launch(ext['id'])
+            if not launch_info or not self._is_extension_process_running(launch_info):
+                print_warning(f"Extension '{ext.get('name', ext['id'])}' is not running")
+                return True
+
+            process = launch_info['process']
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+            job_id = launch_info.get('job_id')
+            if job_id:
+                try:
+                    from core.job_manager import global_job_manager
+
+                    global_job_manager.kill_job(job_id)
+                except Exception:
+                    pass
+
+            self._get_extension_launches().pop(ext['id'], None)
+            print_success(f"Extension '{ext.get('name', ext['id'])}' stopped")
+            return True
+
+        except Exception as e:
+            print_error(f"Failed to stop extension: {e}")
             return False
     
     def _buy_module(self, args) -> bool:

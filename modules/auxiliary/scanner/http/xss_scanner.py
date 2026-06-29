@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
 import re
 import urllib.parse
 import html
@@ -346,5 +347,13 @@ class Module(Auxiliary, Http_client):
         else:
             print_info("No XSS vulnerabilities detected during automated testing.")
             print_info("Note: This does not guarantee the application is secure.")
-        
-        return True
+
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="Cross-Site Scripting (XSS)",
+            severity="high",
+            category="xss",
+            findings_key="xss_findings",
+            dedupe_keys=("method", "param", "payload"),
+        )

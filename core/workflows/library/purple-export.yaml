@@ -1,0 +1,51 @@
+id: purple-export
+version: "1"
+name: Purple Team Export
+description: >
+  Run representative scanners then export purple-team artifacts (manifest + ATT&CK STIX catalog).
+  Complement with `detection_pack` on specific modules for Sigma/YARA rules.
+tags: [purple, detection, export]
+continue_on_failure: true
+variables:
+  target:
+    description: Target hostname or URL
+    required: true
+  port: "443"
+  ssl: "true"
+  workflow_id: purple-export
+start_step: surface_passive
+steps:
+  surface_passive:
+    module: auxiliary/osint/domain_surface_mapper
+    description: Passive surface mapping for purple context
+    options:
+      target: "${target}"
+      check_subdomains: "true"
+    on_success: cors_check
+    on_failure: cors_check
+  cors_check:
+    module: auxiliary/scanner/http/cors_misconfig
+    description: CORS misconfiguration (detection engineering signal)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: debug_leaks
+    on_failure: debug_leaks
+  debug_leaks:
+    module: auxiliary/scanner/http/debug_info_leak
+    description: Debug/error leak patterns
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: purple_bundle
+    on_failure: purple_bundle
+  purple_bundle:
+    type: builtin
+    action: purple_export
+    description: Write purple export manifest and STIX catalog bundle
+    options:
+      output_dir: artifacts/purple/${workflow_id}
+    on_success: null
+    on_failure: null

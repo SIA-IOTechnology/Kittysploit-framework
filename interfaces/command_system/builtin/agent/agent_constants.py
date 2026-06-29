@@ -56,6 +56,7 @@ DISCREET_PROFILE_EXPENSIVE_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
 
 WAF_RISK_HTTP_STATUS_CODES: Final[Tuple[int, ...]] = (403, 406, 429)
 
+# Prefer interfaces.command_system.builtin.agent.waf_signals for detection logic.
 WAF_BODY_MARKERS: Final[Tuple[str, ...]] = (
     "captcha",
     "recaptcha",
@@ -241,6 +242,13 @@ NOTABLE_CATALOG_KEYWORDS: Final[Tuple[str, ...]] = (
     "wordpress",
     "drupal",
     "joomla",
+    "nextjs",
+    "next.js",
+    "next_js",
+    "javascript",
+    "client_js",
+    "webhook",
+    "secret",
 )
 
 # Paths treated as pure technology detection (noise unless strong signal in message)
@@ -265,6 +273,26 @@ STRONG_VULN_SIGNAL_PHRASES: Final[Tuple[str, ...]] = (
 
 CMS_LOCK_NAMES: Final[Tuple[str, ...]] = ("wordpress", "drupal", "joomla")
 
+NEXTJS_HINT_TOKENS: Final[Tuple[str, ...]] = (
+    "__next_data__",
+    "/_next/",
+    "/_next/static/",
+    "next-route-announcer",
+    "next-head-count",
+    "nextjs",
+    "next.js",
+    "x-nextjs-cache",
+    "x-nextjs-matched-path",
+    "x-middleware-rewrite",
+    "x-middleware-next",
+)
+
+CLIENT_JS_INTEL_MODULES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/js_endpoint_extractor",
+    "auxiliary/osint/webhook_api_leak_analyzer",
+    "auxiliary/osint/secret_leak_access_validator",
+)
+
 # ``agent --all``: extra module trees (beyond ``scanner/http`` + ``auxiliary/scanner/http``).
 EXPANDED_SURFACE_MODULE_PREFIXES: Final[Tuple[str, ...]] = (
     "auxiliary/osint/",
@@ -286,17 +314,41 @@ EXPANDED_SURFACE_RECON_SKIP_SUBSTR: Final[Tuple[str, ...]] = (
 DERIVED_HOST_SCAN_MAX_HOSTS: Final[int] = 10
 DERIVED_HOST_SCAN_MODULES_PER_HOST: Final[int] = 8
 
+# Rapid HTTP probe before derived-host scans (--all / shell pivot).
+DERIVED_HOST_PROBE_PATHS: Final[Tuple[str, ...]] = ("/", "/api", "/login")
+DERIVED_HOST_LIVE_STATUSES: Final[Tuple[int, ...]] = (200, 301, 302, 401, 403)
+
+# Subdomain hostname priority (higher score → scanned first).
+SUBDOMAIN_PRIORITY_MARKERS: Final[Tuple[Tuple[str, int], ...]] = (
+    ("api.", 40),
+    ("admin.", 35),
+    ("dev.", 30),
+    ("staging.", 30),
+    ("stage.", 28),
+    ("login.", 25),
+    ("auth.", 25),
+    ("portal.", 20),
+    ("app.", 15),
+    ("internal.", 12),
+    ("test.", 10),
+    ("beta.", 10),
+)
+
+# obtain-shell macro loop: max extra module rounds after phased campaign.
+SHELL_HUNTER_MACRO_MAX_ROUNDS: Final[int] = 12
+
 # ``agent --all``: ordered passive intel before HTTP campaign (subdomains → identities).
 EXPANDED_SURFACE_SUBDOMAIN_MODULES: Final[Tuple[str, ...]] = (
-    "auxiliary/osint/domain_crtsh",
-    "auxiliary/osint/domain_dns",
     "auxiliary/osint/domain_surface_mapper",
 )
 
 EXPANDED_SURFACE_IDENTITY_MODULES: Final[Tuple[str, ...]] = (
-    "auxiliary/osint/email_infra_pivot",
+    "auxiliary/osint/email_pattern_harvester",
     "auxiliary/osint/identity_handle_hunter",
+    "auxiliary/osint/persona_password_profiler",
     "auxiliary/osint/breach_exposure_score",
+    "auxiliary/osint/saas_tenant_discovery",
+    "auxiliary/osint/email_infra_pivot",
     "auxiliary/osint/advanced_exposed_credentials_detector",
 )
 
@@ -304,7 +356,7 @@ EXPANDED_SURFACE_INTEL_MODULES: Final[Tuple[str, ...]] = (
     EXPANDED_SURFACE_SUBDOMAIN_MODULES + EXPANDED_SURFACE_IDENTITY_MODULES
 )
 
-EXPANDED_SURFACE_INTEL_MAX_MODULES: Final[int] = 7
+EXPANDED_SURFACE_INTEL_MAX_MODULES: Final[int] = 6
 EXPANDED_SURFACE_USERNAME_CANDIDATE_MAX: Final[int] = 24
 EXPANDED_SURFACE_PASSWORD_CANDIDATE_MAX: Final[int] = 32
 EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS: Final[int] = 36

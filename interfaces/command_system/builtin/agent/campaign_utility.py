@@ -22,6 +22,10 @@ from interfaces.command_system.builtin.agent.module_scoring import (
 from interfaces.command_system.builtin.agent.module_state_match import compute_generic_module_score
 from interfaces.command_system.builtin.agent.action_planner import planner_alignment_bonus
 from interfaces.command_system.builtin.agent.attack_chain_memory import chain_readiness_bonus
+from interfaces.command_system.builtin.agent.goal_planner import (
+    is_shell_operator_goal,
+    operator_goal_from_mapping,
+)
 
 
 def _scanner_basename(path_lower: str) -> str:
@@ -90,6 +94,64 @@ def expected_information_gain(
     return gain
 
 
+def shell_goal_gain_bonus(path_lower: str, kb: Dict[str, Any]) -> float:
+    """Extra discovery/exploit weight when operator pursues obtain-shell."""
+    if not isinstance(kb, dict):
+        return 0.0
+    if not (
+        kb.get("shell_hunter_mode")
+        or is_shell_operator_goal(operator_goal_from_mapping(kb))
+    ):
+        return 0.0
+    bonus = 0.0
+    if "crawler" in path_lower:
+        bonus += 1.35
+    if any(x in path_lower for x in ("api_fuzzer", "swagger_detect", "graphql_detect")):
+        bonus += 1.55
+    if "domain_surface" in path_lower or "domain_crtsh" in path_lower:
+        bonus += 1.25
+    if any(x in path_lower for x in ("lfi", "sqli", "sql_injection", "rce", "inject", "xxe", "ssrf", "php_injection", "nodejs_injection")):
+        bonus += 1.2
+    signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
+    if signals.intersection({"api_surface_detected", "test_api_surface"}) and "api" in path_lower:
+        bonus += 1.75
+    if "expand_host_surface" in signals and "domain_surface" in path_lower:
+        bonus += 2.0
+    if "active_web_probe_completed" in signals and any(
+        x in path_lower for x in ("swagger", "graphql", "api_fuzzer", "crawler", "lfi")
+    ):
+        bonus += 1.1
+    return bonus
+
+
+def attack_graph_stale_penalty(path_lower: str, kb: Dict[str, Any]) -> float:
+    """Penalize modules that ran without growing the attack graph."""
+    if not path_lower or not isinstance(kb, dict):
+        return 0.0
+    stale = {str(x).lower().strip() for x in (kb.get("attack_graph_stale_modules") or []) if x}
+    if path_lower in stale:
+        return 1.65
+    tail = path_lower.rsplit("/", 1)[-1]
+    if tail in stale:
+        return 1.2
+    return 0.0
+
+
+def attack_graph_next_action_bonus(path_lower: str, kb: Dict[str, Any]) -> float:
+    """Boost module aligned with ``attack_graph_next_action``."""
+    if not path_lower or not isinstance(kb, dict):
+        return 0.0
+    nxt = kb.get("attack_graph_next_action")
+    if not isinstance(nxt, dict):
+        return 0.0
+    action = str(nxt.get("action") or "").strip().lower()
+    if action and action == path_lower:
+        return 2.4
+    if action and path_lower.endswith(action.rsplit("/", 1)[-1]):
+        return 1.1
+    return 0.0
+
+
 def module_utility(
     module: Dict[str, Any],
     kb: Dict[str, Any],
@@ -97,6 +159,7 @@ def module_utility(
     executed_paths: Set[str],
     performance_memory: Any = None,
     context_memory: Any = None,
+    health_memory: Any = None,
 ) -> float:
     """
     utility = (gain * redundancy_discount + exploit_bonus) / network_cost
@@ -111,8 +174,11 @@ def module_utility(
     path = module_path_lower(module)
     gain = expected_information_gain(blob, path, tech_hints, kb if isinstance(kb, dict) else {})
     gain += exploit_proximity_bonus(path, kb if isinstance(kb, dict) else {})
+    gain += shell_goal_gain_bonus(path, kb if isinstance(kb, dict) else {})
     red = redundancy_penalty(path, executed_paths)
-    effective = gain * (1.0 - 0.55 * red)
+    stale = attack_graph_stale_penalty(path, kb if isinstance(kb, dict) else {})
+    graph_bonus = attack_graph_next_action_bonus(path, kb if isinstance(kb, dict) else {})
+    effective = gain * (1.0 - 0.55 * red) - stale + graph_bonus
     cost = estimate_network_cost(path)
     u = effective / max(0.4, cost)
     if performance_memory is not None and path:
@@ -123,6 +189,11 @@ def module_utility(
     if context_memory is not None and path:
         try:
             u *= float(context_memory.context_multiplier(path, kb if isinstance(kb, dict) else {}))
+        except Exception:
+            pass
+    if health_memory is not None and path:
+        try:
+            u *= float(health_memory.health_multiplier(path, kb if isinstance(kb, dict) else {}))
         except Exception:
             pass
     try:
@@ -143,6 +214,7 @@ def unified_module_score(
     executed_paths: Set[str],
     performance_memory: Optional[Any] = None,
     context_memory: Optional[Any] = None,
+    health_memory: Optional[Any] = None,
 ) -> Optional[float]:
     """
     Prefer :func:`compute_generic_module_score` when ``module`` carries planner ``agent`` metadata;
@@ -152,8 +224,19 @@ def unified_module_score(
         module, kb, tech_hints, executed_paths, performance_memory, context_memory,
     )
     if g is not None:
+        if g >= 0 and health_memory is not None:
+            path = module_path_lower(module)
+            try:
+                hm = float(health_memory.health_multiplier(path, kb if isinstance(kb, dict) else {}))
+                if hm < 0.4:
+                    return -1.0
+                g *= hm
+            except Exception:
+                pass
         return g
-    return module_utility(module, kb, tech_hints, executed_paths, performance_memory, context_memory)
+    return module_utility(
+        module, kb, tech_hints, executed_paths, performance_memory, context_memory, health_memory,
+    )
 
 
 def select_opportunistic_batch(
@@ -164,6 +247,7 @@ def select_opportunistic_batch(
     limit: int,
     performance_memory: Optional[Any] = None,
     context_memory: Optional[Any] = None,
+    health_memory: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """Pick up to ``limit`` unseen modules with highest unified score (generic ``agent`` or legacy utility)."""
     if limit <= 0:
@@ -183,10 +267,22 @@ def select_opportunistic_batch(
         if g is not None and g < 0:
             continue
         if g is not None:
+            if health_memory is not None:
+                path = module_path_lower(m)
+                try:
+                    hm = float(health_memory.health_multiplier(path, kb))
+                    if hm < 0.4:
+                        continue
+                    g *= hm
+                except Exception:
+                    pass
             scored.append((g, m))
         else:
             scored.append((
-                module_utility(m, kb, tech_hints, executed_paths, performance_memory, context_memory),
+                module_utility(
+                    m, kb, tech_hints, executed_paths,
+                    performance_memory, context_memory, health_memory,
+                ),
                 m,
             ))
     scored.sort(key=lambda item: (item[0], str(item[1].get("path", ""))), reverse=True)

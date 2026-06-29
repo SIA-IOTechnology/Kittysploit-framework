@@ -17,6 +17,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
 from core.utils.paths import data_resource_exists, read_data_text
+from core.utils.service_fingerprint import (
+    fingerprint_services,
+    format_service_label,
+)
 
 class NetworkDiscoverCommand(BaseCommand):
     """Command to discover hosts on the network"""
@@ -72,9 +76,28 @@ class NetworkDiscoverCommand(BaseCommand):
             merged['hostname'] = existing_host.get('hostname', 'Unknown')
         
         # Merge services (combine lists)
-        existing_services = set(existing_host.get('services', []))
-        new_services = set(new_host.get('services', []))
-        merged['services'] = sorted(list(existing_services | new_services))
+        existing_services = list(existing_host.get('services', []))
+        new_services = list(new_host.get('services', []))
+        merged['services'] = sorted(set(existing_services) | set(new_services))
+
+        existing_fingerprints = {
+            (f.get('protocol'), f.get('port')): f
+            for f in existing_host.get('service_fingerprints', [])
+            if isinstance(f, dict) and f.get('port') is not None
+        }
+        for fingerprint in new_host.get('service_fingerprints', []):
+            if not isinstance(fingerprint, dict) or fingerprint.get('port') is None:
+                continue
+            key = (fingerprint.get('protocol'), fingerprint.get('port'))
+            existing_fingerprints[key] = fingerprint
+        merged['service_fingerprints'] = sorted(
+            existing_fingerprints.values(),
+            key=lambda item: (item.get('protocol', ''), int(item.get('port', 0))),
+        )
+
+        existing_modules = set(existing_host.get('suggested_modules', []))
+        new_modules = set(new_host.get('suggested_modules', []))
+        merged['suggested_modules'] = sorted(existing_modules | new_modules)
         
         # Merge methods (combine)
         existing_method = existing_host.get('method', '')
@@ -96,7 +119,7 @@ class NetworkDiscoverCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "network_discover [--range <network_range>] [--timeout <seconds>] [--threads <num>] [--method <method>]"
+        return "network_discover [--range <network_range>] [--timeout <seconds>] [--threads <num>] [--method <method>] [--fingerprint|--no-fingerprint]"
     
     @property
     def help_text(self) -> str:
@@ -112,12 +135,15 @@ This command discovers hosts on the network using multiple discovery techniques:
     - UDP scanning
     - NetBIOS discovery
     - mDNS/Bonjour discovery
+    - Service fingerprinting (banner grab) with suggested KittySploit modules
 
 Options:
     --range <network>     Network range to scan (e.g., 192.168.1.0/24)
     --timeout <seconds>   Timeout for each probe (default: 1)
     --threads <num>       Number of threads to use (default: 50)
     --method <method>     Discovery method: all, arp, ping, tcp, udp, netbios, mdns
+    --fingerprint         Grab service banners and suggest modules (default)
+    --no-fingerprint      Skip banner fingerprinting and module suggestions
 
 Examples:
     network_discover                                    # Auto-detect network and scan
@@ -155,6 +181,9 @@ Note: Some methods require elevated privileges (sudo/Administrator).
             
             # Discover hosts
             hosts = self._discover_hosts(network, options)
+
+            if options.get('fingerprint', True):
+                hosts = self._enrich_with_fingerprints(hosts, options)
             
             # Display results
             self._display_results(hosts, network)
@@ -171,7 +200,8 @@ Note: Some methods require elevated privileges (sudo/Administrator).
             'range': None,
             'timeout': 1,
             'threads': 50,
-            'method': 'all'
+            'method': 'all',
+            'fingerprint': True,
         }
         
         i = 0
@@ -198,6 +228,12 @@ Note: Some methods require elevated privileges (sudo/Administrator).
             elif arg == '--method' and i + 1 < len(args):
                 options['method'] = args[i + 1].lower()
                 i += 2
+            elif arg == '--fingerprint':
+                options['fingerprint'] = True
+                i += 1
+            elif arg == '--no-fingerprint':
+                options['fingerprint'] = False
+                i += 1
             else:
                 i += 1
         
@@ -387,6 +423,27 @@ Note: Some methods require elevated privileges (sudo/Administrator).
                 vendor = self._get_mac_vendor(hosts[ip]['mac'])
                 hosts[ip]['vendor'] = vendor
         
+        return hosts
+
+    def _enrich_with_fingerprints(self, hosts, options):
+        """Fingerprint open services and attach suggested KittySploit modules."""
+        if not hosts:
+            return hosts
+
+        print_info("Fingerprinting open services and suggesting modules...")
+        timeout = float(options.get('timeout', 1))
+
+        for ip, host in hosts.items():
+            services = host.get('services') or []
+            if not services:
+                continue
+            fingerprints, suggested = fingerprint_services(ip, services, timeout=timeout)
+            if fingerprints:
+                host['service_fingerprints'] = fingerprints
+                host['services'] = [format_service_label(item) for item in fingerprints]
+            if suggested:
+                host['suggested_modules'] = suggested
+
         return hosts
     
     def _arp_scan(self, network, options):
@@ -652,23 +709,38 @@ Note: Some methods require elevated privileges (sudo/Administrator).
             return
         
         print_success(f"Discovered {len(hosts)} hosts on {network}")
-        print_info("=" * 100)
-        print_info(f"{'IP Address':<15} {'MAC Address':<17} {'Vendor':<25} {'Hostname':<20} {'Services':<25} {'Method'}")
-        print_info("-" * 100)
+        print_info("=" * 120)
+        print_info(
+            f"{'IP Address':<15} {'MAC Address':<17} {'Vendor':<22} "
+            f"{'Hostname':<18} {'Services':<28} {'Method'}"
+        )
+        print_info("-" * 120)
         
         for ip, info in sorted(hosts.items(), key=lambda x: ipaddress.ip_address(x[0])):
-            services = ', '.join(info['services'][:2])  # Show first 2 services
-            if len(info['services']) > 2:
+            if info.get('service_fingerprints'):
+                services = ', '.join(format_service_label(item) for item in info['service_fingerprints'][:2])
+            else:
+                services = ', '.join(info['services'][:2])
+            if len(info.get('services', [])) > 2:
                 services += f" (+{len(info['services'])-2} more)"
             
             vendor = info.get('vendor', 'Unknown')
-            # Truncate vendor name if too long
-            if len(vendor) > 24:
-                vendor = vendor[:21] + "..."
+            if len(vendor) > 21:
+                vendor = vendor[:18] + "..."
             
-            print_info(f"{info['ip']:<15} {info['mac']:<17} {vendor:<25} {info['hostname']:<20} {services:<25} {info['method']}")
+            print_info(
+                f"{info['ip']:<15} {info['mac']:<17} {vendor:<22} "
+                f"{info['hostname']:<18} {services:<28} {info['method']}"
+            )
+
+            suggested = info.get('suggested_modules') or []
+            if suggested:
+                modules = ', '.join(suggested[:3])
+                if len(suggested) > 3:
+                    modules += f" (+{len(suggested) - 3} more)"
+                print_info(f"  -> suggested modules: {modules}")
         
-        print_info("=" * 100)
+        print_info("=" * 120)
         print_info(f"Total: {len(hosts)} hosts discovered")
         
         # Summary by method

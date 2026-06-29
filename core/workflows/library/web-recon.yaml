@@ -1,0 +1,54 @@
+id: web-recon
+version: "1"
+name: Web Reconnaissance
+description: >
+  Passive-to-light active web surface mapping — DNS/CT subdomains, login pages,
+  API discovery, and debug leak checks for authorized targets.
+tags: [web, recon, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target hostname or URL (e.g. example.com or https://example.com)
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: domain_surface
+steps:
+  domain_surface:
+    module: auxiliary/osint/domain_surface_mapper
+    description: Map DNS, certificate transparency subdomains, and HTTP headers
+    options:
+      target: "${target}"
+      check_subdomains: "true"
+      check_headers: "true"
+    on_success: login_detect
+    on_failure: login_detect
+  login_detect:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Detect exposed login and authentication pages
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: api_discovery
+    on_failure: api_discovery
+  api_discovery:
+    module: auxiliary/scanner/http/api_fuzzer
+    description: Discover API endpoints and misconfigurations
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: debug_leaks
+    on_failure: debug_leaks
+  debug_leaks:
+    module: auxiliary/scanner/http/debug_info_leak
+    description: Check for debug and verbose error pages
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

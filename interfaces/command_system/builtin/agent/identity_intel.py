@@ -7,8 +7,20 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple
 
+from core.osint.identity_handles import is_generic_handle
+from core.osint.intel_synthesis import (
+    distinct_org_emails,
+    merge_osint_synthesis_into_knowledge_base,
+    should_run_agent_intel_step,
+    synthesize_intel_graph,
+)
+from core.osint.password_profiling import (
+    build_persona_password_list,
+    harvest_password_candidates_from_results,
+    organization_root_domain,
+)
 from interfaces.command_system.builtin.agent.agent_constants import (
     DERIVED_HOST_SCAN_MAX_HOSTS,
     EXPANDED_SURFACE_IDENTITY_MODULES,
@@ -25,29 +37,15 @@ _EMAIL_RE = re.compile(
 )
 _HANDLE_RE = re.compile(r"\b([a-z][a-z0-9._\-]{2,31})\b", re.IGNORECASE)
 
-_DEFAULT_PASSWORDS = (
-    "password",
-    "Password1",
-    "Password123",
-    "admin",
-    "admin123",
-    "123456",
-    "welcome",
-    "changeme",
-    "letmein",
-    "qwerty",
-    "summer",
-    "winter",
-    "spring",
-    "autumn",
+# Agent ``--all`` phased OSINT (context-aware; skips redundant / low-value steps).
+AGENT_INTEL_PIPELINE: Tuple[Tuple[str, str], ...] = (
+    ("surface", "auxiliary/osint/domain_surface_mapper"),
+    ("emails", "auxiliary/osint/email_pattern_harvester"),
+    ("identity", "auxiliary/osint/identity_handle_hunter"),
+    ("persona", "auxiliary/osint/persona_password_profiler"),
+    ("breach", "auxiliary/osint/breach_exposure_score"),
+    ("saas", "auxiliary/osint/saas_tenant_discovery"),
 )
-
-
-def organization_root_domain(hostname: str) -> str:
-    host = (hostname or "").lower().strip(".")
-    if host.startswith("www."):
-        return host[4:]
-    return host
 
 
 def _dedupe_preserve(items: Iterable[str], *, limit: int) -> List[str]:
@@ -132,6 +130,7 @@ def harvest_identities_from_results(
         if not isinstance(row, dict):
             continue
         details = row.get("details") if isinstance(row.get("details"), dict) else {}
+        path = str(row.get("path", "") or "")
         strings: List[str] = []
         _collect_strings(details, strings)
         strings.append(str(row.get("message", "") or ""))
@@ -161,10 +160,12 @@ def harvest_identities_from_results(
         for handle in details.get("handles", []) if isinstance(details.get("handles"), list) else []:
             handles.append(str(handle))
 
-    # Seed org mailbox patterns when we know the domain.
-    if root and "." in root:
-        for local in ("admin", "administrator", "info", "contact", "support", "hr", "sales", "webmaster"):
-            emails.append(f"{local}@{root}")
+        if path.endswith("persona_password_profiler"):
+            summary = details.get("intel_summary") if isinstance(details.get("intel_summary"), dict) else {}
+            for key in ("full_name", "first_name", "last_name"):
+                val = str(summary.get(key) or "").strip()
+                if val and key == "full_name":
+                    names.append(val)
 
     return {
         "emails": _dedupe_preserve(emails, limit=EXPANDED_SURFACE_USERNAME_CANDIDATE_MAX),
@@ -176,11 +177,14 @@ def harvest_identities_from_results(
 def build_username_candidates(identities: Mapping[str, Sequence[str]]) -> List[str]:
     candidates: List[str] = []
     for email in identities.get("emails", []) or []:
-        candidates.append(str(email))
-        local = str(email).split("@", 1)[0]
+        email = str(email)
+        candidates.append(email)
+        local = email.split("@", 1)[0]
+        if is_generic_handle(local):
+            continue
         candidates.append(local)
         for part in re.split(r"[._\-+]", local):
-            if len(part) >= 2:
+            if len(part) >= 2 and not is_generic_handle(part):
                 candidates.append(part)
     for handle in identities.get("handles", []) or []:
         candidates.append(str(handle))
@@ -210,42 +214,11 @@ def build_persona_password_candidates(
     root_domain: str = "",
 ) -> List[str]:
     """Guess likely weak passwords from identities (authorized assessments only)."""
-    passwords: List[str] = list(_DEFAULT_PASSWORDS)
-    root = organization_root_domain(root_domain)
-    org_token = root.split(".", 1)[0] if root else ""
-
-    for name in identities.get("names", []) or []:
-        cleaned = re.sub(r"[^a-zA-Z ]", " ", str(name)).strip()
-        parts = [p for p in cleaned.split() if len(p) >= 2]
-        for part in parts:
-            low = part.lower()
-            cap = part[:1].upper() + part[1:].lower() if part else ""
-            passwords.extend([low, cap, f"{low}123", f"{cap}123", f"{low}2024", f"{low}2025", f"{low}2026"])
-        if len(parts) >= 2:
-            first, last = parts[0], parts[-1]
-            passwords.extend([
-                f"{first.lower()}{last.lower()}",
-                f"{last.lower()}{first.lower()}",
-                f"{first.lower()}.{last.lower()}",
-            ])
-
-    for handle in identities.get("handles", []) or []:
-        token = re.sub(r"[^a-z0-9]", "", str(handle).lower())
-        if len(token) >= 3:
-            passwords.extend([token, f"{token}123", f"{token}1"])
-
-    if org_token and len(org_token) >= 3:
-        passwords.extend([
-            org_token,
-            org_token.capitalize(),
-            f"{org_token}123",
-            f"{org_token}2024",
-            f"{org_token}2025",
-            f"{org_token}2026",
-            f"Welcome{org_token.capitalize()}",
-        ])
-
-    return _dedupe_preserve(passwords, limit=EXPANDED_SURFACE_PASSWORD_CANDIDATE_MAX)
+    return build_persona_password_list(
+        identities,
+        root_domain=root_domain,
+        count=EXPANDED_SURFACE_PASSWORD_CANDIDATE_MAX,
+    )
 
 
 def merge_intel_into_knowledge_base(
@@ -316,11 +289,16 @@ def pick_intel_modules(
     return picked
 
 
+def _distinct_org_emails(identities: Mapping[str, Sequence[str]], root: str) -> List[str]:
+    return distinct_org_emails(identities, limit=EXPANDED_SURFACE_USERNAME_CANDIDATE_MAX)
+
+
 def build_intel_option_overrides(
     module_path: str,
     *,
     root_domain: str,
     identities: Mapping[str, Sequence[str]],
+    persona_seed: str = "",
 ) -> Dict[str, Any]:
     path = str(module_path or "").strip()
     root = organization_root_domain(root_domain)
@@ -329,25 +307,148 @@ def build_intel_option_overrides(
     if path == "auxiliary/osint/email_infra_pivot":
         return {"target": root, "domain": root}
     if path == "auxiliary/osint/identity_handle_hunter":
-        seed = ""
-        for key in ("handles", "emails", "names"):
-            values = identities.get(key) or []
-            if values:
-                seed = str(values[0])
+        seed = str(persona_seed or "").strip()
+        if not seed:
+            for key in ("names", "handles"):
+                values = identities.get(key) or []
+                if values:
+                    seed = str(values[0]).strip()
+                    break
+        if not seed:
+            for email in _distinct_org_emails(identities, root):
+                seed = email
                 break
-        if not seed and root:
-            seed = f"admin@{root}"
-        qtype = "email" if "@" in seed else "username"
+        if not seed:
+            return {"query": "", "query_type": "name"}
+        if "@" in seed:
+            qtype = "email"
+        elif " " in seed:
+            qtype = "name"
+        else:
+            qtype = "username"
         return {"query": seed, "query_type": qtype}
     if path == "auxiliary/osint/breach_exposure_score":
         seed = ""
-        emails = identities.get("emails") or []
+        emails = _distinct_org_emails(identities, root)
         if emails:
-            seed = str(emails[0])
+            seed = emails[0]
         elif root:
             seed = root
         target_type = "email" if "@" in seed else "domain"
         return {"target": seed, "target_type": target_type}
     if path == "auxiliary/osint/advanced_exposed_credentials_detector":
         return {"target": root}
+    if path == "auxiliary/osint/email_pattern_harvester":
+        return {"target": root, "scan_cert_names": True}
+    if path == "auxiliary/osint/persona_password_profiler":
+        seed = str(persona_seed or "").strip()
+        names = identities.get("names") or []
+        emails = _distinct_org_emails(identities, root)
+        if not seed and names:
+            seed = str(names[0])
+        elif not seed and emails:
+            seed = emails[0]
+        if not seed:
+            seed = root
+        opts: Dict[str, Any] = {
+            "target": seed,
+            "company_domain": root,
+            "password_count": "20",
+        }
+        if "@" in seed:
+            opts["target_type"] = "email"
+        elif seed == root:
+            opts["target_type"] = "company"
+        else:
+            opts["target_type"] = "person"
+        return opts
+    if path == "auxiliary/osint/domain_surface_mapper":
+        return {
+            "target": root,
+            "resolve_dns": True,
+            "check_subdomains": True,
+            "check_headers": True,
+            "max_subdomains": "25",
+        }
+    if path == "auxiliary/osint/saas_tenant_discovery":
+        return {"target": root, "scan_cert_subdomains": True}
     return {"target": root}
+
+
+def pick_agent_intel_pipeline_modules(
+    catalog_modules: Sequence[Mapping[str, Any]],
+    *,
+    max_steps: int = EXPANDED_SURFACE_INTEL_MAX_MODULES,
+) -> List[Dict[str, Any]]:
+    by_path = {
+        str(row.get("path", "")).strip(): dict(row)
+        for row in catalog_modules or []
+        if str(row.get("path", "")).strip()
+    }
+    picked: List[Dict[str, Any]] = []
+    for _step, path in AGENT_INTEL_PIPELINE:
+        row = by_path.get(path)
+        if row:
+            picked.append(row)
+        if len(picked) >= max_steps:
+            break
+    return picked
+
+
+def run_agent_intel_pipeline(
+    *,
+    execute_modules: Callable[[List[Dict[str, Any]], Dict[str, Dict[str, Any]]], Sequence[Mapping[str, Any]]],
+    catalog_modules: Sequence[Mapping[str, Any]],
+    root_domain: str,
+    persona_seed: str = "",
+    max_steps: int = EXPANDED_SURFACE_INTEL_MAX_MODULES,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Run OSINT modules in context-aware phases.
+
+    Each step updates identities from prior results before the next module runs.
+    """
+    root = organization_root_domain(root_domain)
+    pipeline = pick_agent_intel_pipeline_modules(catalog_modules, max_steps=max_steps)
+    all_results: List[Dict[str, Any]] = []
+    running_identities: Dict[str, List[str]] = {"emails": [], "handles": [], "names": []}
+    if persona_seed:
+        running_identities["names"].append(str(persona_seed).strip())
+
+    for step, path in AGENT_INTEL_PIPELINE:
+        module = next((row for row in pipeline if str(row.get("path", "")) == path), None)
+        if not module:
+            continue
+        if not should_run_agent_intel_step(
+            step,
+            persona_seed=persona_seed,
+            identities=running_identities,
+            root_domain=root,
+        ):
+            continue
+
+        overrides = {
+            path: build_intel_option_overrides(
+                path,
+                root_domain=root,
+                identities=running_identities,
+                persona_seed=persona_seed,
+            )
+        }
+        batch = execute_modules([module], overrides)
+        all_results.extend(list(batch or []))
+
+        harvested = harvest_identities_from_results(all_results, root_domain=root)
+        for key in ("emails", "handles", "names"):
+            running_identities[key] = _dedupe_preserve(
+                list(running_identities.get(key) or []) + list(harvested.get(key) or []),
+                limit=EXPANDED_SURFACE_USERNAME_CANDIDATE_MAX if key != "names" else 12,
+            )
+
+    synthesis = synthesize_intel_graph(
+        all_results,
+        root_domain=root,
+        identities=running_identities,
+        persona_seed=persona_seed,
+    )
+    return all_results, synthesis

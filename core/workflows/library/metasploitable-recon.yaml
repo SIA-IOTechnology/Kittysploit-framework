@@ -1,0 +1,45 @@
+id: metasploitable-recon
+version: "1"
+name: Metasploitable Recon
+description: >
+  Network reconnaissance tuned for Metasploitable-style lab hosts — TCP port scan
+  and SMB null session / signing checks.
+tags: [lab, metasploitable, recon]
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: tcp_scan
+steps:
+  tcp_scan:
+    module: auxiliary/scanner/portscan/tcp
+    description: TCP scan of common Metasploitable services
+    options:
+      rhosts: "${target}"
+      ports: "21,22,23,25,53,80,111,139,445,512,513,514,1099,1524,2049,2121,3306,3632,5432,5900,6000,6667,8009,8180"
+      threads: "30"
+      timeout: "2.0"
+    on_success: smb_null
+    on_failure: smb_null
+  smb_null:
+    module: scanner/smb/null_session
+    description: SMB null session acceptance
+    options:
+      target: "${target}"
+    on_success: smb_signing
+    on_failure: smb_signing
+  smb_signing:
+    module: scanner/smb/signing_not_required
+    description: SMB signing not required
+    options:
+      target: "${target}"
+    on_success: smb_v1
+    on_failure: smb_v1
+  smb_v1:
+    module: scanner/smb/smbv1_detect
+    description: SMBv1 enabled
+    options:
+      target: "${target}"
+    on_success: null
+    on_failure: null

@@ -1,0 +1,133 @@
+id: osint-deep-recon
+version: "1"
+name: OSINT Deep Recon
+description: >
+  Passive OSINT chain with persona password profiling and optional login bruteforce
+  using harvested wordlists. Set run_login_bruteforce=true only on authorized targets.
+tags: [osint, passive, deep-recon, credentials, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target organization domain (e.g. example.com)
+    required: true
+  persona_name:
+    description: Optional person full name for targeted password profiling
+    default: ""
+  port:
+    default: "443"
+  ssl:
+    default: "true"
+  login_path:
+    description: Login page path for optional bruteforce step
+    default: "/admin/login"
+  run_login_bruteforce:
+    description: Set to true to run admin_login_bruteforce after OSINT (authorized only)
+    default: "false"
+start_step: surface
+steps:
+  surface:
+    module: auxiliary/osint/domain_surface_mapper
+    description: DNS, CT subdomains, and HTTP security headers
+    options:
+      target: "${target}"
+      resolve_dns: "true"
+      check_subdomains: "true"
+      check_headers: "true"
+      max_subdomains: "25"
+    on_success: wayback
+    on_failure: wayback
+  wayback:
+    module: auxiliary/osint/wayback_surface_hunter
+    description: Historical sensitive URLs from Internet Archive
+    options:
+      target: "${target}"
+      max_urls: "400"
+      min_score: "50"
+    on_success: origin_ip
+    on_failure: origin_ip
+  origin_ip:
+    module: auxiliary/osint/cdn_origin_ip_finder
+    description: Probable origin IPs behind CDN
+    options:
+      target: "${target}"
+      scan_cert_subdomains: "true"
+      max_cert_names: "150"
+    on_success: github
+    on_failure: github
+  github:
+    module: auxiliary/osint/github_org_exposure
+    description: Public GitHub repos and secret/workflow risks
+    options:
+      target: "${target}"
+      max_repos: "20"
+    on_success: identity
+    on_failure: identity
+  identity:
+    module: auxiliary/osint/identity_handle_hunter
+    description: Discover public identity handles (requires persona_name or distinctive query)
+    options:
+      query: "${persona_name}"
+      query_type: "name"
+      max_results: "20"
+      min_confidence: "80"
+      output_file: "artifacts/osint/${target}/identity.json"
+    on_success: emails
+    on_failure: emails
+  emails:
+    module: auxiliary/osint/email_pattern_harvester
+    description: Email addresses and patterns from passive sources
+    options:
+      target: "${target}"
+      scan_cert_names: "true"
+      output_file: "artifacts/osint/${target}/emails.json"
+    on_success: persona
+    on_failure: persona
+  persona:
+    module: auxiliary/osint/persona_password_profiler
+    description: Build 20 contextual passwords and username wordlists from OSINT
+    options:
+      target: "${persona_name}"
+      target_type: "auto"
+      company_domain: "${target}"
+      identity_file: "artifacts/osint/${target}/identity.json"
+      email_file: "artifacts/osint/${target}/emails.json"
+      password_count: "20"
+      output_file: "artifacts/osint/${target}/persona.json"
+      wordlist_file: "artifacts/osint/${target}/persona_passwords.txt"
+      usernames_wordlist_file: "artifacts/osint/${target}/persona_usernames.txt"
+    on_success: saas
+    on_failure: saas
+  saas:
+    module: auxiliary/osint/saas_tenant_discovery
+    description: SaaS and IdP tenant discovery (Okta, M365, Google, etc.)
+    options:
+      target: "${target}"
+      scan_cert_subdomains: "true"
+    on_success: login_detect
+    on_failure: login_detect
+  login_detect:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Detect exposed login pages before optional bruteforce
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: login_bruteforce
+    on_failure: login_bruteforce
+  login_bruteforce:
+    module: auxiliary/scanner/http/login/admin_login_bruteforce
+    description: Optional login bruteforce with persona wordlists (authorized targets only)
+    when: ${run_login_bruteforce} == true
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      path: "${login_path}"
+      usernames_file: "artifacts/osint/${target}/persona_usernames.txt"
+      passwords_file: "artifacts/osint/${target}/persona_passwords.txt"
+      max_attempts: "40"
+      stop_on_success: "true"
+    on_success: null
+    on_failure: null

@@ -25,6 +25,9 @@ class Module(Scanner, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'requires': {
+            'api_surface_ready': True,
+        },
     },
     }
 

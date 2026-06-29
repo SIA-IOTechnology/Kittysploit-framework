@@ -12,7 +12,7 @@ import os
 import re
 import time
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -107,23 +107,112 @@ FILE_PARAM_TOKENS = frozenset({
     "view",
 })
 
-WAF_STATUS_CODES = frozenset({403, 406, 429})
-WAF_BODY_MARKERS = (
-    "access denied",
-    "akamai",
-    "bot detection",
-    "captcha",
-    "cloudflare",
-    "cf-chl",
-    "hcaptcha",
-    "imperva",
-    "incapsula",
-    "not acceptable",
-    "rate limit",
-    "request blocked",
-    "sucuri",
-    "too many requests",
+CMD_PARAM_TOKENS = frozenset({
+    "cmd",
+    "command",
+    "exec",
+    "execute",
+    "host",
+    "ip",
+    "ping",
+    "query",
+    "q",
+    "run",
+    "shell",
+    "system",
+})
+
+# Low-noise paths for default active GET discovery (any campaign goal).
+SAFE_PROBE_PATHS: Tuple[str, ...] = (
+    "/",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/api",
+    "/api/v1",
+    "/swagger.json",
+    "/openapi.json",
+    "/graphql",
+    "/login",
+    "/health",
+    "/docs",
+    "/redoc",
 )
+
+# Config leak / admin / debug paths — only with obtain-shell or --shell-hunter
+# and explicit ``--approve-risk intrusive``.
+SENSITIVE_SHELL_PROBE_PATHS: Tuple[str, ...] = (
+    "/api/v2",
+    "/swagger",
+    "/admin",
+    "/wp-login.php",
+    "/login.php",
+    "/xmlrpc.php",
+    "/readme.html",
+    "/wp-json/",
+    "/actuator",
+    "/actuator/health",
+    "/.env",
+    "/server-status",
+    "/phpinfo.php",
+)
+
+# Backward-compatible alias (full list); prefer ``resolve_active_probe_paths``.
+SHELL_PROBE_PATHS: Tuple[str, ...] = SAFE_PROBE_PATHS + SENSITIVE_SHELL_PROBE_PATHS
+
+
+def _normalize_probe_path(raw: Any) -> str:
+    path = str(raw or "").strip()
+    if not path:
+        return ""
+    if not path.startswith("/"):
+        path = "/" + path
+    return path.split("?", 1)[0] or "/"
+
+
+def resolve_active_probe_paths(
+    *,
+    shell_mode: bool = False,
+    intrusive_approved: bool = False,
+    extra_paths: Optional[Iterable[str]] = None,
+    limit: int = 14,
+) -> Tuple[List[str], str]:
+    """
+    Build ordered GET probe paths and a tier label (``safe`` or ``shell``).
+
+    Sensitive paths are appended only when ``shell_mode`` and ``intrusive_approved``.
+    """
+    ordered: List[str] = []
+    seen: set = set()
+    cap = max(1, int(limit or 1))
+
+    def _add(raw: Any) -> None:
+        path = _normalize_probe_path(raw)
+        if not path or path in seen:
+            return
+        seen.add(path)
+        ordered.append(path)
+
+    for raw in extra_paths or []:
+        _add(raw)
+        if len(ordered) >= cap:
+            return ordered[:cap], "safe"
+
+    for raw in SAFE_PROBE_PATHS:
+        _add(raw)
+        if len(ordered) >= cap:
+            return ordered[:cap], "safe"
+
+    tier = "safe"
+    if shell_mode and intrusive_approved:
+        tier = "shell"
+        for raw in SENSITIVE_SHELL_PROBE_PATHS:
+            _add(raw)
+            if len(ordered) >= cap:
+                break
+
+    return ordered[:cap], tier
+
+from interfaces.command_system.builtin.agent.waf_signals import is_actionable_waf_signal
 
 
 def _as_text(value: Any) -> str:
@@ -263,7 +352,284 @@ class HttpRequestIntelligence:
             "login_fidelity": {},
             "extracted_secrets": [],
             "calibration": {},
+            "probe_results": [],
         }
+
+    def build_target_base_url(self, target_info: Dict[str, Any]) -> str:
+        scheme = str((target_info or {}).get("scheme") or "http").lower()
+        host = str((target_info or {}).get("hostname") or "").strip()
+        if not host:
+            return ""
+        try:
+            port = int((target_info or {}).get("port") or _default_port_for_scheme(scheme))
+        except Exception:
+            port = _default_port_for_scheme(scheme)
+        if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+            return f"{scheme}://{host}"
+        return f"{scheme}://{host}:{port}"
+
+    def merge_intel_summaries(self, base: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge proxy + active probe summaries into one KB-compatible payload."""
+        if not isinstance(base, dict):
+            base = self.empty_summary()
+        if not isinstance(extra, dict) or not extra:
+            return dict(base)
+
+        out = dict(base)
+        out["analyzed_flows"] = int(base.get("analyzed_flows", 0) or 0) + int(extra.get("analyzed_flows", 0) or 0)
+        out["matched_flows"] = int(base.get("matched_flows", 0) or 0) + int(extra.get("matched_flows", 0) or 0)
+
+        def _merge_list(key: str, limit: int) -> None:
+            seen: set = set()
+            merged: List[Any] = []
+            for row in list(base.get(key) or []) + list(extra.get(key) or []):
+                if isinstance(row, dict):
+                    token = str(row.get("path") or row.get("endpoint") or row.get("url") or row)
+                else:
+                    token = str(row)
+                if token in seen:
+                    continue
+                seen.add(token)
+                merged.append(row)
+            out[key] = merged[:limit]
+
+        def _merge_set(key: str, limit: int) -> None:
+            values = set(str(x) for x in list(base.get(key) or []) + list(extra.get(key) or []) if str(x).strip())
+            out[key] = sorted(values)[:limit]
+
+        _merge_set("discovered_endpoints", 300)
+        _merge_set("discovered_params", 200)
+        _merge_set("login_paths", 40)
+        _merge_set("tech_hints", 40)
+        _merge_set("risk_signals", 80)
+        _merge_list("interesting_requests", 24)
+        _merge_list("candidate_requests", 24)
+        _merge_list("probe_results", 40)
+        out["dom_xss_potential"] = list(base.get("dom_xss_potential") or []) + list(extra.get("dom_xss_potential") or [])
+        out["extracted_secrets"] = list(base.get("extracted_secrets") or []) + list(extra.get("extracted_secrets") or [])
+        out["active_probe"] = bool(base.get("active_probe") or extra.get("active_probe") or extra.get("source") == "active_probe")
+        return out
+
+    def probe_direct_surface(
+        self,
+        target_info: Dict[str, Any],
+        *,
+        extra_paths: Optional[Iterable[str]] = None,
+        probe_paths: Optional[Iterable[str]] = None,
+        limit: int = 14,
+        user_agent: str = "",
+        timeout: float = 8.0,
+        on_request: Optional[Callable[[], bool]] = None,
+        throttle_seconds: float = 0.0,
+        on_throttle: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """Send bounded GET requests to map API/admin/login surfaces without proxy traffic."""
+        summary = self.empty_summary(enabled=True)
+        summary["source"] = "active_probe"
+        base_url = self.build_target_base_url(target_info)
+        if not base_url:
+            summary["error"] = "missing target hostname"
+            return summary
+
+        if probe_paths is not None:
+            cap = max(1, int(limit or 1))
+            ordered_paths = []
+            seen: set = set()
+            for raw in probe_paths:
+                path = _normalize_probe_path(raw)
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                ordered_paths.append(path)
+                if len(ordered_paths) >= cap:
+                    break
+            tier = "safe"
+        else:
+            ordered_paths, tier = resolve_active_probe_paths(
+                extra_paths=extra_paths,
+                limit=max(1, int(limit or 1)),
+            )
+        summary["probe_tier"] = tier
+
+        guard = active_scope_guard()
+        policy = active_runtime_policy()
+        verify = policy.tls_verify_value() if policy is not None else True
+        if not verify:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        proxies = self._build_proxy_dict()
+        headers = {"User-Agent": user_agent or "KittysploitAgent/1.0 (+authorized-testing)"}
+
+        analyzed = 0
+        for idx, path in enumerate(ordered_paths):
+            if idx > 0:
+                if on_throttle is not None:
+                    try:
+                        on_throttle(path)
+                    except Exception:
+                        pass
+                elif float(throttle_seconds or 0.0) > 0:
+                    time.sleep(float(throttle_seconds))
+            if on_request is not None and not on_request():
+                break
+            url = base_url.rstrip("/") + (path if path.startswith("/") else f"/{path}")
+            if guard is not None:
+                allowed, reason = guard.validate_url(url)
+                if not allowed:
+                    summary["probe_results"].append({
+                        "status": "blocked",
+                        "method": "GET",
+                        "url": url,
+                        "path": path,
+                        "error": reason,
+                    })
+                    continue
+            started = time.time()
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=max(1.0, float(timeout or 8.0)),
+                    allow_redirects=False,
+                    proxies=proxies or None,
+                    verify=verify,
+                )
+                elapsed_ms = int((time.time() - started) * 1000)
+                item = self._summarize_direct_response(
+                    url=url,
+                    path=path,
+                    status_code=int(response.status_code or 0),
+                    response_headers=_normalize_headers(dict(response.headers)),
+                    response_body=response.text[:24000],
+                    duration_ms=elapsed_ms,
+                )
+            except Exception as exc:
+                summary["probe_results"].append({
+                    "status": "error",
+                    "method": "GET",
+                    "url": url,
+                    "path": path,
+                    "error": str(exc),
+                })
+                continue
+
+            if not item:
+                continue
+            analyzed += 1
+            summary["probe_results"].append({
+                "status": "ok",
+                "method": "GET",
+                "url": url,
+                "path": path,
+                "status_code": item.get("status_code"),
+                "response_length": item.get("response_length"),
+                "reasons": item.get("reasons", [])[:8],
+            })
+            if item.get("endpoint"):
+                summary["discovered_endpoints"].append(item["endpoint"])
+            summary["discovered_endpoints"].extend(item.get("discovered_endpoints", []) or [])
+            summary["discovered_params"].extend(item.get("param_names", []) or [])
+            summary["login_paths"].extend(item.get("login_paths", []) or [])
+            summary["tech_hints"] = sorted(set(summary["tech_hints"]) | set(item.get("tech_hints", []) or []))
+            summary["risk_signals"] = sorted(set(summary["risk_signals"]) | set(item.get("risk_signals", []) or []))
+            if int(item.get("interesting_score", 0) or 0) > 0:
+                summary["interesting_requests"].append(self._interesting_view(item))
+            candidate = self._candidate_from_item(item)
+            if candidate:
+                summary["candidate_requests"].append(candidate)
+            for secret in item.get("extracted_secrets", []) or []:
+                summary["extracted_secrets"].append(secret)
+
+        summary["analyzed_flows"] = analyzed
+        summary["matched_flows"] = analyzed
+        summary["discovered_endpoints"] = sorted(set(summary["discovered_endpoints"]))[:300]
+        summary["discovered_params"] = sorted(set(summary["discovered_params"]))[:200]
+        summary["login_paths"] = sorted(set(summary["login_paths"]))[:40]
+        summary["tech_hints"] = sorted(set(summary["tech_hints"]))
+        summary["risk_signals"] = sorted(set(summary["risk_signals"]))
+        summary["interesting_requests"] = sorted(
+            summary["interesting_requests"],
+            key=lambda row: int(row.get("interesting_score", 0) or 0),
+            reverse=True,
+        )[:24]
+        summary["candidate_requests"] = sorted(
+            summary["candidate_requests"],
+            key=lambda row: int(row.get("interesting_score", 0) or 0),
+            reverse=True,
+        )[:24]
+        return summary
+
+    def _summarize_direct_response(
+        self,
+        *,
+        url: str,
+        path: str,
+        status_code: int,
+        response_headers: Dict[str, str],
+        response_body: str,
+        duration_ms: int = 0,
+    ) -> Dict[str, Any]:
+        endpoint = path or "/"
+        tech_hints = list(self._infer_tech_hints(url, {}, response_headers, "", response_body))
+        risk_signals, reasons = self._classify_request(
+            method="GET",
+            endpoint=endpoint,
+            status_code=status_code,
+            param_names=[],
+            request_headers={},
+            response_headers=response_headers,
+            request_content_type="",
+            response_content_type=_header_value(response_headers, "Content-Type").split(";", 1)[0].strip().lower(),
+            request_body="",
+            response_body=response_body,
+        )
+        discovered_endpoints = self._endpoint_hints_from_body(response_body)
+        interesting_score = self._score_reasons(reasons, "GET")
+        if status_code in (200, 301, 302, 401, 403, 500):
+            interesting_score += 1
+        secrets = self.extract_secrets(response_body)
+        if secrets:
+            risk_signals = set(risk_signals)
+            risk_signals.add("leaked_secrets_detected")
+            reasons.append("secrets in response body")
+        return {
+            "flow_id": f"active:{endpoint}",
+            "method": "GET",
+            "url": url,
+            "endpoint": endpoint,
+            "status_code": status_code,
+            "content_type": _header_value(response_headers, "Content-Type").split(";", 1)[0].strip().lower(),
+            "response_length": len(response_body or ""),
+            "duration_ms": duration_ms,
+            "request_headers": {},
+            "response_headers": response_headers,
+            "body_b64": "",
+            "param_names": [],
+            "discovered_endpoints": discovered_endpoints,
+            "tech_hints": tech_hints,
+            "risk_signals": sorted(set(risk_signals)),
+            "reasons": reasons,
+            "interesting_score": interesting_score,
+            "replay_safe": True,
+            "has_cookie": False,
+            "has_authorization": False,
+            "login_paths": self._login_paths_from_request(endpoint, [], reasons),
+            "extracted_secrets": secrets[:12],
+        }
+
+    def _endpoint_hints_from_body(self, response_body: str) -> List[str]:
+        endpoints: set = set()
+        for marker in ("/api/", "/graphql", "/swagger", "/wp-json/", "/admin", "/login"):
+            if marker in (response_body or "").lower():
+                endpoints.add(marker.rstrip("/") or "/")
+        for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", response_body or "", flags=re.IGNORECASE):
+            endpoint = self._endpoint_from_url_or_path(src)
+            if endpoint:
+                endpoints.add(endpoint)
+        for href in re.findall(r"""href=["']([^"'#]+)["']""", response_body or "", flags=re.IGNORECASE)[:80]:
+            endpoint = self._endpoint_from_url_or_path(href)
+            if endpoint and endpoint.startswith("/"):
+                endpoints.add(endpoint.split("?", 1)[0])
+        return sorted(endpoints)[:80]
 
     def collect_from_proxy(
         self,
@@ -566,6 +932,10 @@ class HttpRequestIntelligence:
         for marker in ("/api/", "/graphql", "/swagger", "/wp-json/", "/admin", "/login"):
             if marker in response_body.lower():
                 endpoints.add(marker.rstrip("/") or "/")
+        for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", response_body, flags=re.IGNORECASE):
+            endpoint = self._endpoint_from_url_or_path(src)
+            if endpoint:
+                endpoints.add(endpoint)
         return sorted(endpoints)[:80]
 
     def _endpoint_from_url_or_path(self, value: Any) -> str:
@@ -612,6 +982,19 @@ class HttpRequestIntelligence:
             "joomla": ("joomla", "com_content"),
             "nginx": ("server': 'nginx", "server: nginx", "nginx"),
             "nodejs": ("express", "node.js", "x-powered-by': 'express", "x-powered-by: express"),
+            "nextjs": (
+                "__next_data__",
+                "/_next/",
+                "/_next/static/",
+                "next-route-announcer",
+                "next-head-count",
+                "nextjs",
+                "next.js",
+                "x-nextjs-cache",
+                "x-nextjs-matched-path",
+                "x-middleware-rewrite",
+                "x-middleware-next",
+            ),
             "php": ("phpsessid", "x-powered-by': 'php", "x-powered-by: php"),
             "phpmyadmin": ("phpmyadmin",),
             "swagger": ("swagger", "openapi"),
@@ -636,6 +1019,9 @@ class HttpRequestIntelligence:
         )
         if any(re.search(marker, blob, re.IGNORECASE) for marker in react_markers):
             hints.add("react")
+        if "nextjs" in hints:
+            hints.add("react")
+            hints.add("nodejs")
 
         vue_markers = (
             r"\bdata-v-[a-f0-9]{4,}",
@@ -688,6 +1074,12 @@ class HttpRequestIntelligence:
         if param_set.intersection(FILE_PARAM_TOKENS):
             reasons.append("file/path parameter")
             signals.add("file_path_params")
+        if (
+            param_set.intersection(CMD_PARAM_TOKENS)
+            or any(token in low_endpoint for token in ("cmd", "exec", "ping", "shell"))
+        ):
+            reasons.append("command injection candidate")
+            signals.add("rce_candidate_params")
         if "/api" in low_endpoint or "json" in response_content_type or "json" in request_content_type:
             reasons.append("API/JSON surface")
             signals.add("api_surface_detected")
@@ -709,7 +1101,12 @@ class HttpRequestIntelligence:
         if status_code >= 500:
             reasons.append(f"server error status {status_code}")
             signals.add("server_error_observed")
-        if status_code in WAF_STATUS_CODES or any(marker in blob for marker in WAF_BODY_MARKERS):
+        if is_actionable_waf_signal(
+            status_code=status_code,
+            body=blob,
+            message=" ".join(reasons),
+            details=response_headers,
+        ):
             reasons.append("blocking/WAF signal")
             signals.add("waf_or_blocking_detected")
         if _header_value(request_headers, "Cookie"):
@@ -737,6 +1134,7 @@ class HttpRequestIntelligence:
             "object-id parameter": 6,
             "redirect/url parameter": 5,
             "file/path parameter": 5,
+            "command injection candidate": 7,
             "API/JSON surface": 4,
             "GraphQL surface": 4,
             "Swagger/OpenAPI surface": 4,

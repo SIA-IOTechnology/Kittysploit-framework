@@ -11,7 +11,20 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+
+from core.campaign.browser_c2 import (
+    BROWSER_AUX_PREFERRED,
+    BROWSER_C2_TECHNIQUES,
+    BROWSER_POST_TECHNIQUES,
+    browser_c2_framework_commands,
+    browser_server_running,
+    collect_browser_sessions,
+    is_browser_session,
+    browser_session_host,
+    browser_session_id,
+)
+from core.utils.service_fingerprint import PORT_SERVICE_HINTS, SERVICE_SCANNER_MODULES
 
 MITRE_TECHNIQUE_RE = re.compile(
     r"attack\.mitre\.org/techniques/(T\d+(?:\.\d+)?)",
@@ -32,20 +45,6 @@ DESTRUCTIVE_KEYWORDS = (
 
 RISK_SCORES = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1, "unknown": 1}
 
-PORT_SERVICE_HINTS: Dict[int, str] = {
-    21: "ftp",
-    22: "ssh",
-    25: "smtp",
-    80: "http",
-    443: "https",
-    445: "smb",
-    3306: "mysql",
-    3389: "rdp",
-    5432: "postgres",
-    8080: "http",
-    8443: "https",
-}
-
 PATH_TECHNIQUE_HINTS: Tuple[Tuple[str, str], ...] = (
     ("scanner/portscan", "T1046"),
     ("scanner/discovery", "T1046"),
@@ -59,17 +58,9 @@ PATH_TECHNIQUE_HINTS: Tuple[Tuple[str, str], ...] = (
     ("auxiliary/scanner", "T1595"),
     ("auxiliary/osint", "T1590"),
     ("auxiliary/crawler", "T1594"),
+    ("browser_auxiliary/", "T1189"),
+    ("browser_server", "T1071.001"),
 )
-
-# Known-good modules for common service hints (verified under modules/).
-SERVICE_SCANNER_MODULES: Dict[str, str] = {
-    "http": "scanner/http/server_banner_detect",
-    "https": "scanner/http/server_banner_detect",
-    "ftp": "auxiliary/scanner/ftp/ftp_enum",
-    "redis": "scanner/redis/redis_info_detect",
-    "mysql": "scanner/mysql/mysql_info_detect",
-    "smb": "scanner/smb/null_session",
-}
 
 RECON_MODULE_PREFERENCES: Tuple[str, ...] = (
     "auxiliary/scanner/portscan/tcp",
@@ -151,6 +142,8 @@ class CampaignGraphBuilder:
         nodes: List[CampaignNode] = []
         edges: List[Dict[str, str]] = []
         host_scan_nodes: Dict[str, str] = {}
+        host_web_nodes: Dict[str, str] = {}
+        host_browser_c2_nodes: Dict[str, str] = {}
         used_modules: Dict[str, Set[str]] = {}
 
         for host in snapshot["hosts"]:
@@ -212,16 +205,52 @@ class CampaignGraphBuilder:
                     nodes.append(web_node)
                     self._track_module_use(web_node, host_used)
                     edges.append({"from": scan_id, "to": web_node.id, "type": "web_surface"})
+                    host_web_nodes[address] = web_node.id
+                    if len(nodes) < max_steps:
+                        browser_node = self._browser_c2_setup_node(
+                            host,
+                            scope_ok,
+                            scope_reason,
+                            web_node.id,
+                            exclude=host_used,
+                        )
+                        if browser_node:
+                            nodes.append(browser_node)
+                            self._track_module_use(browser_node, host_used)
+                            edges.append(
+                                {"from": web_node.id, "to": browser_node.id, "type": "browser_c2"}
+                            )
+                            host_browser_c2_nodes[address] = browser_node.id
 
+        browser_sessions = snapshot.get("browser_sessions") or []
         for session in snapshot.get("sessions") or []:
             if len(nodes) >= max_steps:
                 break
+            if is_browser_session(session):
+                continue
             post_node = self._post_exploitation_node(session, scope_mgr)
             if post_node:
                 nodes.append(post_node)
                 parent = host_scan_nodes.get(session.get("target_host") or "")
                 if parent:
                     edges.append({"from": parent, "to": post_node.id, "type": "post_session"})
+
+        for session in browser_sessions:
+            if len(nodes) >= max_steps:
+                break
+            browser_node = self._browser_post_exploitation_node(session, scope_mgr)
+            if not browser_node:
+                continue
+            nodes.append(browser_node)
+            target_host = browser_session_host(session)
+            parent = (
+                host_browser_c2_nodes.get(target_host)
+                or host_web_nodes.get(target_host)
+                or host_scan_nodes.get(target_host)
+                or ""
+            )
+            if parent:
+                edges.append({"from": parent, "to": browser_node.id, "type": "browser_session"})
 
         graph = CampaignGraph(
             workspace=ws_name,
@@ -458,11 +487,21 @@ class CampaignGraphBuilder:
                     }
                 )
 
+        browser_sessions = collect_browser_sessions(self.framework)
+        known_ids = {str(item.get("id") or "") for item in sessions_out}
+        for row in browser_sessions:
+            session_id = browser_session_id(row)
+            if session_id and session_id not in known_ids:
+                sessions_out.append(row)
+                known_ids.add(session_id)
+
         return {
             "workspace_id": workspace_id,
             "workspace_name": workspace_name,
             "hosts": hosts_out,
             "sessions": sessions_out,
+            "browser_sessions": browser_sessions,
+            "browser_server_running": browser_server_running(self.framework),
         }
 
     def _check_scope(self, address: str, scope_mgr: Any) -> Tuple[bool, str]:
@@ -708,6 +747,107 @@ class CampaignGraphBuilder:
             dry_run_safe=True,
         )
 
+    def _browser_c2_setup_node(
+        self,
+        host: Dict[str, Any],
+        scope_ok: bool,
+        scope_reason: str,
+        depends_on: str,
+        exclude: Optional[Set[str]] = None,
+    ) -> Optional[CampaignNode]:
+        address = host["address"]
+        candidates = self._find_modules(query="browser", module_type="browser_auxiliary", limit=8)
+        selected = self._pick_module_path(BROWSER_AUX_PREFERRED, candidates, exclude=exclude)
+        endpoints = browser_c2_framework_commands(self.framework, host_address=address)
+        return CampaignNode(
+            id=self._node_id("browser_c2"),
+            phase="c2",
+            title=f"Browser C2 (`browser_server`) on {address}",
+            host_address=address,
+            host_id=host.get("id"),
+            candidate_modules=candidates,
+            selected_module=selected,
+            module_options=self._browser_module_options(selected, address),
+            framework_commands=endpoints,
+            preconditions=[
+                "Authorized client-side / browser testing in scope",
+                "Victim browser can reach the operator browser_server endpoint",
+            ],
+            expected_evidence=[
+                "browser_server status reports running listener",
+                "Hook script delivered (inject.js / xss.js)",
+                "Active browser session listed in browser_server sessions",
+            ],
+            rollback_steps=[
+                "browser_server stop",
+                "Remove injected script from test pages used during the engagement",
+            ],
+            risk_score=3.0,
+            risk_level="medium",
+            attack_techniques=list(BROWSER_C2_TECHNIQUES),
+            scope_allowed=scope_ok,
+            scope_reason=scope_reason,
+            depends_on=[depends_on],
+            estimated_minutes=20,
+            dry_run_safe=True,
+        )
+
+    def _browser_post_exploitation_node(
+        self, session: Dict[str, Any], scope_mgr: Any
+    ) -> Optional[CampaignNode]:
+        target = browser_session_host(session)
+        session_id = browser_session_id(session)
+        if not session_id:
+            return None
+        scope_ok, scope_reason = self._check_scope(str(target), scope_mgr)
+        candidates = self._find_modules(query="browser", module_type="browser_auxiliary", limit=8)
+        selected = self._pick_module_path(BROWSER_AUX_PREFERRED, candidates)
+        if not selected and candidates:
+            selected = candidates[0]["path"]
+        if not selected:
+            selected = BROWSER_AUX_PREFERRED[0]
+        short_id = session_id[:8]
+        framework_cmds = [
+            "browser_server sessions",
+            f"use {selected}",
+            f"set SESSION {session_id}",
+            "run --preview",
+        ]
+        return CampaignNode(
+            id=self._node_id("browser_post"),
+            phase="post_exploitation",
+            title=f"Browser operator actions on session {short_id}",
+            host_address=str(target),
+            candidate_modules=candidates,
+            selected_module=selected,
+            module_options={"SESSION": session_id},
+            framework_commands=framework_cmds,
+            preconditions=[
+                "browser_server is running",
+                f"Active browser session {session_id} is polling",
+            ],
+            expected_evidence=[
+                "Browser auxiliary module output stored in workspace/session context",
+                "Captured DOM / fingerprint / operator telemetry as applicable",
+            ],
+            rollback_steps=[
+                "Stop active browser auxiliary modules",
+                "Close or invalidate browser session when testing is complete",
+            ],
+            risk_score=3.0,
+            risk_level="medium",
+            attack_techniques=list(BROWSER_POST_TECHNIQUES),
+            scope_allowed=scope_ok,
+            scope_reason=scope_reason,
+            estimated_minutes=10,
+            dry_run_safe=True,
+        )
+
+    def _browser_module_options(self, module_path: Optional[str], address: str) -> Dict[str, Any]:
+        if not module_path:
+            return {}
+        return {"SESSION": "", "target": address}
+
     def _post_exploitation_node(self, session: Dict[str, Any], scope_mgr: Any) -> Optional[CampaignNode]:
         target = (
             session.get("target_host")
@@ -914,6 +1054,7 @@ class CampaignGraphBuilder:
         high_risk = sum(1 for n in nodes if n.risk_level in ("high", "critical"))
         hosts = snapshot.get("hosts") if snapshot else []
         service_count = sum(len(h.get("services") or []) for h in hosts)
+        browser_sessions = (snapshot or {}).get("browser_sessions") or []
         return {
             "total_steps": len(nodes),
             "in_scope_steps": in_scope,
@@ -921,6 +1062,8 @@ class CampaignGraphBuilder:
             "high_risk_steps": high_risk,
             "workspace_hosts": len(hosts),
             "workspace_services": service_count,
+            "browser_sessions": len(browser_sessions),
+            "browser_server_running": bool((snapshot or {}).get("browser_server_running")),
             "phases": phases,
             "techniques": sorted(set(techniques)),
             "scope_enforced": scope_enforced,

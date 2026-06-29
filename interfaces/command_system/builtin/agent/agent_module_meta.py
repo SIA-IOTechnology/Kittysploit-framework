@@ -92,7 +92,34 @@ def normalize_requires(raw: Any) -> Dict[str, Any]:
             "auth_session": False,
             "capabilities_any": [],
             "capabilities_all": [],
+            "confidence_min": {},
+            "confidence_min_any": {},
+            "endpoint_pattern_any": [],
+            "param_any": [],
+            "api_surface_ready": False,
         }
+    conf_min_raw = raw.get("confidence_min") or {}
+    confidence_min: Dict[str, float] = {}
+    if isinstance(conf_min_raw, dict):
+        for tech, val in conf_min_raw.items():
+            tkey = str(tech).lower().strip()
+            if not tkey:
+                continue
+            try:
+                confidence_min[tkey] = float(val)
+            except (TypeError, ValueError):
+                continue
+    conf_min_any_raw = raw.get("confidence_min_any") or {}
+    confidence_min_any: Dict[str, float] = {}
+    if isinstance(conf_min_any_raw, dict):
+        for tech, val in conf_min_any_raw.items():
+            tkey = str(tech).lower().strip()
+            if not tkey:
+                continue
+            try:
+                confidence_min_any[tkey] = float(val)
+            except (TypeError, ValueError):
+                continue
     return {
         "min_endpoints": int(raw.get("min_endpoints", 0) or 0),
         "min_params": int(raw.get("min_params", 0) or 0),
@@ -103,6 +130,13 @@ def normalize_requires(raw: Any) -> Dict[str, Any]:
         "auth_session": bool(raw.get("auth_session", False)),
         "capabilities_any": [str(x).lower() for x in (raw.get("capabilities_any") or []) if str(x).strip()],
         "capabilities_all": [str(x).lower() for x in (raw.get("capabilities_all") or []) if str(x).strip()],
+        "confidence_min": confidence_min,
+        "confidence_min_any": confidence_min_any,
+        "endpoint_pattern_any": [
+            str(x).lower() for x in (raw.get("endpoint_pattern_any") or []) if str(x).strip()
+        ],
+        "param_any": [str(x).lower() for x in (raw.get("param_any") or []) if str(x).strip()],
+        "api_surface_ready": bool(raw.get("api_surface_ready", False)),
     }
 
 

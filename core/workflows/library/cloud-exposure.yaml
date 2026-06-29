@@ -1,0 +1,71 @@
+id: cloud-exposure
+version: "1"
+name: Cloud Exposure
+description: >
+  Detect cloud metadata paths, AWS S3/Azure/GCP storage exposure, and related misconfigurations.
+tags: [cloud, exposure, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: HTTP(S) target URL or hostname
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: metadata_paths
+steps:
+  metadata_paths:
+    module: scanner/cloud/cloud_metadata_detect
+    description: Cloud metadata path exposure (IMDS / SSRF vectors)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: aws_s3
+    on_failure: aws_s3
+  aws_s3:
+    module: scanner/cloud/aws_s3_detect
+    description: AWS S3 bucket/API exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: aws_s3_listing
+    on_failure: aws_s3_listing
+  aws_s3_listing:
+    module: scanner/cloud/aws_s3_public_listing_detect
+    description: Public S3 bucket listing
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: azure_blob
+    on_failure: azure_blob
+  azure_blob:
+    module: scanner/cloud/azure_blob_detect
+    description: Azure blob storage exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: gcp_storage
+    on_failure: gcp_storage
+  gcp_storage:
+    module: scanner/cloud/gcp_storage_detect
+    description: GCP storage bucket exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: k8s_api
+    on_failure: k8s_api
+  k8s_api:
+    module: scanner/cloud/kubernetes_api_detect
+    description: Exposed Kubernetes API
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

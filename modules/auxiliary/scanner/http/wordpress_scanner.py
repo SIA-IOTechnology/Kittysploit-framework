@@ -26,6 +26,12 @@ class Module(Auxiliary, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'incompatible_when': {
+            'tech_hints_any': ['nextjs', 'react', 'nodejs', 'drupal', 'joomla'],
+        },
+        'requires': {
+            'confidence_min': {'wordpress': 0.3},
+        },
     },
     }
 

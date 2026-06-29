@@ -65,6 +65,9 @@ class Module(Scanner, Http_client):
                 'min_endpoints': 0,
                 'min_params': 0,
             },
+            'incompatible_when': {
+                'tech_hints_any': ['nextjs', 'react', 'nodejs', 'drupal', 'joomla'],
+            },
             'produces': ['tech_hints', 'specializations', 'risk_signals'],
             'cost': 'low',
             'noise': 'low',

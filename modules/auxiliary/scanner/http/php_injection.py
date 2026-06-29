@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
 import urllib.parse
 import time
 import re
@@ -565,5 +566,13 @@ class Module(Auxiliary, Http_client):
             print_info("")
         else:
             print_info("No PHP injection vulnerabilities detected during automated testing.")
-        
-        return True
+
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="PHP Injection",
+            severity="high",
+            category="injection",
+            findings_key="php_injection_findings",
+            dedupe_keys=("method", "param", "payload"),
+        )

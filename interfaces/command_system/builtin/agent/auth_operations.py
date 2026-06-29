@@ -19,9 +19,7 @@ from interfaces.command_system.builtin.agent.auth_strategies import (
     compose_auth_option_overrides,
     infer_bruteforce_field_overrides,
 )
-from interfaces.command_system.builtin.agent.agent_constants import (
-    EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS,
-)
+from interfaces.command_system.builtin.agent.crawler_intelligence import bruteforce_attempt_cap
 from interfaces.command_system.builtin.agent.identity_intel import write_agent_wordlist
 from interfaces.command_system.builtin.agent.run_store import AgentPathService, _safe_component
 from interfaces.command_system.builtin.agent.state import AgentState
@@ -374,7 +372,7 @@ class AuthContextOperations:
             elif path == "auxiliary/scanner/http/login/admin_login_bruteforce":
                 bf_opts: Dict[str, Any] = {
                     "path": login_path,
-                    "max_attempts": 10,
+                    "max_attempts": bruteforce_attempt_cap(state),
                     **bf_extras,
                 }
                 if persona_usernames or persona_passwords:
@@ -397,7 +395,10 @@ class AuthContextOperations:
                         bf_opts["passwords_file"] = passwords_file
                     attempt_cap = min(
                         EXPANDED_SURFACE_BRUTEFORCE_MAX_ATTEMPTS,
-                        max(10, len(persona_usernames) * max(1, min(len(persona_passwords), 6))),
+                        bruteforce_attempt_cap(
+                            state,
+                            persona_pairs=len(persona_usernames) * max(1, len(persona_passwords)),
+                        ),
                     )
                     bf_opts["max_attempts"] = attempt_cap
                 overrides[path] = bf_opts

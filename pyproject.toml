@@ -65,6 +65,7 @@ dependencies = [
     "pysmb",
     "toml",
     "tomli; python_version < '3.11'",
+    "pyyaml>=6.0",
     "bcrypt==4.0.1",
     "pyserial",
     "pychromecast",
@@ -83,6 +84,7 @@ dependencies = [
     "reportlab",
     "capstone>=5.0.0",
     "yara-python>=4.5.0",
+    "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -113,6 +115,7 @@ exclude = ["examples*", "scripts*", "install*", "tests*", "venv*", "apps*"]
 
 [tool.setuptools.package-data]
 "core.schemas" = ["json/v1/*.schema.json", "README.md"]
+"core.workflows" = ["library/*.yaml", "library/*.yml", "library/*.json"]
 "core" = [
     "browser_static/libs/*.js",
     "browser_static/icons/**/*.svg",

@@ -27,7 +27,11 @@ from interfaces.command_system.builtin.agent.runtime_policy import (
     AgentScopeGuard,
     CancellationToken,
 )
-from interfaces.command_system.builtin.agent.goal_planner import build_goal_plan, normalize_goal
+from interfaces.command_system.builtin.agent.goal_planner import (
+    build_goal_plan,
+    is_shell_operator_goal,
+    normalize_goal,
+)
 from interfaces.command_system.builtin.agent.explain_service import AgentExplainService
 from interfaces.command_system.builtin.agent.replay_service import AgentReplayService
 from interfaces.command_system.builtin.agent.retest_service import AgentRetestService
@@ -96,6 +100,7 @@ Target & workflow:
     --goal GOAL                           recon, validate, obtain-auth, obtain-shell,
                                           post-auth, evidence-only, detection-validation, retest
     --profile PROFILE                     Mission preset (see Mission profiles)
+    --persona "Jane Doe"                     Persona for OSINT identity/password linking
     --all                                 Subdomains, identity OSINT, persona passwords → bruteforce
     --shell-hunter                        Pursue interactive shells (needs --approve-risk intrusive)
     --dry-run                             Plan without network traffic or module execution
@@ -107,6 +112,7 @@ Target & workflow:
 Safety & approvals:
     --safety-profile PROFILE              safe | discreet | normal | aggressive (default: normal)
     --approve-risk LEVEL                  Approve read, active, intrusive, or destructive (repeatable)
+                                          intrusive also continues through CDN/WAF heuristics (throttled)
     --approve-active-replay               Allow mutating HTTP replay (--http-replay active)
     --approve-post-exploit                Allow read-only post-exploitation collection
     --policy FILE                         JSON/TOML mission policy file
@@ -354,6 +360,12 @@ Examples:
             help="Seed agent modules with Cookie context observed in matching KittyProxy flows.",
         )
         parser.add_argument(
+            "--persona",
+            dest="persona_name",
+            default="",
+            help="Person full name for OSINT persona profiling (links identity → passwords).",
+        )
+        parser.add_argument(
             "--all",
             dest="expanded_surface",
             action="store_true",
@@ -537,6 +549,17 @@ Examples:
             print_error(f"Agent scope blocked target: {reason}")
             return False
 
+        raw_operator_goal = (
+            getattr(parsed, "goal", None) or profile_overrides.get("campaign_goal") or ""
+        )
+        normalized_operator_goal = (
+            normalize_goal(raw_operator_goal) if str(raw_operator_goal).strip() else None
+        )
+        shell_goal = is_shell_operator_goal(normalized_operator_goal)
+        replay_max = max(0, int(parsed.http_replay_max))
+        if shell_goal and replay_max <= 3:
+            replay_max = 8
+
         state = AgentState(
             raw_target=parsed.target,
             target_info=target_info,
@@ -556,7 +579,7 @@ Examples:
             proxy_flows=not bool(parsed.no_proxy_flows),
             proxy_flow_limit=max(0, int(parsed.proxy_flow_limit)),
             http_replay=str(parsed.http_replay or "safe"),
-            http_replay_max=max(0, int(parsed.http_replay_max)),
+            http_replay_max=replay_max,
             reuse_proxy_auth=bool(parsed.reuse_proxy_auth),
             shell_hunter=bool(parsed.shell_hunter),
             llm_local=parsed.llm_local,
@@ -574,9 +597,8 @@ Examples:
                 "reasoning_confidence": 0.0,
                 "skip_exploitation": False,
             },
-            campaign_goal=normalize_goal(
-                getattr(parsed, "goal", None) or profile_overrides.get("campaign_goal") or ""
-            ) if getattr(parsed, "goal", None) or profile_overrides.get("campaign_goal") else None,
+            campaign_goal=normalized_operator_goal,
+            operator_goal=normalized_operator_goal,
             llm_plan={"selected_paths": [], "rationale": "No LLM plan generated."},
             knowledge_base={
                 "tech_hints": [],
@@ -587,6 +609,9 @@ Examples:
                 "discovered_params": [],
                 "login_paths": [],
                 "risk_signals": [],
+                "operator_campaign_goal": normalized_operator_goal or "",
+                "shell_hunter_mode": bool(parsed.shell_hunter or shell_goal),
+                "persona_name": str(getattr(parsed, "persona_name", "") or "").strip(),
                 "authenticated_page_excerpt": "",
                 "post_auth_catalog_paths": [],
                 "post_auth_exploit_paths": [],

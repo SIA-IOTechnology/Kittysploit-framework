@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run, target_base_url
 import re
 
 
@@ -197,6 +198,7 @@ class Module(Auxiliary, Http_client):
         paths = self._build_paths()
         detections = []
         suspicious_pages = []
+        self.login_paths = []
 
         print_status("Starting login page detection...")
         print_info(f"Target: {self.target}")
@@ -260,17 +262,32 @@ class Module(Auxiliary, Http_client):
 
             print_success(f"Detected {len(detections)} login page(s).")
             print_table(['Path', 'HTTP', 'Score', 'Confidence', 'Indicators'], table_data)
+            self.login_paths = [entry["path"] for entry in detections if entry.get("path")]
 
-            self.vulnerability_info = {
-                'reason': f"Detected {len(detections)} login page(s)",
-                'severity': 'Info',
-                'paths': ", ".join(d['path'] for d in detections[:5]),
-                # Explicit path for agent KB / admin_login_bruteforce (root ``/`` is valid).
-                'login_path': detections[0]['path'],
-                'login_error_decoy': False,
-                'suspicious_login_pages': [],
-            }
-            return True
+            return finalize_http_scanner_run(
+                self,
+                detections,
+                title="Login page detected",
+                severity="info",
+                reason=f"Detected {len(detections)} login page(s)",
+                category="recon",
+                findings_key="login_pages",
+                dedupe_keys=("path",),
+                hit_mapper=lambda entry: {
+                    "path": entry.get("path"),
+                    "method": "GET",
+                    "request_url": target_base_url(self, path=str(entry.get("path") or "/")),
+                    "status_code": entry.get("status"),
+                    "type": "login_page",
+                    "evidence_snippet": ", ".join(entry.get("indicators") or []),
+                },
+                vulnerability_info_extra={
+                    "paths": ", ".join(d["path"] for d in detections[:5]),
+                    "login_path": detections[0]["path"],
+                    "login_error_decoy": False,
+                    "suspicious_login_pages": [],
+                },
+            )
 
         if suspicious_pages:
             table_data = []
@@ -283,18 +300,33 @@ class Module(Auxiliary, Http_client):
                 ])
             print_warning(f"Detected {len(suspicious_pages)} suspicious login-like error/decoy page(s).")
             print_table(['Path', 'HTTP', 'Score', 'Decoy Markers'], table_data)
-            self.vulnerability_info = {
-                'reason': f"Suspicious login-like decoy/error page(s): {len(suspicious_pages)}",
-                'severity': 'Low',
-                'login_error_decoy': True,
-                'suspicious_login_pages': [row.get("path", "") for row in suspicious_pages[:10]],
-                'paths': ", ".join([row.get("path", "") for row in suspicious_pages[:5]]),
-            }
-            return True
+            return finalize_http_scanner_run(
+                self,
+                suspicious_pages,
+                title="Suspicious login-like page",
+                severity="low",
+                reason=f"Suspicious login-like decoy/error page(s): {len(suspicious_pages)}",
+                category="recon",
+                findings_key="suspicious_login_pages",
+                dedupe_keys=("path",),
+                hit_mapper=lambda entry: {
+                    "path": entry.get("path"),
+                    "method": "GET",
+                    "request_url": target_base_url(self, path=str(entry.get("path") or "/")),
+                    "status_code": entry.get("status"),
+                    "type": "login_decoy",
+                    "evidence_snippet": ", ".join(entry.get("decoy_markers") or []),
+                },
+                vulnerability_info_extra={
+                    "login_error_decoy": True,
+                    "suspicious_login_pages": [row.get("path", "") for row in suspicious_pages[:10]],
+                    "paths": ", ".join(row.get("path", "") for row in suspicious_pages[:5]),
+                },
+            )
 
         print_warning("No login page detected with current heuristics.")
         self.vulnerability_info = {
             'reason': 'No login page detected',
             'severity': 'Info'
         }
-        return False
+        return self.module_result(success=True)

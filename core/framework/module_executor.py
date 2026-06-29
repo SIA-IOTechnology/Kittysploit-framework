@@ -10,10 +10,11 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.framework.runtime import EventType
 from core.framework.base_module import ModuleResult, normalize_module_result
+from core.framework.evidence_adapter import attach_schema_evidence
 
 
 class ModuleExecutionBlockReason(Enum):
@@ -53,6 +54,10 @@ class ModuleExecutionResult:
     session_id: Optional[str] = None
     finding: Any = None
     evidence: Any = None
+    schema_evidence: List[Dict[str, Any]] = field(default_factory=list)
+    schema_finding: Optional[Dict[str, Any]] = None
+    schema_validation_ok: bool = True
+    schema_validation_errors: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -742,4 +747,4 @@ class ModuleExecutor:
                 from core.observability.context import bind_session
 
                 bind_session(result.session_id)
-            return result
+            return attach_schema_evidence(result, module=module, framework=framework)

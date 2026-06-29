@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
 import urllib.parse
 import base64
 
@@ -328,5 +329,13 @@ class Module(Auxiliary, Http_client):
             print_info("No XXE vulnerabilities detected during automated testing.")
             print_info("Note: This does not guarantee the application is secure.")
             print_info("Note: Out-of-band XXE attacks require external monitoring to detect.")
-        
-        return True
+
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="XML External Entity (XXE)",
+            severity="high",
+            category="xxe",
+            findings_key="xxe_findings",
+            dedupe_keys=("method", "param", "payload"),
+        )

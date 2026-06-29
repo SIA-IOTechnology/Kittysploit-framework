@@ -3,7 +3,14 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
+from core.scanner.http.discovery import (
+    build_injection_targets,
+    merge_scan_paths,
+    parse_csv_option,
+)
 import urllib.parse
+from urllib.parse import parse_qsl, urlparse
 import time
 import re
 
@@ -90,6 +97,31 @@ class Module(Auxiliary, Http_client):
         'name', 'value', 'data', 'input', 'param',
     ]
 
+    scan_paths = OptString(
+        "",
+        "Comma-separated paths/URLs to test (typically from crawler output)",
+        required=False,
+        advanced=True,
+    )
+    extra_paths = OptString(
+        "",
+        "Additional paths to include (e.g. login pages from recon)",
+        required=False,
+        advanced=True,
+    )
+    seed_params = OptString(
+        "",
+        "Comma-separated parameter names to prioritize (from crawler/recon)",
+        required=False,
+        advanced=True,
+    )
+    blind_fallback = OptBool(
+        True,
+        "When no crawl/recon surface exists, probe generic parameters on /",
+        required=False,
+        advanced=True,
+    )
+
     def check(self):
         """
         Check if the target is accessible
@@ -137,7 +169,25 @@ class Module(Auxiliary, Http_client):
         except Exception:
             return str(path or "/")
 
-    def test_sqli_payload(self, payload, param_name='id', method='GET'):
+    def _build_get_path(self, base_path: str, param_name: str, payload: str) -> str:
+        base_path = base_path if str(base_path).startswith("/") else f"/{base_path}"
+        parsed = urlparse(base_path)
+        path_only = parsed.path or "/"
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        params[param_name] = payload
+        query = urllib.parse.urlencode(params)
+        return f"{path_only}?{query}" if query else path_only
+
+    def _discovered_targets(self):
+        paths = merge_scan_paths(
+            parse_csv_option(self.scan_paths),
+            parse_csv_option(self.extra_paths),
+        )
+        seed_params = parse_csv_option(self.seed_params)
+        targets = build_injection_targets(paths, seed_params)
+        return paths, seed_params, targets
+
+    def test_sqli_payload(self, payload, param_name='id', method='GET', base_path='/'):
         """
         Test a SQL injection payload
         
@@ -150,10 +200,9 @@ class Module(Auxiliary, Http_client):
             dict: Test results
         """
         try:
-            test_path = "/"
             if method == 'GET':
                 encoded_payload = urllib.parse.quote(payload)
-                test_path = f"/?{param_name}={encoded_payload}"
+                test_path = self._build_get_path(base_path, param_name, encoded_payload)
                 
                 start_time = time.time()
                 response = self.http_request(
@@ -164,11 +213,12 @@ class Module(Auxiliary, Http_client):
                 elapsed_time = time.time() - start_time
             else:
                 post_data = {param_name: payload}
-                test_path = "/"
+                post_path = urlparse(base_path if str(base_path).startswith("/") else f"/{base_path}").path or "/"
+                test_path = post_path
                 start_time = time.time()
                 response = self.http_request(
                     method="POST",
-                    path="/",
+                    path=post_path,
                     data=post_data,
                     allow_redirects=False
                 )
@@ -295,82 +345,91 @@ class Module(Auxiliary, Http_client):
         print_status("Starting SQL injection scan...")
         print_info(f"Target: {self.target}")
         print_info("")
-        
-        # Test GET parameters
-        print_status("Testing GET parameters for SQL injection...")
-        print_info("")
-        
+
+        discovered_paths, seed_params, discovered_targets = self._discovered_targets()
+        use_blind = bool(self._to_bool(getattr(self, "blind_fallback", True)))
+
         sqli_print_keys = set()
         sqli_live_cap = 48
         sqli_live_printed = 0
-        
-        for param in self.COMMON_PARAMS:
-            print_info(f"Testing parameter: {param}")
-            
-            for i, payload in enumerate(self.SQLI_PAYLOADS[:20], 1):  # Test first 20 payloads per param
-                result = self.test_sqli_payload(payload, param, method='GET')
-                self.test_results.append(result)
-                
-                if result.get('vulnerable'):
-                    self.vulnerabilities.append(result)
-                    key = ("GET", param)
-                    if key in sqli_print_keys or sqli_live_printed >= sqli_live_cap:
-                        continue
-                    sqli_print_keys.add(key)
-                    sqli_live_printed += 1
-                    pl_show = payload if len(payload) <= 100 else (payload[:97] + "…")
-                    rt = result.get("response_time")
-                    rt_s = f" | t={rt:.2f}s" if isinstance(rt, (int, float)) else ""
-                    inds = ", ".join(result.get("indicators") or [])[:400]
-                    print_success(
-                        f"[!] Potential SQLi | GET {result.get('request_url', '')} "
-                        f"| param={param} | {result.get('injection_type', 'Unknown')} "
-                        f"| status={result.get('status_code')} | len={result.get('response_length')} "
-                        f"| payload={pl_show!r}{rt_s}"
-                    )
-                    if inds:
-                        print_success(f"    indicators: {inds}")
-                    ev = (result.get("evidence_snippet") or "").strip()
-                    if ev:
-                        print_success(f"    evidence: {ev[:700]}{'…' if len(ev) > 700 else ''}")
-        
-        print_info("")
-        
-        # Test POST parameters
-        print_status("Testing POST parameters for SQL injection...")
-        print_info("")
-        
-        for param in self.COMMON_PARAMS[:10]:  # Test first 10 params via POST
-            print_info(f"Testing POST parameter: {param}")
-            
-            for payload in self.SQLI_PAYLOADS[:15]:  # Test first 15 payloads
-                result = self.test_sqli_payload(payload, param, method='POST')
-                self.test_results.append(result)
-                
-                if result.get('vulnerable'):
-                    self.vulnerabilities.append(result)
-                    key = ("POST", param)
-                    if key in sqli_print_keys or sqli_live_printed >= sqli_live_cap:
-                        continue
-                    sqli_print_keys.add(key)
-                    sqli_live_printed += 1
-                    pl_show = payload if len(payload) <= 100 else (payload[:97] + "…")
-                    rt = result.get("response_time")
-                    rt_s = f" | t={rt:.2f}s" if isinstance(rt, (int, float)) else ""
-                    inds = ", ".join(result.get("indicators") or [])[:400]
-                    print_success(
-                        f"[!] Potential SQLi | POST {result.get('request_url', '')} "
-                        f"| param={param} | {result.get('injection_type', 'Unknown')} "
-                        f"| status={result.get('status_code')} | len={result.get('response_length')} "
-                        f"| payload={pl_show!r}{rt_s}"
-                    )
-                    if inds:
-                        print_success(f"    indicators: {inds}")
-                    ev = (result.get("evidence_snippet") or "").strip()
-                    if ev:
-                        print_success(f"    evidence: {ev[:700]}{'…' if len(ev) > 700 else ''}")
-        
-        print_info("")
+
+        def _record_hit(result):
+            nonlocal sqli_live_printed
+            self.test_results.append(result)
+            if not result.get('vulnerable'):
+                return
+            self.vulnerabilities.append(result)
+            key = (result.get("method"), result.get("param"), result.get("request_path"))
+            if key in sqli_print_keys or sqli_live_printed >= sqli_live_cap:
+                return
+            sqli_print_keys.add(key)
+            sqli_live_printed += 1
+            pl_show = result['payload'] if len(result['payload']) <= 100 else (result['payload'][:97] + "…")
+            rt = result.get("response_time")
+            rt_s = f" | t={rt:.2f}s" if isinstance(rt, (int, float)) else ""
+            inds = ", ".join(result.get("indicators") or [])[:400]
+            print_success(
+                f"[!] Potential SQLi | {result.get('method')} {result.get('request_url', '')} "
+                f"| param={result.get('param')} | {result.get('injection_type', 'Unknown')} "
+                f"| status={result.get('status_code')} | len={result.get('response_length')} "
+                f"| payload={pl_show!r}{rt_s}"
+            )
+            if inds:
+                print_success(f"    indicators: {inds}")
+            ev = (result.get("evidence_snippet") or "").strip()
+            if ev:
+                print_success(f"    evidence: {ev[:700]}{'…' if len(ev) > 700 else ''}")
+
+        if discovered_targets:
+            print_status(
+                f"Testing discovered surface first ({len(discovered_targets)} path/param pair(s) "
+                f"from {len(discovered_paths)} path(s))..."
+            )
+            print_info("")
+            for base_path, param in discovered_targets:
+                print_info(f"Testing discovered target: {base_path} [param={param}]")
+                for payload in self.SQLI_PAYLOADS[:16]:
+                    result = self.test_sqli_payload(payload, param, method='GET', base_path=base_path)
+                    _record_hit(result)
+            print_info("")
+        elif not use_blind:
+            print_warning("No crawl/recon surface provided and blind fallback disabled; skipping SQLi scan.")
+            self.vulnerability_info = {"reason": "No discovered endpoints to test", "severity": "Info"}
+            return self.module_result(success=True)
+        else:
+            print_warning(
+                "No crawl/recon surface found — falling back to generic parameter probes on /."
+            )
+            print_info("Tip: run auxiliary/scanner/http/crawler first or pass scan_paths/seed_params.")
+            print_info("")
+
+        if use_blind and not discovered_targets:
+            print_status("Testing GET parameters for SQL injection...")
+            print_info("")
+            for param in self.COMMON_PARAMS:
+                print_info(f"Testing parameter: {param}")
+                for payload in self.SQLI_PAYLOADS[:20]:
+                    result = self.test_sqli_payload(payload, param, method='GET', base_path='/')
+                    _record_hit(result)
+
+            print_info("")
+            print_status("Testing POST parameters for SQL injection...")
+            print_info("")
+            for param in self.COMMON_PARAMS[:10]:
+                print_info(f"Testing POST parameter: {param}")
+                for payload in self.SQLI_PAYLOADS[:15]:
+                    result = self.test_sqli_payload(payload, param, method='POST', base_path='/')
+                    _record_hit(result)
+            print_info("")
+        elif discovered_targets and use_blind:
+            print_status("Quick POST probe on top discovered parameters...")
+            print_info("")
+            for base_path, param in discovered_targets[:6]:
+                print_info(f"POST probe: {base_path} [param={param}]")
+                for payload in self.SQLI_PAYLOADS[:8]:
+                    result = self.test_sqli_payload(payload, param, method='POST', base_path=base_path)
+                    _record_hit(result)
+            print_info("")
         
         # Summary
         print_status("=" * 60)
@@ -423,41 +482,22 @@ class Module(Auxiliary, Http_client):
             print_info("No SQL injection vulnerabilities detected during automated testing.")
             print_info("Note: This does not guarantee the application is secure.")
 
-        # Scanner / agent: structured result (message + details) for reports and LLM context
         if self.vulnerabilities:
-            seen = set()
-            hits_out = []
-            for v in self.vulnerabilities:
-                key = (v.get("method"), v.get("param"))
-                if key in seen:
-                    continue
-                seen.add(key)
-                hits_out.append({
-                    "param": v.get("param"),
-                    "method": v.get("method"),
-                    "request_url": v.get("request_url"),
-                    "injection_type": v.get("injection_type"),
-                    "payload": v.get("payload"),
-                    "indicators": v.get("indicators") or [],
-                    "status_code": v.get("status_code"),
-                    "response_length": v.get("response_length"),
-                    "response_time_s": v.get("response_time"),
-                    "evidence_snippet": (v.get("evidence_snippet") or "")[:2000],
-                })
-                if len(hits_out) >= 24:
-                    break
-
-            first = hits_out[0]
+            first = self.vulnerabilities[0]
             summary = (
                 f"{first.get('injection_type', 'SQLi')} on param={first.get('param')} "
-                f"({first.get('method')}) — {first.get('request_url', '')[:180]}"
+                f"({first.get('method')}) — {str(first.get('request_url', ''))[:180]}"
             )
-            self.vulnerability_info = {
-                "reason": f"Potential SQL injection: {summary}",
-                "severity": "High",
-                "sqli_findings": hits_out,
-                "sqli_hit_count": len(self.vulnerabilities),
-            }
-            return True
+            return finalize_http_scanner_run(
+                self,
+                self.vulnerabilities,
+                title="SQL Injection",
+                severity="high",
+                reason=f"Potential SQL injection: {summary}",
+                category="injection",
+                findings_key="sqli_findings",
+                dedupe_keys=("method", "param"),
+            )
 
-        return False
+        self.vulnerability_info = {}
+        return self.module_result(success=True)

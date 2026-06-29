@@ -223,11 +223,12 @@ class ActionScorer:
 def _map_campaign_goal_to_planner(raw: Optional[str]) -> str:
     if not raw:
         return "obtain_session"
-    if raw in (CAMPAIGN_GOAL_EXPLOIT, CAMPAIGN_GOAL_OBTAIN_SHELL):
+    normalized = str(raw).strip().lower().replace("_", "-")
+    if normalized in ("obtain-shell", "exploit") or raw in (CAMPAIGN_GOAL_EXPLOIT, CAMPAIGN_GOAL_OBTAIN_SHELL):
         return "obtain_shell"
-    if raw in (CAMPAIGN_GOAL_POST_AUTH, CAMPAIGN_GOAL_SHELL_STOP):
+    if raw in (CAMPAIGN_GOAL_POST_AUTH, CAMPAIGN_GOAL_SHELL_STOP) or normalized == "post-auth":
         return "privilege_escalation"
-    if raw in (CAMPAIGN_GOAL_OBTAIN_AUTH, CAMPAIGN_GOAL_RECON):
+    if raw in (CAMPAIGN_GOAL_OBTAIN_AUTH, CAMPAIGN_GOAL_RECON) or normalized in ("obtain-auth", "recon"):
         return "obtain_session"
     return "obtain_session"
 
@@ -252,7 +253,9 @@ def planner_state_from_kb(kb: Dict[str, Any]) -> PlannerState:
     executed |= _normalize_action_tokens(kb.get("planner_executed_actions", []))
     failed = _normalize_action_tokens(kb.get("planner_failed_actions", []))
 
-    goal = _map_campaign_goal_to_planner(str(kb.get("planner_campaign_goal") or "").strip() or None)
+    goal = _map_campaign_goal_to_planner(
+        str(kb.get("planner_campaign_goal") or kb.get("operator_campaign_goal") or "").strip() or None
+    )
 
     return PlannerState(
         goal=goal,
@@ -306,7 +309,11 @@ def _infer_produces(path_lower: str, blob: str) -> Dict[str, float]:
     if "ssrf" in path_lower:
         return {"rce": 0.25, "auth_bypass": 0.1}
     if "crawler" in path_lower or "spa_scanner" in path_lower:
-        return {"credentials": 0.05, "session_cookie": 0.08}
+        return {"credentials": 0.05, "session_cookie": 0.08, "rce": 0.04, "shell": 0.03}
+    if "api_fuzzer" in path_lower or "graphql_detect" in path_lower or "swagger_detect" in path_lower:
+        return {"auth_bypass": 0.18, "rce": 0.22, "shell": 0.08}
+    if "domain_surface" in path_lower or "domain_crtsh" in path_lower:
+        return {"credentials": 0.06, "rce": 0.05}
     if any(
         x in path_lower
         for x in (

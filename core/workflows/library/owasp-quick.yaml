@@ -1,0 +1,101 @@
+id: owasp-quick
+version: "1"
+name: OWASP Quick Scan
+description: >
+  Fast OWASP-oriented web checks — crawl and login discovery first, then targeted
+  injection, XSS, SSRF, XXE, CORS, and PHP issues on discovered surface.
+tags: [web, owasp, scanner]
+policy:
+  intrusive: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target URL or hostname
+    required: true
+  port: "443"
+  ssl: "true"
+  max_crawl: "30"
+start_step: crawl
+steps:
+  crawl:
+    module: auxiliary/scanner/http/crawler
+    description: Crawl the site to discover paths and query parameters
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      max_crawl: "${max_crawl}"
+    output_mapping:
+      discovered_paths: discovered_paths
+      discovered_params: discovered_params
+    on_success: login_detect
+    on_failure: login_detect
+  login_detect:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Detect exposed login and authentication pages
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    output_mapping:
+      login_paths: login_paths
+    on_success: sql_injection
+    on_failure: sql_injection
+  sql_injection:
+    module: auxiliary/scanner/http/sql_injection
+    description: SQL injection probing on crawled surface (not blind-first)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    input_mapping:
+      discovered_paths: scan_paths
+      discovered_params: seed_params
+      login_paths: extra_paths
+    on_success: xss
+    on_failure: xss
+  xss:
+    module: auxiliary/scanner/http/xss_scanner
+    description: Reflected/stored XSS checks
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: ssrf
+    on_failure: ssrf
+  ssrf:
+    module: auxiliary/scanner/http/ssrf_scanner
+    description: Server-side request forgery indicators
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: xxe
+    on_failure: xxe
+  xxe:
+    module: auxiliary/scanner/http/xxe_scanner
+    description: XML external entity exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: cors
+    on_failure: cors
+  cors:
+    module: auxiliary/scanner/http/cors_misconfig
+    description: CORS misconfiguration
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: php_injection
+    on_failure: php_injection
+  php_injection:
+    module: auxiliary/scanner/http/php_injection
+    description: PHP code injection vectors
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

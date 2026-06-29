@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
 import urllib.parse
 
 class Module(Auxiliary, Http_client):
@@ -299,4 +300,12 @@ class Module(Auxiliary, Http_client):
             
             if table_data:
                 print_table(['Vulnerability Type', 'Affected Origins', 'Count'], table_data)
-        return True
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="CORS Misconfiguration",
+            severity="medium",
+            category="cors",
+            findings_key="cors_findings",
+            dedupe_keys=("origin", "vulnerability_type"),
+        )

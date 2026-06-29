@@ -36,9 +36,10 @@ class CampaignCommand(BaseCommand):
 
 Usage: {self.usage}
 
-Reads the current workspace (hosts, services, vulnerabilities, sessions) and
-produces a structured attack plan — not an auto-run. Use it to prepare and
-review an engagement before executing modules manually or with your team.
+Reads the current workspace (hosts, services, vulnerabilities, sessions, browser
+sessions from `browser_server`) and produces a structured attack plan — not an
+auto-run. Use it to prepare and review an engagement before executing modules
+manually or with your team.
 
 Options:
     --output, -o <dir>      Base output directory (default: artifacts/campaigns)
@@ -149,6 +150,10 @@ Examples:
         ws_services = summary.get("workspace_services", 0)
         if ws_hosts or ws_services:
             print_info(f"Workspace intel: {ws_hosts} host(s), {ws_services} service(s) in database")
+        browser_sessions = summary.get("browser_sessions", 0)
+        if browser_sessions:
+            running = "running" if summary.get("browser_server_running") else "stopped"
+            print_info(f"Browser C2: {browser_sessions} session(s), browser_server {running}")
         if ws_services == 0 and graph.nodes:
             print_info(
                 "Tip: portscan/scanner results are saved to the workspace — re-run campaign after scanning"

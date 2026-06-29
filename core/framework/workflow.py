@@ -6,6 +6,7 @@ import json
 import os
 from typing import List, Dict, Any, Optional, Callable
 from core.framework.base_module import BaseModule
+from core.framework.module_context import capture_module_context, restore_module_context
 from core.output_handler import print_info, print_error, print_success, print_warning
 
 class WorkflowStep:
@@ -221,6 +222,8 @@ class Workflow(BaseModule):
             return False
         
         print_info(f"Starting workflow: {self.name}")
+
+        previous_module = capture_module_context(self.framework)
         
         # Initialize the context
         self.context = {
@@ -234,88 +237,91 @@ class Workflow(BaseModule):
         current_step_name = self.start_step
         success = True
         
-        while current_step_name:
-            if current_step_name not in self.steps:
-                print_error(f"Step {current_step_name} not found in the workflow")
-                return False
-            
-            step = self.steps[current_step_name]
-            self.current_step = step
-            self.context["current_step"] = current_step_name
-            
-            print_info(f"Executing step: {step.name} - {step.description}")
-            
-            # Check if the step should be executed
-            if not step.should_execute(self.context):
-                print_info(f"Step {step.name} skipped (condition not met)")
+        try:
+            while current_step_name:
+                if current_step_name not in self.steps:
+                    print_error(f"Step {current_step_name} not found in the workflow")
+                    return False
                 
-                # Go to the next step in case of success
-                current_step_name = step.on_success
-                continue
-            
-            # Load the module
-            module = self.framework.load_module(step.module_path)
-            if not module:
-                print_error(f"Unable to load the module {step.module_path}")
+                step = self.steps[current_step_name]
+                self.current_step = step
+                self.context["current_step"] = current_step_name
                 
-                # Go to the next step in case of failure
-                current_step_name = step.on_failure
-                success = False
-                continue
-            
-            # Configure the options of the module
-            for option_name, option_value in step.options.items():
-                if hasattr(module, option_name):
-                    setattr(module, option_name, option_value)
-            
-            # Apply the inputs of the context to the module
-            if hasattr(step, 'input_mapping') and step.input_mapping:
-                step.apply_inputs(module, self.context["data"])
-            
-            # Execute the module
-            try:
-                result = module.run()
-                step.result = result
-                step.executed = True
+                print_info(f"Executing step: {step.name} - {step.description}")
                 
-                # Store the result in the context
-                self.context["results"][step.name] = result
-                self.results[step.name] = result
-                
-                # Extract the outputs of the module and store them in the context
-                if hasattr(step, 'output_mapping') and step.output_mapping:
-                    outputs = step.extract_outputs(module)
-                    for key, value in outputs.items():
-                        self.context["data"][key] = value
-                        print_info(f"Data '{key}' extracted and stored in context")
-                
-                if result:
-                    print_success(f"Step {step.name} executed successfully")
+                # Check if the step should be executed
+                if not step.should_execute(self.context):
+                    print_info(f"Step {step.name} skipped (condition not met)")
+                    
+                    # Go to the next step in case of success
                     current_step_name = step.on_success
-                else:
-                    print_warning(f"Step {step.name} failed")
+                    continue
+                
+                # Load the module
+                module = self.framework.load_module(step.module_path)
+                if not module:
+                    print_error(f"Unable to load the module {step.module_path}")
+                    
+                    # Go to the next step in case of failure
+                    current_step_name = step.on_failure
+                    success = False
+                    continue
+                
+                # Configure the options of the module
+                for option_name, option_value in step.options.items():
+                    if hasattr(module, option_name):
+                        setattr(module, option_name, option_value)
+                
+                # Apply the inputs of the context to the module
+                if hasattr(step, 'input_mapping') and step.input_mapping:
+                    step.apply_inputs(module, self.context["data"])
+                
+                # Execute the module
+                try:
+                    result = module.run()
+                    step.result = result
+                    step.executed = True
+                    
+                    # Store the result in the context
+                    self.context["results"][step.name] = result
+                    self.results[step.name] = result
+                    
+                    # Extract the outputs of the module and store them in the context
+                    if hasattr(step, 'output_mapping') and step.output_mapping:
+                        outputs = step.extract_outputs(module)
+                        for key, value in outputs.items():
+                            self.context["data"][key] = value
+                            print_info(f"Data '{key}' extracted and stored in context")
+                    
+                    if result:
+                        print_success(f"Step {step.name} executed successfully")
+                        current_step_name = step.on_success
+                    else:
+                        print_warning(f"Step {step.name} failed")
+                        current_step_name = step.on_failure
+                        success = False
+                
+                except Exception as e:
+                    print_error(f"Error executing step {step.name}: {str(e)}")
+                    step.result = False
+                    step.executed = True
+                    
+                    # Store the error in the context
+                    self.context["results"][step.name] = False
+                    self.context["errors"] = self.context.get("errors", {})
+                    self.context["errors"][step.name] = str(e)
+                    self.results[step.name] = False
+                    
                     current_step_name = step.on_failure
                     success = False
             
-            except Exception as e:
-                print_error(f"Error executing step {step.name}: {str(e)}")
-                step.result = False
-                step.executed = True
-                
-                # Store the error in the context
-                self.context["results"][step.name] = False
-                self.context["errors"] = self.context.get("errors", {})
-                self.context["errors"][step.name] = str(e)
-                self.results[step.name] = False
-                
-                current_step_name = step.on_failure
-                success = False
-        
-        # Calculate execution duration
-        duration = time.time() - self.context["start_time"]
-        print_info(f"Workflow finished in {duration:.2f} seconds")
-        
-        return success
+            # Calculate execution duration
+            duration = time.time() - self.context["start_time"]
+            print_info(f"Workflow finished in {duration:.2f} seconds")
+            
+            return success
+        finally:
+            restore_module_context(self.framework, previous_module)
     
     def save(self, filename):
         """Save the workflow to a JSON file"""

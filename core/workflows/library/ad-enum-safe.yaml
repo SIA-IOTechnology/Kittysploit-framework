@@ -1,0 +1,67 @@
+id: ad-enum-safe
+version: "1"
+name: AD Enumeration (Safe)
+description: >
+  Read-only Active Directory LDAP checks — password policy, Kerberos roastable accounts,
+  unconstrained delegation, and domain RBCD indicators. Requires LDAP bind credentials.
+tags: [ad, ldap, enum, safe]
+policy:
+  approval_recommended: true
+continue_on_failure: true
+variables:
+  target:
+    description: Domain controller hostname or IP
+    required: true
+  username:
+    description: Bind user (DOMAIN\\user or user@domain)
+    default: ""
+  password:
+    description: Bind password
+    default: ""
+start_step: password_policy
+steps:
+  password_policy:
+    module: scanner/ldap/password_policy
+    description: Domain password policy weaknesses
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: kerberos_roast
+    on_failure: kerberos_roast
+  kerberos_roast:
+    module: scanner/ldap/kerberos_roastable
+    description: Kerberoastable service accounts
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: asrep_roast
+    on_failure: asrep_roast
+  asrep_roast:
+    module: scanner/ldap/asrep_roastable
+    description: AS-REP roastable accounts
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: unconstrained
+    on_failure: unconstrained
+  unconstrained:
+    module: scanner/ldap/unconstrained_delegation
+    description: Unconstrained Kerberos delegation
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: rbcd_domain
+    on_failure: rbcd_domain
+  rbcd_domain:
+    module: scanner/ldap/rbcd_on_domain
+    description: Resource-based constrained delegation on domain object
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: null
+    on_failure: null

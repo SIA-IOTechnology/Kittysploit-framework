@@ -27,6 +27,13 @@ class Module(Scanner, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'requires': {
+            'tech_hints_any': ['nextjs', 'nodejs', 'react'],
+            'confidence_min_any': {'nextjs': 0.45, 'nodejs': 0.4, 'react': 0.4},
+        },
+        'incompatible_when': {
+            'tech_hints_any': ['wordpress', 'drupal', 'joomla'],
+        },
     },
     }
 

@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run
 import urllib.parse
 import time
 import socket
@@ -321,5 +322,13 @@ class Module(Auxiliary, Http_client):
         else:
             print_info("No SSRF vulnerabilities detected during automated testing.")
             print_info("Note: This does not guarantee the application is secure.")
-        
-        return True
+
+        return finalize_http_scanner_run(
+            self,
+            self.vulnerabilities,
+            title="Server-Side Request Forgery (SSRF)",
+            severity="high",
+            category="ssrf",
+            findings_key="ssrf_findings",
+            dedupe_keys=("method", "param", "payload"),
+        )

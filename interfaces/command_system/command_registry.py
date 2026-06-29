@@ -126,7 +126,8 @@ class CommandRegistry:
             'tor',
             'route',
             'scope',
-            'campaign'
+            'campaign',
+            'workflows'
         ]
         
         for command_name in builtin_commands:

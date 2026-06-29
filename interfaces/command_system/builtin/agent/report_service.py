@@ -18,6 +18,9 @@ from interfaces.command_system.builtin.agent.redaction import (
     is_sensitive_key,
     sanitize_nested,
 )
+from interfaces.command_system.builtin.agent.campaign_knowledge_graph import (
+    summarize_attack_graph_for_report,
+)
 from interfaces.command_system.builtin.agent.run_store import AgentPathService, new_run_id
 
 
@@ -115,6 +118,8 @@ class ReportService:
                 f"HTTP request intelligence analyzed {request_intel.get('analyzed_flows', 0)} captured flow(s)."
             )
 
+        attack_graph = summarize_attack_graph_for_report(knowledge_base)
+
         return {
             "decision_counts": decision_counts,
             "important_findings": important_findings,
@@ -127,6 +132,7 @@ class ReportService:
                 "reasoning_confidence": execution_plan.get("reasoning_confidence", 0.0),
             },
             "why_it_matters": why_it_matters,
+            "attack_graph": attack_graph,
         }
 
     def load_history_scores(self) -> Dict[str, Any]:
@@ -325,6 +331,39 @@ class ReportService:
                         )
                 report_md.write("\n")
 
+                attack_graph = report_summary.get("attack_graph") or {}
+                if isinstance(attack_graph, dict) and int(attack_graph.get("nodes", 0) or 0) > 0:
+                    report_md.write("## Attack Graph\n")
+                    report_md.write(
+                        f"- Nodes: `{attack_graph.get('nodes', 0)}` | "
+                        f"Edges: `{attack_graph.get('edges', 0)}` | "
+                        f"Last Δ: `{attack_graph.get('last_delta', 0)}`\n"
+                    )
+                    by_kind = attack_graph.get("nodes_by_kind") or {}
+                    if isinstance(by_kind, dict) and by_kind:
+                        kind_line = ", ".join(f"{k}={v}" for k, v in sorted(by_kind.items()))
+                        report_md.write(f"- By kind: {kind_line}\n")
+                    nxt = attack_graph.get("next_action") if isinstance(attack_graph.get("next_action"), dict) else {}
+                    if nxt.get("action"):
+                        report_md.write(
+                            f"- Next graph action: `{nxt.get('action')}` "
+                            f"(confidence={float(nxt.get('confidence', 0.0) or 0.0):.2f})\n"
+                        )
+                    stale = attack_graph.get("stale_modules") or []
+                    if stale:
+                        report_md.write(f"- Stale (no graph growth): {', '.join(f'`{m}`' for m in stale[:6])}\n")
+                    sample_nodes = attack_graph.get("sample_nodes") or []
+                    if sample_nodes:
+                        report_md.write("- Sample nodes:\n")
+                        for row in sample_nodes[:8]:
+                            if not isinstance(row, dict):
+                                continue
+                            report_md.write(
+                                f"  - `{row.get('kind', '')}` {self._shorten(str(row.get('label', '')), 72)} "
+                                f"(conf={float(row.get('confidence', 0.0) or 0.0):.2f})\n"
+                            )
+                    report_md.write("\n")
+
                 report_md.write("## Knowledge Context\n")
                 report_md.write(f"- Tech hints: `{len(safe_knowledge_base.get('tech_hints', []))}`\n")
                 report_md.write(f"- Tech confidence signals: `{len(safe_knowledge_base.get('tech_confidence', {}))}`\n")
@@ -420,6 +459,23 @@ class ReportService:
                             report_md.write(
                                 f"    evidence: {self._shorten('; '.join([str(x) for x in evidence[:4]]), 260)}\n"
                             )
+                        if isinstance(explanation, dict):
+                            rejected = explanation.get("rejected_alternatives", []) or []
+                            for alt in rejected[:2]:
+                                if isinstance(alt, dict) and alt.get("path"):
+                                    report_md.write(
+                                        f"    not `{alt.get('path')}`: "
+                                        f"{self._shorten(str(alt.get('reason', '')), 180)}\n"
+                                    )
+                            pivot = explanation.get("next_pivot")
+                            if pivot:
+                                report_md.write(f"    next pivot: `{pivot}`\n")
+                            risk = explanation.get("risk", {}) if isinstance(explanation.get("risk"), dict) else {}
+                            if risk.get("level"):
+                                report_md.write(
+                                    f"    risk: {risk.get('level')} "
+                                    f"(cost={risk.get('cost', '?')})\n"
+                                )
                 report_md.write("\n")
 
                 report_md.write("## Important Findings\n")
@@ -452,8 +508,30 @@ class ReportService:
                         if not isinstance(row, dict):
                             continue
                         phase = str(row.get("phase", "?"))
+                        kind = str(row.get("kind", "phase"))
                         summary = self._shorten(row.get("summary", ""), 220)
-                        report_md.write(f"- `{phase}`: {summary}\n")
+                        report_md.write(f"- `{phase}` [{kind}]: {summary}\n")
+                        extra = row.get("extra", {}) or {}
+                        explanation = (
+                            extra.get("decision_explanation")
+                            if isinstance(extra, dict)
+                            else {}
+                        ) or {}
+                        if isinstance(explanation, dict) and explanation:
+                            rejected = explanation.get("rejected_alternatives", []) or []
+                            for alt in rejected[:2]:
+                                if isinstance(alt, dict) and alt.get("path"):
+                                    report_md.write(
+                                        f"  not `{alt.get('path')}`: "
+                                        f"{self._shorten(str(alt.get('reason', '')), 160)}\n"
+                                    )
+                            if explanation.get("next_pivot"):
+                                report_md.write(f"  next pivot: `{explanation.get('next_pivot')}`\n")
+                            risk = explanation.get("risk", {}) if isinstance(explanation.get("risk"), dict) else {}
+                            if risk.get("level"):
+                                report_md.write(
+                                    f"  risk: {risk.get('level')} (cost={risk.get('cost', '?')})\n"
+                                )
                         modules = row.get("modules", []) or []
                         if modules:
                             report_md.write(

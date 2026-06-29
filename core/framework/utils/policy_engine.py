@@ -439,7 +439,7 @@ class PolicyEngine:
         """Persiste les manifestes sur le disque"""
         try:
             data = {}
-            for path, manifest in self.manifest_cache.items():
+            for path, manifest in list(self.manifest_cache.items()):
                 data[path] = self._manifest_to_dict(manifest)
             
             with open(self.manifest_file, 'w', encoding='utf-8') as f:
@@ -502,4 +502,3 @@ class PolicyEngine:
             self.dependency_graph = Stub()
             self.approval_chain = Stub()
             self.differential_analyzer = Stub()
-

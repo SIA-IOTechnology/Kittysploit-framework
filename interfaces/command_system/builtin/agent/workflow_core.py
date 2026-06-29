@@ -57,9 +57,11 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     AUTH_PATH_MARKERS,
     CAMPAIGN_GOAL_EXPLOIT,
     CAMPAIGN_GOAL_OBTAIN_AUTH,
+    CAMPAIGN_GOAL_OBTAIN_SHELL,
     CAMPAIGN_GOAL_POST_AUTH,
     CAMPAIGN_GOAL_RECON,
     CAMPAIGN_GOAL_SHELL_STOP,
+    CLIENT_JS_INTEL_MODULES,
     CMS_HINT_TOKENS,
     CMS_LOCK_NAMES,
     CMS_SPECIALIZATION_BLOB_TOKENS,
@@ -70,6 +72,8 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     DRUPAL_BLOB_MARKERS,
     DERIVED_HOST_SCAN_MAX_HOSTS,
     DERIVED_HOST_SCAN_MODULES_PER_HOST,
+    DERIVED_HOST_LIVE_STATUSES,
+    DERIVED_HOST_PROBE_PATHS,
     EXPANDED_SURFACE_INTEL_MAX_MODULES,
     EXPANDED_SURFACE_MODULE_PREFIXES,
     EXPANDED_SURFACE_RECON_SKIP_SUBSTR,
@@ -77,21 +81,30 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     HTTP_STATUS_RISK_SIGNALS,
     JOOMLA_BLOB_MARKERS,
     NEGATIVE_EVIDENCE_MARKERS,
+    NEXTJS_HINT_TOKENS,
     POSITIVE_EVIDENCE_MARKERS,
     POSITIVE_SCAN_MESSAGE_MARKERS,
     SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS,
     SAFE_FOLLOWUP_ACTION_TYPES,
+    SHELL_HUNTER_MACRO_MAX_ROUNDS,
     WAF_BODY_MARKERS,
     WAF_RISK_HTTP_STATUS_CODES,
     WORDPRESS_BODY_FINGERPRINT_TOKENS,
     WORDPRESS_FORM_FIELD_TOKENS,
     WORDPRESS_LANDING_PATH_MARKERS,
 )
+from interfaces.command_system.builtin.agent.waf_signals import (
+    approved_to_continue_through_waf,
+    is_actionable_waf_signal,
+)
 from interfaces.command_system.builtin.agent.target_resolver import TargetResolver
 from interfaces.command_system.builtin.agent.module_catalog import ModuleCatalogService
 from interfaces.command_system.builtin.agent.local_llm import LocalLLMService
 from interfaces.command_system.builtin.agent.report_service import ReportService
-from interfaces.command_system.builtin.agent.http_intelligence import HttpRequestIntelligence
+from interfaces.command_system.builtin.agent.http_intelligence import (
+    HttpRequestIntelligence,
+    resolve_active_probe_paths,
+)
 from interfaces.command_system.builtin.agent.post_exploit_intelligence import PostExploitIntelligence
 from interfaces.command_system.builtin.agent.auth_operations import AuthContextOperations
 from interfaces.command_system.builtin.agent.identity_intel import (
@@ -101,14 +114,25 @@ from interfaces.command_system.builtin.agent.identity_intel import (
     harvest_identities_from_results,
     harvest_subdomains_from_results,
     merge_intel_into_knowledge_base,
+    merge_osint_synthesis_into_knowledge_base,
     organization_root_domain,
     pick_intel_modules,
+    run_agent_intel_pipeline,
 )
+from core.osint.password_profiling import harvest_password_candidates_from_results
 from interfaces.command_system.builtin.agent.attack_chain_memory import (
     build_chain_option_overrides,
     export_chain_summary,
     poison_kb_from_results,
     suggest_chain_module_paths,
+)
+from interfaces.command_system.builtin.agent.goal_planner import (
+    is_shell_operator_goal,
+    kb_api_surface_ready,
+    kb_subdomain_surface_expandable,
+    operator_goal_from_mapping,
+    prioritize_subdomain_hosts,
+    suggest_shell_plan_followups,
 )
 from interfaces.command_system.builtin.agent.io_utils import atomic_write_json, load_json_dict
 from interfaces.command_system.builtin.agent.module_scoring import (
@@ -120,16 +144,27 @@ from interfaces.command_system.builtin.agent.module_scoring import (
     score_rules,
     score_tech_hints_in_blob,
 )
+from interfaces.command_system.builtin.agent.crawler_intelligence import (
+    BRUTEFORCE_MODULE_PATH,
+    merge_crawler_overrides,
+)
 from interfaces.command_system.builtin.agent.campaign_utility import (
     module_utility,
     select_opportunistic_batch,
     unified_module_score,
 )
+from interfaces.command_system.builtin.agent.campaign_continuation import (
+    list_shell_continuation_pivots,
+    should_defer_shell_low_novelty_stop,
+)
+from interfaces.command_system.builtin.agent.campaign_knowledge_graph import sync_attack_graph_from_kb
+from interfaces.command_system.builtin.agent.decision_report import build_action_decision_report
 from interfaces.command_system.builtin.agent.module_context_memory import ModuleContextMemory
 from interfaces.command_system.builtin.agent.module_performance_memory import (
     ModulePerformanceMemory,
     kb_light_copy,
 )
+from interfaces.command_system.builtin.agent.module_health_memory import ModuleHealthMemory
 from interfaces.command_system.builtin.agent.compiled_patterns import (
     ABSOLUTE_URL_RE,
     ACRONYM_RE,
@@ -181,6 +216,7 @@ class AgentWorkflowCore:
         self._post_intel = PostExploitIntelligence(framework)
         self._auth_ops = AuthContextOperations(self._normalize_relative_path)
         self._module_perf = ModulePerformanceMemory()
+        self._module_health = ModuleHealthMemory()
         self._module_ctx = ModuleContextMemory()
         self._lifecycle = RunLifecycle()
         self._module_runner = AgentModuleRunner(WorkflowModuleRunnerHooks(self))
@@ -623,6 +659,17 @@ class AgentWorkflowCore:
             delay_max = delay_min
         return delay_min, delay_max
 
+    def _throttle_active_web_probe(self, state: AgentState, path: str) -> None:
+        """Per-request spacing for direct surface probes (avoids 10+ GET burst)."""
+        delay_min, delay_max = self._action_delay_bounds(state)
+        if delay_max <= 0:
+            if self._discreet_mode(state):
+                time.sleep(random.uniform(0.45, 0.95))
+            else:
+                time.sleep(random.uniform(0.25, 0.55))
+            return
+        self._sleep_between_agent_actions(state, f"active-probe:{path}")
+
     def _sleep_between_agent_actions(self, state: AgentState, context: str = "") -> None:
         delay_min, delay_max = self._action_delay_bounds(state)
         if delay_max <= 0:
@@ -710,25 +757,14 @@ class AgentWorkflowCore:
             print_warning("Rate limit signal detected; increasing agent delay window")
 
     def _result_waf_signal(self, result: Any) -> bool:
-        if not isinstance(result, dict):
+        return is_actionable_waf_signal(result)
+
+    def _should_pause_campaign_for_waf(self, state: AgentState) -> bool:
+        if self._normalized_safety_profile(state) == "aggressive":
             return False
-        status_values = []
-        for key in ("status_code", "http_status", "code"):
-            try:
-                if key in result:
-                    status_values.append(int(result.get(key) or 0))
-            except Exception:
-                pass
-        blob = " ".join([
-            str(result.get("status", "")),
-            str(result.get("message", "")),
-            str(result.get("details", "")),
-            str(result.get("body", ""))[:4096],
-        ]).lower()
-        status_values.extend([int(code) for code in HTTP_STATUS_IN_TEXT_RE.findall(blob)])
-        if any(code in WAF_RISK_HTTP_STATUS_CODES for code in status_values):
-            return True
-        return any(marker in blob for marker in WAF_BODY_MARKERS)
+        if approved_to_continue_through_waf(state):
+            return False
+        return True
 
     def _record_waf_signals_from_results(self, state: AgentState, results: List[Any], phase_name: str) -> bool:
         if self._normalized_safety_profile(state) == "aggressive":
@@ -743,17 +779,27 @@ class AgentWorkflowCore:
         kb["waf_signal_count"] = int(kb.get("waf_signal_count", 0) or 0) + len(signals)
         state.knowledge_base = kb
         threshold = 1 if self._normalized_safety_profile(state) in ("safe", "discreet") else 3
-        if int(kb.get("waf_signal_count", 0) or 0) >= threshold:
-            state.campaign_stop_reason = (
-                f"{phase_name}: blocking/WAF signals detected; pausing campaign to avoid target overload"
-            )
-            delay_min, delay_max = self._action_delay_bounds(state)
-            state.request_delay_min = max(delay_min, 5.0)
-            state.request_delay_max = max(delay_max, 15.0)
-            if getattr(state, "verbose", False):
-                print_warning(state.campaign_stop_reason)
-            return True
-        return False
+        if int(kb.get("waf_signal_count", 0) or 0) < threshold:
+            return False
+
+        delay_min, delay_max = self._action_delay_bounds(state)
+        state.request_delay_min = max(delay_min, 5.0)
+        state.request_delay_max = max(delay_max, 15.0)
+
+        if not self._should_pause_campaign_for_waf(state):
+            if getattr(state, "verbose", False) or approved_to_continue_through_waf(state):
+                print_warning(
+                    f"{phase_name}: WAF/CDN signals detected ({len(signals)}); "
+                    "continuing with throttling (--approve-risk intrusive)"
+                )
+            return False
+
+        state.campaign_stop_reason = (
+            f"{phase_name}: blocking/WAF signals detected; pausing campaign to avoid target overload"
+        )
+        if getattr(state, "verbose", False):
+            print_warning(state.campaign_stop_reason)
+        return True
 
     def _has_proxy_request_intel(self, state: AgentState) -> bool:
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
@@ -786,7 +832,7 @@ class AgentWorkflowCore:
             hint_lower = str(hint or "").lower().strip()
             if hint_lower:
                 tech_hints.add(hint_lower)
-                if hint_lower in ("wordpress", "drupal", "joomla", "django", "flask", "nodejs", "api"):
+                if hint_lower in ("wordpress", "drupal", "joomla", "django", "flask", "nodejs", "nextjs", "api"):
                     self._update_tech_confidence(kb, hint_lower, 0.25)
                 elif hint_lower in ("graphql", "swagger", "react", "angular", "vue", "phpmyadmin", "dvwa"):
                     self._update_tech_confidence(kb, hint_lower, 0.18)
@@ -824,7 +870,6 @@ class AgentWorkflowCore:
             kb["extracted_secrets"] = summary["extracted_secrets"]
             risk = set(kb.get("risk_signals", []) or [])
             risk.add("leaked_secrets_detected")
-            # Automatically unlock capabilities based on secrets
             caps = set(kb.get("unlocked_capabilities", []) or [])
             for secret in summary["extracted_secrets"]:
                 if secret["type"] in ("jwt", "bearer_token"):
@@ -833,14 +878,137 @@ class AgentWorkflowCore:
                     caps.add("cloud_credentials")
             kb["unlocked_capabilities"] = sorted(caps)
             kb["risk_signals"] = sorted(risk)
-        
+
         if summary.get("timing_anomalies"):
             kb["timing_anomalies"] = summary["timing_anomalies"]
             risk = set(kb.get("risk_signals", []) or [])
             risk.add("timing_side_channel_detected")
             kb["risk_signals"] = sorted(risk)
 
+        if summary.get("active_probe"):
+            risk = set(kb.get("risk_signals", []) or [])
+            risk.add("active_web_probe_completed")
+            kb["risk_signals"] = sorted(risk)
+
         state.knowledge_base = kb
+
+    def _shell_sensitive_probes_allowed(self, state: AgentState) -> bool:
+        """True when shell-tier probe paths (/.env, /phpinfo, …) are explicitly approved."""
+        shell_mode = (
+            is_shell_operator_goal(self._operator_campaign_goal(state))
+            or bool(getattr(state, "shell_hunter", False))
+        )
+        if not shell_mode:
+            return False
+        policy = getattr(state, "runtime_policy", None)
+        if policy is None:
+            return False
+        from interfaces.command_system.builtin.agent.runtime_policy import ModuleRisk
+
+        risk = ModuleRisk(
+            "intrusive",
+            ("active_exploitation",),
+            1,
+            False,
+            True,
+            False,
+            "shell-tier active web probes",
+        )
+        return bool(policy.risk_approved(risk))
+
+    def _resolve_active_probe_paths_for_state(
+        self,
+        state: AgentState,
+        *,
+        extra_paths: Optional[List[str]] = None,
+        limit: int = 14,
+    ) -> Tuple[List[str], str]:
+        shell_mode = (
+            is_shell_operator_goal(self._operator_campaign_goal(state))
+            or bool(getattr(state, "shell_hunter", False))
+        )
+        return resolve_active_probe_paths(
+            shell_mode=shell_mode,
+            intrusive_approved=self._shell_sensitive_probes_allowed(state),
+            extra_paths=extra_paths,
+            limit=limit,
+        )
+
+    def _active_web_probe_result(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(row, dict):
+            row = {}
+        path = row.get("path") or row.get("url") or ""
+        status = str(row.get("status") or "ok")
+        if status == "ok":
+            message = (
+                f"Active web probe GET {path} -> {row.get('status_code')} "
+                f"({row.get('response_length', 0)} bytes) "
+                f"[{', '.join(row.get('reasons', [])[:3])}]"
+            )
+            result_status = "safe"
+        elif status == "blocked":
+            message = f"Active web probe blocked for {path}: {row.get('error', '')}"
+            result_status = "skipped"
+        else:
+            message = f"Active web probe failed for {path}: {row.get('error', 'unknown error')}"
+            result_status = "error"
+        return {
+            "module": "Active web surface probe",
+            "path": "agent/active_web_probe",
+            "status": result_status,
+            "vulnerable": False,
+            "severity": "info",
+            "message": message,
+            "details": dict(row),
+        }
+
+    def _run_active_web_surface_probe(
+        self,
+        state: AgentState,
+        *,
+        extra_paths: Optional[List[str]] = None,
+        max_requests: int = 12,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Send direct GET probes when proxy traffic is thin or shell goal needs more surface."""
+        if state.dry_run:
+            return {}, []
+        if state.target_reachable is False:
+            return {}, []
+
+        def _budget() -> bool:
+            return self._consume_network_units(state, 1)
+
+        paths, tier = self._resolve_active_probe_paths_for_state(
+            state,
+            extra_paths=extra_paths,
+            limit=max(1, int(max_requests or 1)),
+        )
+        summary = self._http_intel.probe_direct_surface(
+            state.target_info or {},
+            probe_paths=paths,
+            limit=len(paths),
+            user_agent=str(getattr(state, "user_agent", "") or ""),
+            on_request=_budget,
+            on_throttle=lambda probe_path: self._throttle_active_web_probe(state, probe_path),
+        )
+        summary["probe_tier"] = tier
+        analyzed = int(summary.get("analyzed_flows", 0) or 0)
+        if analyzed <= 0:
+            return summary, []
+
+        self._merge_http_request_intel_into_kb(state, summary)
+        results = [self._active_web_probe_result(row) for row in (summary.get("probe_results") or []) if isinstance(row, dict)]
+        self._append_timeline_event(
+            state,
+            "request-intel",
+            (
+                f"Active web probe: {analyzed} GET request(s), "
+                f"{len(summary.get('discovered_endpoints', []) or [])} endpoint hint(s)."
+            ),
+            kind="probe",
+            extra={"interesting": len(summary.get("interesting_requests", []) or [])},
+        )
+        return summary, results
 
     def _http_request_intel_result(self, row: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(row, dict):
@@ -884,6 +1052,8 @@ class AgentWorkflowCore:
             return []
 
         max_replay = max(0, int(getattr(state, "http_replay_max", 3) or 0))
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            max_replay = max(max_replay, 8)
         if max_replay <= 0:
             return []
         selected = candidates[:max_replay]
@@ -1009,7 +1179,10 @@ class AgentWorkflowCore:
                                 })
 
             # Shell Hunter: Command Injection Probing
-            if state.shell_hunter and mode == "active" and any(r in (row.get("reasons", []) or []) for r in ("command injection", "rce")):
+            rce_markers = ("command injection", "command injection candidate", "rce")
+            if state.shell_hunter and mode == "active" and any(
+                r in (row.get("reasons", []) or []) for r in rce_markers
+            ):
                 param = next(iter(candidate.get("params", {}).keys()), None)
                 if param:
                     from interfaces.command_system.builtin.agent.http_intelligence import PayloadMutationEngine
@@ -1043,26 +1216,69 @@ class AgentWorkflowCore:
         return results
 
     def _ingest_http_request_intelligence(self, state: AgentState) -> List[Dict[str, Any]]:
-        if not bool(getattr(state, "proxy_flows", True)):
-            return []
-        
         if state.shell_hunter:
             kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
             kb["shell_hunter_mode"] = True
             state.knowledge_base = kb
-        summary = self._http_intel.collect_from_proxy(
-            state.target_info or {},
-            limit=max(0, int(getattr(state, "proxy_flow_limit", 40) or 0)),
-            include_auth_context=bool(getattr(state, "reuse_proxy_auth", False)),
-        )
-        if not isinstance(summary, dict) or summary.get("error"):
-            if getattr(state, "verbose", False) and isinstance(summary, dict) and summary.get("error"):
-                print_warning(str(summary.get("error")))
-            return []
-        if int(summary.get("analyzed_flows", 0) or 0) <= 0:
-            return []
 
-        self._merge_http_request_intel_into_kb(state, summary)
+        proxy_enabled = bool(getattr(state, "proxy_flows", True))
+        if proxy_enabled:
+            summary = self._http_intel.collect_from_proxy(
+                state.target_info or {},
+                limit=max(0, int(getattr(state, "proxy_flow_limit", 40) or 0)),
+                include_auth_context=bool(getattr(state, "reuse_proxy_auth", False)),
+            )
+            if not isinstance(summary, dict):
+                summary = self._http_intel.empty_summary(enabled=True)
+            if summary.get("error") and getattr(state, "verbose", False):
+                print_warning(str(summary.get("error")))
+        else:
+            summary = self._http_intel.empty_summary(enabled=True)
+            summary["source"] = "proxy_disabled"
+
+        proxy_flows = int(summary.get("analyzed_flows", 0) or 0)
+        if proxy_flows > 0:
+            self._merge_http_request_intel_into_kb(state, summary)
+
+        operator_shell = is_shell_operator_goal(self._operator_campaign_goal(state))
+        shell_hunter = bool(getattr(state, "shell_hunter", False))
+        shell_mode = operator_shell or shell_hunter
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        endpoint_count = len(kb.get("discovered_endpoints", []) or [])
+        active_results: List[Dict[str, Any]] = []
+
+        should_active_probe = proxy_flows <= 0 or (shell_mode and endpoint_count < 8)
+        if should_active_probe:
+            if proxy_flows <= 0 and getattr(state, "verbose", False):
+                if shell_mode and self._shell_sensitive_probes_allowed(state):
+                    print_info(
+                        "HTTP intelligence: no KittyProxy flows; active GET probes "
+                        "(safe + shell-tier paths approved)."
+                    )
+                elif shell_mode:
+                    print_info(
+                        "HTTP intelligence: no KittyProxy flows; active GET probes "
+                        "(safe paths only — use --approve-risk intrusive for /.env, /phpinfo, etc.)."
+                    )
+                else:
+                    print_info("HTTP intelligence: no KittyProxy flows; sending safe GET surface probes.")
+            if shell_mode and self._shell_sensitive_probes_allowed(state):
+                probe_limit = 14
+            elif shell_mode:
+                probe_limit = 10
+            else:
+                probe_limit = 8
+            active_summary, active_results = self._run_active_web_surface_probe(
+                state,
+                max_requests=probe_limit,
+            )
+            if int(active_summary.get("analyzed_flows", 0) or 0) > 0:
+                summary = self._http_intel.merge_intel_summaries(summary, active_summary)
+                self._merge_http_request_intel_into_kb(state, summary)
+
+        if int(summary.get("analyzed_flows", 0) or 0) <= 0:
+            return active_results
+
         print_status(
             "HTTP request intelligence: "
             f"{summary.get('analyzed_flows', 0)} flow(s), "
@@ -1092,7 +1308,7 @@ class AgentWorkflowCore:
                 "replay_mode": getattr(state, "http_replay", "safe"),
             },
         )
-        return self._run_http_request_replay(state, summary)
+        return active_results + self._run_http_request_replay(state, summary)
 
     def _attempt_shell_delivery(self, state: AgentState, candidate: Dict[str, Any], param: str) -> Optional[Dict[str, Any]]:
         """Attempt to deliver a reverse shell payload to a confirmed RCE endpoint."""
@@ -1303,6 +1519,15 @@ class AgentWorkflowCore:
             self._is_actionable_finding,
             self._result_has_exploit_link,
         )
+        self._module_health.record_phase_outcomes(
+            kb_before_light,
+            kb_after,
+            phase_results,
+            hostname=str(state.target_info.get("hostname", "") or ""),
+            is_actionable=self._is_actionable_finding,
+            get_agent_metadata=self._catalog.get_agent_metadata,
+            stack_mismatch_fn=self._module_stack_mismatch_reason,
+        )
 
     def _merge_module_produces_into_kb(self, knowledge_base: Any, module_path: str, details: Any) -> None:
         """Merge static ``agent.produces`` and optional runtime ``details['agent_produces']`` into KB."""
@@ -1480,7 +1705,7 @@ class AgentWorkflowCore:
         known = (
             "dvwa", "wordpress", "drupal", "joomla", "phpmyadmin", "grafana", "jenkins",
             "elasticsearch", "kibana", "tomcat", "nginx", "apache", "fastapi",
-            "django", "flask", "nodejs", "react", "angular", "vue", "api",
+            "django", "flask", "nextjs", "nodejs", "react", "angular", "vue", "api",
         )
         rows: List[Tuple[str, float]] = []
         for name in known:
@@ -1503,6 +1728,43 @@ class AgentWorkflowCore:
         noise = self._display_hint_noise_tokens()
         filtered = [h for h in hints if h and h not in noise]
         return filtered[:limit]
+
+    def _has_nextjs_evidence(self, knowledge_base: Dict[str, Any], threshold: float = 0.55) -> bool:
+        kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+        if self._has_tech_evidence(kb, "nextjs", threshold=threshold):
+            return True
+        endpoints = " ".join(str(x).lower() for x in kb.get("discovered_endpoints", []) or [])
+        trace = " ".join(
+            " ".join(str(row.get(key, "")) for key in ("url", "path", "final_url", "body"))
+            for row in (kb.get("fingerprint_trace", []) or [])
+            if isinstance(row, dict)
+        ).lower()
+        request_intel = kb.get("request_intel", {}) if isinstance(kb.get("request_intel", {}), dict) else {}
+        request_hints = {str(x).lower() for x in request_intel.get("tech_hints", []) or []}
+        if "nextjs" in request_hints:
+            return True
+        return any(token in endpoints or token in trace for token in NEXTJS_HINT_TOKENS)
+
+    def _module_stack_mismatch_reason(self, path: str, knowledge_base: Dict[str, Any]) -> str:
+        from interfaces.command_system.builtin.agent.module_stack_gate import resolve_module_stack_mismatch
+
+        kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+        agent = self._catalog.get_agent_metadata(path)
+        return resolve_module_stack_mismatch(
+            path,
+            kb,
+            agent,
+            has_tech_evidence=lambda tech, threshold=0.65: self._has_tech_evidence(kb, tech, threshold),
+            has_nextjs_evidence=lambda: self._has_nextjs_evidence(kb),
+        )
+
+    def _filter_stack_compatible_paths(self, paths: List[str], knowledge_base: Dict[str, Any]) -> List[str]:
+        compatible = []
+        for path in paths or []:
+            if self._module_stack_mismatch_reason(path, knowledge_base):
+                continue
+            compatible.append(path)
+        return compatible
 
     def _action_reason_for_path(self, path: str, state: AgentState, findings: Optional[List[Any]] = None) -> str:
         low = str(path or "").lower()
@@ -1700,7 +1962,7 @@ class AgentWorkflowCore:
         if not tradeoffs and action_type == "run_followup":
             tradeoffs.append("validation-first step before higher-risk exploitation")
 
-        return {
+        base = {
             "reason": reason,
             "score": round(score, 3),
             "confidence": round(confidence, 3),
@@ -1709,6 +1971,23 @@ class AgentWorkflowCore:
             "evidence": evidence[:8],
             "tradeoffs": tradeoffs[:5],
         }
+        report = build_action_decision_report(
+            path,
+            action_type,
+            kb,
+            campaign_goal=str(getattr(state, "campaign_goal", "") or ""),
+            reason=reason,
+            matching_finding=top or None,
+            stack_mismatch_fn=self._module_stack_mismatch_reason,
+            evidence=evidence[:8],
+            tradeoffs=tradeoffs[:5],
+            score=base["score"],
+            confidence=base["confidence"],
+            expected_gain=base["expected_gain"],
+            risk_cost=base["risk_cost"],
+        )
+        base.update(report)
+        return base
 
     def _enrich_execution_plan_actions(
         self,
@@ -1961,7 +2240,15 @@ class AgentWorkflowCore:
             tech_hints.add(str(hint).lower())
         state.scan_tech_hints = sorted(tech_hints)
         state.scan_modules_executed = len(executed_paths)
-        return all_results
+        return self._finalize_scan_campaign(
+            state,
+            modules,
+            scanner,
+            all_results,
+            executed_paths,
+            phase_threads,
+            tech_hints,
+        )
 
     def _has_tech_evidence(self, knowledge_base, tech_key: str, threshold: float = 0.6) -> bool:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
@@ -2215,6 +2502,9 @@ class AgentWorkflowCore:
         )
         if inferred:
             return True
+        operator = operator_goal_from_mapping(kb)
+        if is_shell_operator_goal(operator):
+            return True
         return False
 
     def _has_exploit_pressure(self, state: Optional[AgentState]) -> bool:
@@ -2249,7 +2539,10 @@ class AgentWorkflowCore:
             kb,
             limit=1,
         )
-        return bool(inferred)
+        if inferred:
+            return True
+        operator = self._operator_campaign_goal(state)
+        return is_shell_operator_goal(operator)
 
     def _derive_exploit_paths_from_findings(
         self,
@@ -2290,6 +2583,8 @@ class AgentWorkflowCore:
             if not path or score <= 0:
                 return
             if self._planner_action_keys(path).intersection(failed_tokens):
+                return
+            if self._module_stack_mismatch_reason(path, kb):
                 return
             prev = scores.get(path, 0.0)
             if score > prev:
@@ -2397,6 +2692,8 @@ class AgentWorkflowCore:
             low = path.lower()
             if self._planner_action_keys(path).intersection(failed_tokens):
                 continue
+            if self._module_stack_mismatch_reason(path, kb):
+                continue
             score = 0.0
             overlap = sum(1 for h in strong_hints if h in low)
             if overlap:
@@ -2410,13 +2707,133 @@ class AgentWorkflowCore:
         scored.sort(key=lambda row: (-row[0], row[1]))
         return [p for _, p in scored[: max(1, int(limit or 1))]]
 
+    def _operator_campaign_goal(self, state: AgentState) -> str:
+        """North-star goal from CLI/profile (not the tactical phase goal)."""
+        raw = getattr(state, "operator_goal", None) or ""
+        if str(raw).strip():
+            return operator_goal_from_mapping({"operator_goal": raw})
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        return operator_goal_from_mapping(kb)
+
+    def _module_path_observed(self, kb: Dict[str, Any], *needles: str) -> bool:
+        observed = [str(p).lower() for p in (kb.get("observed_modules") or []) if p]
+        return any(any(n in p for n in needles) for p in observed)
+
+    def _api_surface_ready_for_testing(self, kb: Dict[str, Any]) -> bool:
+        return kb_api_surface_ready(kb)
+
+    def _subdomain_surface_expandable(self, kb: Dict[str, Any]) -> bool:
+        return kb_subdomain_surface_expandable(kb)
+
+    def _next_best_action_for_shell_goal(
+        self,
+        state: AgentState,
+        kb: Dict[str, Any],
+        findings: List[Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Opportunistic ladder toward shell: exploit → API → subdomains → crawl → injections."""
+        preferred_paths = self._preferred_post_auth_exploit_paths(kb)
+        for path in preferred_paths:
+            return {
+                "type": "run_exploit",
+                "path": path,
+                "reason": "Goal obtain-shell: weaponize authenticated context.",
+            }
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            ex = self._catalog.normalize_exploit_module_path(f.get("exploit_module"))
+            if ex:
+                return {
+                    "type": "run_exploit",
+                    "path": ex,
+                    "reason": "Goal obtain-shell: linked exploit module from finding.",
+                }
+        for p in kb.get("post_auth_exploit_paths") or []:
+            if isinstance(p, str) and (p.startswith("exploit/") or p.startswith("exploits/")):
+                return {
+                    "type": "run_exploit",
+                    "path": p,
+                    "reason": "Goal obtain-shell: catalog exploit from auth context.",
+                }
+        inferred_paths = self._derive_exploit_paths_from_findings(findings, kb, limit=2)
+        for path in inferred_paths:
+            return {
+                "type": "run_exploit",
+                "path": path,
+                "reason": "Goal obtain-shell: inferred exploit from scanner evidence.",
+            }
+
+        for f in findings:
+            if not isinstance(f, dict) or not f.get("vulnerable"):
+                continue
+            decision = self._finding_decision_class(f)
+            mod_path = str(f.get("path", "") or "").strip()
+            if decision in ("exploit", "followup") and mod_path:
+                action_type = "run_exploit" if decision == "exploit" else "run_followup"
+                return {
+                    "type": action_type,
+                    "path": mod_path,
+                    "reason": "Goal obtain-shell: weaponize confirmed finding.",
+                }
+
+        nxt = kb.get("attack_graph_next_action")
+        if isinstance(nxt, dict):
+            graph_path = str(nxt.get("action") or "").strip()
+            observed = set(kb.get("observed_modules") or [])
+            stale = set(kb.get("attack_graph_stale_modules") or [])
+            if (
+                graph_path
+                and graph_path not in observed
+                and graph_path not in stale
+                and not self._module_block_reason_for_profile(state, graph_path)
+                and not self._module_stack_mismatch_reason(graph_path, kb)
+            ):
+                action_type = (
+                    "run_exploit"
+                    if graph_path.startswith(("exploit/", "exploits/"))
+                    else "run_followup"
+                )
+                return {
+                    "type": action_type,
+                    "path": graph_path,
+                    "reason": "Attack graph: next highest-confidence step toward shell.",
+                }
+
+        for path in suggest_shell_plan_followups(kb):
+            return {
+                "type": "run_followup",
+                "path": path,
+                "reason": "Goal obtain-shell: strategic surface expansion toward RCE.",
+            }
+
+        if self._auth_first_mode(state):
+            bf = "auxiliary/scanner/http/login/admin_login_bruteforce"
+            if self._login_surface_wants_bruteforce(kb, findings, False) and not self._module_block_reason_for_profile(state, bf):
+                return {
+                    "type": "run_followup",
+                    "path": bf,
+                    "reason": "Goal obtain-shell: credential path toward post-auth exploitation.",
+                }
+
+        return {
+            "type": "run_followup",
+            "path": "auxiliary/scanner/http/crawler",
+            "reason": "Goal obtain-shell: keep widening attack surface until a weaponizable vector appears.",
+        }
+
     def _sync_campaign_goal(self, state: AgentState) -> None:
         """
         Set ``state.campaign_goal`` from KB + results.
 
-        Rule chain: shell → stop; authenticated → exploit or post_auth; login surface → obtain_auth; else recon.
+        Rule chain: shell → stop; authenticated → exploit or post_auth; login surface → obtain_auth;
+        operator obtain-shell → pursue_shell; else recon.
         """
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        operator = self._operator_campaign_goal(state)
+        if is_shell_operator_goal(operator):
+            kb["shell_hunter_mode"] = True
+            state.knowledge_base = kb
         if self._has_shell_milestone(state):
             state.campaign_goal = CAMPAIGN_GOAL_SHELL_STOP
             return
@@ -2428,6 +2845,9 @@ class AgentWorkflowCore:
             return
         if self._auth_first_mode(state):
             state.campaign_goal = CAMPAIGN_GOAL_OBTAIN_AUTH
+            return
+        if is_shell_operator_goal(operator):
+            state.campaign_goal = CAMPAIGN_GOAL_OBTAIN_SHELL
             return
         state.campaign_goal = CAMPAIGN_GOAL_RECON
 
@@ -2446,6 +2866,11 @@ class AgentWorkflowCore:
                 "path": "",
                 "reason": "Shell or interactive session obtained; strategic stop.",
             }
+
+        if goal == CAMPAIGN_GOAL_OBTAIN_SHELL:
+            shell_action = self._next_best_action_for_shell_goal(state, kb, findings)
+            if shell_action:
+                return shell_action
 
         bf = "auxiliary/scanner/http/login/admin_login_bruteforce"
         lpd = "auxiliary/scanner/http/login_page_detector"
@@ -2527,6 +2952,9 @@ class AgentWorkflowCore:
                     "wordpress": "auxiliary/scanner/http/wp_plugin_scanner",
                     "drupal": "auxiliary/scanner/http/drupal_scanner",
                     "joomla": "auxiliary/scanner/http/joomla_scanner",
+                    "nextjs": "auxiliary/osint/js_endpoint_extractor",
+                    "react": "auxiliary/osint/js_endpoint_extractor",
+                    "nodejs": "auxiliary/osint/js_endpoint_extractor",
                     "phpmyadmin": "auxiliary/scanner/http/lfi_fuzzer",
                 }
                 chosen = stack_map.get(top_stack, "")
@@ -2866,25 +3294,17 @@ class AgentWorkflowCore:
             return
         base_url = f"{scheme}://{host}:{port}"
 
-        probe_paths = [
-            "/",
-            "/robots.txt",
-            "/sitemap.xml",
-            "/login.php",
-            "/wp-login.php",
-            "/xmlrpc.php",
-            "/readme.html",
-            "/wp-json/",
-            "/?rest_route=/",
-        ]
+        probe_limit = 10 if not self._discreet_mode(state) else 5
+        probe_paths, probe_tier = self._resolve_active_probe_paths_for_state(
+            state,
+            limit=probe_limit,
+        )
         if self._discreet_mode(state):
-            probe_paths = [
-                "/",
-                "/robots.txt",
-                "/wp-login.php",
-                "/wp-json/",
-                "/login.php",
-            ]
+            allowed = {"/", "/robots.txt", "/sitemap.xml", "/login", "/health"}
+            probe_paths = [p for p in probe_paths if p in allowed][:5]
+        if probe_tier == "shell" and "/?rest_route=/" not in probe_paths:
+            probe_paths = list(probe_paths) + ["/?rest_route=/"]
+            probe_paths = probe_paths[:probe_limit]
         probe_results = []
         tech_hints = set([str(x).lower() for x in kb.get("tech_hints", [])])
         endpoints = set(kb.get("discovered_endpoints", []))
@@ -3008,6 +3428,7 @@ class AgentWorkflowCore:
             self._paths = store.paths
             self._report.set_paths(store.paths)
             self._module_perf.set_paths(store.paths)
+            self._module_health.set_paths(store.paths)
             self._module_ctx.set_paths(store.paths)
         with network_budget_context(getattr(state, "network_budget", None)), runtime_policy_context(
             getattr(state, "runtime_policy", None),
@@ -3252,12 +3673,32 @@ class AgentWorkflowCore:
 
         scan_results = self._run_scan_campaign(state, modules, scanner)
         results.extend(scan_results)
+
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+            extra_paths = [
+                str(p).split("?", 1)[0]
+                for p in (kb.get("discovered_endpoints", []) or [])
+                if isinstance(p, str) and p.startswith("/")
+            ][:16]
+            if extra_paths:
+                _, probe_rows = self._run_active_web_surface_probe(
+                    state,
+                    extra_paths=extra_paths,
+                    max_requests=min(10, len(extra_paths)),
+                )
+                results.extend(probe_rows)
+
         if not results:
             state.error = "No relevant modules selected after intelligent scan campaign."
             return state
 
         if getattr(state, "expanded_surface", False):
             results = self._run_derived_host_surface_scans(state, scanner, all_modules, results)
+        elif is_shell_operator_goal(self._operator_campaign_goal(state)):
+            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+            if kb.get("subdomain_candidates") or kb_subdomain_surface_expandable(kb):
+                results = self._run_derived_host_surface_scans(state, scanner, all_modules, results)
 
         state.results = results
         state.vulnerable_results = deduplicate_scanner_results(
@@ -3324,7 +3765,15 @@ class AgentWorkflowCore:
                 set(),
                 set(),
             )
-            return single_pass_results
+            return self._finalize_scan_campaign(
+                state,
+                modules,
+                scanner,
+                single_pass_results,
+                {m.get("path") for m in selected if m.get("path")},
+                max(2, min(threads, 8)),
+                {str(x).lower() for x in (state.knowledge_base or {}).get("tech_hints", [])},
+            )
 
         executed_paths = set()
         all_results = []
@@ -3387,9 +3836,9 @@ class AgentWorkflowCore:
                 extra={"tech_hints": sorted(tech_hints)[:8]},
             )
             if state.campaign_stop_reason:
-                state.scan_tech_hints = sorted(tech_hints)
-                state.scan_modules_executed = len(executed_paths)
-                return all_results
+                return self._finalize_scan_campaign(
+                    state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                )
             if self._credential_milestone_reached(state.knowledge_base):
                 return self._pivot_scan_campaign_after_credentials(
                     state,
@@ -3471,19 +3920,31 @@ class AgentWorkflowCore:
                 modules=selected,
                 extra={"budget": min(budget, remaining)},
             )
-            self._log_opportunistic_pick(phase_name, selected, state, tech_hints, set(executed_paths))
+            self._log_opportunistic_pick(
+                phase_name, selected, state, tech_hints, set(executed_paths),
+                candidate_pool=phase_modules,
+            )
             snapshot_before = self._snapshot_campaign_state(state, all_results)
             if verbose:
                 print_status(f"Phase {phase_name}: executing {len(selected)} module(s)")
-            phase_results = self._execute_agent_modules(
-                state,
-                scanner,
-                selected,
-                state.target_info,
-                phase_threads,
-                False,
-                phase_name,
-            )
+            crawl_overrides = self._build_inferred_option_overrides(selected, state)
+            if phase_name == "crawl":
+                phase_results = self._execute_plan_modules_with_options(
+                    selected,
+                    state,
+                    option_overrides=crawl_overrides,
+                    verbose=verbose,
+                )
+            else:
+                phase_results = self._execute_agent_modules(
+                    state,
+                    scanner,
+                    selected,
+                    state.target_info,
+                    phase_threads,
+                    False,
+                    phase_name,
+                )
             all_results.extend(phase_results)
             selected_paths = [m.get("path") for m in selected if m.get("path")]
             for module in selected:
@@ -3508,9 +3969,9 @@ class AgentWorkflowCore:
                 results=phase_results,
             )
             if state.campaign_stop_reason:
-                state.scan_tech_hints = sorted(tech_hints)
-                state.scan_modules_executed = len(executed_paths)
-                return all_results
+                return self._finalize_scan_campaign(
+                    state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                )
             if self._credential_milestone_reached(state.knowledge_base):
                 return self._pivot_scan_campaign_after_credentials(
                     state,
@@ -3538,9 +3999,9 @@ class AgentWorkflowCore:
                 break
 
         if state.campaign_stop_reason:
-            state.scan_tech_hints = sorted(tech_hints)
-            state.scan_modules_executed = len(executed_paths)
-            return all_results
+            return self._finalize_scan_campaign(
+                state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+            )
 
         # Injection phase is conditional to minimize noise and requests.
         specializations_pre = self._detect_specializations(tech_hints, all_results, state.knowledge_base)
@@ -3571,7 +4032,10 @@ class AgentWorkflowCore:
                         modules=inject_selected,
                         extra={"budget": min(inject_budget, remaining)},
                     )
-                    self._log_opportunistic_pick("injection", inject_selected, state, tech_hints, set(executed_paths))
+                    self._log_opportunistic_pick(
+                        "injection", inject_selected, state, tech_hints, set(executed_paths),
+                        candidate_pool=inject_candidates,
+                    )
                     snapshot_before = self._snapshot_campaign_state(state, all_results)
                     if verbose:
                         print_status(f"Phase injection: executing {len(inject_selected)} module(s)")
@@ -3628,9 +4092,9 @@ class AgentWorkflowCore:
                         state.campaign_stop_reason = stop_reason
                         if verbose:
                             print_warning(f"Aggressive stop: {stop_reason}")
-                        state.scan_tech_hints = sorted(tech_hints)
-                        state.scan_modules_executed = len(executed_paths)
-                        return all_results
+                        return self._finalize_scan_campaign(
+                            state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                        )
 
         # Adaptive specialized pass (CMS/framework-specific) based on discovered hints.
         remaining = max_modules - len(executed_paths)
@@ -3662,7 +4126,10 @@ class AgentWorkflowCore:
                     modules=specialized_selected,
                     extra={"specializations": sorted(specializations)},
                 )
-                self._log_opportunistic_pick("adaptive", specialized_selected, state, tech_hints, set(executed_paths))
+                self._log_opportunistic_pick(
+                    "adaptive", specialized_selected, state, tech_hints, set(executed_paths),
+                    candidate_pool=specialized_modules,
+                )
                 snapshot_before = self._snapshot_campaign_state(state, all_results)
                 if verbose:
                     print_status(
@@ -3726,9 +4193,9 @@ class AgentWorkflowCore:
                     state.campaign_stop_reason = stop_reason
                     if verbose:
                         print_warning(f"Aggressive stop: {stop_reason}")
-                    state.scan_tech_hints = sorted(tech_hints)
-                    state.scan_modules_executed = len(executed_paths)
-                    return all_results
+                    return self._finalize_scan_campaign(
+                        state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                    )
             state.scan_specializations = sorted(specializations)
 
         # Follow-up pass: when detections occur, chain auxiliary scanners/modules contextually.
@@ -3765,7 +4232,10 @@ class AgentWorkflowCore:
                     modules=followup_selected,
                     extra={"budget": min(followup_budget, remaining)},
                 )
-                self._log_opportunistic_pick("follow-up", followup_selected, state, tech_hints, set(executed_paths))
+                self._log_opportunistic_pick(
+                    "follow-up", followup_selected, state, tech_hints, set(executed_paths),
+                    candidate_pool=followup_modules,
+                )
                 snapshot_before = self._snapshot_campaign_state(state, all_results)
                 if verbose:
                     print_status(f"Phase follow-up: executing {len(followup_selected)} module(s)")
@@ -3826,9 +4296,9 @@ class AgentWorkflowCore:
                     state.campaign_stop_reason = stop_reason
                     if verbose:
                         print_warning(f"Aggressive stop: {stop_reason}")
-                    state.scan_tech_hints = sorted(tech_hints)
-                    state.scan_modules_executed = len(executed_paths)
-                    return all_results
+                    return self._finalize_scan_campaign(
+                        state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                    )
 
             post_auth_budget = min(12, max(3, max_modules - len(executed_paths)))
             if self._discreet_mode(state):
@@ -3946,13 +4416,289 @@ class AgentWorkflowCore:
                     state.campaign_stop_reason = stop_reason
                     if verbose:
                         print_warning(f"Aggressive stop: {stop_reason}")
-                    state.scan_tech_hints = sorted(tech_hints)
-                    state.scan_modules_executed = len(executed_paths)
-                    return all_results
+                    return self._finalize_scan_campaign(
+                        state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                    )
+
+        return self._finalize_scan_campaign(
+            state,
+            modules,
+            scanner,
+            all_results,
+            executed_paths,
+            phase_threads,
+            tech_hints,
+        )
+
+    def _is_soft_campaign_stop_reason(self, reason: Optional[str]) -> bool:
+        """Non-terminal stops that shell-hunter finalization may override."""
+        text = str(reason or "").lower()
+        if not text:
+            return False
+        return any(
+            token in text
+            for token in (
+                "low novelty",
+                "no remaining shell pivots",
+                "no pivot",
+            )
+        )
+
+    def _is_hard_campaign_stop_reason(self, reason: Optional[str]) -> bool:
+        """Terminal stops: WAF/policy/budget/unreachable — do not run shell-hunter macro."""
+        text = str(reason or "").strip().lower()
+        if not text:
+            return False
+        if self._is_soft_campaign_stop_reason(reason):
+            return False
+        hard_tokens = (
+            "blocking/waf",
+            "waf_or_blocking",
+            "target_unreachable",
+            "dry_run",
+            "deadline_reached",
+            "budget_exhausted",
+            "request_budget_exhausted",
+            "operator_cancelled",
+            "phase_timeout",
+            "profile blocks",
+            "requires explicit",
+            "requires approval",
+            "excessive redirect",
+            "rate-limit noise",
+        )
+        return any(token in text for token in hard_tokens)
+
+    def _is_low_novelty_stop_reason(self, reason: Optional[str]) -> bool:
+        return self._is_soft_campaign_stop_reason(reason) and "low novelty" in str(reason or "").lower()
+
+    def _should_run_shell_hunter_finalization(self, state: AgentState) -> bool:
+        if self._has_shell_milestone(state):
+            return False
+        if self._is_hard_campaign_stop_reason(state.campaign_stop_reason):
+            return False
+        return (
+            is_shell_operator_goal(self._operator_campaign_goal(state))
+            or bool(getattr(state, "shell_hunter", False))
+        )
+
+    def _finalize_scan_campaign(
+        self,
+        state: AgentState,
+        modules,
+        scanner,
+        all_results: List[Any],
+        executed_paths: set,
+        phase_threads: int,
+        tech_hints: set,
+    ) -> List[Any]:
+        """
+        Central scan exit: classify stop reason, run shell-hunter macro when allowed.
+
+        Soft stops (low novelty, no pivots) are cleared so obtain-shell can continue.
+        Hard stops (WAF, policy, budget, unreachable) preserve ``campaign_stop_reason``.
+        """
+        verbose = bool(state.verbose)
+        pending_reason = state.campaign_stop_reason
+        if pending_reason and self._is_soft_campaign_stop_reason(pending_reason):
+            if verbose:
+                print_info(
+                    f"Soft campaign stop deferred to shell-hunter finalization: {pending_reason}"
+                )
+            state.campaign_stop_reason = None
+        elif pending_reason and self._is_hard_campaign_stop_reason(pending_reason) and verbose:
+            print_info(f"Hard campaign stop (shell-hunter skipped): {pending_reason}")
+
+        if self._should_run_shell_hunter_finalization(state):
+            all_results = self._run_shell_hunter_macro_wave(
+                state,
+                modules,
+                scanner,
+                all_results,
+                executed_paths,
+                phase_threads,
+                tech_hints,
+            )
 
         state.scan_tech_hints = sorted(tech_hints)
         state.scan_modules_executed = len(executed_paths)
         return all_results
+
+    def _run_shell_hunter_macro_wave(
+        self,
+        state: AgentState,
+        modules: List[Dict[str, Any]],
+        scanner: ScannerCommand,
+        all_results: List[Any],
+        executed_paths: set,
+        phase_threads: int,
+        tech_hints: set,
+    ) -> List[Any]:
+        """
+        Persistent obtain-shell loop after phased campaign.
+
+        Runs strategic followups/exploits until shell, budget exhaustion, or hard stop (WAF).
+        """
+        if not (
+            is_shell_operator_goal(self._operator_campaign_goal(state))
+            or bool(getattr(state, "shell_hunter", False))
+        ):
+            return all_results
+        if self._has_shell_milestone(state):
+            return all_results
+
+        if self._is_soft_campaign_stop_reason(state.campaign_stop_reason):
+            state.campaign_stop_reason = None
+
+        modules_by_path = {
+            str(m.get("path", "")).strip(): m
+            for m in modules or []
+            if m.get("path")
+        }
+        max_modules = int(state.max_modules)
+        verbose = bool(state.verbose)
+        max_rounds = min(
+            SHELL_HUNTER_MACRO_MAX_ROUNDS,
+            max(1, max_modules - len(executed_paths)),
+        )
+
+        for round_idx in range(max_rounds):
+            if self._has_shell_milestone(state):
+                break
+            if state.campaign_stop_reason and not self._is_soft_campaign_stop_reason(state.campaign_stop_reason):
+                break
+            if len(executed_paths) >= max_modules:
+                break
+
+            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+            findings = list(state.vulnerable_results or state.contextual_findings or [])
+            action = self._next_best_action_for_shell_goal(state, kb, findings) or {}
+            path = str(action.get("path", "") or "").strip()
+            action_type = str(action.get("type", "run_followup") or "run_followup").lower()
+
+            if not path or path in executed_paths:
+                path = ""
+                for candidate in suggest_shell_plan_followups(kb):
+                    if candidate not in executed_paths:
+                        path = candidate
+                        action_type = (
+                            "run_exploit"
+                            if path.startswith(("exploit/", "exploits/"))
+                            else "run_followup"
+                        )
+                        break
+            if not path or path in executed_paths:
+                break
+
+            if self._module_block_reason_for_profile(state, path):
+                executed_paths.add(path)
+                continue
+            mismatch = self._module_stack_mismatch_reason(path, kb)
+            if mismatch:
+                executed_paths.add(path)
+                if verbose:
+                    print_warning(f"Shell-hunter skip [{path}]: {mismatch}")
+                continue
+
+            kb_pre = kb_light_copy(kb)
+            if verbose:
+                print_status(f"Shell-hunter macro ({round_idx + 1}/{max_rounds}): {path}")
+
+            if action_type == "run_exploit" and not state.no_exploit:
+                self._execute_exploit_results_with_options(
+                    [],
+                    state.target_info,
+                    state=state,
+                    explicit_exploit_paths=[path],
+                    verbose=verbose,
+                )
+                executed_paths.add(path)
+                if isinstance(kb, dict):
+                    observed = set(kb.get("observed_modules", []) or [])
+                    observed.add(path)
+                    kb["observed_modules"] = sorted(observed)
+                if self._has_shell_milestone(state):
+                    break
+                continue
+
+            module = modules_by_path.get(path)
+            if not module:
+                executed_paths.add(path)
+                continue
+
+            phase_results = self._execute_agent_modules(
+                state,
+                scanner,
+                [module],
+                state.target_info,
+                phase_threads,
+                False,
+                "shell-hunter",
+            )
+            all_results.extend(phase_results)
+            executed_paths.add(path)
+            phase_hints = self._extract_tech_hints(phase_results)
+            tech_hints.update(phase_hints)
+            self._update_knowledge_base_from_results(
+                state.knowledge_base,
+                phase_results,
+                [path],
+                phase_hints,
+                set(),
+                phase="shell-hunter",
+            )
+            self._record_module_performance_phase(state, kb_pre, phase_results, "shell-hunter")
+            self._append_timeline_event(
+                state,
+                "shell-hunter",
+                f"Shell-hunter macro step {round_idx + 1}: {path}",
+                modules=[module],
+                results=phase_results,
+            )
+            if self._has_shell_milestone(state):
+                break
+
+        state.scan_modules_executed = len(executed_paths)
+        return all_results
+
+    def _probe_and_filter_live_derived_hosts(
+        self,
+        state: AgentState,
+        hosts: List[str],
+    ) -> List[str]:
+        """HTTP probe derived candidates; keep live hosts sorted by subdomain priority."""
+        if not hosts:
+            return []
+        from interfaces.command_system.builtin.agent.goal_planner import score_subdomain_host
+
+        live_statuses = set(DERIVED_HOST_LIVE_STATUSES)
+        ranked: List[Tuple[int, int, str]] = []
+
+        for host in prioritize_subdomain_hosts(hosts):
+            live_hits = 0
+            for scheme in ("https", "http"):
+                urls = [f"{scheme}://{host}{path}" for path in DERIVED_HOST_PROBE_PATHS]
+                rows = self._http_probe_many(state, urls, timeout_s=3, read_bytes=1024)
+                live_hits = sum(
+                    1 for row in rows
+                    if int(row.get("status") or 0) in live_statuses
+                )
+                if live_hits:
+                    break
+            if not live_hits:
+                continue
+            ranked.append((-score_subdomain_host(host), -live_hits, host))
+
+        ranked.sort()
+        live_hosts = [host for _, _, host in ranked]
+        kb = state.knowledge_base
+        if isinstance(kb, dict):
+            kb["derived_host_probe"] = {
+                "candidates": len(hosts),
+                "live": len(live_hosts),
+                "hosts": live_hosts[:24],
+            }
+        return live_hosts
 
     def _compute_adaptive_budgets(self, state: AgentState) -> Dict[str, int]:
         max_modules = int(state.max_modules)
@@ -4219,25 +4965,41 @@ class AgentWorkflowCore:
         status_codes = []
         waf_markers = 0
         for row in phase_results or []:
+            if self._result_waf_signal(row):
+                waf_markers += 1
             blob = " ".join([
                 str(row.get("message", "")),
                 str(row.get("details", "")),
             ]).lower()
             status_codes.extend([int(code) for code in HTTP_STATUS_IN_TEXT_RE.findall(blob)])
-            if any(marker in blob for marker in WAF_BODY_MARKERS):
-                waf_markers += 1
 
         novelty_limit = 1 if state is not None and self._discreet_mode(state) else 2
         exploit_pressure = self._has_exploit_pressure(state)
-        if exploit_pressure:
+        if exploit_pressure and state is not None and not is_shell_operator_goal(self._operator_campaign_goal(state)):
             novelty_limit += 1
         if no_novelty_streak >= novelty_limit:
-            pressure_phases = {"injection", "specialized", "follow-up", "followup", "exploit"}
-            if exploit_pressure and str(phase_name or "").lower() in pressure_phases:
-                return False, no_novelty_streak, ""
-            return True, no_novelty_streak, (
-                f"{phase_name}: low novelty for {novelty_limit} consecutive phase(s)"
+            kb = state.knowledge_base if state is not None and isinstance(state.knowledge_base, dict) else {}
+            campaign_goal = self._operator_campaign_goal(state) if state is not None else ""
+            defer, pivots = should_defer_shell_low_novelty_stop(
+                kb,
+                campaign_goal=campaign_goal,
+                stack_mismatch_fn=self._module_stack_mismatch_reason if state is not None else None,
             )
+            if defer:
+                if state is not None and state.verbose and pivots:
+                    print_status(
+                        "Low novelty ignored (shell goal): "
+                        + ", ".join(pivots[:5])
+                    )
+                return False, 0, ""
+            if exploit_pressure and not is_shell_operator_goal(campaign_goal):
+                return False, no_novelty_streak, ""
+            stop_detail = f"{phase_name}: low novelty for {novelty_limit} consecutive phase(s)"
+            if is_shell_operator_goal(campaign_goal):
+                stop_detail += "; no remaining shell pivots"
+            elif pivots:
+                stop_detail += f" (pivots exhausted: {', '.join(pivots[:3])})"
+            return True, no_novelty_streak, stop_detail
 
         if status_codes:
             noisy = [c for c in status_codes if c in HTTP_STATUS_RISK_SIGNALS]
@@ -4251,7 +5013,8 @@ class AgentWorkflowCore:
             waf_codes = [c for c in status_codes if c in WAF_RISK_HTTP_STATUS_CODES]
             waf_floor = 1 if state is not None and self._discreet_mode(state) else 3
             marker_floor = 1 if state is not None and self._discreet_mode(state) else 2
-            if len(waf_codes) >= waf_floor or waf_markers >= marker_floor:
+            pause_for_waf = state is None or self._should_pause_campaign_for_waf(state)
+            if pause_for_waf and (len(waf_codes) >= waf_floor or waf_markers >= marker_floor):
                 return True, no_novelty_streak, (
                     f"{phase_name}: repeated blocking/WAF signals ({len(waf_codes)} status, {waf_markers} marker)"
                 )
@@ -4291,6 +5054,19 @@ class AgentWorkflowCore:
             if hint_lower in ("wordpress", "drupal", "joomla", "django", "flask", "nodejs", "api"):
                 tech_confidence[hint_lower] = round(
                     max(float(tech_confidence.get(hint_lower, 0.0) or 0.0), 0.45),
+                    3,
+                )
+            elif hint_lower == "nextjs":
+                tech_confidence["nextjs"] = round(
+                    max(float(tech_confidence.get("nextjs", 0.0) or 0.0), 0.68),
+                    3,
+                )
+                tech_confidence["nodejs"] = round(
+                    max(float(tech_confidence.get("nodejs", 0.0) or 0.0), 0.5),
+                    3,
+                )
+                tech_confidence["react"] = round(
+                    max(float(tech_confidence.get("react", 0.0) or 0.0), 0.45),
                     3,
                 )
         for sp in specializations or []:
@@ -4353,6 +5129,13 @@ class AgentWorkflowCore:
                     tech_confidence["joomla"] = round(min(1.0, float(tech_confidence.get("joomla", 0.0) or 0.0) + 0.08), 3)
                 if "graphql" in evidence_blob or "swagger" in evidence_blob or "/api" in evidence_blob:
                     tech_confidence["api"] = round(min(1.0, float(tech_confidence.get("api", 0.0) or 0.0) + 0.06), 3)
+                if any(token in evidence_blob for token in NEXTJS_HINT_TOKENS):
+                    kb_hints.add("nextjs")
+                    kb_hints.add("nodejs")
+                    kb_hints.add("react")
+                    tech_confidence["nextjs"] = round(max(float(tech_confidence.get("nextjs", 0.0) or 0.0), 0.78), 3)
+                    tech_confidence["nodejs"] = round(max(float(tech_confidence.get("nodejs", 0.0) or 0.0), 0.55), 3)
+                    tech_confidence["react"] = round(max(float(tech_confidence.get("react", 0.0) or 0.0), 0.5), 3)
             else:
                 # Decay over-confident CMS hypotheses when scanners repeatedly
                 # report explicit negative outcomes.
@@ -4386,6 +5169,47 @@ class AgentWorkflowCore:
                     pass
 
             if isinstance(details, dict):
+                findings = details.get("findings")
+                if isinstance(findings, dict):
+                    for endpoint in findings.get("endpoints", []) or []:
+                        for candidate in self._extract_endpoint_candidates(str(endpoint)):
+                            discovered_endpoints.add(candidate)
+                            if "/api" in candidate.lower() or "graphql" in candidate.lower():
+                                kb_hints.add("api")
+                                risk_signals.add("api_surface_detected")
+                    if findings.get("key_hints"):
+                        risk_signals.add("leaked_secrets_detected")
+                        risk_signals.add("possible_secret_literals_in_js")
+                        knowledge_base["extracted_secrets"] = list(knowledge_base.get("extracted_secrets", []) or []) + [
+                            {
+                                "type": "client_js_secret_hint",
+                                "name": str(row.get("name", ""))[:80],
+                                "source": str(row.get("source", ""))[:240],
+                            }
+                            for row in findings.get("key_hints", [])[:20]
+                            if isinstance(row, dict)
+                        ]
+                elif isinstance(findings, list) and "secret" in mod_path_low:
+                    if findings:
+                        risk_signals.add("leaked_secrets_detected")
+                        risk_signals.add("possible_secret_literals_in_js")
+                    knowledge_base["extracted_secrets"] = list(knowledge_base.get("extracted_secrets", []) or []) + [
+                        {
+                            "type": str(row.get("type", "secret_hint"))[:80],
+                            "source": str(result.get("path", ""))[:200],
+                        }
+                        for row in findings[:20]
+                        if isinstance(row, dict)
+                    ]
+                endpoint_rows = details.get("endpoints")
+                if isinstance(endpoint_rows, list):
+                    for row in endpoint_rows:
+                        endpoint = row.get("endpoint") if isinstance(row, dict) else row
+                        for candidate in self._extract_endpoint_candidates(str(endpoint)):
+                            discovered_endpoints.add(candidate)
+                            if "/api" in candidate.lower() or "graphql" in candidate.lower():
+                                kb_hints.add("api")
+                                risk_signals.add("api_surface_detected")
                 if bool(details.get("dom_xss_suspected")) or int(details.get("dom_xss_score", 0) or 0) >= 6:
                     risk_signals.add("dom_xss_signal")
                     risk_signals.add("xss_signal")
@@ -4563,12 +5387,19 @@ class AgentWorkflowCore:
                     identities=identities,
                     subdomains=subdomains,
                     username_candidates=build_username_candidates(identities),
-                    password_candidates=build_persona_password_candidates(
-                        identities,
+                    password_candidates=harvest_password_candidates_from_results(
+                        results or [],
+                        identities=identities,
                         root_domain=root,
                     ),
                 )
         knowledge_base["attack_chain_summary"] = export_chain_summary(knowledge_base)
+        sync_attack_graph_from_kb(
+            knowledge_base,
+            hostname=str(knowledge_base.get("target_hostname") or ""),
+            module_paths=list(module_paths or []),
+            results=[r for r in (results or []) if isinstance(r, dict)],
+        )
 
     def _select_best_login_path(self, knowledge_base):
         return self._auth_ops.select_best_login_path(knowledge_base)
@@ -4583,6 +5414,7 @@ class AgentWorkflowCore:
             merged = dict(overrides.get(path) or {})
             merged.update(opts)
             overrides[path] = merged
+        overrides = merge_crawler_overrides(overrides, kb, state)
         return overrides
 
     def _extract_endpoint_candidates(self, text):
@@ -4646,6 +5478,71 @@ class AgentWorkflowCore:
             limit,
             self._module_perf,
             self._module_ctx,
+            self._module_health,
+        )
+
+    def _build_module_decision_report(
+        self,
+        module: Dict[str, Any],
+        state: AgentState,
+        tech_hints: set,
+        executed_paths: set,
+        *,
+        phase_label: str = "",
+        candidate_pool: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        path = str(module.get("path", "") or "").strip()
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        score = unified_module_score(
+            module,
+            kb,
+            tech_hints,
+            executed_paths,
+            self._module_perf,
+            self._module_ctx,
+            self._module_health,
+        )
+        reason = self._action_reason_for_path(
+            path,
+            state,
+            state.contextual_findings or state.vulnerable_results,
+        )
+        scored: List[tuple] = []
+        for row in candidate_pool or []:
+            if not isinstance(row, dict) or not row.get("path"):
+                continue
+            g = unified_module_score(
+                row,
+                kb,
+                tech_hints,
+                executed_paths,
+                self._module_perf,
+                self._module_ctx,
+                self._module_health,
+            )
+            if g is None:
+                g = -1.0
+            scored.append((float(g), row))
+        scored.sort(key=lambda item: (item[0], str(item[1].get("path", ""))), reverse=True)
+
+        from interfaces.command_system.builtin.agent.decision_report import infer_rejected_scored_alternatives
+
+        rejected = infer_rejected_scored_alternatives(path, candidate_pool or [], scored)
+        matching = self._action_matching_findings(path, state.contextual_findings or state.vulnerable_results)
+        low = path.lower()
+        risk_cost = float(estimate_network_cost(low))
+        return build_action_decision_report(
+            path,
+            "run_module",
+            kb,
+            campaign_goal=str(getattr(state, "campaign_goal", "") or ""),
+            reason=reason,
+            matching_finding=matching[0] if matching else None,
+            stack_mismatch_fn=self._module_stack_mismatch_reason,
+            rejected_alternatives=rejected,
+            score=float(score or 0.0),
+            confidence=0.55 if score and score > 0 else 0.35,
+            risk_cost=risk_cost,
         )
 
     def _log_opportunistic_pick(
@@ -4655,26 +5552,61 @@ class AgentWorkflowCore:
         state: AgentState,
         tech_hints: set,
         executed_paths_before: set,
+        *,
+        candidate_pool: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        if not selected or not state.verbose:
+        if not selected:
             return
-        parts = []
-        for m in selected[:6]:
-            path = m.get("path", "") or ""
-            tail = path.split("/")[-1] if path else "?"
-            u = unified_module_score(
-                m,
-                state.knowledge_base,
+        if state.verbose:
+            parts = []
+            for m in selected[:6]:
+                path = m.get("path", "") or ""
+                tail = path.split("/")[-1] if path else "?"
+                u = unified_module_score(
+                    m,
+                    state.knowledge_base,
+                    tech_hints,
+                    executed_paths_before,
+                    self._module_perf,
+                    self._module_ctx,
+                    self._module_health,
+                )
+                parts.append(f"{tail}={u:.2f}")
+            kb_s = information_score_kb(state.knowledge_base)
+            print_info(
+                f"[{phase_label}] opportunistic utility order | KB info≈{kb_s:.2f} | " + ", ".join(parts)
+            )
+        for module in selected[:8]:
+            if not isinstance(module, dict):
+                continue
+            report = self._build_module_decision_report(
+                module,
+                state,
                 tech_hints,
                 executed_paths_before,
-                self._module_perf,
-                self._module_ctx,
+                phase_label=phase_label,
+                candidate_pool=candidate_pool,
             )
-            parts.append(f"{tail}={u:.2f}")
-        kb_s = information_score_kb(state.knowledge_base)
-        print_info(
-            f"[{phase_label}] opportunistic utility order | KB info≈{kb_s:.2f} | " + ", ".join(parts)
-        )
+            path = str(module.get("path", "") or "")
+            self._append_timeline_event(
+                state,
+                phase_label,
+                str(report.get("chosen", path))[:240],
+                kind="module_decision",
+                modules=[module],
+                extra={"decision_explanation": report, "path": path},
+            )
+            if state.verbose:
+                rejected = report.get("rejected_alternatives", []) or []
+                if rejected:
+                    alt = rejected[0]
+                    print_info(
+                        f"  not {alt.get('path', '?').split('/')[-1]}: "
+                        f"{self._shorten_text(str(alt.get('reason', '')), 90)}"
+                    )
+                pivot = str(report.get("next_pivot", "") or "")
+                if pivot:
+                    print_info(f"  next pivot: {pivot.split('/')[-1]}")
 
     def _pick_crawler_modules(self, modules):
         crawler_keywords = (
@@ -4802,7 +5734,10 @@ class AgentWorkflowCore:
             specializations.add("joomla")
         if any(t in corpus for t in ("django", "flask", "fastapi", "python")):
             specializations.add("python_web")
-        if any(t in corpus for t in ("nodejs", "react", "angular", "vue")):
+        if any(t in corpus for t in ("nodejs", "nextjs", "react", "angular", "vue")):
+            specializations.add("node_web")
+        if "nextjs" in corpus or float(confidence.get("nextjs", 0.0) or 0.0) >= 0.6:
+            specializations.add("nextjs")
             specializations.add("node_web")
         if any(t in corpus for t in ("api", "swagger", "graphql")):
             specializations.add("api")
@@ -5038,6 +5973,10 @@ class AgentWorkflowCore:
                     key: value for key, value in dynamic_info.items()
                     if key not in ("reason", "severity", "version")
                 }
+                if isinstance(run_result, dict):
+                    result["details"].update(run_result)
+                    if "error" in run_result and not dynamic_info.get("reason"):
+                        result["message"] = str(run_result.get("error") or result["message"])
             except Exception as exc:
                 result["message"] = f"Error: {exc}"
             finally:
@@ -5063,6 +6002,7 @@ class AgentWorkflowCore:
             "joomla": ("joomla",),
             "python_web": ("django", "flask", "fastapi", "python", "python_injection"),
             "node_web": ("nodejs", "node", "react", "angular", "vue"),
+            "nextjs": ("nextjs", "next_js", "next-", "_next", "javascript", "js_endpoint", "webhook", "api_leak"),
             "api": ("api", "swagger", "graphql"),
             "admin_surface": ("grafana", "jenkins", "tomcat", "phpmyadmin", "admin", "login"),
         }
@@ -5083,6 +6023,9 @@ class AgentWorkflowCore:
                 continue
             if any(token in blob for token in tokens):
                 picked.append(module)
+                continue
+            if "nextjs" in specializations and str(module.get("path", "")) in CLIENT_JS_INTEL_MODULES:
+                picked.append(module)
         return picked
 
     def _pick_followup_modules(self, results, modules, knowledge_base=None):
@@ -5101,6 +6044,8 @@ class AgentWorkflowCore:
         for h in tech_hints_lower:
             if not auth_session and h in ("auth_portal", "login"):
                 detection_tokens.add("login_surface")
+            if h in ("nextjs", "react", "nodejs", "api", "graphql", "swagger"):
+                detection_tokens.add(h)
 
         # Concrete login URLs from fingerprint / parsers: always chain auth follow-ups.
         if not auth_session and any(isinstance(p, str) and p.startswith("/") for p in kb.get("login_paths", [])):
@@ -5123,6 +6068,7 @@ class AgentWorkflowCore:
             for token in (
                 "wordpress", "phpmyadmin", "apache", "nginx", "robots", "sitemap",
                 "security headers", "missing headers", "api", "swagger", "graphql",
+                "nextjs", "next.js", "/_next/", "__next_data__", "javascript",
                 "admin panel", "login panel", "wp-login.php", "/admin", "administrator",
                 "/login.php", "login.php", "/login", "signin", "auth/login",
             ):
@@ -5159,7 +6105,20 @@ class AgentWorkflowCore:
                 "auxiliary/scanner/http/cors_misconfig",
                 "auxiliary/scanner/http/csp_bypass",
             ),
-            "api": ("scanner/http/swagger_detect",),
+            "nextjs": CLIENT_JS_INTEL_MODULES,
+            "next.js": CLIENT_JS_INTEL_MODULES,
+            "/_next/": CLIENT_JS_INTEL_MODULES,
+            "__next_data__": CLIENT_JS_INTEL_MODULES,
+            "javascript": CLIENT_JS_INTEL_MODULES,
+            "react": CLIENT_JS_INTEL_MODULES,
+            "nodejs": CLIENT_JS_INTEL_MODULES + (
+                "auxiliary/scanner/http/nodejs_injection",
+            ),
+            "api": (
+                "scanner/http/swagger_detect",
+                "scanner/http/graphql_detect",
+                "auxiliary/scanner/http/api_fuzzer",
+            ),
             "swagger": ("scanner/http/swagger_detect",),
             "graphql": ("scanner/http/graphql_detect",),
             "admin panel": (
@@ -5510,6 +6469,18 @@ class AgentWorkflowCore:
             kb.setdefault("derived_host_scans", [])
         if not hosts:
             return primary_results
+        probe_candidates = len(hosts)
+        hosts = self._probe_and_filter_live_derived_hosts(state, hosts)
+        if isinstance(kb, dict):
+            kb["derived_target_candidates"] = list(hosts)
+        if not hosts:
+            self._append_timeline_event(
+                state,
+                "scan",
+                "Derived host scans skipped: no live HTTP hosts after probe.",
+                extra={"candidates": probe_candidates, "live": 0},
+            )
+            return primary_results
         max_hosts, per_host = self._derived_scan_limits(state)
         http_pool = self._filter_modules_by_protocol(all_modules, "http")
         if not http_pool:
@@ -5578,57 +6549,49 @@ class AgentWorkflowCore:
         state: AgentState,
         all_modules: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """``--all``: subdomain enum, identity OSINT, persona wordlists for auth."""
+        """``--all``: context-chained OSINT pipeline with linked intel graph."""
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         hostname = str((state.target_info or {}).get("hostname", "") or "").strip()
         if not hostname:
             return []
         root = organization_root_domain(hostname)
+        persona_seed = str(kb.get("persona_name") or "").strip()
         if isinstance(state.knowledge_base, dict):
             state.knowledge_base["expanded_surface"] = True
             state.knowledge_base["target_hostname"] = hostname
-        intel_modules = pick_intel_modules(
-            all_modules,
-            max_modules=min(
-                EXPANDED_SURFACE_INTEL_MAX_MODULES,
-                max(3, int(state.recon_modules or 12) // 2),
-            ),
+
+        max_steps = min(
+            EXPANDED_SURFACE_INTEL_MAX_MODULES,
+            max(3, int(state.recon_modules or 12) // 2),
         )
-        if not intel_modules:
-            return []
-        identities = {
-            "emails": list(kb.get("identity_emails") or []),
-            "handles": list(kb.get("identity_handles") or []),
-            "names": list(kb.get("identity_names") or []),
-        }
-        option_overrides: Dict[str, Dict[str, Any]] = {}
-        for row in intel_modules:
-            path = str(row.get("path", "")).strip()
-            if not path:
-                continue
-            option_overrides[path] = build_intel_option_overrides(
-                path,
-                root_domain=root,
-                identities=identities,
-            )
         if bool(state.verbose):
             print_info(
-                f"Expanded surface: running {len(intel_modules)} OSINT module(s) "
-                f"(subdomains, identities) on {root}"
+                f"Agent OSINT pipeline on {root} "
+                f"(phased, max {max_steps} steps, persona={persona_seed or 'none'})"
             )
         self._append_timeline_event(
             state,
             "scan",
-            f"Expanded OSINT phase: {len(intel_modules)} module(s) on {root}",
+            f"Agent OSINT pipeline on {root}",
             kind="plan",
-            modules=intel_modules,
         )
-        results = self._execute_plan_modules_with_options(
-            intel_modules,
-            state,
-            option_overrides=option_overrides,
-            verbose=bool(state.verbose),
+
+        def _execute_batch(modules, option_overrides):
+            return self._execute_plan_modules_with_options(
+                modules,
+                state,
+                option_overrides=option_overrides,
+                verbose=bool(state.verbose),
+            )
+
+        results, synthesis = run_agent_intel_pipeline(
+            execute_modules=_execute_batch,
+            catalog_modules=all_modules,
+            root_domain=root,
+            persona_seed=persona_seed,
+            max_steps=max_steps,
         )
+
         harvested_id = harvest_identities_from_results(results, root_domain=root)
         harvested_sub = harvest_subdomains_from_results(results, root_domain=root)
         merge_intel_into_knowledge_base(
@@ -5636,16 +6599,20 @@ class AgentWorkflowCore:
             identities=harvested_id,
             subdomains=harvested_sub,
             username_candidates=build_username_candidates(harvested_id),
-            password_candidates=build_persona_password_candidates(
-                harvested_id,
+            password_candidates=harvest_password_candidates_from_results(
+                results,
+                identities=harvested_id,
                 root_domain=root,
             ),
         )
         if isinstance(state.knowledge_base, dict):
+            merge_osint_synthesis_into_knowledge_base(state.knowledge_base, synthesis)
+            for line in synthesis.get("summary_lines", [])[:8]:
+                print_info(f"  OSINT link: {line}")
             self._update_knowledge_base_from_results(
                 state.knowledge_base,
                 results,
-                [row.get("path") for row in intel_modules],
+                [str(r.get("path", "")) for r in results if isinstance(r, dict)],
                 list(state.knowledge_base.get("tech_hints") or []),
                 list(state.scan_specializations or []),
                 phase="expanded-osint",
@@ -5725,8 +6692,8 @@ class AgentWorkflowCore:
         hint_words = [
             "dvwa", "wordpress", "drupal", "joomla", "grafana", "jenkins", "elasticsearch",
             "kibana", "tomcat", "nginx", "apache", "phpmyadmin", "docker", "cloud",
-            "api", "swagger", "fastapi", "django", "flask", "nodejs", "react", "angular",
-            "php", "python", "java",
+            "api", "swagger", "fastapi", "django", "flask", "nodejs", "nextjs",
+            "react", "angular", "php", "python", "java",
         ]
         for result in recon_results:
             if not self._result_indicates_positive_detection(result):
@@ -6304,6 +7271,19 @@ class AgentWorkflowCore:
                     evidence = explanation.get("evidence", []) or []
                     if evidence:
                         print_info(f"  evidence: {self._shorten_text('; '.join(evidence[:3]), 140)}")
+                    rejected = explanation.get("rejected_alternatives", []) or []
+                    if rejected:
+                        alt = rejected[0]
+                        print_info(
+                            f"  not {str(alt.get('path', '?')).split('/')[-1]}: "
+                            f"{self._shorten_text(str(alt.get('reason', '')), 100)}"
+                        )
+                    pivot = str(explanation.get("next_pivot", "") or "")
+                    if pivot:
+                        print_info(f"  next pivot: {pivot.split('/')[-1]}")
+                    risk = explanation.get("risk", {}) if isinstance(explanation.get("risk"), dict) else {}
+                    if risk.get("level"):
+                        print_info(f"  risk: {risk.get('level')} (cost={risk.get('cost', '?')})")
 
         rationale = llm_plan.get("rationale")
         if rationale:
@@ -6364,21 +7344,24 @@ class AgentWorkflowCore:
             print_info(f"Campaign goal: {state.campaign_goal}")
 
         if state.campaign_stop_reason and "blocking/WAF" in str(state.campaign_stop_reason):
-            state.llm_plan = {
-                "selected_paths": [],
-                "rationale": state.campaign_stop_reason,
-                "next_best_action": {"type": "skip", "path": "", "reason": state.campaign_stop_reason},
-            }
-            state.execution_plan = {
-                "next_actions": [],
-                "max_requests_next_phase": 0,
-                "stop_conditions": ["waf_or_blocking_detected"],
-                "reasoning_confidence": 1.0,
-                "skip_exploitation": True,
-                "campaign_goal": state.campaign_goal,
-            }
-            state.decision_source = "heuristic"
-            return state
+            if approved_to_continue_through_waf(state):
+                state.campaign_stop_reason = None
+            else:
+                state.llm_plan = {
+                    "selected_paths": [],
+                    "rationale": state.campaign_stop_reason,
+                    "next_best_action": {"type": "skip", "path": "", "reason": state.campaign_stop_reason},
+                }
+                state.execution_plan = {
+                    "next_actions": [],
+                    "max_requests_next_phase": 0,
+                    "stop_conditions": ["waf_or_blocking_detected"],
+                    "reasoning_confidence": 1.0,
+                    "skip_exploitation": True,
+                    "campaign_goal": state.campaign_goal,
+                }
+                state.decision_source = "heuristic"
+                return state
 
         if state.campaign_goal == CAMPAIGN_GOAL_SHELL_STOP:
             state.llm_plan = {
@@ -6915,6 +7898,8 @@ class AgentWorkflowCore:
         max_requests = min(8, max(2, len(selected_paths) + 1))
         if self._has_exploit_pressure(state):
             max_requests = max(max_requests, 12)
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            max_requests = max(max_requests, 18)
         if auth_session:
             max_requests = min(10, max_requests + 2)
         elif auth_surface or cms_lock:
@@ -6989,6 +7974,35 @@ class AgentWorkflowCore:
             })
         if auth_surface and not auth_session:
             max_requests = min(max(10, max_requests), 12)
+
+        if self._has_nextjs_evidence(knowledge_base) or any(
+            self._has_tech_evidence(knowledge_base, tech, threshold=0.65)
+            for tech in ("react", "nodejs")
+        ):
+            base_priority = len(actions) + 1
+            for offset, path in enumerate(CLIENT_JS_INTEL_MODULES):
+                if any(a.get("path") == path for a in actions):
+                    continue
+                actions.append({
+                    "type": "run_followup",
+                    "path": path,
+                    "priority": base_priority + offset,
+                    "options": {},
+                })
+            max_requests = min(16, max(max_requests, 8))
+
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            base_priority = len(actions) + 1
+            for offset, path in enumerate(suggest_shell_plan_followups(knowledge_base)):
+                if any(a.get("path") == path for a in actions):
+                    continue
+                action_type = "run_exploit" if path.startswith(("exploit/", "exploits/")) else "run_followup"
+                actions.append({
+                    "type": action_type,
+                    "path": path,
+                    "priority": base_priority + offset,
+                    "options": {},
+                })
 
         base_priority = len(actions) + 1
         for offset, path in enumerate(linked_followups, start=0):
@@ -7165,6 +8179,14 @@ class AgentWorkflowCore:
                 "auxiliary/scanner/http/react_xss",
                 "auxiliary/scanner/http/angular_xss",
             ])
+        if self._has_nextjs_evidence(knowledge_base) or any(h in hints for h in ("nextjs", "react", "nodejs")):
+            candidates.extend(CLIENT_JS_INTEL_MODULES)
+            if "api_surface_detected" in risk_signals or any(
+                "/api" in str(endpoint).lower() or "graphql" in str(endpoint).lower()
+                for endpoint in knowledge_base.get("discovered_endpoints", [])
+            ):
+                candidates.append("scanner/http/graphql_detect")
+                candidates.append("scanner/http/swagger_detect")
 
         # Hard safety: if CMS lock is active, drop generic fuzzing modules from
         # follow-up verification actions even if suggested by model/heuristics.
@@ -7347,6 +8369,8 @@ class AgentWorkflowCore:
             if not path:
                 continue
             ok_prefix = path.startswith("scanner/") or path.startswith("auxiliary/scanner/")
+            if path in CLIENT_JS_INTEL_MODULES:
+                ok_prefix = True
             if not ok_prefix and getattr(state, "expanded_surface", False):
                 ok_prefix = self._is_expanded_surface_module_path(path) and path.startswith(
                     ("auxiliary/osint/", "auxiliary/aws/", "auxiliary/azure/", "auxiliary/gcp/")
@@ -7361,7 +8385,8 @@ class AgentWorkflowCore:
         available = {
             m.get("path"): m
             for m in self._catalog.discover_campaign_modules(
-                expanded=bool(getattr(state, "expanded_surface", False)),
+                expanded=bool(getattr(state, "expanded_surface", False))
+                or any(path in CLIENT_JS_INTEL_MODULES for path in followup_paths),
             )
         }
         max_req = int(execution_plan.get("max_requests_next_phase", 10) or 10)
@@ -7561,6 +8586,10 @@ class AgentWorkflowCore:
                     key: value for key, value in dynamic_info.items()
                     if key not in ("reason", "severity", "version")
                 }
+                if isinstance(run_result, dict):
+                    result["details"].update(run_result)
+                    if "error" in run_result and not dynamic_info.get("reason"):
+                        result["message"] = str(run_result.get("error") or result["message"])
             except Exception as exc:
                 result["message"] = f"Error: {exc}"
             finally:
@@ -7815,6 +8844,14 @@ class AgentWorkflowCore:
             if isinstance(state, AgentState) and self._phase_stop_reason(state, "exploit"):
                 break
             if isinstance(state, AgentState):
+                mismatch_reason = self._module_stack_mismatch_reason(
+                    exploit_path,
+                    state.knowledge_base,
+                )
+                if mismatch_reason:
+                    failed_paths.add(exploit_path)
+                    print_warning(f"Exploit skipped [{exploit_path}]: {mismatch_reason}")
+                    continue
                 block_reason = self._module_block_reason_for_profile(state, exploit_path)
                 if block_reason:
                     failed_paths.add(exploit_path)

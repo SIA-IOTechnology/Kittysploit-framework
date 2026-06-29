@@ -653,6 +653,62 @@ class ApiServer:
                         "status": "error",
                         "error": str(e)
                     }), 500
+
+            @self.app.route('/api/workflows', methods=['GET'])
+            def list_workflows():
+                """List declarative workflow library definitions."""
+                if not self.check_auth(request):
+                    return jsonify({"error": "Unauthorized"}), 401
+                try:
+                    from core.workflows import list_workflow_ids, load_workflow_definition
+
+                    items = []
+                    for workflow_id in list_workflow_ids():
+                        definition = load_workflow_definition(workflow_id)
+                        items.append({
+                            "id": definition.workflow_id,
+                            "name": definition.name,
+                            "description": definition.description,
+                            "tags": definition.tags,
+                            "steps": len(definition.steps),
+                            "quick_win": definition.quick_win,
+                        })
+                    return jsonify({"workflows": items, "count": len(items)})
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
+
+            @self.app.route('/api/workflows/<workflow_id>/run', methods=['POST'])
+            def run_workflow(workflow_id):
+                """Execute a library workflow by id."""
+                if not self.check_auth(request):
+                    return jsonify({"error": "Unauthorized"}), 401
+                try:
+                    from core.workflows import WorkflowEngine, load_workflow_definition
+
+                    data = request.json or {}
+                    variables = dict(data.get("variables") or {})
+                    if data.get("target"):
+                        variables["target"] = data["target"]
+                    variables["workflow_id"] = workflow_id
+                    dry_run = bool(data.get("dry_run", False))
+
+                    definition = load_workflow_definition(workflow_id)
+                    engine = WorkflowEngine(self.framework)
+                    result = engine.run(definition, variables, dry_run=dry_run)
+                    return jsonify({
+                        "workflow_id": result.workflow_id,
+                        "success": result.success,
+                        "dry_run": result.dry_run,
+                        "duration_seconds": result.duration_seconds,
+                        "steps_executed": result.steps_executed,
+                        "step_results": result.step_results,
+                        "errors": result.errors,
+                        "plan": result.plan,
+                    })
+                except FileNotFoundError:
+                    return jsonify({"error": f"Workflow not found: {workflow_id}"}), 404
+                except Exception as e:
+                    return jsonify({"error": str(e)}), 500
             
             @self.app.route('/api/events', methods=['GET'])
             def get_events():

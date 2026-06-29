@@ -784,6 +784,111 @@ class ExtensionClient:
                             })
         
         return installed
+
+    @property
+    def framework_root(self) -> Path:
+        """Framework root directory (parent of extensions/)."""
+        return Path(os.path.dirname(self.extensions_dir))
+
+    def get_launcher_path(self, extension_id: str) -> Optional[Path]:
+        """Return the auto-generated launcher script path for an extension, if present."""
+        launcher_name = f"launch_{extension_id.replace('-', '_')}.py"
+        launcher_path = self.framework_root / launcher_name
+        return launcher_path if launcher_path.is_file() else None
+
+    def find_installed_extension(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Find an installed extension by manifest id, name, or directory id."""
+        needle = (identifier or "").strip().lower()
+        if not needle:
+            return None
+
+        for ext in self.list_installed_extensions():
+            candidates = {
+                str(ext.get("id") or "").lower(),
+                str(ext.get("name") or "").lower(),
+                str(ext.get("directory_id") or "").lower(),
+                str(ext.get("marketplace_id") or "").lower(),
+            }
+            if needle in candidates:
+                return ext
+            ext_id = str(ext.get("id") or "").lower()
+            if ext_id and (needle == ext_id or ext_id.startswith(needle)):
+                return ext
+        return None
+
+    def list_launchable_extensions(self) -> List[Dict[str, Any]]:
+        """Installed UI/interface extensions that have a launcher script."""
+        launchable: List[Dict[str, Any]] = []
+        for ext in self.list_installed_extensions():
+            ext_type = str(ext.get("type") or "").lower()
+            if ext_type not in ("ui", "interface"):
+                continue
+            launcher = self.get_launcher_path(ext["id"])
+            if launcher is None:
+                continue
+            launchable.append({**ext, "launcher": str(launcher)})
+        return launchable
+
+    def launch_extension(
+        self,
+        identifier: str,
+        *,
+        background: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Launch an installed UI/interface extension via its generated launcher.
+
+        Returns metadata including the subprocess handle when background=True.
+        """
+        ext = self.find_installed_extension(identifier)
+        if not ext:
+            print_error(f"Extension '{identifier}' is not installed")
+            return None
+
+        ext_type = str(ext.get("type") or "").lower()
+        if ext_type not in ("ui", "interface"):
+            print_error(
+                f"Extension '{ext.get('name', identifier)}' is a {ext.get('type')} extension, "
+                "not a launchable UI/interface."
+            )
+            print_info("Use 'use <module>' and 'run' for module extensions.")
+            return None
+
+        launcher = self.get_launcher_path(ext["id"])
+        if launcher is None:
+            print_error(f"No launcher found for extension '{ext['id']}'")
+            print_info("Try reinstalling: market install " + ext["id"])
+            return None
+
+        try:
+            process = subprocess.Popen(
+                [sys.executable, str(launcher)],
+                cwd=str(self.framework_root),
+            )
+        except Exception as exc:
+            print_error(f"Failed to launch extension: {exc}")
+            return None
+
+        if not background:
+            try:
+                return_code = process.wait()
+            except KeyboardInterrupt:
+                if process.poll() is None:
+                    process.terminate()
+                print_warning("Launch interrupted")
+                return None
+            if return_code != 0:
+                print_error(f"Extension exited with code {return_code}")
+                return None
+            print_success(f"Extension '{ext.get('name', ext['id'])}' finished")
+            return {"extension": ext, "process": process, "return_code": return_code}
+
+        return {
+            "extension": ext,
+            "process": process,
+            "launcher": str(launcher),
+            "pid": process.pid,
+        }
     
     def purchase_extension(self, extension_id: str, user_id: str, version: Optional[str] = None) -> bool:
         """Purchase a paid extension"""

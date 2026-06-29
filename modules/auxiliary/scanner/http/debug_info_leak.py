@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.module_result import finalize_http_scanner_run, target_base_url
 import re
 import urllib.parse
 
@@ -31,6 +32,23 @@ class Module(Auxiliary, Http_client):
     paths = OptString("", "Comma-separated list of additional paths to test (e.g., /debug,/test,/api)", required=False)
     depth = OptInteger(2, "Maximum depth for path traversal (default: 2)", required=False)
     timeout = OptInteger(10, "Request timeout in seconds", required=False)
+    strict_body_scan = OptBool(
+        False,
+        "Apply aggressive body patterns on HTML pages (may flag normal client-side JavaScript)",
+        required=False,
+    )
+    output_max_length = OptInteger(
+        0,
+        "Truncate displayed leak lines longer than N characters (0 = show full value)",
+        required=False,
+    )
+
+    # Known third-party / CMS client-side snippets — not server debug leaks.
+    _BENIGN_JS_MARKERS = re.compile(
+        r"gtag|googletagmanager|googleTranslate|revslider|jquery|wp-content|"
+        r"analytics|fbq\(|dataLayer|elementor|woocommerce|cloudflare|recaptcha",
+        re.IGNORECASE,
+    )
 
     # Patterns de détection pour les fuites d'informations
     DEBUG_PATTERNS = {
@@ -57,13 +75,8 @@ class Module(Auxiliary, Http_client):
             r'Exception\s+occurred',
         ],
         'file_paths': [
-            r'[A-Z]:\\[^\\s]+',
-            r'/[\w/]+\.(py|php|java|js|rb|pl|asp|aspx|jsp)',
-            r'\/var\/www\/[^\s]+',
-            r'\/home\/[^\s]+',
-            r'\/usr\/[^\s]+',
-            r'C:\\[^\s]+',
-            r'D:\\[^\s]+',
+            r'(?:/var/www|/home/[\w.-]+|/usr/(?:share|local)|/opt/)[^\s<>"\']{3,}',
+            r'[A-Z]:\\(?:Users|Windows|inetpub|Program Files|xampp)[^\s<>"\']{3,}',
         ],
         'version_info': [
             r'PHP\s+\d+\.\d+\.\d+',
@@ -99,20 +112,15 @@ class Module(Auxiliary, Http_client):
         ],
         'source_code': [
             r'<\?php\s+[^\?]+',
-            r'def\s+\w+\([^)]*\):',
-            r'function\s+\w+\([^)]*\)\s*\{',
-            r'class\s+\w+\s+extends',
-            r'import\s+[^\s]+',
-            r'require[_\s]+\([^)]+\)',
-            r'include[_\s]+\([^)]+\)',
+            r'(?m)^\s*def\s+\w+\([^)]*\):',
+            r'(?m)^\s*class\s+\w+\s+extends\s+',
+            r'(?m)Traceback\s+\(most\s+recent\s+call\s+last\)',
+            r'require(?:_once)?\s*\(\s*[\'"][^\'"]+[\'"]\s*\)',
+            r'include(?:_once)?\s*\(\s*[\'"][^\'"]+[\'"]\s*\)',
         ],
         'environment_vars': [
-            r'\$\{?[A-Z_][A-Z0-9_]*\}?',
+            r'(?:^|[\s;])(?:PATH|HOME|USER|JAVA_HOME|DOCUMENT_ROOT)\s*=\s*[^\r\n<]{3,}',
             r'%[A-Z_][A-Z0-9_]*%',
-            r'PATH\s*=\s*[^\r\n]+',
-            r'HOME\s*=\s*[^\r\n]+',
-            r'USER\s*=\s*[^\r\n]+',
-            r'JAVA_HOME\s*=\s*[^\r\n]+',
         ],
         'debug_mode': [
             r'DEBUG\s*=\s*True',
@@ -205,11 +213,36 @@ class Module(Auxiliary, Http_client):
             }
         
         # Analyser le contenu avec les patterns
+        seen_matches = set()
+        is_html = self._is_html_page(content, headers)
+        conservative_body = (
+            is_html
+            and not self._opt_bool(self.strict_body_scan)
+            and self._is_benign_surface_path(path)
+        )
+
         for leak_type, patterns in self.DEBUG_PATTERNS.items():
+            if conservative_body and leak_type in self._HTML_CONSERVATIVE_SKIP:
+                continue
             for pattern in patterns:
                 matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE)
                 for match in matches:
-                    # Extraire le contexte autour du match
+                    match_text = match.group(0)
+                    dedupe_key = (leak_type, match_text[:160], path)
+                    if dedupe_key in seen_matches:
+                        continue
+                    if not self._is_actionable_leak(
+                        leak_type,
+                        match_text,
+                        content,
+                        path,
+                        response,
+                        is_html=is_html,
+                        match_offset=match.start(),
+                    ):
+                        continue
+                    seen_matches.add(dedupe_key)
+
                     start = max(0, match.start() - 50)
                     end = min(len(content), match.end() + 50)
                     context = content[start:end].replace('\n', ' ').replace('\r', ' ')
@@ -217,10 +250,12 @@ class Module(Auxiliary, Http_client):
                     leaks.append({
                         'type': leak_type,
                         'pattern': pattern,
-                        'match': match.group(0),
+                        'match': match_text,
                         'context': context.strip(),
                         'path': path,
-                        'severity': self._get_severity(leak_type)
+                        'status_code': response.status_code,
+                        'severity': self._get_severity(leak_type),
+                        'source': 'response_body',
                     })
         
         # Analyser les en-têtes HTTP
@@ -236,13 +271,16 @@ class Module(Auxiliary, Http_client):
         
         for header in sensitive_headers:
             if header in headers:
+                header_value = headers[header]
                 leaks.append({
                     'type': 'version_info',
-                    'pattern': f'Header: {header}',
-                    'match': f'{header}: {headers[header]}',
-                    'context': f'HTTP Header disclosure',
+                    'header': header,
+                    'header_value': header_value,
+                    'match': f'{header}: {header_value}',
                     'path': path,
-                    'severity': 'medium'
+                    'status_code': response.status_code,
+                    'severity': self._get_severity('version_info'),
+                    'source': 'response_header',
                 })
         
         # Vérifier les codes d'erreur qui peuvent révéler des informations
@@ -252,9 +290,10 @@ class Module(Auxiliary, Http_client):
                     'type': 'error_messages',
                     'pattern': 'HTTP 500 Error',
                     'match': 'Internal Server Error with details',
-                    'context': 'Error page may contain sensitive information',
                     'path': path,
-                    'severity': 'high'
+                    'status_code': response.status_code,
+                    'severity': 'high',
+                    'source': 'http_status',
                 })
         
         return {
@@ -315,6 +354,162 @@ class Module(Auxiliary, Http_client):
             return True
 
         return False
+
+    # On public HTML pages, skip categories that routinely match bundled client JS/CSS.
+    _HTML_CONSERVATIVE_SKIP = frozenset({
+        "source_code",
+        "file_paths",
+        "environment_vars",
+    })
+
+    def _is_benign_surface_path(self, path):
+        """Paths that are usually public HTML surfaces, not debug endpoints."""
+        normalized = self._normalize_path(path)
+        return normalized in (
+            "/",
+            "/robots.txt",
+            "/sitemap.xml",
+            "/.well-known/security.txt",
+        )
+
+    def _opt_bool(self, value):
+        if hasattr(value, "value"):
+            value = value.value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+    def _opt_int(self, value, default=0):
+        if hasattr(value, "value"):
+            value = value.value
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _format_output_text(self, text):
+        """Format leak text for CLI output without hiding short values."""
+        cleaned = (text or "").replace("\n", " ").replace("\r", " ").strip()
+        max_len = max(0, self._opt_int(self.output_max_length, 0))
+        if max_len <= 0 or len(cleaned) <= max_len:
+            return cleaned
+        return f"{cleaned[:max_len]}… (+{len(cleaned) - max_len} chars)"
+
+    def _leak_display_fields(self, leak):
+        """Return ordered (label, value) pairs with concrete evidence only."""
+        fields = []
+        header = leak.get("header")
+        header_value = leak.get("header_value")
+        if header:
+            fields.append(("Header", str(header)))
+            if header_value is not None:
+                fields.append(("Value", str(header_value)))
+        else:
+            match = leak.get("match", "")
+            if match:
+                fields.append(("Evidence", match))
+
+        surrounding = (leak.get("context") or "").strip()
+        match_text = (leak.get("match") or "").strip()
+        if surrounding and surrounding != match_text:
+            fields.append(("Surrounding", surrounding))
+
+        status_code = leak.get("status_code")
+        if status_code is not None:
+            fields.append(("HTTP status", str(status_code)))
+
+        source = leak.get("source")
+        if source:
+            fields.append(("Source", str(source)))
+
+        return fields
+
+    def _print_leak_block(self, leak, indent="    "):
+        leak_type = leak.get("type", "unknown")
+        severity = str(leak.get("severity", "medium")).upper()
+        path = leak.get("path", "/")
+        title = f"{indent}[{severity}] {leak_type} @ {path}"
+        severity_low = str(leak.get("severity", "medium")).lower()
+        if severity_low in ("critical", "high"):
+            print_info(color_red(title))
+        elif severity_low == "medium":
+            print_info(color_yellow(title))
+        else:
+            print_info(color_blue(title))
+        for label, value in self._leak_display_fields(leak):
+            if value:
+                print_info(f"{indent}  {label}: {self._format_output_text(value)}")
+
+    def _is_html_page(self, content, headers):
+        content_type = str((headers or {}).get("Content-Type") or "").lower()
+        if "text/html" in content_type:
+            return True
+        sample = (content or "")[:8192].lower()
+        return "<html" in sample or "<!doctype html" in sample
+
+    def _offset_inside_script_block(self, content, offset):
+        lower = (content or "").lower()
+        script_open = lower.rfind("<script", 0, offset)
+        if script_open < 0:
+            return False
+        tag_end = lower.find(">", script_open)
+        if tag_end < 0 or tag_end > offset:
+            return False
+        script_close = lower.find("</script>", offset)
+        return script_close >= 0
+
+    def _is_json_escaped_url_fragment(self, match_text):
+        text = match_text or ""
+        if "\\/" in text or ":\\/" in text:
+            return True
+        if re.fullmatch(r"[a-z]:\\/?", text, flags=re.IGNORECASE):
+            return True
+        return False
+
+    def _is_actionable_leak(self, leak_type, match_text, content, path, response, *, is_html, match_offset=0):
+        text = match_text or ""
+
+        if self._is_json_escaped_url_fragment(text):
+            return False
+
+        if leak_type == "source_code":
+            if re.match(r"function\s+\w+\s*\(", text, re.IGNORECASE):
+                return False
+            if self._BENIGN_JS_MARKERS.search(text):
+                return False
+            if is_html and self._offset_inside_script_block(content, match_offset):
+                return False
+
+        if leak_type == "file_paths":
+            if self._is_json_escaped_url_fragment(text):
+                return False
+            if is_html and path in ("", "/"):
+                if not re.search(
+                    r"(?:/var/|/home/|/usr/|/opt/|"
+                    r"[A-Z]:\\(?:Users|Windows|inetpub|Program Files|xampp))",
+                    text,
+                    re.IGNORECASE,
+                ):
+                    return False
+
+        if leak_type == "environment_vars":
+            if "=" not in text and not text.startswith("%"):
+                return False
+            if text.startswith("${") or text.startswith("$"):
+                return False
+
+        if leak_type == "version_info" and is_html:
+            if self._offset_inside_script_block(content, match_offset):
+                return False
+
+        if leak_type == "error_messages" and is_html and response.status_code == 200:
+            if path in ("", "/") and not any(
+                token in text.lower()
+                for token in ("fatal error", "parse error", "syntax error", "stack trace", "traceback")
+            ):
+                return False
+
+        return True
 
     def _get_severity(self, leak_type):
         """
@@ -382,6 +577,12 @@ class Module(Auxiliary, Http_client):
         if root_result and root_result.get('has_leaks'):
             self.vulnerable_paths.append(root_result)
             self.all_leaks.extend(root_result['leaks'])
+            print_success("\n[!] INFORMATION LEAK DETECTED: /")
+            print_info(f"    HTTP status: {root_result.get('status_code')}")
+            print_info(f"    Leaks: {len(root_result.get('leaks', []))}")
+            for leak in root_result.get('leaks', []):
+                self._print_leak_block(leak)
+            print_info("")
         
         # Tester les chemins communs
         print_status(f"Testing {len(paths_to_test)} common debug paths...")
@@ -402,35 +603,10 @@ class Module(Auxiliary, Http_client):
                     leaks = result.get('leaks', [])
                     
                     print_success(f"\n[!] INFORMATION LEAK DETECTED: {path}")
-                    print_info(f"    Status Code: {result.get('status_code')}")
-                    print_info(f"    Leaks Found: {len(leaks)}")
-                    
-                    # Grouper les fuites par type
-                    leaks_by_type = {}
+                    print_info(f"    HTTP status: {result.get('status_code')}")
+                    print_info(f"    Leaks: {len(leaks)}")
                     for leak in leaks:
-                        leak_type = leak.get('type', 'unknown')
-                        if leak_type not in leaks_by_type:
-                            leaks_by_type[leak_type] = []
-                        leaks_by_type[leak_type].append(leak)
-                    
-                    # Afficher les fuites par type
-                    for leak_type, type_leaks in leaks_by_type.items():
-                        severity = type_leaks[0].get('severity', 'medium')
-                        severity_text = f"    [{severity.upper()}] {leak_type}: {len(type_leaks)} occurrence(s)"
-                        
-                        if severity in ['critical', 'high']:
-                            print_info(color_red(severity_text))
-                        elif severity == 'medium':
-                            print_info(color_yellow(severity_text))
-                        else:
-                            print_info(color_blue(severity_text))
-                        
-                        # Afficher un exemple pour chaque type
-                        if type_leaks:
-                            example = type_leaks[0]
-                            print_info(f"      Example: {example.get('match', '')[:80]}...")
-                            print_info(f"      Context: {example.get('context', '')[:100]}...")
-                    
+                        self._print_leak_block(leak)
                     print_info("")
                     
                     self.vulnerable_paths.append(result)
@@ -449,41 +625,29 @@ class Module(Auxiliary, Http_client):
         if self.all_leaks:
             print_success("\nInformation Leaks Detected:")
             print_info("")
-            
-            # Grouper par sévérité
-            leaks_by_severity = {
-                'critical': [],
-                'high': [],
-                'medium': [],
-                'low': []
-            }
-            
+
+            table_data = []
             for leak in self.all_leaks:
-                severity = leak.get('severity', 'medium')
-                leaks_by_severity[severity].append(leak)
-            
-            # Afficher par ordre de sévérité
-            for severity in ['critical', 'high', 'medium', 'low']:
-                leaks = leaks_by_severity[severity]
-                if leaks:
-                    severity_text = f"\n[{severity.upper()}] {len(leaks)} leak(s):"
-                    
-                    if severity in ['critical', 'high']:
-                        print_info(color_red(severity_text))
-                    elif severity == 'medium':
-                        print_info(color_yellow(severity_text))
-                    else:
-                        print_info(color_blue(severity_text))
-                    
-                    # Afficher les 5 premiers de chaque catégorie
-                    for leak in leaks[:5]:
-                        print_info(f"  - {leak.get('type', 'unknown')} at {leak.get('path', '/')}")
-                        print_info(f"    Match: {leak.get('match', '')[:60]}...")
-                    
-                    if len(leaks) > 5:
-                        print_info(f"  ... and {len(leaks) - 5} more")
-            
-            # Tableau récapitulatif
+                evidence = leak.get("header_value") or leak.get("match") or ""
+                if leak.get("header"):
+                    evidence = f"{leak['header']}: {leak.get('header_value', '')}"
+                table_data.append([
+                    str(leak.get("path", "/")),
+                    str(leak.get("type", "unknown")),
+                    str(leak.get("severity", "medium")).upper(),
+                    self._format_output_text(evidence),
+                    str(leak.get("status_code", "")),
+                ])
+                self._print_leak_block(leak, indent="  ")
+
+            print_info("")
+            print_status("Findings table:")
+            if table_data:
+                print_table(
+                    ["Path", "Type", "Severity", "Evidence", "HTTP status"],
+                    table_data,
+                )
+
             print_info("")
             print_status("Summary by Leak Type:")
             
@@ -503,6 +667,26 @@ class Module(Auxiliary, Http_client):
             
             if table_data:
                 print_table(['Leak Type', 'Count', 'Severity'], table_data)
-        
-        return True
+
+        return finalize_http_scanner_run(
+            self,
+            self.all_leaks,
+            title="Debug Information Leak",
+            severity="high",
+            category="information-disclosure",
+            findings_key="debug_leaks",
+            dedupe_keys=("path", "type"),
+            hit_mapper=lambda leak: {
+                "path": leak.get("path"),
+                "method": "GET",
+                "request_url": target_base_url(self, path=str(leak.get("path") or "/")),
+                "status_code": leak.get("status_code"),
+                "type": leak.get("type"),
+                "header": leak.get("header"),
+                "header_value": leak.get("header_value"),
+                "evidence_snippet": leak.get("header_value") or leak.get("match"),
+                "severity": leak.get("severity"),
+                "source": leak.get("source"),
+            },
+        )
 

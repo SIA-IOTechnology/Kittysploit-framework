@@ -92,6 +92,7 @@ class AgentState:
     scan_modules_executed: int = 0
     potential_findings: List[Any] = field(default_factory=list)
     campaign_goal: Optional[str] = None
+    operator_goal: Optional[str] = None
     target_reachable: Optional[bool] = None
     reachability_reason: Optional[str] = None
     decision_timeline: List[Any] = field(default_factory=list)
@@ -180,6 +181,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "scan_modules_executed": state.scan_modules_executed,
         "potential_findings": state.potential_findings,
         "campaign_goal": state.campaign_goal,
+        "operator_goal": state.operator_goal,
         "target_reachable": state.target_reachable,
         "reachability_reason": state.reachability_reason,
         "decision_timeline": state.decision_timeline,
@@ -289,6 +291,7 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         scan_modules_executed=int(d.get("scan_modules_executed", 0)),
         potential_findings=list(d.get("potential_findings") or []),
         campaign_goal=d.get("campaign_goal"),
+        operator_goal=d.get("operator_goal"),
         target_reachable=d.get("target_reachable"),
         reachability_reason=d.get("reachability_reason"),
         decision_timeline=list(d.get("decision_timeline") or []),

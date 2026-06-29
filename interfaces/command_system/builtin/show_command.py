@@ -44,9 +44,11 @@ class ShowCommand(BaseCommand):
         "docker_environments": "docker_environment",
         "backdoor": "backdoor",
         "backdoors": "backdoor",
+        "analysis": "analysis",
     }
     
     MODULE_PATH_PREFIXES = [
+        ("analysis/", "analysis"),
         ("exploits/", "exploit"),
         ("auxiliary/", "auxiliary"),
         ("payloads/", "payload"),
@@ -71,7 +73,7 @@ class ShowCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|listeners|encoders|obfuscators|docker|backdoors]"
+        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|analysis|listeners|encoders|obfuscators|docker|backdoors]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
@@ -85,6 +87,7 @@ class ShowCommand(BaseCommand):
             "payload",  # alias
             "post",
             "postmodules",  # alias
+            "analysis",
             "listeners",
             "listener",  # alias
             "encoders",
@@ -127,6 +130,7 @@ Arguments:
     auxiliary      Show auxiliary modules
     payloads       Show payload modules
     post           Show post-exploitation modules
+    analysis       Show analysis modules
     listeners      Show available listeners
     docker         Show Docker environment modules
     nops           Show available NOP types
@@ -139,6 +143,7 @@ Examples:
     show advanced           # Show only advanced options
     show modules            # List all available modules
     show exploits           # List exploit modules
+    show analysis           # List analysis modules
     show docker             # List Docker environments
     show backdoors          # List backdoor modules
     show listeners          # List all available listeners
@@ -196,6 +201,8 @@ Examples:
                 self._show_modules_by_category("Payload", "payload")
             elif show_type in ("post", "postmodules"):
                 self._show_modules_by_category("Post-exploitation", "post")
+            elif show_type == "analysis":
+                self._show_modules_by_category("Analysis", "analysis")
             elif show_type in ("listener", "listeners"):
                 self._show_listeners()
             elif show_type in ("encoder", "encoders"):
@@ -216,8 +223,8 @@ Examples:
                 print_error(f"Unknown show type: {show_type}")
                 print_info(
                     "Use 'show options', 'show advanced', 'show info', 'show modules', "
-                    "'show listeners', 'show encoders', 'show obfuscators', 'show nops', "
-                    "'show workspaces', or 'show backdoors'"
+                    "'show analysis', 'show listeners', 'show encoders', 'show obfuscators', "
+                    "'show nops', 'show workspaces', or 'show backdoors'"
                 )
                 return False
             
@@ -723,7 +730,13 @@ Examples:
         headers = ["Path", "Description"]
         total = len(rows)
         print_status(f"Available listeners ({total})")
-        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
+        print_table(
+            headers,
+            rows,
+            max_width=self.SEP_WIDTH,
+            expand_to_terminal=True,
+            prefer_single_line=True,
+        )
         print_empty()
         print_info(f"  Use 'use <path>' to select a listener.")
     
@@ -774,10 +787,15 @@ Examples:
             else:
                 rows.append([path, description])
         
-        # Use print_table which handles terminal width and description truncation
-        # Compact display: heading with status color, minimal spacing
+        # Use print_table: full terminal width, description on one line when it fits
         print_status(heading)
-        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
+        print_table(
+            headers,
+            rows,
+            max_width=self.SEP_WIDTH,
+            expand_to_terminal=True,
+            prefer_single_line=True,
+        )
     
     def _normalize_module_type(self, module_type: str):
         if not module_type:

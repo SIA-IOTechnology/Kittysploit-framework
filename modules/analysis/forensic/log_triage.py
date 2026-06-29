@@ -10,7 +10,7 @@ import re
 from collections import Counter
 
 
-class Module(Auxiliary):
+class Module(Analysis):
     __info__ = {
         "name": "Forensic Log Triage",
         "author": ["KittySploit Team"],

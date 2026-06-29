@@ -437,11 +437,11 @@ class ModuleSyncManager:
         path = (module_path or "").lower()
         
         # Valid types according to CHECK constraint in models.py
-        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 'listeners', 'encoders', 'obfuscator']
+        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 'listeners', 'encoders', 'obfuscator', 'analysis']
         
         # Module path prefixes mapping (must match valid types in CHECK constraint)
         type_mapping = {
-            'analysis/': 'auxiliary',
+            'analysis/': 'analysis',
             'exploits/': 'exploits',
             'auxiliary/': 'auxiliary',
             'scanner/': 'scanner',  # Some scanners are in auxiliary/scanner/ but standalone scanner/ exists

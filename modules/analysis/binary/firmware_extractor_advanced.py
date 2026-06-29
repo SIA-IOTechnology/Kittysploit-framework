@@ -20,7 +20,7 @@ from lib.firmware import (
 from lib.firmware.utils import filter_gzip_redundant_with_trx
 
 
-class Module(Auxiliary, FirmwareExtract):
+class Module(Analysis, FirmwareExtract):
     __info__ = {
         "name": "Firmware Extractor (Advanced)",
         "description": (

@@ -236,6 +236,23 @@ Shortcut modules wrap common workflows or one-shot tasks into a single entry poi
   - Use 'show shortcut' to list available shortcuts.
 """,
     },
+    "analysis": {
+        "summary": "Offline analysis modules: malware triage, forensics, binary inspection, reporting.",
+        "detail": """
+Analysis modules run locally against files, artifacts, or workspace data. They do not target remote hosts directly and do not require an active session.
+
+  How to use:
+  1. use <analysis_path>       e.g. use analysis/binary/agenttesla_config_extractor
+  2. show options              Set input paths, timeouts, output files, etc.
+  3. set <option> <value>      Configure the module (e.g. set file_path /path/to/sample)
+  4. run                       Execute the analysis
+
+  Tips:
+  - Use 'show analysis' to list modules under analysis/ (binary, forensic, reporting).
+  - Many analysis modules depend on optional tools (pythonnet, reportlab, etc.); check show info for dependencies.
+  - Results are usually printed to the console and can often be saved to an output file via module options.
+""",
+    },
     "plugins": {
         "summary": "Framework extensions that add commands or features.",
         "detail": """

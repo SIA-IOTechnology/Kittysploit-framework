@@ -8,7 +8,7 @@ from kittysploit import *
 from lib.analysis.binary.firmware_extractor import PyFirmwareExtractor
 
 
-class Module(Auxiliary):
+class Module(Analysis):
     __info__ = {
         "name": "Firmware .bin signature scan and decompress",
         "description": (

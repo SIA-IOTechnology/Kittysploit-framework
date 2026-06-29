@@ -8,7 +8,7 @@ import os
 import re
 
 
-class Module(Auxiliary):
+class Module(Analysis):
     __info__ = {
         "name": "Forensic Artifact Carver",
         "author": ["KittySploit Team"],

@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
-from core.framework.analysis import Analysis
-from core.framework.option import OptString
 from core.models.models import Host, Service, Vulnerability, Credential, Note, Loot
 import os
 from datetime import datetime

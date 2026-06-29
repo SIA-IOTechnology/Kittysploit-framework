@@ -216,11 +216,15 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
             keep natural width during shrink (default: ``name``, ``path``). Pass e.g. ``("name",)``
             so long paths can share space with other columns.
         wrap_extra_headers: Optional iterable of header names to word-wrap like ``Description``.
+        prefer_single_line: If True, use spare terminal width for Description: one line when
+            the text fits, otherwise word-wrap the full text (never truncate with ``...``).
     """
     if is_thread_output_quiet():
         return
     if not headers or not rows:
         return
+
+    prefer_single_line = bool(kwargs.get("prefer_single_line", False))
 
     if expand_to_terminal:
         # Use terminal width when available: never narrower than requested max_width.
@@ -384,8 +388,11 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
             # Calculate how much extra space is available
             extra_space = available_width - total_min_width
             if extra_space > 0:
-                # Give extra space to Description column to help it fit on one line
-                col_widths[desc_column_index] += min(extra_space, int(available_width * 0.3))
+                if prefer_single_line:
+                    col_widths[desc_column_index] += extra_space
+                else:
+                    # Give extra space to Description column to help it fit on one line
+                    col_widths[desc_column_index] += min(extra_space, int(available_width * 0.3))
         
         # Cap columns at reasonable maximum
         max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
@@ -419,6 +426,10 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                     break
             if not progressed:
                 break
+
+    if prefer_single_line and desc_column_index is not None:
+        other_width = sum(col_widths[i] for i in range(len(col_widths)) if i != desc_column_index)
+        col_widths[desc_column_index] = max(col_widths[desc_column_index], available_width - other_width)
     
     # Build header line
     header_parts = []
@@ -454,6 +465,13 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                 # Protected title column: one line, no truncation (e.g. module option names)
                 cell_lines.append([cell_value])
                 max_lines = max(max_lines, 1)
+            elif i == desc_column_index and prefer_single_line:
+                if len(cell_value) <= col_widths[i]:
+                    cell_lines.append([cell_value])
+                else:
+                    wrapped = _wrap_cell_text(cell_value, col_widths[i])
+                    cell_lines.append(wrapped)
+                    max_lines = max(max_lines, len(wrapped))
             elif i in wrap_column_indices or i == desc_column_index:
                 wrapped = _wrap_cell_text(cell_value, col_widths[i])
                 cell_lines.append(wrapped)

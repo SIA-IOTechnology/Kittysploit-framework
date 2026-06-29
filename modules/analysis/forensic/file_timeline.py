@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 
 
-class Module(Auxiliary):
+class Module(Analysis):
     __info__ = {
         "name": "Forensic File Timeline",
         "author": ["KittySploit Team"],

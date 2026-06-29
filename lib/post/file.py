@@ -67,9 +67,15 @@ class File(BaseModule):
 				if result and 'true' in result:
 					return True
 			else:
-				result = self.cmd_exec(f"command -v {cmd} && echo true")
-				if result and 'true' in result:
-					return True
+				checks = [
+					f"command -v {cmd} >/dev/null 2>&1 && echo true",
+					f"which {cmd} >/dev/null 2>&1 && echo true",
+					f"type {cmd} >/dev/null 2>&1 && echo true",
+				]
+				for check in checks:
+					result = self.cmd_exec(check)
+					if result and 'true' in result:
+						return True
 		except Exception:
 			pass
 		return False

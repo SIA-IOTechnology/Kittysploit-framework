@@ -30,6 +30,7 @@ class CommandRegistry:
         self.output_handler = output_handler
         self.commands: Dict[str, BaseCommand] = {}
         self.command_classes: Dict[str, Type[BaseCommand]] = {}
+        self.command_aliases: Dict[str, str] = {}
         self.command_history: List[Dict[str, Any]] = []
         self._history_workspace_id = None
         
@@ -101,6 +102,7 @@ class CommandRegistry:
             'host',
             'vuln',
             'jobs',
+            'listen',
             'msf',
             'check',
             'doctor',
@@ -253,6 +255,15 @@ class CommandRegistry:
             raise KittyException(f"Command '{command_name}' is already registered")
         
         self.command_classes[command_name] = command_class
+
+        for alias in temp_instance.aliases:
+            if alias in self.command_classes or alias in self.command_aliases:
+                raise KittyException(f"Command alias '{alias}' is already registered")
+            self.command_aliases[alias] = command_name
+
+    def resolve_command_name(self, command_name: str) -> str:
+        """Resolve an alias to its primary command name."""
+        return self.command_aliases.get(command_name, command_name)
     
     def get_command(self, command_name: str) -> BaseCommand:
         """
@@ -267,8 +278,11 @@ class CommandRegistry:
         Raises:
             KittyException: If command is not found
         """
+        original_name = command_name
+        command_name = self.resolve_command_name(command_name)
+
         if command_name not in self.command_classes:
-            raise KittyException(f"Unknown command: '{command_name}'")
+            raise KittyException(f"Unknown command: '{original_name}'")
         
         # Create instance if not already created
         if command_name not in self.commands:
@@ -289,6 +303,10 @@ class CommandRegistry:
             List[str]: List of command names
         """
         return list(self.command_classes.keys())
+
+    def get_completion_command_names(self) -> List[str]:
+        """Primary command names plus registered aliases (for tab completion)."""
+        return sorted(set(self.command_classes.keys()) | set(self.command_aliases.keys()))
     
     def get_command_help(self, command_name: str = None) -> str:
         """
@@ -301,7 +319,8 @@ class CommandRegistry:
             str: Help text
         """
         if command_name:
-            if command_name not in self.command_classes:
+            resolved_name = self.resolve_command_name(command_name)
+            if resolved_name not in self.command_classes:
                 return f"Unknown command: {command_name}"
             
             command = self.get_command(command_name)

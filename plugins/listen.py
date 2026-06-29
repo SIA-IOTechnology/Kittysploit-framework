@@ -122,7 +122,7 @@ class ListenPlugin(Plugin):
     def run(self, *args, **kwargs):
         """Main execution method for the plugin"""
         parser = ModuleArgumentParser(description="Netcat-like listener for accepting TCP connections", prog="listen")
-        parser.add_argument("-p", "--port", dest="port", help="Port to listen on", type=int, default=6000)
+        parser.add_argument("-p", "--port", dest="port", metavar="PORT", help="Port to listen on", type=int, default=6000)
         
         if not args or not args[0]:
             parser.print_help()

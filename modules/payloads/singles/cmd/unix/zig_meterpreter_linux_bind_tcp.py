@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Compatibility module for the Linux Zig Meterpreter reverse TCP payload.
-Prefer payloads/singles/cmd/unix/zig_meterpreter_linux_reverse_tcp.
-"""
-
 from kittysploit import *
-from core.payload_templates.zig_meterpreter_reverse_tcp import ZigMeterpreterReverseTcpBase
+from core.payload_templates.zig_meterpreter_bind_tcp import ZigMeterpreterBindTcpBase
 
 
-class Module(ZigMeterpreterReverseTcpBase, Payload):
+class Module(ZigMeterpreterBindTcpBase, Payload):
     __info__ = {
-        'name': 'Zig Meterpreter Linux, Reverse TCP',
-        'description': 'Linux Meterpreter payload in Zig (compatibility path; requires Zig compiler)',
+        'name': 'Zig Meterpreter Linux, Bind TCP',
+        'description': 'Linux Meterpreter bind TCP payload in Zig (requires Zig compiler)',
         'author': 'KittySploit Team',
         'version': '1.1.0',
         'category': 'singles',
         'platform': Platform.UNIX,
         'arch': Arch.X64,
-        'listener': 'listeners/multi/meterpreter_reverse_tcp',
-        'handler': Handler.REVERSE,
+        'listener': 'listeners/multi/meterpreter_bind_tcp',
+        'handler': Handler.BIND,
         'session_type': SessionType.METERPRETER,
         'references': [
             'https://ziglang.org/',

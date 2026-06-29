@@ -344,7 +344,7 @@ class AdvancedCompleter(Completer):
         now = time.time()
         if not self._command_cache or now - self._last_command_cache > self.CACHE_TTL:
             try:
-                commands = self.command_registry.get_available_commands()
+                commands = self.command_registry.get_completion_command_names()
             except Exception:
                 self._log_completion_error(
                     "available-commands",

@@ -475,10 +475,11 @@ class MeterpreterShell(BaseShell):
         if not self.connection:
             self._initialize_connection()
 
-        # If we have a connection to remote client, send command via JSON
+        # If we have a connection to remote client, run the full command in a shell.
+        # Some Meterpreter clients (e.g. Zig) only pass args[0] for unknown commands.
         if self.connection:
-            print_debug(f"Executing command '{cmd}' via remote connection")
-            result = self._send_command(cmd, args)
+            print_debug(f"Executing command via remote shell: {command!r}")
+            result = self._send_command('shell', [command.strip()])
             print_debug(f"Command result: status={result.get('status')}, has_output={bool(result.get('output'))}, has_error={bool(result.get('error'))}")
             return result
 

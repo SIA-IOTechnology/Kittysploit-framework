@@ -17,7 +17,7 @@ class Module(Payload):
         'session_type': SessionType.SHELL
     }
 
-    bind_host = OptString('0.0.0.0', 'Address to bind on the target', True)
+    rhost = OptString('0.0.0.0', 'Address to bind on the target', True)
     rport = OptPort(4444, 'Port to bind on the target', True)
     shell_binary = OptString('/bin/bash', 'The system shell in use', True, True)
     python_binary = OptString('python3', 'Python binary version', True)
@@ -57,7 +57,7 @@ class Module(Payload):
         )
 
     def get_python_script(self):
-        host = str(self.bind_host)
+        host = str(self.rhost)
         port = int(self.rport)
         shell = str(self.shell_binary).replace("'", "'\"'\"'")
         return self._build_script(host, port, shell)

@@ -35,6 +35,16 @@ class Module(Post, System):
 
     def _run_cmd(self, command: str) -> str:
         try:
+            session_id_value = self.session_id.value if hasattr(self.session_id, "value") else str(self.session_id)
+            shell_manager = getattr(self.framework, "shell_manager", None) if self.framework else None
+            shell = shell_manager.get_shell(session_id_value) if shell_manager and session_id_value else None
+
+            if shell and getattr(shell, "shell_name", None) == "meterpreter" and hasattr(shell, "_send_command"):
+                result = shell._send_command("shell", [command])
+                if result.get("error"):
+                    return result.get("error", "")
+                return (result.get("output") or "").strip()
+
             output = self.cmd_exec(command)
             return output.strip() if output else ""
         except Exception:

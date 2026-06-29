@@ -110,7 +110,13 @@ class ModuleArgumentParser:
         print_info("Options:")
         for arg_def in self.arguments:
             args_str = ", ".join(arg_def['args'])
+            metavar = arg_def['kwargs'].get('metavar')
+            if metavar and args_str:
+                args_str = f"{args_str} {metavar}"
             help_text = arg_def['kwargs'].get('help', '')
+            default = arg_def['kwargs'].get('default')
+            if default is not None and arg_def['kwargs'].get('action') != 'store_true':
+                help_text = f"{help_text} (default: {default})".strip()
             print_info(f"  {args_str:<20} {help_text}")
 
 class Plugin(ABC):

@@ -57,14 +57,11 @@ class Post(BaseModule):
             session_id_value, command, framework=self.framework, pty=pty
         )
         
-        # Check for errors
-        if result.get('error'):
-            # Return error message or empty string based on preference
-            # For compatibility with old code that expects string output
-            return result.get('error', '')
-        
-        # Return the output
-        return result.get('output', '')
+        # Return output when present; fall back to error text only if output is empty.
+        output = result.get('output', '') or ''
+        if output:
+            return output
+        return result.get('error', '') or ''
     
     def cmd_exec(self, command: str, **kwargs) -> str:
         """

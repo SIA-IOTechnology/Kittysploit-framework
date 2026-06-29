@@ -31,6 +31,11 @@ class BaseCommand(ABC):
         pass
     
     @property
+    def aliases(self) -> List[str]:
+        """Optional alternate command names (e.g. plugins -> plugin)."""
+        return []
+
+    @property
     def usage(self) -> str:
         """Command usage string"""
         return f"{self.name} [options]"

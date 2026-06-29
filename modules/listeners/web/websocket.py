@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-WebSocket reverse listener - accept WebSocket connections for interactive shell.
-Differentiates KittySploit from Metasploit (no native WebSocket listener).
-"""
 
 from kittysploit import *
 import socket
@@ -88,7 +84,7 @@ class Module(Listener):
 
     __info__ = {
         'name': 'WebSocket Listener',
-        'description': 'Reverse WebSocket listener - accepts WebSocket connections for interactive shell (differentiator vs Metasploit)',
+        'description': 'Reverse WebSocket listener - accepts WebSocket connections for interactive shell',
         'author': 'KittySploit Team',
         'version': '1.0.0',
         'handler': Handler.REVERSE,

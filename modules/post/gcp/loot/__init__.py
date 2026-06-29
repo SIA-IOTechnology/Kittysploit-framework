@@ -1,0 +1,1 @@
+# GCP loot post modules

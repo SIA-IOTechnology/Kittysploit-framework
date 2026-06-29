@@ -297,6 +297,21 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "email":
                 session_type = "email"
                 shell_type = "email"
+            elif session and session.session_type and session.session_type.lower() == "gcp_api":
+                session_type = "gcp_api"
+                shell_type = "gcp_api"
+            elif session and session.session_type and session.session_type.lower() == "gcp_compute_ssh":
+                session_type = "gcp_compute_ssh"
+                shell_type = "gcp_compute_ssh"
+            elif session and session.session_type and session.session_type.lower() == "azure_run_command":
+                session_type = "azure_run_command"
+                shell_type = "azure_run_command"
+            elif session and session.session_type and session.session_type.lower() == "polling":
+                session_type = "polling"
+                shell_type = "polling"
+            elif session and session.session_type and session.session_type.lower() == "winrm":
+                session_type = "winrm"
+                shell_type = "winrm"
             else:
                 session_type = "standard"
                 shell_type = "classic"

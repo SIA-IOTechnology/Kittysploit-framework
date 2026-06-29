@@ -463,8 +463,7 @@ class Module(Listener):
             if self.framework and hasattr(self.framework, 'module_loader'):
                 if stage_language == 'php':
                     payload_paths = [
-                        'payloads/singles/php/meterpreter_php_reverse_tcp',
-                        'payloads/singles/php/meterpreter_reverse_tcp'
+                        'payloads/singles/cmd/php/meterpreter_reverse_tcp'
                     ]
                 else:
                     # Try Windows payload first, then fallback to Unix

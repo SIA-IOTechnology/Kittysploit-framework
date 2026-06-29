@@ -12,19 +12,15 @@ import tempfile
 from kittysploit import *
 
 from lib.firmware import (
+    FirmwareExtract,
     detect_firmware_type,
-    extract_elf,
-    extract_gzip,
-    extract_lzma,
     extract_trx,
-)
-from lib.firmware.utils import (
     SUPPORTED_FORMATS_DEFAULT,
-    filter_gzip_redundant_with_trx,
 )
+from lib.firmware.utils import filter_gzip_redundant_with_trx
 
 
-class Module(Auxiliary):
+class Module(Auxiliary, FirmwareExtract):
     __info__ = {
         "name": "Firmware Extractor (Advanced)",
         "description": (
@@ -40,9 +36,9 @@ class Module(Auxiliary):
 
     SUPPORTED_FORMATS = {
         "trx": {**SUPPORTED_FORMATS_DEFAULT["trx"], "handler": extract_trx},
-        "gzip": {**SUPPORTED_FORMATS_DEFAULT["gzip"], "handler": extract_gzip},
-        "lzma": {**SUPPORTED_FORMATS_DEFAULT["lzma"], "handler": extract_lzma},
-        "elf": {**SUPPORTED_FORMATS_DEFAULT["elf"], "handler": extract_elf},
+        "gzip": {**SUPPORTED_FORMATS_DEFAULT["gzip"], "handler": FirmwareExtract.extract_gzip},
+        "lzma": {**SUPPORTED_FORMATS_DEFAULT["lzma"], "handler": FirmwareExtract.extract_lzma},
+        "elf": {**SUPPORTED_FORMATS_DEFAULT["elf"], "handler": FirmwareExtract.extract_elf},
         "squashfs": {**SUPPORTED_FORMATS_DEFAULT["squashfs"], "handler": None},
     }
 

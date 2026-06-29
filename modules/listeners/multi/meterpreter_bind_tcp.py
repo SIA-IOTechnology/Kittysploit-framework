@@ -365,8 +365,7 @@ class Module(Listener):
             if self.framework and hasattr(self.framework, 'module_loader'):
                 if stage_language == 'php':
                     payload_paths = [
-                        'payloads/singles/php/meterpreter_php_bind_tcp',
-                        'payloads/singles/php/meterpreter_bind_tcp'
+                        'payloads/singles/cmd/php/meterpreter_bind_tcp'
                     ]
                 else:
                     payload_paths = [

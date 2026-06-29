@@ -38,7 +38,7 @@ The command is only available when a payload module is loaded.
 
 Options:
     --output <file>        Save generated payload to file
-    --format <format>      Output format (raw, hex, base64, c, python, etc.)
+    --format <format>      Output format (raw, php, hex, base64, c, python, etc.)
     --encoder <encoder>    Apply encoder to the payload
     --nops <nops>          Add NOP sled of specified length
     --iterations <count>   Number of encoding iterations
@@ -48,6 +48,7 @@ Options:
 Examples:
     generate                           # Generate payload with default settings
     generate --output payload.bin      # Save payload to file
+    generate --format php              # Generate PHP payload as source code
     generate --format hex              # Generate payload in hex format
     generate --encoder xor --iterations 3  # Apply XOR encoder 3 times
     generate --nops 100                # Add 100-byte NOP sled
@@ -69,6 +70,7 @@ Note: This command only works when a payload module is selected.
 Examples:
   generate                           # Generate payload with default settings
   generate --output payload.bin      # Save payload to file
+  generate --format php              # Generate PHP payload as source code
   generate --format hex              # Generate payload in hex format
   generate --encoder xor --iterations 3  # Apply XOR encoder 3 times
   generate --nops 100                # Add 100-byte NOP sled
@@ -78,7 +80,7 @@ Examples:
         
         parser.add_argument("--output", "-o", metavar="<file>", help="Save generated payload to file")
         parser.add_argument("--format", "-f", metavar="<format>", 
-                          choices=["raw", "hex", "base64", "c", "python", "powershell", "bash"],
+                          choices=["raw", "php", "hex", "base64", "c", "python", "powershell", "bash"],
                           default="raw", help="Output format (default: raw)")
         parser.add_argument("--encoder", "-e", metavar="<encoder>", help="Apply encoder to the payload")
         parser.add_argument("--nops", "-n", type=int, metavar="<length>", help="Add NOP sled of specified length")
@@ -290,7 +292,7 @@ Examples:
             else:
                 payload_bytes = payload
             
-            if format_type == "raw":
+            if format_type in ("raw", "php"):
                 return payload  # Return original (string or bytes)
             elif format_type == "hex":
                 return payload_bytes.hex()
@@ -326,7 +328,7 @@ Examples:
         print_info(f"\nGenerated Payload ({format_type} format):")
         print_info("=" * 50)
         
-        if format_type == "raw":
+        if format_type in ("raw", "php"):
             # For raw binary, show hex representation
             if isinstance(payload, str):
                 # If it's a string (like instructions), display it directly
@@ -354,13 +356,8 @@ Examples:
             if isinstance(payload, GeneratedArtifact):
                 payload = artifact_to_bytes(payload)
 
-            with open(filename, 'wb' if format_type == "raw" else 'w') as f:
-                if format_type == "raw" and isinstance(payload, str):
-                    # Convert hex string back to bytes
-                    payload_bytes = bytes.fromhex(payload)
-                    f.write(payload_bytes)
-                else:
-                    f.write(payload if isinstance(payload, bytes) else str(payload).encode('utf-8'))
+            with open(filename, 'wb') as f:
+                f.write(payload if isinstance(payload, bytes) else str(payload).encode('utf-8'))
             
             print_success(f"Payload saved to: {filename}")
             print_info(f"File size: {os.path.getsize(filename)} bytes")

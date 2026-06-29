@@ -59,6 +59,7 @@ bs4
 uvicorn
 mitmproxy
 boto3
+google-auth
 pure-python-adb
 pyftpdlib
 pyjwt

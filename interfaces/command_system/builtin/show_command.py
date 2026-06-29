@@ -561,7 +561,10 @@ Examples:
                 # Convert DB format to expected format
                 if modules:
                     formatted_modules = []
+                    seen_paths = set()
                     for module in modules:
+                        path = module.get('path', '')
+                        seen_paths.add(path)
                         formatted_modules.append({
                             'path': module.get('path', ''),
                             'name': module.get('name', module.get('path', '')),
@@ -569,6 +572,11 @@ Examples:
                             'type': module.get('type', ''),
                             'author': module.get('author', 'Unknown')
                         })
+                    # The DB can be stale during development. Merge filesystem hits so
+                    # freshly-added modules show up before a manual sync.
+                    for fs_module in self._search_modules_filesystem(normalized_type):
+                        if fs_module.get('path') not in seen_paths:
+                            formatted_modules.append(fs_module)
                     return formatted_modules
         except Exception as e:
             # Database search failed, fall back to filesystem

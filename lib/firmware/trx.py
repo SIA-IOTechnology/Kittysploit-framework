@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import List
 
-from lib.firmware.extract import extract_gzip
+from lib.firmware.extract import FirmwareExtract
 
 # En-tête TRX minimal : magic 4 + len 4 + crc 4 + flags 4 + 3 offsets 12 = 28 octets après le début du bloc TRX
 _TRX_HEADER_LEN = 28
@@ -37,7 +37,7 @@ def extract_trx(firmware_path: str, output_dir: str, offset: int = 0x20) -> List
 
     out: List[str] = []
     if len(peek) >= 2 and peek[:2] == b"\x1f\x8b":
-        out.extend(extract_gzip(firmware_path, output_dir, payload_off))
+        out.extend(FirmwareExtract.extract_gzip(firmware_path, output_dir, payload_off))
         return out
 
     # Pas de gzip au slot attendu : copie brute de la zone après en-tête pour inspection

@@ -455,13 +455,14 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
             return False
     
 
-    def write_out_dir(self, file_path: str, content: str) -> bool:
+    def write_out_dir(self, file_path: str, content: str, *, quiet: bool = False) -> bool:
         """
         Write a file to the output directory.
         
         Args:
             file_path: Relative path to the file (e.g., "filename.php" or "subdir/filename.php")
             content: Content to write to the file
+            quiet: Skip the success message when True
             
         Returns:
             bool: True if the file has been written successfully, False otherwise
@@ -486,8 +487,19 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            print_success(f"File written: {full_path}")
+            if not quiet:
+                print_success(f"File written: {full_path}")
             return True
         except Exception as e:
             print_error(f"Error writing file to output directory: {e}")
             return False
+
+    def output_dir_path(self, file_path: str = "") -> str:
+        """Resolve a path under the module output directory."""
+        output_dir = os.path.join(os.getcwd(), "output")
+        rel = str(file_path or "").strip().replace("\\", "/").lstrip("/")
+        if rel.startswith("output/"):
+            rel = rel[len("output/") :]
+        if not rel:
+            return output_dir
+        return os.path.join(output_dir, rel)

@@ -59,6 +59,11 @@ LDAPShell = _lazy_import('.ldap_shell', 'LDAPShell')
 MongoDBShell = _lazy_import('.mongodb_shell', 'MongoDBShell')
 ElasticsearchShell = _lazy_import('.elasticsearch_shell', 'ElasticsearchShell')
 MSSQLShell = _lazy_import('.mssql_shell', 'MSSQLShell')
+WinRMShell = _lazy_import('.winrm_shell', 'WinRMShell')
+PollingShell = _lazy_import('.polling_shell', 'PollingShell')
+AzureRunCommandShell = _lazy_import('.azure_run_command_shell', 'AzureRunCommandShell')
+GcpComputeSshShell = _lazy_import('.gcp_compute_ssh_shell', 'GcpComputeSshShell')
+GcpApiShell = _lazy_import('.gcp_api_shell', 'GcpApiShell')
 
 class ShellManager:
     """Manager for different shell types"""
@@ -78,6 +83,11 @@ class ShellManager:
             'mongodb': MongoDBShell,
             'elasticsearch': ElasticsearchShell,
             'mssql': MSSQLShell,
+            'winrm': WinRMShell,
+            'polling': PollingShell,
+            'azure_run_command': AzureRunCommandShell,
+            'gcp_compute_ssh': GcpComputeSshShell,
+            'gcp_api': GcpApiShell,
             'mqtt': MQTTShell,
             'dns': DNSShell,
             'ftp': FTPShell,
@@ -118,7 +128,7 @@ class ShellManager:
                     return None
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -216,6 +226,16 @@ class ShellManager:
                         shell_type = 'elasticsearch'
                     elif session_type == 'mssql':
                         shell_type = 'mssql'
+                    elif session_type == 'winrm':
+                        shell_type = 'winrm'
+                    elif session_type == 'polling':
+                        shell_type = 'polling'
+                    elif session_type == 'azure_run_command':
+                        shell_type = 'azure_run_command'
+                    elif session_type == 'gcp_compute_ssh':
+                        shell_type = 'gcp_compute_ssh'
+                    elif session_type == 'gcp_api':
+                        shell_type = 'gcp_api'
                     elif session_type == 'mqtt':
                         shell_type = 'mqtt'
                     elif session_type == 'dns':

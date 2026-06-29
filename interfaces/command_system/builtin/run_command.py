@@ -716,6 +716,16 @@ Examples:
                 shell_type = "android"
             elif session_type == "email":
                 shell_type = "email"
+            elif session_type == "gcp_api":
+                shell_type = "gcp_api"
+            elif session_type == "gcp_compute_ssh":
+                shell_type = "gcp_compute_ssh"
+            elif session_type == "azure_run_command":
+                shell_type = "azure_run_command"
+            elif session_type == "polling":
+                shell_type = "polling"
+            elif session_type == "winrm":
+                shell_type = "winrm"
             else:
                 shell_type = "classic"
             

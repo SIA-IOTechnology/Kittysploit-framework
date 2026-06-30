@@ -6,7 +6,7 @@ Use command implementation
 """
 
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_warning, print_table
+from core.output_handler import print_info, print_success, print_error, print_warning, print_table, table_render_width
 from core.framework.option.base_option import Option as BaseOption
 from core.utils.privileges import is_root, is_admin
 import os
@@ -153,11 +153,17 @@ Examples:
                             rows.append([name, value_str, req_text, description])
                     
                     # Display table
+                    table_kwargs = {
+                        "max_width": self.SEP_WIDTH,
+                        "expand_to_terminal": True,
+                        "prefer_single_line": True,
+                    }
+                    frame_width = table_render_width(headers, rows, **table_kwargs)
                     print_info("")
                     print_info("Module options:")
-                    print_info("=" * self.SEP_WIDTH)
-                    print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
-                    print_info("=" * self.SEP_WIDTH)
+                    print_info("=" * frame_width)
+                    print_table(headers, rows, **table_kwargs)
+                    print_info("=" * frame_width)
                 
                 if advanced_count > 0:
                     print_info("")

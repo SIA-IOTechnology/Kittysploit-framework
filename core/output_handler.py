@@ -200,42 +200,25 @@ def _wrap_cell_text(cell_value: str, col_width: int) -> list:
     return wrapped_lines if wrapped_lines else [""]
 
 
-def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
-    """Print a formatted table with proper column alignment.
+def _resolve_table_max_width(max_width, expand_to_terminal):
+    """Widen layout width up to the TTY when requested."""
+    if not expand_to_terminal:
+        return max_width
+    try:
+        if _stream_isatty(sys.stdout):
+            terminal_cols = _terminal_size().columns
+            if terminal_cols > max_width:
+                return min(max(terminal_cols - 2, max_width), 400)
+    except (OSError, AttributeError):
+        pass
+    return max_width
 
-    Args:
-        headers: Column titles.
-        rows: Table body.
-        max_width: Target total width for layout (column sizing and separators).
-        expand_to_terminal: If True, widen max_width up to the TTY (capped) when the terminal
-            is wider — good for large data tables. If False, keep max_width exactly (e.g. module
-            options framed with '=' lines must match the table and inner rule width).
-        column_min_widths: Optional ``{header_label: int}`` minimum widths after measuring cells.
-        column_max_widths: Optional ``{header_label: int}`` maximum widths (e.g. cap ``Path``).
-        protect_full_width_headers: Optional iterable of header names (case-insensitive) that
-            keep natural width during shrink (default: ``name``, ``path``). Pass e.g. ``("name",)``
-            so long paths can share space with other columns.
-        wrap_extra_headers: Optional iterable of header names to word-wrap like ``Description``.
-        prefer_single_line: If True, use spare terminal width for Description: one line when
-            the text fits, otherwise word-wrap the full text (never truncate with ``...``).
-    """
-    if is_thread_output_quiet():
-        return
-    if not headers or not rows:
-        return
 
+def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
+    """Return column widths and metadata for table rendering."""
     prefer_single_line = bool(kwargs.get("prefer_single_line", False))
+    max_width = _resolve_table_max_width(max_width, expand_to_terminal)
 
-    if expand_to_terminal:
-        # Use terminal width when available: never narrower than requested max_width.
-        try:
-            if _stream_isatty(sys.stdout):
-                terminal_cols = _terminal_size().columns
-                if terminal_cols > max_width:
-                    max_width = min(max(terminal_cols - 2, max_width), 400)
-        except (OSError, AttributeError):
-            pass
-    
     # Calculate optimal column widths
     # Reserve space for separators (3 chars per separator: " | ")
     num_separators = len(headers) - 1
@@ -394,9 +377,10 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                     # Give extra space to Description column to help it fit on one line
                     col_widths[desc_column_index] += min(extra_space, int(available_width * 0.3))
         
-        # Cap columns at reasonable maximum
-        max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
-        col_widths = [min(w, max_col_width) for w in col_widths]
+        # Cap columns at reasonable maximum (skip when prefer_single_line — Description uses spare width)
+        if not prefer_single_line:
+            max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
+            col_widths = [min(w, max_col_width) for w in col_widths]
 
     # Re-apply minimum widths (scaling can drive columns below column_min_widths) then fit by shrinking Description first.
     if column_min_widths:
@@ -430,7 +414,60 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
     if prefer_single_line and desc_column_index is not None:
         other_width = sum(col_widths[i] for i in range(len(col_widths)) if i != desc_column_index)
         col_widths[desc_column_index] = max(col_widths[desc_column_index], available_width - other_width)
-    
+
+    return {
+        "col_widths": col_widths,
+        "max_width": max_width,
+        "name_column_index": name_column_index,
+        "desc_column_index": desc_column_index,
+        "wrap_column_indices": wrap_column_indices,
+        "prefer_single_line": prefer_single_line,
+        "separator_width": separator_width,
+    }
+
+
+def table_render_width(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
+    """Return the rendered line width for a table (for framing separators)."""
+    if not headers or not rows:
+        return max_width
+    layout = _compute_table_layout(headers, rows, max_width, expand_to_terminal, **kwargs)
+    return sum(layout["col_widths"]) + layout["separator_width"]
+
+
+def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
+    """Print a formatted table with proper column alignment.
+
+    Args:
+        headers: Column titles.
+        rows: Table body.
+        max_width: Target total width for layout (column sizing and separators).
+        expand_to_terminal: If True, widen max_width up to the TTY (capped) when the terminal
+            is wider — good for large data tables. If False, keep max_width exactly (e.g. module
+            options framed with '=' lines must match the table and inner rule width).
+        column_min_widths: Optional ``{header_label: int}`` minimum widths after measuring cells.
+        column_max_widths: Optional ``{header_label: int}`` maximum widths (e.g. cap ``Path``).
+        protect_full_width_headers: Optional iterable of header names (case-insensitive) that
+            keep natural width during shrink (default: ``name``, ``path``). Pass e.g. ``("name",)``
+            so long paths can share space with other columns.
+        wrap_extra_headers: Optional iterable of header names to word-wrap like ``Description``.
+        prefer_single_line: If True, use spare terminal width for Description: one line when
+            the text fits, otherwise word-wrap the full text (never truncate with ``...``).
+
+    Returns:
+        Rendered table line width, or None when nothing was printed.
+    """
+    if is_thread_output_quiet():
+        return None
+    if not headers or not rows:
+        return None
+
+    layout = _compute_table_layout(headers, rows, max_width, expand_to_terminal, **kwargs)
+    col_widths = layout["col_widths"]
+    name_column_index = layout["name_column_index"]
+    desc_column_index = layout["desc_column_index"]
+    wrap_column_indices = layout["wrap_column_indices"]
+    prefer_single_line = layout["prefer_single_line"]
+
     # Build header line
     header_parts = []
     for i, header in enumerate(headers):
@@ -444,14 +481,6 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
     separator_char = "─" if _stream_isatty(sys.stdout) else "-"
     separator_len = len(header_line)
     print_info(separator_char * separator_len)
-    
-    # Print rows with word wrapping for long descriptions
-    # Find Description column index for special handling
-    desc_column_index = None
-    for i, header in enumerate(headers):
-        if str(header).lower() == "description":
-            desc_column_index = i
-            break
     
     for row in rows:
         # Split cells that need wrapping (especially Description column)
@@ -496,6 +525,8 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
             
             row_line = " | ".join(row_parts)
             print_info(row_line)
+
+    return separator_len
 
 def print_debug(message="", force=False, **kwargs):
     """

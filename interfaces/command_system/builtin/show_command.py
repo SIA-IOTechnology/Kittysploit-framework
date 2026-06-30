@@ -6,7 +6,7 @@ Show command implementation
 """
 
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_table, print_empty, print_status, print_warning
+from core.output_handler import print_info, print_success, print_error, print_table, print_empty, print_status, print_warning, table_render_width
 from core.framework.option.base_option import Option as BaseOption
 import os
 import logging
@@ -413,11 +413,17 @@ Examples:
                 rows.append([name, value_str, req_text, desc_text])
         
         # Display table
+        table_kwargs = {
+            "max_width": self.SEP_WIDTH,
+            "expand_to_terminal": True,
+            "prefer_single_line": True,
+        }
+        frame_width = table_render_width(headers, rows, **table_kwargs)
         print_info()
         print_info("Module options:")
-        print_info("=" * self.SEP_WIDTH)
-        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
-        print_info("=" * self.SEP_WIDTH)
+        print_info("=" * frame_width)
+        print_table(headers, rows, **table_kwargs)
+        print_info("=" * frame_width)
         
         if advanced_count > 0 and not show_advanced:
             print_info()
@@ -487,11 +493,17 @@ Examples:
                 rows.append([name, value_str, req_text, description])
         
         # Display table
+        table_kwargs = {
+            "max_width": self.SEP_WIDTH,
+            "expand_to_terminal": True,
+            "prefer_single_line": True,
+        }
+        frame_width = table_render_width(headers, rows, **table_kwargs)
         print_info("")
         print_info("Advanced module options:")
-        print_info("=" * self.SEP_WIDTH)
-        print_table(headers, rows, max_width=self.SEP_WIDTH, expand_to_terminal=False)
-        print_info("=" * self.SEP_WIDTH)
+        print_info("=" * frame_width)
+        print_table(headers, rows, **table_kwargs)
+        print_info("=" * frame_width)
         print_info("")
         print_info("Use 'set <option> <value>' to set option values")
     

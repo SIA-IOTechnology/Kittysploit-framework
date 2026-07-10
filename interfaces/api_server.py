@@ -347,17 +347,23 @@ class ApiServer:
             modules = self.framework.get_available_modules()
             if isinstance(modules, dict):
                 result = {}
+                # Full metadata for every module is expensive; return a compact catalog
+                # and only hydrate info when ?details=1 is set.
+                details = request.args.get('details', '').lower() in ('1', 'true', 'yes')
                 for module_path, module_file in modules.items():
-                    module_info = self.framework.get_module_info(module_path)
-                    if module_info:
-                        result[module_path] = module_info
-                    else:
-                        result[module_path] = {
-                            'name': module_path,
-                            'description': 'No description available',
-                            'author': 'Unknown',
-                            'references': []
-                        }
+                    if details:
+                        module_info = self.framework.get_module_info(module_path)
+                        if module_info:
+                            result[module_path] = module_info
+                            continue
+                    result[module_path] = {
+                        'name': str(module_path).rsplit('/', 1)[-1],
+                        'path': module_path,
+                        'file': module_file if isinstance(module_file, str) else None,
+                        'description': 'No description available',
+                        'author': 'Unknown',
+                        'references': [],
+                    }
                 return jsonify(result)
             return jsonify(modules)
 

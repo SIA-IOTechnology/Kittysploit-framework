@@ -56,6 +56,8 @@ Rules:
 - Use only against systems and networks you are explicitly authorized to test.
 - For free-form user requests, start with `ks_plan_natural_request` to extract intent,
   targets, module candidates, and native command/tool suggestions.
+- For full autonomous campaigns (scan → analyze → reason → exploit → report), use
+  `ks_run_agent` with an authorized target.
 - Typical flow: search or plan → `ks_prepare_module_run` → confirm resolved options →
   `ks_run_module` → poll logs with the returned client_id.
 - `ks_execute_command` can drive the framework through its native CLI commands when that
@@ -440,6 +442,47 @@ def create_mcp_server(
         if result.get("executed_command"):
             _invalidate_module_caches()
         return _finish("ks_plan_natural_request", _safe_json(result))
+
+    @mcp.tool()
+    @safe
+    def ks_run_agent(
+        target: str,
+        llm_local: bool = False,
+        llm_model: str = "llama3.3:latest",
+        goal: Optional[str] = None,
+        dry_run: bool = False,
+        safety_profile: Literal["safe", "discreet", "normal", "aggressive"] = "normal",
+        allow_dangerous: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Launch the autonomous agent workflow (scan → analyze → reason → exploit → report).
+
+        Requires explicit authorization for the target. Exploitation steps need
+        `allow_dangerous=true` when the server was started with dangerous consent.
+        """
+        blocked = _authorize("ks_run_agent", allow_dangerous=allow_dangerous)
+        if blocked:
+            return blocked
+
+        command_parts = ["agent", target.strip(), "--safety-profile", safety_profile]
+        if llm_local:
+            command_parts.extend(["--llm-local", "--llm-model", llm_model])
+        if goal:
+            command_parts.extend(["--goal", goal.strip()])
+        if dry_run:
+            command_parts.append("--dry-run")
+
+        result = command_bridge.execute_command(
+            " ".join(command_parts),
+            allow_dangerous=allow_dangerous,
+        )
+        if result.get("status") in ("ok", "failed"):
+            _invalidate_module_caches()
+        return _finish(
+            "ks_run_agent",
+            _safe_json(result),
+            allow_dangerous=allow_dangerous,
+        )
 
     @mcp.tool()
     @safe

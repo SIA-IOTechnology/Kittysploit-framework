@@ -326,8 +326,30 @@ class HttpRequestIntelligence:
         self.framework = framework
         self.evasion = EvasionEngine()
         self._llm: Optional[Any] = None
+        self._llm_endpoint: str = ""
+        self._llm_model: str = ""
         if framework and hasattr(framework, "llm_service"):
             self._llm = framework.llm_service
+
+    def configure_llm(self, *, endpoint: str = "", model: str = "") -> None:
+        """Bind agent LLM endpoint/model for adaptive HTTP probes."""
+        if endpoint:
+            self._llm_endpoint = str(endpoint)
+        if model:
+            self._llm_model = str(model)
+
+    def _resolve_llm_endpoint(self, llm_endpoint: str = "") -> str:
+        endpoint = (
+            llm_endpoint
+            or self._llm_endpoint
+            or "http://127.0.0.1:11434/api/generate"
+        )
+        if endpoint.endswith("/api/chat"):
+            return endpoint.replace("/api/chat", "/api/generate")
+        return endpoint
+
+    def _resolve_llm_model(self, llm_model: str = "") -> str:
+        return llm_model or self._llm_model or "llama3.1:8b"
 
     def empty_summary(self, enabled: bool = True, error: str = "") -> Dict[str, Any]:
         return {
@@ -1529,25 +1551,23 @@ class HttpRequestIntelligence:
             
         return result
 
-    def generate_adaptive_payload(self, context: str, param_name: str) -> str:
+    def generate_adaptive_payload(
+        self,
+        context: str,
+        param_name: str,
+        *,
+        llm_endpoint: str = "",
+        llm_model: str = "",
+    ) -> str:
         """Use LLM to generate a payload tailored to the reflection context."""
         if not self._llm:
             return ""
-        
-        prompt = f"""
-        Generate a minimal XSS payload for the following context where the parameter '{param_name}' is reflected.
-        Context: {context}
-        Rules:
-        - Minimal length
-        - Bypass basic filters
-        - No markdown, just the payload string.
-        """
         try:
             if not hasattr(self._llm, "query_text"):
                 return ""
             response = self._llm.query_text(
-                "http://127.0.0.1:11434/api/generate",
-                "llama3.1:8b",
+                self._resolve_llm_endpoint(llm_endpoint),
+                self._resolve_llm_model(llm_model),
                 "Return one minimal test payload as plain text.",
                 {"context": context, "parameter": param_name},
             )
@@ -1614,22 +1634,22 @@ class HttpRequestIntelligence:
         except Exception:
             return {}
 
-    def infer_hidden_parameters(self, known_params: List[str]) -> List[str]:
+    def infer_hidden_parameters(
+        self,
+        known_params: List[str],
+        *,
+        llm_endpoint: str = "",
+        llm_model: str = "",
+    ) -> List[str]:
         """Use LLM to guess potential hidden or interesting parameters."""
         if not self._llm or not known_params:
             return []
-        
-        prompt = f"""
-        Given these known HTTP parameters: {', '.join(known_params)}
-        Suggest 5 other potential hidden, administrative, or debug parameters that might exist.
-        Output only the names separated by commas.
-        """
         try:
             if not hasattr(self._llm, "query_text"):
                 return []
             response = self._llm.query_text(
-                "http://127.0.0.1:11434/api/generate",
-                "llama3.1:8b",
+                self._resolve_llm_endpoint(llm_endpoint),
+                self._resolve_llm_model(llm_model),
                 "Return at most five parameter names separated by commas.",
                 {"known_parameters": known_params},
             )

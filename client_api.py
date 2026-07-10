@@ -88,13 +88,31 @@ class KittyApiClient:
     def list_modules(self, *args):
         """List all available modules"""
         try:
-            response = self.session.get(f"{self.base_url}/modules", headers=self.headers)
+            response = self.session.get(
+                f"{self.base_url}/modules",
+                headers=self.headers,
+                params={"full": "1"},
+            )
             if response.status_code == 200:
                 modules = response.json()
                 print(f"\n{Fore.CYAN}=== Available Modules ===")
-                for module_name, info in modules.items():
-                    description = info.get('description', 'No description available')
-                    print(f"{Fore.GREEN}{module_name}{Fore.WHITE} - {description}")
+                if isinstance(modules, dict):
+                    for module_name, info in modules.items():
+                        if isinstance(info, dict):
+                            description = info.get('description', 'No description available')
+                        else:
+                            description = str(info)
+                        print(f"{Fore.GREEN}{module_name}{Fore.WHITE} - {description}")
+                elif isinstance(modules, list):
+                    for item in modules:
+                        if isinstance(item, dict):
+                            name = item.get("path") or item.get("name") or str(item)
+                            description = item.get("description", "No description available")
+                            print(f"{Fore.GREEN}{name}{Fore.WHITE} - {description}")
+                        else:
+                            print(f"{Fore.GREEN}{item}")
+                else:
+                    print(f"{Fore.YELLOW}Unexpected modules payload: {type(modules).__name__}")
                 print()
             else:
                 print(f"{Fore.RED}[!] Error: {response.text}")
@@ -407,7 +425,11 @@ class KittyApiClient:
                 print(f"{Fore.WHITE}Description: {Fore.WHITE}{ext.get('description', 'N/A')}")
                 print(f"{Fore.WHITE}Type: {Fore.GREEN}{ext.get('type')}")
                 print(f"{Fore.WHITE}Publisher: {Fore.GREEN}{ext.get('publisher', {}).get('name', 'N/A') if isinstance(ext.get('publisher'), dict) else ext.get('publisher', 'N/A')}")
-                print(f"{Fore.WHITE}Price: {Fore.GREEN}{'FREE' if ext.get('is_free') else f\"{ext.get('price')} {ext.get('currency')}\"}")
+                if ext.get("is_free"):
+                    price_label = "FREE"
+                else:
+                    price_label = f"{ext.get('price')} {ext.get('currency')}"
+                print(f"{Fore.WHITE}Price: {Fore.GREEN}{price_label}")
                 print(f"{Fore.WHITE}License: {Fore.GREEN}{ext.get('license_type', 'N/A')}")
                 
                 versions = ext.get('versions', [])

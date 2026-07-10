@@ -525,6 +525,7 @@ MCP_TOOL_SCOPES: Dict[str, MCPToolScope] = {
     "ks_get_command_help": MCPToolScope("mcp:read"),
     "ks_execute_command": MCPToolScope("commands:execute", param_consent="allow_dangerous"),
     "ks_plan_natural_request": MCPToolScope("mcp:read"),
+    "ks_run_agent": MCPToolScope("mcp:execute", dangerous=True, param_consent="allow_dangerous"),
     "ks_execute_natural_request": MCPToolScope("mcp:execute", param_consent="allow_dangerous"),
     "ks_list_workspaces": MCPToolScope("workspaces:read"),
     "ks_switch_workspace": MCPToolScope("workspaces:switch"),

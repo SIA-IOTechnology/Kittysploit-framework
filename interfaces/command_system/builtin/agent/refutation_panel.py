@@ -143,6 +143,8 @@ def refute_finding_panel(
     llm_model: str = "",
     source_resolver: Optional[Callable[[str], str]] = None,
     timeout: int = 20,
+    llm_budget_remaining: Optional[Callable[[], int]] = None,
+    on_llm_call: Optional[Callable[[], None]] = None,
 ) -> Dict[str, Any]:
     """
     Run N refuters on a finding and return an adjudicated panel report.
@@ -161,7 +163,14 @@ def refute_finding_panel(
 
     for idx in range(count):
         vote: Optional[Dict[str, Any]] = None
-        if llm_service is not None and llm_endpoint and llm_model:
+        budget_left = llm_budget_remaining() if llm_budget_remaining is not None else None
+        can_use_llm = (
+            llm_service is not None
+            and llm_endpoint
+            and llm_model
+            and (budget_left is None or budget_left > 0)
+        )
+        if can_use_llm:
             prompt = _build_refuter_prompt(finding, refuter_index=idx)
             try:
                 raw = llm_service.query_json(
@@ -174,6 +183,8 @@ def refute_finding_panel(
                 if isinstance(raw, dict):
                     verdict = str(raw.get("verdict") or "").upper()
                     if verdict in {"REFUTED", "SURVIVED"}:
+                        if on_llm_call is not None:
+                            on_llm_call()
                         vote = {
                             "verdict": verdict,
                             "why": str(raw.get("why") or raw.get("rationale") or "")[:800],
@@ -224,6 +235,8 @@ def refute_findings_batch(
     *,
     min_severity: str = "high",
     max_findings: int = 5,
+    llm_budget_remaining: Optional[Callable[[], int]] = None,
+    on_llm_call: Optional[Callable[[], None]] = None,
     **kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """Refute high-severity findings in a batch."""
@@ -239,6 +252,20 @@ def refute_findings_batch(
     candidates = candidates[:max_findings]
     results: List[Dict[str, Any]] = []
     for finding in candidates:
-        panel = refute_finding_panel(finding, **kwargs)
+        if llm_budget_remaining is not None and llm_budget_remaining() <= 0:
+            panel = refute_finding_panel(
+                finding,
+                llm_service=None,
+                llm_endpoint="",
+                llm_model="",
+                **{k: v for k, v in kwargs.items() if k not in {"llm_service", "llm_endpoint", "llm_model"}},
+            )
+        else:
+            panel = refute_finding_panel(
+                finding,
+                llm_budget_remaining=llm_budget_remaining,
+                on_llm_call=on_llm_call,
+                **kwargs,
+            )
         results.append(apply_refutation_to_finding(dict(finding), panel))
     return results

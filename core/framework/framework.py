@@ -461,11 +461,28 @@ class Framework:
     def get_available_modules(self) -> Dict[str, Any]:
         """
         Retourne tous les modules disponibles.
-        
-        Returns:
-            Dict[str, Any]: Modules disponibles
+
+        Prefer filesystem discovery via the module loader. ``self.modules`` is only
+        populated in legacy/core-load modes and is often empty after a normal boot.
         """
-        return self.modules
+        if isinstance(self.modules, dict) and self.modules:
+            # Legacy nested/core shape: flatten path→file when values look like file paths.
+            flat: Dict[str, Any] = {}
+            for key, value in self.modules.items():
+                if isinstance(value, str) and value.endswith(".py"):
+                    flat[str(key)] = value
+                elif isinstance(value, dict):
+                    for nested_key, nested_value in value.items():
+                        flat[str(nested_key)] = nested_value
+            if flat:
+                return flat
+            # Non-empty but not a path map (e.g. type→list placeholders) — fall through.
+        if getattr(self, "module_loader", None) is not None:
+            try:
+                return self.module_loader.discover_modules()
+            except Exception:
+                pass
+        return self.modules if isinstance(self.modules, dict) else {}
     
     def get_available_exploits(self) -> Dict[str, Any]:
         """

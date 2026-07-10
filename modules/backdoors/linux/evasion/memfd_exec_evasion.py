@@ -110,14 +110,6 @@ class Module(Backdoor):
             print_success(f"Backdoor ELF generated: {elf_path} ({elf_path.stat().st_size} bytes)")
             print_info(f"Inner stage: {len(inner_elf)} bytes | memfd label: {option_value(self, 'memfd_name')}")
             print_info(f"Embedded callback: {lhost}:{lport} (must match a running reverse_tcp listener)")
-            if lhost in ("127.0.0.1", "localhost", "::1"):
-                print_warning(
-                    "LHOST is loopback — the payload connects to 127.0.0.1 on the TARGET host. "
-                    "For a remote shell, re-run with: set LHOST <your_kittysploit_ip>"
-                )
-            print_warning(
-                "Listener tip: use `set LHOST 0.0.0.0` on listeners/multi/reverse_tcp when the target is not local."
-            )
             print_warning("Use only on authorized systems. Start a matching listener before running the binary.")
             return True
 

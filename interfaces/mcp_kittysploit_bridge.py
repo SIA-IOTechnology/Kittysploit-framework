@@ -1161,6 +1161,9 @@ class NaturalLanguagePlanner:
             self._llm = LocalLLMService()
         else:
             self._llm = type("NullLLMService", (), {"last_error": None})()
+        from interfaces.command_system.builtin.agent.planning_service import PlanningService
+
+        self._planner = PlanningService(self._llm)
 
     def invalidate_caches(self) -> None:
         self._module_index_cache = {"expires_at": 0.0, "rows": []}
@@ -1377,21 +1380,16 @@ class NaturalLanguagePlanner:
             "module_families": self._candidate_module_families(),
             "current_state": self.command_bridge.get_state() if self.command_bridge else {},
         }
-        instruction = (
-            "You are KittySploit's search-query assistant. "
-            "Reply ONLY a valid JSON object. "
-            "Required keys: search_terms (array), module_types (array), rationale (string). "
-            "Optional keys: rewritten_request (string), boost_terms (array), intent_override (string), "
-            "target_hint (string), reasoning_confidence (0..1). "
-            "Use only module_types from the provided module_families list. "
-            "search_terms must be short tokens or short phrases useful for matching module paths, names, tags, or descriptions."
-        )
-        response = self._llm.query_json(
+        from interfaces.command_system.builtin.agent.planning_service import MCP_SEARCH_ASSIST_INSTRUCTION
+
+        response = self._planner.query_json_cached(
+            phase="mcp_search_assist",
             endpoint=self.ollama_endpoint,
             model=self.ollama_model,
-            instruction=instruction,
+            instruction=MCP_SEARCH_ASSIST_INSTRUCTION,
             payload=payload,
             timeout=self.ollama_timeout,
+            goal=parsed.normalized_request,
         )
         if not isinstance(response, dict):
             return None
@@ -1817,21 +1815,16 @@ class NaturalLanguagePlanner:
                 for item in command_catalog
             ],
         }
-        instruction = (
-            "You are KittySploit MCP's natural-language planner. "
-            "Reply ONLY a valid JSON object. "
-            "Required keys: rationale (string), command_sequence (array), selected_paths (array). "
-            "Optional keys: should_execute_now (boolean), execution_mode (string), reasoning_confidence (0..1), notes (array). "
-            "Each item of command_sequence must be an object with keys: command (string), reason (string). "
-            "Use only realistic KittySploit commands. Prefer safe stateful preparation commands first. "
-            "Do not invent modules outside candidate_modules unless they are already in selected_paths."
-        )
-        response = self._llm.query_json(
+        from interfaces.command_system.builtin.agent.planning_service import MCP_NATURAL_PLANNER_INSTRUCTION
+
+        response = self._planner.query_json_cached(
+            phase="mcp_natural_planner",
             endpoint=self.ollama_endpoint,
             model=self.ollama_model,
-            instruction=instruction,
+            instruction=MCP_NATURAL_PLANNER_INSTRUCTION,
             payload=payload,
             timeout=self.ollama_timeout,
+            goal=str(parsed.normalized_request or ""),
         )
         if not isinstance(response, dict):
             return None

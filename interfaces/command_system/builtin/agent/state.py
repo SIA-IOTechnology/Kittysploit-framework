@@ -117,6 +117,8 @@ class AgentState:
     error_events: List[Any] = field(default_factory=list)
     executed_actions: List[str] = field(default_factory=list)
     completed_phases: List[str] = field(default_factory=list)
+    replan_count: int = 0
+    replan_pending: bool = False
 
 
 def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
@@ -207,6 +209,8 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "error_events": state.error_events,
         "executed_actions": list(state.executed_actions),
         "completed_phases": list(state.completed_phases),
+        "replan_count": state.replan_count,
+        "replan_pending": state.replan_pending,
     }
 
 
@@ -318,6 +322,8 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         error_events=list(d.get("error_events") or []),
         executed_actions=list(d.get("executed_actions") or []),
         completed_phases=list(d.get("completed_phases") or []),
+        replan_count=int(d.get("replan_count", 0) or 0),
+        replan_pending=bool(d.get("replan_pending", False)),
     )
 
 

@@ -41,11 +41,16 @@ from core.playbooks.executor import (
 )
 from interfaces.command_system.builtin.agent.strategic_llm_policy import (
     llm_budget_exhausted,
+    llm_budget_remaining,
     resolve_effective_llm_budget,
     resolve_llm_model,
     should_force_strategic_llm,
     strategic_llm_context,
     strategic_llm_instruction_extension,
+)
+from interfaces.command_system.builtin.agent.planning_service import (
+    PlanningService,
+    build_reason_prompt_payload,
 )
 
 from interfaces.command_system.builtin.scanner_command import ScannerCommand
@@ -243,6 +248,7 @@ class AgentWorkflowCore:
         self._catalog = ModuleCatalogService(framework)
         self._target_resolver = TargetResolver()
         self._llm = LocalLLMService()
+        self._planner = PlanningService(self._llm)
         self._report = ReportService()
         self._http_intel = HttpRequestIntelligence(framework)
         self._http_intel._llm = self._llm
@@ -1265,9 +1271,24 @@ class AgentWorkflowCore:
                         state.knowledge_base = kb
 
                     # Adaptive LLM Payload
-                    if xss.get("contexts") and getattr(state, "llm_local", False):
+                    if (
+                        xss.get("contexts")
+                        and getattr(state, "llm_local", False)
+                        and not llm_budget_exhausted(state)
+                    ):
                         context_str = ", ".join(xss["contexts"])
-                        llm_payload = self._http_intel.generate_adaptive_payload(context_str, param)
+                        llm_model = resolve_llm_model(state)
+                        self._http_intel.configure_llm(
+                            endpoint=state.llm_endpoint,
+                            model=llm_model,
+                        )
+                        state.metrics.llm_calls += 1
+                        llm_payload = self._http_intel.generate_adaptive_payload(
+                            context_str,
+                            param,
+                            llm_endpoint=state.llm_endpoint,
+                            llm_model=llm_model,
+                        )
                         if llm_payload:
                             if not self._consume_network_units(state, 1):
                                 break
@@ -1552,6 +1573,12 @@ class AgentWorkflowCore:
             refuters=3,
             min_severity="medium",
             max_findings=6,
+            llm_budget_remaining=lambda: llm_budget_remaining(state),
+            on_llm_call=lambda: setattr(
+                state.metrics,
+                "llm_calls",
+                int(getattr(state.metrics, "llm_calls", 0) or 0) + 1,
+            ),
         )
         refuted_count = sum(1 for row in refuted if row.get("refutation_blocked"))
         if refuted_count:
@@ -3694,7 +3721,11 @@ class AgentWorkflowCore:
         graph.add_edge("scan", "analyze")
         graph.add_edge("analyze", "reason")
         graph.add_edge("reason", "exploit")
-        graph.add_edge("exploit", "report")
+        graph.add_conditional_edges(
+            "exploit",
+            self._route_after_exploit,
+            {"reason": "reason", "report": "report"},
+        )
         graph.add_edge("report", END)
 
         app = graph.compile()
@@ -3725,12 +3756,47 @@ class AgentWorkflowCore:
                 self._record_agent_error(state, phase, exc, fatal=True, phase=phase)
                 state.error = f"{phase}: {exc}"
             self._checkpoint_state(state, phase)
+            if phase == "exploit" and state.replan_pending and state.replan_count < 1:
+                if state.verbose:
+                    print_info("Low-confidence exploit phase — replanning with remaining LLM budget.")
+                state = self._node_reason(state)
+                self._checkpoint_state(state, "reason")
+                state = self._node_exploit(state)
+                self._checkpoint_state(state, "exploit")
             if state.error and phase != "report":
                 break
         if state.current_phase != "report":
             state = self._node_report(state)
             self._checkpoint_state(state, "report")
         return state
+
+    def _should_replan_after_exploit(self, state: AgentState) -> bool:
+        if state.dry_run or state.plan_only or state.no_exploit:
+            return False
+        if not state.llm_local:
+            return False
+        if state.replan_count >= 1:
+            return False
+        if llm_budget_remaining(state) <= 0:
+            return False
+        if state.new_sessions:
+            return False
+        confidence = float((state.execution_plan or {}).get("reasoning_confidence", 1.0) or 1.0)
+        if confidence < 0.55:
+            return True
+        if state.decision_source == "heuristic" and int(getattr(state.metrics, "llm_fallback_count", 0) or 0) > 0:
+            return True
+        if state.vulnerable_results and not state.new_sessions and confidence < 0.7:
+            actions = (state.execution_plan or {}).get("next_actions") or []
+            if actions:
+                return True
+        return False
+
+    def _route_after_exploit(self, raw: Dict[str, Any]) -> str:
+        state = agent_state_from_dict(raw)
+        if state.replan_pending and state.replan_count < 1:
+            return "reason"
+        return "report"
 
     def _node_scan(self, state: AgentState) -> AgentState:
         state.metrics.deterministic_steps += 1
@@ -7826,6 +7892,9 @@ class AgentWorkflowCore:
         return state.compressed_context_summary
 
     def _node_reason(self, state: AgentState) -> AgentState:
+        if state.replan_pending and state.replan_count < 1:
+            state.replan_count += 1
+            state.replan_pending = False
         if state.target_reachable is False and not self._has_proxy_request_intel(state):
             state.metrics.deterministic_steps += 1
             state.decision_source = "heuristic"
@@ -8019,7 +8088,6 @@ class AgentWorkflowCore:
             return state
 
         print_status("Reasoning with local LLM...")
-        state.metrics.llm_calls += 1
         redirect_observation = self._collect_redirect_observation(state)
         risk_signals_list = knowledge_base.get("risk_signals", []) or []
         auth_session = "authenticated_session" in [str(x).lower() for x in risk_signals_list]
@@ -8047,111 +8115,40 @@ class AgentWorkflowCore:
         except Exception:
             specialist_hints = []
         packed_knowledge = strategic_context.get("packed_knowledge") or {}
-        prompt_payload = {
-            "target": state.raw_target,
-            "operator": strategic_context.get("operator") or {},
-            "strategy": {
-                "campaign_goal": state.campaign_goal,
-                "auth_first_mode": auth_first,
-                "strategic_mode": bool(strategic_context.get("strategic_triggers")),
-            },
-            "strategic_context": strategic_context,
-            "packed_knowledge": packed_knowledge,
-            "specialist_hints": specialist_hints,
-            "knowledge_context": {
-                "packed_summary": (packed_knowledge.get("text") or "")[:4000],
-                "included_sections": packed_knowledge.get("included_sections", []),
-                "dropped_sections": packed_knowledge.get("dropped_sections", []),
-                "compressed_summary": compressed_context,
-                "tech_hints": knowledge_base.get("tech_hints", []),
-                "specializations": knowledge_base.get("specializations", []),
-                "risk_signals": risk_signals_list,
-                "endpoint_count": len(knowledge_base.get("discovered_endpoints", [])),
-                "parameter_count": len(knowledge_base.get("discovered_params", [])),
-                "login_paths": knowledge_base.get("login_paths", [])[:10],
-                "redirect_observation": redirect_observation,
-                "request_intelligence": {
-                    "captured_flows": request_intel.get("analyzed_flows", 0),
-                    "interesting_requests": request_intel.get("interesting_requests", [])[:10],
-                    "sent_requests": request_intel.get("sent_requests", [])[:6],
-                } if request_intel else {},
-                "module_catalog": {
-                    "total_modules": knowledge_base.get("module_capability_catalog", {}).get("total_modules", 0),
-                    "by_family": knowledge_base.get("module_capability_catalog", {}).get("by_family", {}),
-                    "notable_modules": knowledge_base.get("module_capability_catalog", {}).get("notable_modules", [])[:80],
-                },
-            },
-            "post_auth_context": {
-                "authenticated_session": auth_session,
-                "auth_milestone": knowledge_base.get("auth_milestone", {}),
-                "credential_reuse_ready": bool(auth_context),
-                "login_path": auth_context.get("login_path", ""),
-                "landing_path": auth_context.get("final_path", ""),
-                "has_session_cookie": bool((auth_context.get("cookies") or {})),
-                "matched_catalog_paths_from_landing_html": knowledge_base.get("post_auth_catalog_paths", [])[:20],
-                "landing_html_excerpt": (knowledge_base.get("authenticated_page_excerpt") or "")[:2500],
-            },
-            "potential_findings": [
-                {
-                    "path": item.get("path"),
-                    "message": item.get("message"),
-                    "severity": item.get("severity"),
-                }
-                for item in state.potential_findings[:20]
-            ],
-            "vulnerabilities": [
-                {
-                    "path": item.get("path"),
-                    "module": item.get("module"),
-                    "message": item.get("message"),
-                    "severity": item.get("severity"),
-                    "exploit_module": item.get("exploit_module"),
-                    "context_score": item.get("context_score"),
-                    "context_hints": item.get("context_hints", []),
-                    "evidence_state": item.get("evidence_state"),
-                    "proof_quality": item.get("proof_quality"),
-                }
-                for item in decision_findings
-            ],
-            "task": (
-                (
-                    "AUTH-FIRST MODE ACTIVE: login surface confirmed with known login_paths, no authenticated session, no CMS lock. "
-                    "Put 'auxiliary/scanner/http/login/admin_login_bruteforce' as the FIRST run_followup (priority 1). "
-                    "Do not allocate budget to spa_scanner, security_headers, sensitive_files, robots/crawler, or generic tech detection until auth is resolved or bruteforce is exhausted. "
-                )
-                if auth_first
-                else ""
-            )
-            + (
-                "Your job is to choose the BEST NEXT ACTION for this campaign goal (strategy.campaign_goal), "
-                "not to rank vulnerabilities by curiosity. Prefer a single coherent run_followup or run_exploit as priority 1. "
-                "Return strict JSON with keys: "
-                "selected_paths (array, optional legacy hints), rationale (string), "
-                "next_actions (array of objects: {type, path, priority, options}), "
-                "max_requests_next_phase (int, keep this low, e.g. 2-4), stop_conditions (array), reasoning_confidence (0..1). "
-                "If root response is a redirect (e.g. 301/302) or there is very little discovery surface, assume it is an authentication portal. "
-                "In that case, explicitly prioritize 'auxiliary/scanner/http/login/admin_login_bruteforce' for bruteforcing instead of noisy or broad crawler fuzzing. "
-                "Use request_intelligence.interesting_requests as concrete observed traffic: prefer modules that fit captured endpoints, parameters, methods, auth boundaries, and replay results. "
-                "If post_auth_context.authenticated_session is true, a credential milestone succeeded: use landing_html_excerpt only as evidence "
-                "(infer stack from distinctive tokens and structure; do not invent a product unless the HTML supports it). "
-                "When credential_reuse_ready is true, prefer authenticated follow-up or exploit paths and keep reusing the known login path/cookies instead of re-running login discovery. "
-                "After a valid access, keep pushing toward a session/shell with grounded exploit paths before resuming any generic crawling. "
-                "Prefer next_actions that align matched_catalog_paths_from_landing_html with run_followup/run_exploit when paths exist in the catalog. "
-                "If matches are empty or low confidence, propose a short crawler pass then narrow XSS/SQLi/LFI only on parameters/endpoints that were actually observed. "
-                "Avoid paths tied to outbound email, newsletters, ticketing, or mass messaging (irresponsible / noisy). "
-                "Be methodical: one coherent hypothesis per phase, small request budgets."
-            )
-            + strategic_llm_instruction_extension(strategic_context),
-        }
+        prompt_payload = build_reason_prompt_payload(
+            raw_target=state.raw_target,
+            campaign_goal=state.campaign_goal or "",
+            auth_first=auth_first,
+            strategic_context=strategic_context,
+            packed_knowledge=packed_knowledge,
+            specialist_hints=specialist_hints,
+            compressed_context=compressed_context,
+            knowledge_base=knowledge_base,
+            redirect_observation=redirect_observation,
+            auth_session=auth_session,
+            auth_context=auth_context,
+            potential_findings=state.potential_findings,
+            decision_findings=decision_findings,
+            strategic_instruction_extension=strategic_llm_instruction_extension(strategic_context),
+        )
 
         llm_model = resolve_llm_model(state)
-        llm_response = self._llm.query_local_llm(
+        cache_hit = {"value": False}
+
+        def _mark_cache_hit() -> None:
+            cache_hit["value"] = True
+
+        llm_response = self._planner.query_agent_reason(
             endpoint=state.llm_endpoint,
             model=llm_model,
             payload=prompt_payload,
             timeout=25,
+            goal=str(state.campaign_goal or ""),
             strategic=bool(strategic_context.get("strategic_triggers")),
+            on_cache_hit=_mark_cache_hit,
         )
+        if not cache_hit["value"]:
+            state.metrics.llm_calls += 1
 
         if not llm_response:
             print_warning("Local LLM unavailable, using heuristic prioritization.")
@@ -9889,6 +9886,7 @@ class AgentWorkflowCore:
             kind="execution",
             extra={"new_sessions": list(new_sessions)},
         )
+        state.replan_pending = self._should_replan_after_exploit(state)
         return state
 
     def _node_report(self, state: AgentState) -> AgentState:

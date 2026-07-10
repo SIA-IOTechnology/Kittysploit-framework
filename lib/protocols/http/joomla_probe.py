@@ -17,6 +17,8 @@ from lib.scanner.http.detectors import detect_joomla
 from lib.scanner.http.response_validation import is_html_response, is_xml_response, looks_like_html
 
 JCE_PATCHED_VERSION = "2.9.99.5"
+HELIX3_PATCHED_VERSION = "3.1.2"
+HELIX3_AJAX_PATH = "/index.php?option=com_ajax&plugin=helix3&format=json"
 
 
 class Joomla(BaseModule):
@@ -60,6 +62,12 @@ class Joomla(BaseModule):
 
     @classmethod
     def jce_is_patched(cls, version: str, patched: str = JCE_PATCHED_VERSION) -> bool:
+        if not version:
+            return False
+        return not cls.version_less_than(version, patched)
+
+    @classmethod
+    def helix3_is_patched(cls, version: str, patched: str = HELIX3_PATCHED_VERSION) -> bool:
         if not version:
             return False
         return not cls.version_less_than(version, patched)
@@ -167,6 +175,74 @@ class Joomla(BaseModule):
             result["found"] = True
 
         return result
+
+    def probe_helix3(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"found": False, "version": None}
+        for manifest in (
+            "/templates/shaper_helix3/templateDetails.xml",
+            "/plugins/ajax/helix3/helix3.xml",
+            "/plugins/system/helix3/helix3.xml",
+        ):
+            response = self.joomla_http_get(manifest, timeout=8)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            if not is_xml_response(body) and "helix3" not in body.lower():
+                continue
+            match = self._XML_VERSION_RE.search(body)
+            if match:
+                result.update({"found": True, "version": match.group(1).strip()})
+                break
+            if "helix3" in body.lower() or "shaper_helix3" in body.lower():
+                result["found"] = True
+                break
+
+        if not result["found"]:
+            for asset in (
+                "/templates/shaper_helix3/css/bootstrap.min.css",
+                "/plugins/system/helix3/assets/css/system.css",
+            ):
+                response = self.joomla_http_get(asset, timeout=6)
+                if not response or response.status_code != 200:
+                    continue
+                body = response.text or ""
+                if looks_like_html(body) or len(body) <= 20:
+                    continue
+                result["found"] = True
+                break
+
+        return result
+
+    def helix3_ajax_post(
+        self,
+        action: str,
+        layout_name: Optional[str] = None,
+        content: Optional[str] = None,
+        template_id: Optional[str] = None,
+        settings: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ):
+        data: Dict[str, str] = {f"data[action]": action}
+        if layout_name is not None:
+            data["data[layoutName]"] = layout_name
+        if content is not None:
+            data["data[content]"] = content
+        if template_id is not None:
+            data["data[template_id]"] = template_id
+        if settings is not None:
+            data["data[settings]"] = settings
+
+        kwargs: Dict[str, Any] = {"data": data}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return self.http_request(method="POST", path=HELIX3_AJAX_PATH, **kwargs)
+
+    @staticmethod
+    def helix3_ajax_success(response) -> bool:
+        if not response or response.status_code != 200:
+            return False
+        body = (response.text or "").lower()
+        return "success" in body or '"status":true' in body or '"status": true' in body
 
     def probe_jce(self) -> Dict[str, Any]:
         for manifest in (

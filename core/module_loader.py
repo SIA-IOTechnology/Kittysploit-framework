@@ -33,41 +33,6 @@ except ImportError:
     POLICY_ENGINE_AVAILABLE = False
 
 
-        # Legacy paths kept for backward compatibility after module moves/renames.
-MODULE_PATH_ALIASES: Dict[str, str] = {
-    "evasion/windows/x64/direct_syscall_evasion": "backdoors/windows/evasion/direct_syscall_evasion",
-    "evasion/windows/x64/syscall_indirect_evasion": "backdoors/windows/evasion/syscall_indirect_evasion",
-    "evasion/windows/x64/encrypted_dropper_evasion": "backdoors/windows/evasion/encrypted_dropper_evasion",
-    "evasion/windows/powershell_stager_evasion": "backdoors/windows/evasion/powershell_stager_evasion",
-    "evasion/windows/zig_shell_evasion": "backdoors/windows/evasion/zig_shell_evasion",
-    "evasion/windows/process_hollowing_evasion": "backdoors/windows/evasion/process_hollowing_evasion",
-    "evasion/windows/module_stomping_evasion": "backdoors/windows/evasion/module_stomping_evasion",
-    "evasion/windows/early_bird_evasion": "backdoors/windows/evasion/early_bird_evasion",
-    "evasion/windows/srdi_evasion": "backdoors/windows/evasion/srdi_evasion",
-    "evasion/windows/herpaderping_evasion": "backdoors/windows/evasion/herpaderping_evasion",
-    "evasion/windows/etw_amsi_patch_evasion": "backdoors/windows/evasion/etw_amsi_patch_evasion",
-    "evasion/windows/sleep_obfuscation_evasion": "backdoors/windows/evasion/sleep_obfuscation_evasion",
-    "evasion/linux/x64/ebpf_evasion": "backdoors/linux/evasion/ebpf_evasion",
-    "evasion/linux/x64/ptrace_inject_evasion": "backdoors/linux/evasion/ptrace_inject_evasion",
-    "evasion/linux/x64/userfaultfd_evasion": "backdoors/linux/evasion/userfaultfd_evasion",
-    "evasion/linux/ebpf_evasion": "backdoors/linux/evasion/ebpf_evasion",
-    "evasion/linux/ptrace_inject_evasion": "backdoors/linux/evasion/ptrace_inject_evasion",
-    "evasion/linux/userfaultfd_evasion": "backdoors/linux/evasion/userfaultfd_evasion",
-    "evasion/linux/x64/elf_shellcode_loader": "backdoors/linux/evasion/elf_shellcode_loader",
-    "evasion/linux/elf_shellcode_loader": "backdoors/linux/evasion/elf_shellcode_loader",
-    "evasion/linux/x64/memfd_exec_evasion": "backdoors/linux/evasion/memfd_exec_evasion",
-    "evasion/linux/memfd_exec_evasion": "backdoors/linux/evasion/memfd_exec_evasion",
-    "evasion/linux/x64/zig_reverse_evasion": "backdoors/linux/evasion/zig_reverse_evasion",
-    "evasion/linux/zig_reverse_evasion": "backdoors/linux/evasion/zig_reverse_evasion",
-    "evasion/linux/x64/ld_preload_evasion": "backdoors/linux/evasion/ld_preload_evasion",
-    "evasion/linux/ld_preload_evasion": "backdoors/linux/evasion/ld_preload_evasion",
-    "evasion/linux/x64/deb_evasion_packaging": "backdoors/linux/evasion/deb_evasion_packaging",
-    "evasion/linux/deb_evasion_packaging": "backdoors/linux/evasion/deb_evasion_packaging",
-    "evasion/linux/x64/proc_mem_evasion": "backdoors/linux/evasion/proc_mem_evasion",
-    "evasion/linux/proc_mem_evasion": "backdoors/linux/evasion/proc_mem_evasion",
-}
-
-
 class LoadFailureKind(str, Enum):
     NOT_FOUND = "not_found"
     CONTRACT = "contract"
@@ -614,7 +579,6 @@ class ModuleLoader:
         """
         self.last_load_failure = None
         try:
-            module_path = MODULE_PATH_ALIASES.get(module_path, module_path)
             if module_path.startswith("modules/marketplace/"):
                 return self._load_extension_module(module_path, load_only, framework, silent)
 

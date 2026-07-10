@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kittysploit"
-version = "1.0.8"
+version = "1.1.0"
 description = "KittySploit - A modular penetration testing framework"
 readme = "README.md"
 license = { text = "Proprietary" }

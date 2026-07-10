@@ -38,6 +38,20 @@ While traditional tools struggle with modern web architectures and automated def
 
 ---
 
+## Vision: KittySploit 2.0
+
+KittySploit **1.x** lays the groundwork — modular architecture, rapid iteration, and a growing ecosystem. The long-term goal is **version 2.0**: not just another pentest framework, but a genuinely best-in-class offensive platform.
+
+**What 2.0 means for us:**
+
+| **Powerful** | **Stable** | **Complete** |
+| :--- | :--- | :--- |
+| Deep coverage across web, network, cloud, and OT — with AI-assisted planning, evasion-first payloads, and workflows that scale from recon to post-exploitation. | A battle-tested core, predictable APIs, and reliability you can trust on real engagements — not just demos. | One cohesive toolchain: agent, proxy, OSINT, payloads, collaboration, and marketplace — fully integrated, not bolted together. |
+
+We're building toward that north star release by release. Every module, every fix, and every contribution moves us closer to **2.0**.
+
+---
+
 ## Screenshots
 
 <div align="center">

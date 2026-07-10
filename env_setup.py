@@ -20,7 +20,8 @@ def setup_environment():
     
     # Set environment variables
     os.environ['KITTYSPLOIT_HOME'] = str(current_dir)
-    os.environ['KITTYSPLOIT_VERSION'] = '1.0.0'
+    from core.version import VERSION
+    os.environ['KITTYSPLOIT_VERSION'] = VERSION
     
     print(f"KittySploit home: {current_dir}")
     print("Environment setup complete!")

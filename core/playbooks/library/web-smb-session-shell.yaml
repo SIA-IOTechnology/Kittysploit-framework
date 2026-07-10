@@ -1,0 +1,29 @@
+id: web-smb-session-shell
+version: "1"
+name: SMB session to remote shell
+source: bug-bounty
+domain: internal
+tags: [smb, windows, shell, lateral]
+description: >
+  Internal pivot — acquire SMB session on a Windows host, deploy reverse shell
+  via PsExec-style execution when credentials or guest access allow.
+prerequisites:
+  signals_any:
+    - smb
+    - windows
+  domains:
+    - internal
+chain:
+  - id: acquire_smb
+    capability: authenticated_session
+    module: auxiliary/scanner/smb/session_acquire
+    description: Establish SMB session with available credentials
+  - id: deploy_shell
+    capability: shell
+    module: post/smb/manage/deploy_reverse_shell
+    description: Deploy reverse shell over SMB
+blockers:
+  - SMB signing required
+  - no valid credentials
+references:
+  - "Common internal BB / AD path after credential discovery"

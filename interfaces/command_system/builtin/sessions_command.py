@@ -306,12 +306,27 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "azure_run_command":
                 session_type = "azure_run_command"
                 shell_type = "azure_run_command"
+            elif session and session.session_type and session.session_type.lower() == "http_cmd":
+                session_type = "http_cmd"
+                shell_type = "http_cmd"
             elif session and session.session_type and session.session_type.lower() == "polling":
                 session_type = "polling"
                 shell_type = "polling"
             elif session and session.session_type and session.session_type.lower() == "winrm":
                 session_type = "winrm"
                 shell_type = "winrm"
+            elif session and session.session_type and session.session_type.lower() == "smb":
+                session_type = "smb"
+                shell_type = "smb"
+            elif session and session.session_type and session.session_type.lower() == "s7comm":
+                session_type = "s7comm"
+                shell_type = "s7comm"
+            elif session and session.session_type and session.session_type.lower() == "modbus":
+                session_type = "modbus"
+                shell_type = "modbus"
+            elif session and session.session_type and session.session_type.lower() == "quic":
+                session_type = "quic"
+                shell_type = "quic"
             else:
                 session_type = "standard"
                 shell_type = "classic"
@@ -320,6 +335,16 @@ Session Types:
             existing_shell = self.framework.shell_manager.get_shell(session_id)
             if existing_shell:
                 print_info(f"Shell already exists for session {session_id}")
+                if getattr(existing_shell, "shell_name", "") == "classic":
+                    existing_shell._refresh_connection()
+                    existing_shell._normalize_connection()
+                    if not existing_shell.is_session_available():
+                        transport_state = (session.data or {}).get("transport_state") if session else None
+                        if transport_state == "disconnected":
+                            print_error(
+                                "Session disconnected — wait for implant reconnect or kill this session."
+                            )
+                            return False
                 # Switch to existing shell
                 success = self.framework.shell_manager.switch_shell(session_id)
                 if success:
@@ -377,10 +402,33 @@ Session Types:
             print_info("Type 'exit', 'back' or 'background' to return to main shell (session remains active), 'help' for shell commands")
             print_info("-" * 50)
 
+            if getattr(shell, "shell_name", "") == "classic":
+                shell._refresh_connection()
+                shell._normalize_connection()
+                if not shell.is_session_available():
+                    print_error(
+                        "Session disconnected — wait for implant reconnect or kill this session."
+                    )
+                    return False
+                if hasattr(shell, "prepare_interactive_session"):
+                    shell.prepare_interactive_session()
+
             # SSH needs a persistent PTY channel for stateful workflows (su/sudo/cd/export).
             if getattr(shell, "shell_name", "") == "ssh" and hasattr(shell, "start_interactive_shell_loop"):
                 print_info("Using persistent SSH PTY mode for this interactive session.")
                 return bool(shell.start_interactive_shell_loop())
+
+            # Classic reverse shells: raw PTY/ConPTY relay when supported.
+            if (
+                getattr(shell, "shell_name", "") == "classic"
+                and hasattr(shell, "start_interactive_shell_loop")
+                and hasattr(shell, "supports_pty_mode")
+                and shell.supports_pty_mode()
+            ):
+                print_info("Using persistent PTY/ConPTY mode for this interactive session.")
+                if shell.start_interactive_shell_loop():
+                    return True
+                print_info("PTY mode unavailable — falling back to line-by-line shell.")
             
             while True:
                 try:
@@ -388,6 +436,10 @@ Session Types:
                     if hasattr(shell, 'is_connected') and not shell.is_connected:
                         print_error("SSH connection lost. Exiting interactive session...")
                         break
+                    if getattr(shell, "shell_name", "") == "classic" and hasattr(shell, "is_session_available"):
+                        if not shell.is_session_available():
+                            print_error("Remote session disconnected. Exiting interactive session...")
+                            break
                     
                     # Get shell prompt
                     prompt = shell.get_prompt()
@@ -450,6 +502,10 @@ Session Types:
                             'Connection closed',
                             'Connection reset',
                             'connection reset',
+                            'connection lost or no response',
+                            'remote session disconnected',
+                            'brokenpipe',
+                            'session disconnected',
                             'SSH execution error',
                             'Socket connection is closed',
                             'Connection closed by remote',
@@ -511,6 +567,31 @@ Session Types:
         except Exception as e:
             print_error(f"Error showing shell help: {str(e)}")
     
+    def _cleanup_session_transport(self, session_id: str) -> None:
+        """Close listener transport and remove the associated shell."""
+        session = None
+        if hasattr(self.framework, "session_manager"):
+            session = self.framework.session_manager.get_session(session_id)
+        if session:
+            listener_id = (session.data or {}).get("listener_id")
+            listener = (getattr(self.framework, "active_listeners", None) or {}).get(listener_id)
+            if listener and hasattr(listener, "remove_session_connection"):
+                listener.remove_session_connection(session_id)
+        if hasattr(self.framework, "shell_manager"):
+            self.framework.shell_manager.remove_shell(session_id)
+
+    def _cleanup_ics_session(self, session_id: str) -> None:
+        """Close live ICS protocol clients stored outside the session manager."""
+        registry = getattr(self.framework, "_ics_session_clients", None) or {}
+        client = registry.pop(session_id, None)
+        if client and hasattr(client, "close"):
+            try:
+                client.close()
+            except Exception:
+                pass
+        if hasattr(self.framework, "shell_manager"):
+            self.framework.shell_manager.remove_shell(session_id)
+
     def _kill_session(self, session_id: str) -> bool:
         """Kill a specific session or all sessions"""
         try:
@@ -537,6 +618,8 @@ Session Types:
                 return self._kill_all_sessions(session_manager)
             
             # Try to kill standard session
+            self._cleanup_session_transport(session_id)
+            self._cleanup_ics_session(session_id)
             if session_manager.remove_session(session_id):
                 print_success(f"Standard session killed: {session_id}")
                 return True
@@ -579,6 +662,7 @@ Session Types:
             
             # Kill standard sessions
             for session in standard_sessions[:]:  # Copy list to avoid modification during iteration
+                self._cleanup_ics_session(session.id)
                 if session_manager.remove_session(session.id):
                     killed_count += 1
                     print_success(f"Killed standard session: {session.id}")

@@ -1,0 +1,80 @@
+id: ot-safe-assessment
+version: "1"
+name: OT Safe Assessment
+description: >
+  Phase 1 read-only OT assessment — multi-protocol discovery, protection checks,
+  and consolidated reporting. No DoS, PLC stop, or configuration changes.
+tags: [ics, ot, assessment, safe, phase1]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: modbus_identify
+steps:
+  modbus_identify:
+    module: auxiliary/scanner/ics/modbus_identify
+    description: Modbus TCP unit discovery (read-only)
+    options:
+      target: "${target}"
+    on_success: s7_identify
+    on_failure: s7_identify
+  s7_identify:
+    module: auxiliary/scanner/ics/s7comm_identify
+    description: Siemens S7comm CPU identify
+    options:
+      target: "${target}"
+    on_success: s7_protection
+    on_failure: s7_protection
+  s7_protection:
+    module: scanner/ics/s7_protection_level
+    description: Check S7 password protection level
+    options:
+      target: "${target}"
+    on_success: bacnet_whois
+    on_failure: bacnet_whois
+  bacnet_whois:
+    module: auxiliary/scanner/ics/bacnet_whois
+    description: BACnet/IP Who-Is discovery
+    options:
+      target: "${target}"
+    on_success: enip_identity
+    on_failure: enip_identity
+  enip_identity:
+    module: auxiliary/scanner/ics/enip_list_identity
+    description: EtherNet/IP List Identity
+    options:
+      target: "${target}"
+    on_success: dnp3_identify
+    on_failure: dnp3_identify
+  dnp3_identify:
+    module: auxiliary/scanner/ics/dnp3_identify
+    description: DNP3 outstation identify (TCP/20000)
+    options:
+      target: "${target}"
+    on_success: dnp3_integrity
+    on_failure: dnp3_integrity
+  dnp3_integrity:
+    module: auxiliary/scanner/ics/dnp3_integrity_poll
+    description: DNP3 integrity poll (read-only)
+    options:
+      target: "${target}"
+    on_success: modbus_write_check
+    on_failure: modbus_write_check
+  modbus_write_check:
+    module: scanner/ics/modbus_write_enabled
+    description: Detect Modbus write-enabled registers (read probe)
+    options:
+      target: "${target}"
+    on_success: engagement_report
+    on_failure: engagement_report
+  engagement_report:
+    module: analysis/reporting/ics_engagement_report
+    description: Consolidated OT engagement report
+    options:
+      title: "OT Safe Assessment Report"
+      sync_workspace: "true"
+    on_success: done
+    on_failure: done

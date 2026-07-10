@@ -1,0 +1,55 @@
+id: postgres-sqli-to-rce
+version: "1"
+name: PostgreSQL access to COPY PROGRAM RCE
+source: ctf
+domain: web
+tags: [postgresql, sqli, copy, rce, database, linux]
+description: >
+  Database-heavy CTF / BB chain — confirm SQLi or stolen PG creds, enumerate
+  databases and roles, check superuser COPY privileges, execute COPY PROGRAM or
+  CVE-2019-9193 for OS command execution, then spawn interactive shell.
+prerequisites:
+  signals_any:
+    - sql_injection
+    - postgresql
+    - postgres
+  tech_any:
+    - postgresql
+    - php
+    - java
+chain:
+  - id: sqli_confirm
+    capability: db_access
+    module: auxiliary/scanner/http/sqli_engine
+    description: Confirm injectable parameter on app backed by PostgreSQL
+  - id: enum_databases
+    capability: db_access
+    module: post/postgresql/gather/enum_databases
+    description: List databases and accessible schemas
+  - id: enum_roles
+    capability: db_access
+    module: post/postgresql/gather/enum_roles
+    description: Role membership and SUPERUSER flags
+  - id: privesc_paths
+    capability: admin_access
+    module: post/postgresql/gather/enum_privesc_paths
+    description: Unsafe extensions, trust relationships, weak configs
+  - id: copy_program
+    capability: rce
+    module: post/postgresql/exploits/copy_program_exec
+    description: COPY PROGRAM / COPY TO PROGRAM command execution
+  - id: cve_2019_9193
+    capability: rce
+    module: post/postgresql/exploits/cve_2019_9193_rce
+    optional: true
+    description: Legacy pg_read_file + COPY fallback on older clusters
+  - id: spawn_shell
+    capability: shell
+    module: post/shell/multi/manage/spawn_reverse_shell
+    description: Upgrade RCE output to stable reverse shell
+blockers:
+  - non-superuser DB role
+  - COPY disabled or allow_system_table_mods off
+  - network egress filter on reverse connection
+references:
+  - "CTF pattern: SQLi → pg_roles → COPY PROGRAM → bash reverse"

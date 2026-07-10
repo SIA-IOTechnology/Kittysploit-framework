@@ -1,0 +1,35 @@
+id: web-graphql-abuse
+version: "1"
+name: GraphQL introspection to abuse
+source: bug-bounty
+domain: web
+tags: [graphql, api, introspection, injection]
+description: >
+  Detect GraphQL endpoint, run introspection, surface sensitive queries for
+  follow-up auth bypass or injection testing.
+prerequisites:
+  signals_any:
+    - graphql
+    - api
+  capabilities:
+    - api_surface_ready
+chain:
+  - id: graphql_detect
+    capability: graphql_endpoint
+    module: scanner/http/graphql_detect
+    description: Locate GraphQL/GraphiQL endpoint
+  - id: introspection_abuse
+    capability: db_access
+    module: auxiliary/scanner/http/graphql_abuse
+    description: Full introspection and sensitive field mapping
+  - id: sqli_followup
+    capability: db_access
+    module: auxiliary/scanner/http/sqli_engine
+    optional: true
+    description: SQLi on resolver-backed parameters when exposed
+blockers:
+  - introspection disabled in production
+  - query depth/complexity limits
+  - auth required on mutations
+references:
+  - "API BB pattern GraphQL introspection → sensitive queries → IDOR/SQLi"

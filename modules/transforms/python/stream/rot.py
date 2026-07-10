@@ -5,13 +5,13 @@ from typing import Optional
 from kittysploit import *
 
 
-class Module(Obfuscator):
-    """ROT (Caesar) stream obfuscator - shifts each byte by a fixed value (mod 256)."""
+class Module(Transform):
+    """ROT (Caesar) stream transform - shifts each byte by a fixed value (mod 256)."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "ROT Stream Obfuscator",
+        "name": "ROT Stream Transform",
         "description": "Shifts each byte by a fixed value (mod 256). Encode: add shift, decode: subtract. Simple Caesar-style obfuscation.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -44,14 +44,14 @@ class Module(Obfuscator):
         return bytes(out)
 
     def generate_client_code(self, language: str) -> Optional[str]:
-        """Generate Python code that defines _obf_encode(d) and _obf_decode(d)."""
+        """Generate Python code that defines _xf_encode(d) and _xf_decode(d)."""
         if language != "python":
             return None
         s = self._shift_val()
         return (
-            f"_obf_shift={s}\n"
-            "def _obf_decode(d):\n"
-            " return bytes((b-_obf_shift)%256 for b in d)\n"
-            "def _obf_encode(d):\n"
-            " return bytes((b+_obf_shift)%256 for b in d)\n"
+            f"_xf_shift={s}\n"
+            "def _xf_decode(d):\n"
+            " return bytes((b-_xf_shift)%256 for b in d)\n"
+            "def _xf_encode(d):\n"
+            " return bytes((b+_xf_shift)%256 for b in d)\n"
         )

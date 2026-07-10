@@ -1,0 +1,218 @@
+id: verification
+version: "1"
+name: Misconfiguration Verification
+description: >
+  Second-phase scanners that confirm unauthenticated access, writable services,
+  and exposed admin APIs. Run after network-services, devops-panels, or saas-panels.
+tags: [discovery, scanner, verify, misconfig, unauth, quick-win]
+policy:
+  safe_only: true
+  approval_recommended: true
+  quiet_probes: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+  http_port:
+    description: HTTP(S) port for web verification modules
+    default: "443"
+  ssl:
+    description: Use TLS for HTTP verification phase
+    default: "true"
+start_step: redis_unauth_write
+steps:
+  redis_unauth_write:
+    module: scanner/redis/redis_unauth_write_detect
+    description: Confirm Redis unauthenticated writes
+    options:
+      target: "${target}"
+      port: "6379"
+    on_success: mongodb_unauth
+    on_failure: mongodb_unauth
+  mongodb_unauth:
+    module: scanner/mongodb/mongodb_unauth_detect
+    description: Confirm MongoDB unauthenticated database listing
+    options:
+      target: "${target}"
+      port: "27017"
+    on_success: clickhouse_unauth
+    on_failure: clickhouse_unauth
+  clickhouse_unauth:
+    module: scanner/http/clickhouse_unauth_query
+    options:
+      target: "${target}"
+      port: "8123"
+    on_success: influxdb_unauth
+    on_failure: influxdb_unauth
+  influxdb_unauth:
+    module: scanner/http/influxdb_unauth_read
+    options:
+      target: "${target}"
+      port: "8086"
+    on_success: elasticsearch_indices
+    on_failure: elasticsearch_indices
+  elasticsearch_indices:
+    module: scanner/http/elasticsearch_indices_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: neo4j_unauth
+    on_failure: neo4j_unauth
+  neo4j_unauth:
+    module: scanner/http/neo4j_unauth_query
+    options:
+      target: "${target}"
+      port: "7474"
+      ssl: "false"
+    on_success: etcd_unauth
+    on_failure: etcd_unauth
+  etcd_unauth:
+    module: scanner/http/etcd_unauth_write_verify
+    description: etcd KV write probe (write_probe defaults false)
+    options:
+      target: "${target}"
+      port: "2379"
+      ssl: "false"
+      write_probe: "false"
+    on_success: consul_kv_unauth
+    on_failure: consul_kv_unauth
+  consul_kv_unauth:
+    module: scanner/http/consul_kv_unauth_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+      write_probe: "false"
+    on_success: minio_public_buckets
+    on_failure: minio_public_buckets
+  minio_public_buckets:
+    module: scanner/http/minio_public_bucket_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: grafana_unauth
+    on_failure: grafana_unauth
+  grafana_unauth:
+    module: scanner/http/grafana_unauth_api_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: jenkins_open_api
+    on_failure: jenkins_open_api
+  jenkins_open_api:
+    module: scanner/http/jenkins_open_api_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: k8s_dashboard_unauth
+    on_failure: k8s_dashboard_unauth
+  k8s_dashboard_unauth:
+    module: scanner/http/k8s_dashboard_unauth_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: kubelet_readonly
+    on_failure: kubelet_readonly
+  kubelet_readonly:
+    module: scanner/cloud/kubelet_readonly_verify
+    options:
+      target: "${target}"
+      port: "10255"
+      ssl: "false"
+    on_success: k8s_api_verify
+    on_failure: k8s_api_verify
+  k8s_api_verify:
+    module: scanner/cloud/kubernetes_api_detect
+    description: Kubernetes API version/namespaces exposure
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: docker_api
+    on_failure: docker_api
+  docker_api:
+    module: scanner/tcp/docker_api_exposed
+    options:
+      target: "${target}"
+      port: "2375"
+    on_success: zookeeper_unauth
+    on_failure: zookeeper_unauth
+  zookeeper_unauth:
+    module: scanner/tcp/zookeeper_unauth_enum
+    options:
+      target: "${target}"
+      port: "2181"
+    on_success: activemq_jolokia
+    on_failure: activemq_jolokia
+  activemq_jolokia:
+    module: scanner/http/activemq_jolokia_verify
+    options:
+      target: "${target}"
+      port: "8161"
+      ssl: "false"
+    on_success: mlflow_unauth
+    on_failure: mlflow_unauth
+  mlflow_unauth:
+    module: scanner/http/mlflow_unauth_verify
+    options:
+      target: "${target}"
+      port: "5000"
+      ssl: "false"
+    on_success: ollama_api
+    on_failure: ollama_api
+  ollama_api:
+    module: scanner/http/ollama_api_verify
+    options:
+      target: "${target}"
+      port: "11434"
+      ssl: "false"
+    on_success: openwebui_unauth
+    on_failure: openwebui_unauth
+  openwebui_unauth:
+    module: scanner/http/openwebui_unauth_verify
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: comfyui_unauth
+    on_failure: comfyui_unauth
+  comfyui_unauth:
+    module: scanner/http/comfyui_unauth_verify
+    options:
+      target: "${target}"
+      port: "8188"
+      ssl: "false"
+    on_success: adcs_web_enroll
+    on_failure: adcs_web_enroll
+  adcs_web_enroll:
+    module: scanner/http/adcs_web_enroll_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: firebase_rtdb
+    on_failure: firebase_rtdb
+  firebase_rtdb:
+    module: scanner/http/firebase_rtdb_public_access_detect
+    description: Firebase RTDB public read (probe_write defaults false)
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+      probe_write: "false"
+    on_success: sensitive_files
+    on_failure: sensitive_files
+  sensitive_files:
+    module: scanner/http/sensitive_files_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

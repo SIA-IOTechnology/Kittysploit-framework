@@ -21,6 +21,12 @@ from interfaces.command_system.builtin.agent.redaction import (
 from interfaces.command_system.builtin.agent.campaign_knowledge_graph import (
     summarize_attack_graph_for_report,
 )
+from interfaces.command_system.builtin.agent.attack_chain_memory import export_chain_summary
+from core.playbooks.coverage import (
+    assess_playbook_coverage,
+    refresh_playbook_planner_hints,
+    summarize_playbook_coverage_for_report,
+)
 from interfaces.command_system.builtin.agent.run_store import AgentPathService, new_run_id
 
 
@@ -76,6 +82,37 @@ class ReportService:
             "followup": len([f for f in findings if str(f.get("decision_class", "")).lower() == "followup"]),
             "info": len([f for f in findings if str(f.get("decision_class", "")).lower() == "info"]),
         }
+        evidence_summary = {
+            "records": 0,
+            "by_state": {},
+            "confirmed_or_better": 0,
+            "top": [],
+        }
+        for finding in findings:
+            state = str(finding.get("evidence_state") or finding.get("validation_status") or "probable").lower()
+            by_state = evidence_summary["by_state"]
+            by_state[state] = int(by_state.get(state, 0)) + 1
+            if state in {"confirmed", "exploitable"}:
+                evidence_summary["confirmed_or_better"] += 1
+            rows = finding.get("evidence_records") or []
+            if isinstance(rows, list):
+                evidence_summary["records"] += len(rows)
+            proof = finding.get("proof_quality") if isinstance(finding.get("proof_quality"), dict) else {}
+            evidence_summary["top"].append({
+                "path": str(finding.get("path") or ""),
+                "state": state,
+                "records": int(proof.get("records", len(rows) if isinstance(rows, list) else 0) or 0),
+                "best_confidence": float(proof.get("best_confidence", 0.0) or 0.0),
+                "summary": self._shorten(finding.get("evidence") or finding.get("message") or "", 180),
+            })
+        evidence_summary["top"] = sorted(
+            evidence_summary["top"],
+            key=lambda row: (
+                0 if row.get("state") == "exploitable" else 1 if row.get("state") == "confirmed" else 2,
+                -float(row.get("best_confidence", 0.0) or 0.0),
+                str(row.get("path", "")),
+            ),
+        )[:8]
 
         next_best_action = llm_plan.get("next_best_action", {})
         planned_actions = []
@@ -119,10 +156,47 @@ class ReportService:
             )
 
         attack_graph = summarize_attack_graph_for_report(knowledge_base)
+        chain_memory = export_chain_summary(knowledge_base)
+        playbook_coverage = assess_playbook_coverage(knowledge_base, contextual_findings)
+        planner_hints = refresh_playbook_planner_hints(knowledge_base, contextual_findings)
+        if planner_hints:
+            playbook_coverage["next_modules"] = [
+                {"path": path, "weight": round(float(weight), 3)}
+                for path, weight in sorted(
+                    planner_hints.items(),
+                    key=lambda row: -float(row[1]),
+                )[:6]
+            ]
+        playbook_lines = summarize_playbook_coverage_for_report(playbook_coverage)
+        if playbook_lines:
+            why_it_matters.extend(playbook_lines[:4])
+
+        policy_rejections = []
+        for row in knowledge_base.get("policy_rejections", []) or []:
+            if not isinstance(row, dict):
+                continue
+            policy_rejections.append({
+                "phase": str(row.get("phase", "") or ""),
+                "path": str(row.get("path", "") or ""),
+                "risk": str(row.get("risk", "") or ""),
+                "reason": str(row.get("reason", "") or ""),
+                "mission_profile": str(row.get("mission_profile", "") or ""),
+                "safety_profile": str(row.get("safety_profile", "") or ""),
+            })
+            if len(policy_rejections) >= 12:
+                break
+
+        memory_summary = knowledge_base.get("module_memory_summary", {})
+        if not isinstance(memory_summary, dict):
+            memory_summary = {}
 
         return {
             "decision_counts": decision_counts,
             "important_findings": important_findings,
+            "evidence_summary": evidence_summary,
+            "playbook_coverage": playbook_coverage,
+            "policy_rejections": policy_rejections,
+            "module_memory": memory_summary,
             "decision_summary": {
                 "source": "LLM" if decision_source == "llm_local" else "Heuristic",
                 "goal": execution_plan.get("campaign_goal"),
@@ -133,6 +207,7 @@ class ReportService:
             },
             "why_it_matters": why_it_matters,
             "attack_graph": attack_graph,
+            "chain_memory": chain_memory,
         }
 
     def load_history_scores(self) -> Dict[str, Any]:
@@ -318,6 +393,39 @@ class ReportService:
                 report_md.write(f"- Vulnerabilities found: `{len(vulnerable_results)}`\n")
                 report_md.write(f"- SQL injection findings: `{len(sql_findings)}`\n")
                 report_md.write(f"- New sessions: `{len(new_sessions)}`\n")
+                try:
+                    from interfaces.command_system.builtin.agent.operator_archetypes import (
+                        mission_operator_summary,
+                    )
+
+                    op_summary = mission_operator_summary(
+                        timeline=safe_decision_timeline,
+                        current_phase=str(payload.get("current_phase") or ""),
+                        campaign_goal=str(
+                            (report_summary.get("decision_summary") or {}).get("goal") or ""
+                        ),
+                    )
+                    report_md.write("\n## Mission Operators\n")
+                    report_md.write(
+                        f"- Active operator: **{op_summary.get('active_name', 'N/A')}** "
+                        f"(`{op_summary.get('active_operator', '')}`)\n"
+                    )
+                    if op_summary.get("phases_covered"):
+                        report_md.write(
+                            "- Phases: "
+                            + " → ".join(f"`{p}`" for p in op_summary["phases_covered"])
+                            + "\n"
+                        )
+                    for row in op_summary.get("operators_by_phase", [])[:6]:
+                        if not isinstance(row, dict):
+                            continue
+                        report_md.write(
+                            f"  - `{row.get('phase', '')}` → "
+                            f"{row.get('name', '')} "
+                            f"(MITRE: {', '.join(row.get('mitre_tactics') or []) or 'n/a'})\n"
+                        )
+                except Exception:
+                    pass
                 if safe_network_budget:
                     report_md.write("\n## Network Budget\n")
                     report_md.write(f"- Limit: `{safe_network_budget.get('limit', 0)}`\n")
@@ -330,6 +438,49 @@ class ReportService:
                             f"- Last action: {self._shorten(safe_network_budget.get('last_action'), 220)}\n"
                         )
                 report_md.write("\n")
+
+                runtime = payload.get("runtime_policy") if isinstance(payload.get("runtime_policy"), dict) else {}
+                policy_rejections = report_summary.get("policy_rejections", []) or []
+                memory_summary = report_summary.get("module_memory", {}) or {}
+                if runtime or policy_rejections or memory_summary:
+                    report_md.write("## Policy Filtering\n")
+                    if runtime:
+                        report_md.write(
+                            f"- Safety profile: `{runtime.get('safety_profile', 'normal')}`"
+                            f" | Mission policy: `{runtime.get('mission_profile', '') or 'none'}`\n"
+                        )
+                        approved = runtime.get("approved_risks") or []
+                        if approved:
+                            report_md.write(
+                                "- Approved risks: "
+                                + ", ".join(f"`{value}`" for value in approved)
+                                + "\n"
+                            )
+                    if isinstance(memory_summary, dict) and memory_summary:
+                        report_md.write(
+                            f"- Memory context: target=`{memory_summary.get('target_profile', 'unknown')}` "
+                            f"operational=`{memory_summary.get('operational_context', 'unknown')}`\n"
+                        )
+                        perf = memory_summary.get("performance") if isinstance(memory_summary.get("performance"), dict) else {}
+                        ctx = memory_summary.get("context") if isinstance(memory_summary.get("context"), dict) else {}
+                        health = memory_summary.get("health") if isinstance(memory_summary.get("health"), dict) else {}
+                        report_md.write(
+                            f"- Memory records: performance=`{perf.get('records', 0)}`, "
+                            f"contexts=`{ctx.get('contexts', 0)}`, health=`{health.get('records', 0)}`\n"
+                        )
+                    if policy_rejections:
+                        report_md.write("- Rejected by policy:\n")
+                        for row in policy_rejections[:8]:
+                            if not isinstance(row, dict):
+                                continue
+                            report_md.write(
+                                f"  - `{row.get('path', '')}` "
+                                f"({row.get('phase', 'catalog')}, risk={row.get('risk', '?')}): "
+                                f"{self._shorten(row.get('reason', ''), 180)}\n"
+                            )
+                    else:
+                        report_md.write("- Rejected by policy: none\n")
+                    report_md.write("\n")
 
                 attack_graph = report_summary.get("attack_graph") or {}
                 if isinstance(attack_graph, dict) and int(attack_graph.get("nodes", 0) or 0) > 0:
@@ -361,6 +512,99 @@ class ReportService:
                             report_md.write(
                                 f"  - `{row.get('kind', '')}` {self._shorten(str(row.get('label', '')), 72)} "
                                 f"(conf={float(row.get('confidence', 0.0) or 0.0):.2f})\n"
+                            )
+                    report_md.write("\n")
+
+                chain_memory = report_summary.get("chain_memory") or {}
+                if isinstance(chain_memory, dict) and (
+                    int(chain_memory.get("entries", 0) or 0) > 0
+                    or int(chain_memory.get("observations", 0) or 0) > 0
+                ):
+                    report_md.write("## Chain Memory\n")
+                    report_md.write(
+                        f"- Capabilities: `{len(chain_memory.get('capabilities', []) or [])}` | "
+                        f"Entries: `{chain_memory.get('entries', 0)}` | "
+                        f"Observations: `{chain_memory.get('observations', 0)}`\n"
+                    )
+                    counts = chain_memory.get("observation_counts") or {}
+                    if isinstance(counts, dict) and counts:
+                        report_md.write(
+                            "- Observation status: "
+                            + ", ".join(f"`{k}`={v}" for k, v in sorted(counts.items()))
+                            + "\n"
+                        )
+                    blocked = chain_memory.get("blocked_modules") or []
+                    if blocked:
+                        report_md.write(
+                            "- Blocked branches: "
+                            + ", ".join(f"`{self._shorten(path, 72)}`" for path in blocked[:6])
+                            + "\n"
+                        )
+                    refuted = chain_memory.get("refuted_capabilities") or []
+                    if refuted:
+                        report_md.write(
+                            "- Refuted capability hints: "
+                            + ", ".join(f"`{cap}`" for cap in refuted[:8])
+                            + "\n"
+                        )
+                    recent = chain_memory.get("recent_observations") or []
+                    if recent:
+                        report_md.write("- Recent observations:\n")
+                        for row in recent[:6]:
+                            if not isinstance(row, dict):
+                                continue
+                            report_md.write(
+                                f"  - `{row.get('status', '')}` `{row.get('module_path', '')}` "
+                                f"({row.get('capability', '') or 'general'}): "
+                                f"{self._shorten(row.get('reason', ''), 160)}\n"
+                            )
+                    report_md.write("\n")
+
+                playbook_coverage = report_summary.get("playbook_coverage") or {}
+                if isinstance(playbook_coverage, dict) and int(playbook_coverage.get("assessed", 0) or 0) > 0:
+                    report_md.write("## Playbook Coverage\n")
+                    report_md.write(
+                        f"- Library: `{playbook_coverage.get('library_size', 0)}` playbooks | "
+                        f"Assessed: `{playbook_coverage.get('assessed', 0)}` | "
+                        f"Shown: `{playbook_coverage.get('shown', 0)}`\n"
+                    )
+                    by_cov = playbook_coverage.get("by_coverage") or {}
+                    if isinstance(by_cov, dict) and by_cov:
+                        report_md.write(
+                            "- By status: "
+                            + ", ".join(f"`{k}`={v}" for k, v in sorted(by_cov.items()))
+                            + "\n"
+                        )
+                    product_gaps = playbook_coverage.get("product_gaps") or []
+                    if product_gaps:
+                        report_md.write(
+                            "- Framework gaps: "
+                            + ", ".join(f"`{g}`" for g in product_gaps[:8])
+                            + "\n"
+                        )
+                    next_modules = playbook_coverage.get("next_modules") or []
+                    if next_modules:
+                        report_md.write("- Planner next steps:\n")
+                        for row in next_modules:
+                            if not isinstance(row, dict):
+                                continue
+                            report_md.write(
+                                f"  - `{row.get('path', '')}` "
+                                f"(weight={float(row.get('weight', 0) or 0):.2f})\n"
+                            )
+                    for row in playbook_coverage.get("playbooks", []) or []:
+                        if not isinstance(row, dict):
+                            continue
+                        report_md.write(
+                            f"- **{str(row.get('coverage', '')).upper()}** "
+                            f"`{row.get('playbook_id', '')}` "
+                            f"(relevance={float(row.get('relevance', 0) or 0):.2f})\n"
+                        )
+                        report_md.write(f"  {self._shorten(row.get('summary', ''), 260)}\n")
+                        missing = row.get("missing_modules") or []
+                        if missing:
+                            report_md.write(
+                                f"  missing: {self._shorten(', '.join(str(m) for m in missing[:4]), 200)}\n"
                             )
                     report_md.write("\n")
 
@@ -555,6 +799,36 @@ class ReportService:
                         report_md.write(f"- `{session_id}`\n")
                 else:
                     report_md.write("- None\n")
+
+                evidence_summary = report_summary.get("evidence_summary") or {}
+                if isinstance(evidence_summary, dict) and (
+                    int(evidence_summary.get("records", 0) or 0) > 0
+                    or evidence_summary.get("by_state")
+                ):
+                    report_md.write("\n## Evidence Quality\n")
+                    report_md.write(f"- Evidence records: `{evidence_summary.get('records', 0)}`\n")
+                    by_state = evidence_summary.get("by_state") or {}
+                    if isinstance(by_state, dict) and by_state:
+                        report_md.write(
+                            "- By state: "
+                            + ", ".join(f"`{k}`={v}" for k, v in sorted(by_state.items()))
+                            + "\n"
+                        )
+                    report_md.write(
+                        f"- Confirmed or better: `{evidence_summary.get('confirmed_or_better', 0)}`\n"
+                    )
+                    top_evidence = evidence_summary.get("top") or []
+                    if top_evidence:
+                        report_md.write("- Top proof rows:\n")
+                        for row in top_evidence[:6]:
+                            if not isinstance(row, dict):
+                                continue
+                            report_md.write(
+                                f"  - `{row.get('state', 'probable')}` `{row.get('path', '')}` "
+                                f"records={row.get('records', 0)} "
+                                f"conf={float(row.get('best_confidence', 0.0) or 0.0):.2f}: "
+                                f"{self._shorten(row.get('summary', ''), 160)}\n"
+                            )
 
                 report_md.write("\n## Vulnerabilities\n")
                 if vulnerable_results:

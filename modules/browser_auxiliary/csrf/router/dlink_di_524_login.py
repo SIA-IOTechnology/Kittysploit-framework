@@ -4,7 +4,7 @@ from lib.protocols.http.csrf import Csrf
 class Module(BrowserAuxiliary, Csrf):
 	
 	__info__ = {
-		"name": "D-Link DI-524 CSRF",
+		"name": "D-Link DI-524 CSRF (password change)",
 		"description": "D-Link DI-524 Wireless 150 router - Change admin password via CSRF POST",
 		"author": "KittySploit Team",
 		"browser": Browser.ALL,

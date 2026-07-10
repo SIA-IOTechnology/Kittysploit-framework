@@ -1,0 +1,80 @@
+id: ics-multi-protocol
+version: "1"
+name: ICS Multi-Protocol Assessment
+description: >
+  Phase 4 multi-vendor OT assessment — Modbus, S7, DNP3, BACnet, ENIP, IEC104, OPC UA.
+tags: [ics, ot, modbus, s7comm, dnp3, bacnet, enip, iec104, opcua]
+policy:
+  intrusive: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: modbus_identify
+steps:
+  modbus_identify:
+    module: auxiliary/scanner/ics/modbus_identify
+    options:
+      target: "${target}"
+    on_success: s7_identify
+    on_failure: s7_identify
+  s7_identify:
+    module: auxiliary/scanner/ics/s7comm_identify
+    options:
+      target: "${target}"
+    on_success: dnp3_probe
+    on_failure: dnp3_probe
+  dnp3_probe:
+    module: auxiliary/scanner/ics/dnp3_master_probe
+    options:
+      target: "${target}"
+    on_success: bacnet_whois
+    on_failure: bacnet_whois
+  bacnet_whois:
+    module: auxiliary/scanner/ics/bacnet_whois
+    options:
+      target: "${target}"
+    on_success: bacnet_inventory
+    on_failure: bacnet_inventory
+  bacnet_inventory:
+    module: scanner/ics/bacnet_device_inventory
+    description: Read-only BACnet device and object inventory
+    options:
+      target: "${target}"
+      max_devices: "5"
+    on_success: iec61850_mms
+    on_failure: iec61850_mms
+  iec61850_mms:
+    module: auxiliary/scanner/ics/iec61850_mms_identify
+    description: IEC 61850 MMS probe on ISO-on-TCP port 102
+    options:
+      target: "${target}"
+    on_success: mqtt_broker
+    on_failure: mqtt_broker
+  mqtt_broker:
+    module: auxiliary/scanner/ics/mqtt_broker_identify
+    description: MQTT broker detection and anonymous access check
+    options:
+      target: "${target}"
+    on_success: enip_cip
+    on_failure: enip_cip
+  enip_cip:
+    module: scanner/ics/enip_cip_scan
+    options:
+      target: "${target}"
+    on_success: iec104_dump
+    on_failure: iec104_dump
+  iec104_dump:
+    module: post/ics/iec104/gather/interrogation_dump
+    options:
+      target: "${target}"
+      session_id: "ics"
+    on_success: opcua_scan
+    on_failure: opcua_scan
+  opcua_scan:
+    module: scanner/ics/opcua_anonymous
+    options:
+      target: "${target}"
+    on_success: null
+    on_failure: null

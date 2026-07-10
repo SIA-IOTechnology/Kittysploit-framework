@@ -18,6 +18,7 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     STRONG_VULN_SIGNAL_PHRASES,
 )
 from interfaces.command_system.builtin.agent.agent_module_meta import normalize_agent_block
+from interfaces.command_system.builtin.agent.metadata_chain_inference import enrich_agent_metadata
 
 RawModuleMap = Dict[str, str]
 
@@ -154,30 +155,45 @@ class ModuleCatalogService:
         return metadata
 
     def get_agent_metadata(self, module_path: str) -> Any:
-        """Normalized ``__info__['agent']`` for ``module_path``, or ``None``."""
+        """Normalized ``__info__['agent']`` for ``module_path``, enriched with inferred chain."""
         if not module_path:
             return None
         key = str(module_path).strip()
         if key in self._agent_meta_cache:
             return self._agent_meta_cache[key]
         inline = self._inline_module_info.get(key)
-        if isinstance(inline, dict) and "agent" in inline:
-            ag = normalize_agent_block(inline.get("agent"))
-            self._agent_meta_cache[key] = ag
-            return ag
+        static_info: Dict[str, Any] = {}
+        static_agent = None
+        if isinstance(inline, dict):
+            static_info = {
+                k: inline.get(k)
+                for k in ("name", "description", "tags", "modules", "severity")
+                if k in inline
+            }
+            if "agent" in inline:
+                static_agent = normalize_agent_block(inline.get("agent"))
         try:
             discovered = self._get_module_catalog()
             file_path = discovered.get(key)
-            if not file_path:
-                self._agent_meta_cache[key] = None
-                return None
-            meta = self.extract_static_module_metadata(file_path)
-            ag = meta.get("agent")
-            self._agent_meta_cache[key] = ag
-            return ag
+            if file_path:
+                meta = self.extract_static_module_metadata(file_path)
+                static_info = {
+                    "name": meta.get("name", ""),
+                    "description": meta.get("description", ""),
+                    "tags": meta.get("tags", []),
+                    "modules": meta.get("modules", []),
+                    "severity": meta.get("severity", ""),
+                }
+                if meta.get("agent") is not None:
+                    static_agent = meta.get("agent")
         except Exception:
+            file_path = None
+        if not file_path and static_agent is None:
             self._agent_meta_cache[key] = None
             return None
+        ag = enrich_agent_metadata(key, static_agent, static_info)
+        self._agent_meta_cache[key] = ag
+        return ag
 
     def discover_campaign_modules(self, expanded: bool = False) -> List[Dict[str, Any]]:
         modules = []
@@ -194,6 +210,7 @@ class ModuleCatalogService:
                 if not (in_core or in_expanded):
                     continue
                 static_meta = self.extract_static_module_metadata(file_path)
+                agent = self.get_agent_metadata(module_path)
                 modules.append({
                     "path": module_path,
                     "file_path": file_path,
@@ -203,22 +220,35 @@ class ModuleCatalogService:
                     "tags": static_meta.get("tags", []),
                     "modules": static_meta.get("modules", []),
                     "severity": static_meta.get("severity", ""),
-                    "agent": static_meta.get("agent"),
+                    "agent": agent,
                 })
         except Exception:
             return []
         return sorted(modules, key=lambda row: row["path"])
 
     def audit_agent_metadata(self, *, limit_sample: int = 12) -> Dict[str, Any]:
+        from interfaces.command_system.builtin.agent.metadata_chain_inference import chain_is_empty
         from interfaces.command_system.builtin.agent.metadata_linter import lint_agent_block
 
         discovered = self._get_module_catalog()
         rows: List[Dict[str, Any]] = []
         compliant = partial = missing = 0
+        chain_ready = 0
         by_risk: Dict[str, int] = {}
         for module_path in sorted(discovered):
+            file_path = discovered.get(module_path, "")
+            static_meta = self.extract_static_module_metadata(file_path) if file_path else {}
+            static_agent = static_meta.get("agent")
             agent = self.get_agent_metadata(module_path)
             issues = lint_agent_block(agent)
+            has_effective_chain = not chain_is_empty((agent or {}).get("chain"))
+            if has_effective_chain:
+                chain_ready += 1
+            on_disk_chain = not chain_is_empty(
+                (normalize_agent_block(static_agent) or {}).get("chain")
+                if static_agent is not None
+                else None
+            )
             if agent is None:
                 status = "missing"
                 missing += 1
@@ -230,8 +260,17 @@ class ModuleCatalogService:
                 compliant += 1
                 risk = str((agent or {}).get("risk") or "unknown")
                 by_risk[risk] = int(by_risk.get(risk, 0)) + 1
-            if issues or status != "compliant":
-                rows.append({"path": module_path, "status": status, "issues": issues})
+            if issues or status != "compliant" or (has_effective_chain and not on_disk_chain):
+                row_issues = list(issues)
+                if has_effective_chain and not on_disk_chain:
+                    row_issues.append("chain inferred at runtime (not on disk)")
+                rows.append({
+                    "path": module_path,
+                    "status": status,
+                    "issues": row_issues,
+                    "chain_effective": has_effective_chain,
+                    "chain_on_disk": on_disk_chain,
+                })
         sample = rows[: max(0, int(limit_sample))]
         total = len(discovered)
         return {
@@ -241,6 +280,8 @@ class ModuleCatalogService:
             "partial": partial,
             "missing": missing,
             "coverage_ratio": round(compliant / total, 4) if total else 0.0,
+            "chain_coverage_ratio": round(chain_ready / total, 4) if total else 0.0,
+            "chain_ready": chain_ready,
             "by_risk": by_risk,
             "non_compliant_sample": sample,
             "non_compliant_count": len(rows),
@@ -253,15 +294,24 @@ class ModuleCatalogService:
             "notable_modules": [],
             "all_paths": [],
             "semantic_index": [],
+            "modules": [],
         }
         try:
             discovered = self._get_module_catalog()
             catalog["total_modules"] = len(discovered)
+            module_rows: List[Dict[str, Any]] = []
             for module_path, file_path in discovered.items():
                 family = str(module_path).split("/")[0] if "/" in str(module_path) else "other"
                 static_meta = self.extract_static_module_metadata(file_path)
+                agent = self.get_agent_metadata(module_path)
                 catalog["by_family"][family] = int(catalog["by_family"].get(family, 0)) + 1
                 catalog["all_paths"].append(module_path)
+                module_rows.append({
+                    "path": module_path,
+                    "agent": agent,
+                    "tags": static_meta.get("tags", []),
+                    "description": static_meta.get("description", ""),
+                })
                 semantic_text = " ".join([
                     str(module_path),
                     str(static_meta.get("name", "")),
@@ -309,6 +359,7 @@ class ModuleCatalogService:
                     row.get("path", ""),
                 ),
             )[:300]
+            catalog["modules"] = sorted(module_rows, key=lambda row: row.get("path", ""))[:800]
         except Exception as exc:
             logger.warning("Agent capability catalog build degraded: %s", exc)
         return catalog

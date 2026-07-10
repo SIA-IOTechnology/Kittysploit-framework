@@ -59,7 +59,7 @@ class BannerCommand(BaseCommand):
                     # Display modules in the specified order
                     module_order = [
                         'exploits', 'auxiliary', 'browser_exploits', 'browser_auxiliary', 
-                        'payloads', 'encoders', 'obfuscators', 'listeners', 'workflow', 'backdoors', 'docker_environment', 'post', 
+                        'payloads', 'encoders', 'transforms', 'listeners', 'workflow', 'backdoors', 'docker_environment', 'post', 
                         'scanner', 'shortcut', 'analysis', 'plugins'
                     ]
                     
@@ -68,6 +68,7 @@ class BannerCommand(BaseCommand):
                         'docker_environment': 'Docker environments',
                         'browser_exploits': 'Browser Exploits',
                         'browser_auxiliary': 'Browser Auxiliary',
+                        'transforms': 'Transforms',
                     }
                     
                     module_info = []

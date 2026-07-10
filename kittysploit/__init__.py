@@ -35,7 +35,10 @@ from core.framework import (
     fail)
 
 from core.framework.encoder import Encoder
-from core.framework.obfuscator import Obfuscator
+from core.framework.transform import Transform, Obfuscator
+
+from core.framework.exploit_base import ExploitBase
+from core.framework.option.option_payload import OptPayload
 
 # Import all option types
 from core.framework.option import (
@@ -95,6 +98,7 @@ __all__ = [
     # Module types
     'Auxiliary',
     'Exploit', 
+    'ExploitBase',
     'BrowserAuxiliary',
     'Payload',  
     'Listener',
@@ -102,6 +106,7 @@ __all__ = [
     'Post',
     'Backdoor',
     'Encoder',
+    'Transform',
     'Obfuscator',
     'BaseModule',
     'Framework',
@@ -126,6 +131,7 @@ __all__ = [
     'OptChoice',
     'OptFile',
     'OptFloat',
+    'OptPayload',
     # Output functions
     'print_info',
     'print_empty',

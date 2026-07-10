@@ -33,6 +33,7 @@ from core.scanner.result_dedup import (
     group_scanner_results,
     reason_redundant_with_evidence,
 )
+from core.scanner.probe_failure import is_soft_probe_failure
 from core.framework.module_executor import ModuleExecutionRequest, ModuleExecutor
 
 
@@ -623,7 +624,12 @@ Examples:
         elif family == "ldap":
             preferred = [389, 636]
         elif family == "telecom":
-            preferred = [3868, 2123, 2152, 8805, 8080, 8443, 80, 443]
+            if self._is_http_telecom_module(module_path):
+                if configured_port in open_ports:
+                    return configured_port
+                preferred = [443, 8443, 8080, 80, 8000, 8888]
+            else:
+                preferred = [3868, 2123, 2152, 8805, 8080, 8443, 80, 443]
         elif family == "ftp":
             preferred = [21, 2121]
         elif family == "ssh":
@@ -645,6 +651,57 @@ Examples:
 
         return configured_port
 
+    # Product-specific HTTP scanners bound to non-standard service ports.
+    _MODULE_DEDICATED_PORTS = (
+        ("frigate", 5000),
+        ("mindsdb", 47334),
+        ("n8n_", 5678),
+        ("langflow", 7860),
+        ("neo4j", 7474),
+        ("cassandra", 9042),
+        ("cockpit", 9090),
+        ("webmin", 10000),
+        ("ollama", 11434),
+        ("teamcity", 8111),
+        ("clickhouse", 8123),
+        ("activemq", 8161),
+        ("comfyui", 8188),
+        ("mlflow", 5000),
+        ("splunk", 8000),
+        ("kubelet", 10255),
+        ("docker_api", 2375),
+    )
+    _STANDARD_HTTP_PORTS = frozenset({80, 443, 8080, 8443, 8000, 8888})
+
+    def _is_http_telecom_module(self, module_path: str) -> bool:
+        """HTTP-based telecom scanners (management UIs) should use web ports."""
+        path = str(module_path or "").lower()
+        return path.startswith("scanner/telecom/") and (
+            "management" in path or path.endswith("_detect")
+        )
+
+    def _dedicated_port_for_module(self, module_path: str):
+        path = str(module_path or "").lower()
+        for marker, port in self._MODULE_DEDICATED_PORTS:
+            if marker in path:
+                return port
+        return None
+
+    def _should_skip_module_for_target(self, module_path: str, target_info: Dict[str, Any]) -> str:
+        dedicated = self._dedicated_port_for_module(module_path)
+        if dedicated is None:
+            return ""
+        open_ports = set(target_info.get("open_ports") or [])
+        configured = target_info.get("port")
+        if configured == dedicated or dedicated in open_ports:
+            return ""
+        if open_ports and open_ports.issubset(self._STANDARD_HTTP_PORTS):
+            return (
+                f"skipped: module expects TCP/{dedicated} but only standard web ports are open "
+                f"({sorted(open_ports)})"
+            )
+        return ""
+
     def _execute_modules(self, modules: List[Dict], target_info: Dict[str, Any], threads: int, verbose: bool) -> List[Dict]:
         """Execute scanner modules against target"""
         results = []
@@ -661,6 +718,12 @@ Examples:
                 'details': {},
                 'host': target_info.get('hostname', ''),
             }
+
+            skip_reason = self._should_skip_module_for_target(module_path, target_info)
+            if skip_reason:
+                result['status'] = 'skipped'
+                result['message'] = skip_reason
+                return result
             
             try:
                 if verbose:
@@ -725,6 +788,14 @@ Examples:
                         raise RuntimeError(execution.error)
                     # Merge dict returns (common for OSINT/aux) into dynamic details.
                     run_return = execution.result
+                    schema_evidence = getattr(execution, "schema_evidence", None)
+                    if schema_evidence:
+                        result["schema_evidence"] = list(schema_evidence)
+                    schema_finding = getattr(execution, "schema_finding", None)
+                    if schema_finding:
+                        result["schema_finding"] = dict(schema_finding)
+                    if getattr(execution, "evidence", None):
+                        result["raw_evidence"] = execution.evidence
 
                     # Get info from __info__ (static) and vulnerability_info (dynamic)
                     module_info = getattr(module_instance, '__info__', {})
@@ -806,9 +877,13 @@ Examples:
                     set_thread_output_quiet(False)
 
             except Exception as e:
-                result['message'] = f"Error: {str(e)}"
-                if verbose:
-                    print_error(f"  [!] Error in {module_path}: {e}")
+                if is_soft_probe_failure(e):
+                    result['status'] = 'skipped'
+                    result['message'] = f"probe skipped: {e}"
+                else:
+                    result['message'] = f"Error: {str(e)}"
+                    if verbose:
+                        print_error(f"  [!] Error in {module_path}: {e}")
             
             return result
         
@@ -847,7 +922,11 @@ Examples:
         total = len(raw_results)
         raw_vulnerable = sum(1 for r in raw_results if r.get('vulnerable'))
         unique_vulnerable = sum(1 for r in results if r.get('vulnerable'))
-        safe = sum(1 for r in raw_results if not r.get('vulnerable') and r.get('status') != 'error')
+        safe = sum(
+            1 for r in raw_results
+            if not r.get('vulnerable') and r.get('status') not in ('error',)
+        )
+        skipped = sum(1 for r in raw_results if r.get('status') == 'skipped')
         errors = sum(1 for r in raw_results if r.get('status') == 'error')
         
         print_info(f"Total modules executed: {total}")
@@ -859,6 +938,8 @@ Examples:
         else:
             print_success(f"Vulnerabilities found: {unique_vulnerable}")
         print_info(f"Safe: {safe}")
+        if skipped > 0:
+            print_info(f"Skipped: {skipped}")
         if errors > 0:
             print_warning(f"Errors: {errors}")
         print_empty()

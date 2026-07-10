@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -24,3 +24,21 @@ class SamAccountRecord:
     @property
     def is_computer(self) -> bool:
         return self.name.endswith("$")
+
+
+@dataclass
+class SamAliasRecord:
+    """Alias / groupe local exposé via SAMR."""
+
+    name: str
+    rid: int
+    domain_sid: bytes = b""
+
+
+@dataclass
+class SamGroupMembership:
+    """Membres d'un alias SAMR."""
+
+    group_name: str
+    group_rid: int
+    members: List[str]

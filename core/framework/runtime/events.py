@@ -47,6 +47,7 @@ class EventType(Enum):
     SESSION_CREATED = "session.created"
     SESSION_CLOSED = "session.closed"
     SESSION_UPDATED = "session.updated"
+    SESSION_RECONNECTED = "session.reconnected"
     
     # Workspace events
     WORKSPACE_CHANGED = "workspace.changed"

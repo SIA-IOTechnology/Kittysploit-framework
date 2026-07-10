@@ -11,6 +11,8 @@ from interfaces.command_system.builtin.agent.agent_module_meta import (
     RISK_LEVELS,
     normalize_agent_block,
 )
+from interfaces.command_system.builtin.agent.attack_chain_memory import KNOWN_CAPABILITIES
+from interfaces.command_system.builtin.agent.chain_meta import normalize_chain_block
 
 REQUIRED_FIELDS: Sequence[str] = ("risk", "expected_requests")
 RECOMMENDED_FIELDS: Sequence[str] = (
@@ -22,6 +24,61 @@ RECOMMENDED_FIELDS: Sequence[str] = (
     "auth_required",
 )
 EXTENDED_FIELDS: Sequence[str] = ("requires", "chain", "consumes", "prerequisites")
+
+
+def lint_chain_block(agent_raw: Any) -> List[str]:
+    """Return issues specific to ``agent.chain`` metadata."""
+    if not isinstance(agent_raw, dict) or "chain" not in agent_raw:
+        return []
+    raw_chain = agent_raw.get("chain")
+    if raw_chain is None:
+        return []
+    if not isinstance(raw_chain, dict):
+        return ["chain metadata must be an object"]
+
+    issues: List[str] = []
+    normalized = normalize_chain_block(raw_chain)
+
+    raw_produces = raw_chain.get("produces_capabilities") or []
+    seen_raw = set()
+    for item in raw_produces:
+        if isinstance(item, str):
+            key = (item.strip().lower(), "")
+        elif isinstance(item, dict):
+            key = (
+                str(item.get("capability") or "").strip().lower(),
+                str(item.get("from_detail") or item.get("from") or "").strip(),
+            )
+        else:
+            continue
+        if not key[0]:
+            continue
+        if key in seen_raw:
+            issues.append(f"duplicate produced capability: {key[0]}")
+            break
+        seen_raw.add(key)
+
+    produced_caps = {
+        str(row.get("capability", "")).strip().lower()
+        for row in normalized.get("produces_capabilities") or []
+        if isinstance(row, dict) and str(row.get("capability", "")).strip()
+    }
+    consumed_caps = {
+        str(cap).strip().lower()
+        for cap in normalized.get("consumes_capabilities") or []
+        if str(cap).strip()
+    }
+    binding_caps = {
+        str(cap).strip().lower()
+        for cap in (normalized.get("option_bindings") or {}).values()
+        if str(cap).strip()
+    }
+
+    for cap in sorted(produced_caps | consumed_caps | binding_caps):
+        if cap not in KNOWN_CAPABILITIES:
+            issues.append(f"unknown chain capability: {cap}")
+
+    return issues
 
 
 def lint_agent_block(agent_raw: Any) -> List[str]:
@@ -48,6 +105,7 @@ def lint_agent_block(agent_raw: Any) -> List[str]:
                 issues.append("expected_requests must be >= 1")
         except (TypeError, ValueError):
             issues.append("expected_requests must be a positive integer")
+    issues.extend(lint_chain_block(agent_raw))
     return issues
 
 

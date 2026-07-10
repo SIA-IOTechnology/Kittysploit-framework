@@ -17,10 +17,10 @@ class Backdoor(BaseModule):
     
     def _exploit(self):
         try:
-            self.run()
-            print_warning(f"Use responsibly and only on authorized systems!")
-        except ProcedureError as e:
+            return bool(self.run())
+        except ProcedureError:
             return False
-        except Exception as e:
+        except Exception:
             return False
-        return True
+        finally:
+            print_warning("Use responsibly and only on authorized systems!")

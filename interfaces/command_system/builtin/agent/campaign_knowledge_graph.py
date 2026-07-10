@@ -112,6 +112,63 @@ def build_attack_graph_from_kb(
             AttackEdge(host_id, aid, f"auth:{lp_s[:64]}", cost=1, confidence=0.72),
         )
 
+    memory = kb.get("attack_chain_memory") if isinstance(kb.get("attack_chain_memory"), dict) else {}
+    for entry in list(memory.get("entries") or [])[:60]:
+        if not isinstance(entry, dict):
+            continue
+        cap = str(entry.get("capability") or "").strip().lower()
+        if not cap:
+            continue
+        value = str(entry.get("value") or "confirmed").strip()
+        cid = _safe_id("capability", f"{cap}:{value}", 140)
+        try:
+            conf = float(entry.get("confidence", 0.72) or 0.72)
+        except Exception:
+            conf = 0.72
+        graph.upsert_node(
+            cid,
+            "capability",
+            f"{cap}={value[:72]}",
+            confidence=conf,
+            source_module=str(entry.get("source_module") or "")[:160],
+        )
+        graph.add_edge(
+            AttackEdge(host_id, cid, f"capability:{cap}", cost=0, confidence=conf),
+        )
+
+    for row in list(memory.get("observations") or [])[-48:]:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").strip().lower()
+        module_path = str(row.get("module_path") or "").strip()
+        if not status or not module_path:
+            continue
+        oid = _safe_id("observation", f"{status}:{module_path}", 180)
+        label = f"{status}: {module_path.rsplit('/', 1)[-1]}"
+        try:
+            conf = float(row.get("confidence", 0.5) or 0.5)
+        except Exception:
+            conf = 0.5
+        graph.upsert_node(
+            oid,
+            "observation",
+            label[:120],
+            confidence=conf,
+            capability=str(row.get("capability") or ""),
+            reason=str(row.get("reason") or "")[:240],
+        )
+        graph.add_edge(
+            AttackEdge(
+                host_id,
+                oid,
+                f"observe:{module_path}",
+                cost=0,
+                risk="read",
+                confidence=conf,
+                abandoned_reason=status if status in {"blocked", "error", "refuted"} else "",
+            ),
+        )
+
     observed = {str(p) for p in (kb.get("observed_modules") or []) if p}
     stale = {str(p) for p in (kb.get("attack_graph_stale_modules") or []) if p}
 
@@ -198,6 +255,18 @@ def sync_attack_graph_from_kb(
     """
     if not isinstance(kb, MutableMapping):
         return 0
+
+    export_path = str(kb.get("bloodhound_export_path") or "").strip()
+    if export_path:
+        try:
+            from lib.protocols.ldap.ad_graph_import import merge_bloodhound_into_kb
+            merge_bloodhound_into_kb(
+                kb,
+                export_path,
+                domain=str(kb.get("target_hostname") or hostname or ""),
+            )
+        except Exception:
+            pass
 
     prev_stats = kb.get("attack_graph_stats") if isinstance(kb.get("attack_graph_stats"), dict) else {}
     prev_total = int(prev_stats.get("nodes", 0) or 0) + int(prev_stats.get("edges", 0) or 0)

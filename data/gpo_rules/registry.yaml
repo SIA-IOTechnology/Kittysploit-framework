@@ -1,0 +1,77 @@
+- analysis: |-
+    The "Everyone" group includes the "Anonymous Logon" group.
+    Try to authenticate with any username and an empty password
+  key: 'System\CurrentControlSet\Control\Lsa\EveryoneIncludesAnonymous'
+  condition: value_equals
+  value: "1"
+  references: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-special-identities-groups#everyone
+
+- analysis: 'SMB server session signing is not enabled'
+  bloodhound_property:
+    smbSigningEnabled: false
+  key: 'System\CurrentControlSet\Services\LanmanServer\Parameters\EnableSecuritySignature'
+  condition: value_equals
+  value: "0"
+  references: https://www.thehacker.recipes/ad/movement/ntlm/relay
+
+- analysis: 'SMB server session signing is not required'
+  bloodhound_property:
+    smbSigningRequired: false
+  key: 'System\CurrentControlSet\Services\LanmanServer\Parameters\RequireSecuritySignature'
+  condition: value_equals
+  value: "0"
+  references: https://www.thehacker.recipes/ad/movement/ntlm/relay
+
+- analysis: 'NTLMv1 authentication is supported allowing authentication downgrade and LDAP relay'
+  bloodhound_property:
+    NTLMv1Support: true
+  key: 'System\CurrentControlSet\Control\Lsa\LmCompatibilityLevel'
+  condition: value_less_than
+  value: "3"
+  references: https://trustedsec.com/blog/practical-attacks-against-ntlmv1
+
+- analysis: 'Windows automatic logon default password'
+  key: SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\DefaultPassword
+  condition: key_ends_with
+  references: https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/turn-on-automatic-logon
+
+- analysis: 'VNC credentials'
+  key: 'Software\ORL\WinVNC3\Password'
+  condition: key_ends_with
+  decrypt: VNC
+  references: https://whatsoftware.com/crack-or-decrypt-vnc-server-encrypted-password/
+
+- analysis: 'VNC credentials'
+  key: 'Software\ORL\WinVNC\Default\Password'
+  condition: key_ends_with
+  decrypt: VNC
+  references: https://whatsoftware.com/crack-or-decrypt-vnc-server-encrypted-password/
+
+- analysis: 'RealVNC Server credentials'
+  bloodhound_property: "RealVNC Password"
+  key: 'Software\RealVNC\WinVNC4\Password'
+  condition: key_ends_with
+  decrypt: VNC
+  references: https://github.com/frizb/PasswordDecrypts
+
+- analysis: 'TightVNC Server primary password'
+  bloodhound_property: "TightVNC Primary Password"
+  key: 'Software\TightVNC\Server\Password'
+  condition: key_ends_with
+  decrypt: VNC
+  references: https://github.com/frizb/PasswordDecrypts
+
+- analysis: 'PuTTY Proxy password'
+  key: 'Software\SimonTatham\PuTTY\Sessions\ProxyPassword'
+  condition: key_ends_with
+  references: https://github.com/frizb/PasswordDecrypts
+
+- analysis: 'FileZilla Server password'
+  key: 'Software\\FileZilla\\Site Manager\\.*\\Pass'
+  condition: key_regex
+  references: https://github.com/frizb/PasswordDecrypts
+
+- analysis: 'WinSCP Sessions'
+  key: 'Software\Software\Martin Prikryl\WinSCP 2\Sessions'
+  condition: key_ends_with
+  references: https://github.com/frizb/PasswordDecrypts

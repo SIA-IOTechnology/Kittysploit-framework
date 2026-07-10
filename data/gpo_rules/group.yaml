@@ -1,0 +1,41 @@
+S-1-5-32-544:
+  name: "Administrators"
+  sid: "S-1-5-32-544"
+  edge: "AdminTo"
+  edge_reference: "https://bloodhound.specterops.io/resources/edges/admin-to"
+
+S-1-5-32-555:
+  name: "Remote Desktop Users"
+  sid: "S-1-5-32-555"
+  edge: "CanRDP"
+  edge_reference: "https://bloodhound.specterops.io/resources/edges/can-rdp"
+
+S-1-5-32-562:
+  name: "Distributed COM Users"
+  sid: "S-1-5-32-562"
+  edge: "ExecuteDCOM"
+  edge_reference: "https://bloodhound.specterops.io/resources/edges/execute-dcom"
+
+S-1-5-32-580:
+  name: "Remote Management Users"
+  sid: "S-1-5-32-580"
+  edge: "CanPSRemote"
+  edge_reference: "https://bloodhound.specterops.io/resources/edges/can-ps-remote"
+
+S-1-5-32-551:
+  name: "Backup Operators"
+  sid: "S-1-5-32-551"
+  edge: "CanPrivEsc"
+  edge_reference: "https://www.bordergate.co.uk/backup-operator-privilege-escalation/"
+
+S-1-5-32-550:
+  name: "Print Operators"
+  sid: "S-1-5-32-550"
+  edge: "CanPrivEsc"
+  edge_reference: "https://github.com/dollarboysushil/oscp-cpts-notes/blob/main/windows-privilege-escalation/group-privileges/print-operators.md"
+
+S-1-5-32-556:
+  name: "Network Configuration Operators"
+  sid: "S-1-5-32-556"
+  edge: "CanPrivEsc"
+  edge_reference: "https://github.com/rapid7/metasploit-framework/pull/20044"

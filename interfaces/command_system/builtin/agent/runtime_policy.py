@@ -29,6 +29,102 @@ NON_IDEMPOTENT_EFFECTS = frozenset({
     "destructive",
 })
 
+MISSION_PROFILE_ALIASES = {
+    "ot-safe": "ot-safe",
+    "ot-safe-assessment": "ot-safe",
+    "bug-bounty-safe": "bug-bounty-safe",
+    "internal-lab": "internal-lab",
+    "europol-passive": "europol-passive",
+    "europol_passive": "europol-passive",
+    "infra-discovery": "infra-discovery",
+    "infra_discovery": "infra-discovery",
+}
+
+BUG_BOUNTY_BLOCK_PREFIXES = (
+    "backdoors/",
+    "payloads/",
+    "listeners/",
+    "post/",
+    "auxiliary/dos/",
+    "dos/",
+)
+
+BUG_BOUNTY_BLOCK_TOKENS = (
+    "bruteforce",
+    "credential_stuffing",
+    "password_spray",
+    "hashdump",
+    "dump_lsass",
+    "keylogger",
+    "persistence",
+    "backdoor",
+    "delete_file",
+    "flush_",
+    "write_coil",
+    "write_register",
+    "set_iam_policy",
+    "create_service_account_key",
+)
+
+OT_SAFE_BLOCK_PREFIXES = (
+    "backdoors/",
+    "payloads/",
+    "listeners/",
+    "auxiliary/dos/",
+    "dos/",
+    "exploits/",
+    "exploit/",
+)
+
+EUROPOL_PASSIVE_ALLOW_PREFIXES = (
+    "auxiliary/osint/",
+    "analysis/reporting/",
+)
+
+EUROPOL_PASSIVE_BLOCK_TOKENS = (
+    "bruteforce",
+    "persona_password",
+    "admin_login",
+    "credential_stuffing",
+    "password_spray",
+    "exploit",
+    "payload",
+    "listener",
+    "backdoor",
+    "persistence",
+    "hashdump",
+    "write_coil",
+    "write_register",
+    "dos/",
+    "scanner/",
+    "auxiliary/scanner/",
+)
+
+INFRA_DISCOVERY_ALLOW_PREFIXES = (
+    "scanner/",
+    "auxiliary/scanner/",
+)
+
+INFRA_DISCOVERY_BLOCK_PREFIXES = (
+    "exploit/",
+    "exploits/",
+    "post/",
+    "payloads/",
+    "listeners/",
+    "backdoors/",
+    "auxiliary/osint/",
+)
+
+INFRA_DISCOVERY_BLOCK_TOKENS = (
+    "bruteforce",
+    "password_spray",
+    "credential_stuffing",
+    "dos",
+    "wipe",
+    "persistence",
+    "hop_proxy",
+)
+
 
 @dataclass(frozen=True)
 class PolicyBlock:
@@ -92,6 +188,7 @@ class AgentRuntimePolicy:
     dry_run: bool = False
     plan_only: bool = False
     session_policy: str = "ask"
+    mission_profile: str = ""
     deadline_at: Optional[float] = None
     allowed_ports: Set[int] = field(default_factory=set)
     allowed_protocols: Set[str] = field(default_factory=set)
@@ -110,6 +207,7 @@ class AgentRuntimePolicy:
         dry_run: bool = False,
         plan_only: bool = False,
         session_policy: str = "ask",
+        mission_profile: str = "",
         deadline_seconds: float = 0.0,
         policy_file: Optional[str] = None,
     ) -> "AgentRuntimePolicy":
@@ -157,6 +255,12 @@ class AgentRuntimePolicy:
         seconds = float(data.get("deadline_seconds") or deadline_seconds or 0.0)
         if seconds > 0:
             deadline = time.monotonic() + seconds
+        mission = normalize_mission_profile(
+            data.get("catalog_policy")
+            or data.get("mission_profile")
+            or data.get("profile")
+            or mission_profile
+        )
 
         return cls(
             safety_profile=str(data.get("safety_profile") or safety_profile or "normal").lower(),
@@ -172,6 +276,7 @@ class AgentRuntimePolicy:
             dry_run=bool(data.get("dry_run", dry_run)),
             plan_only=bool(data.get("plan_only", plan_only)),
             session_policy=str(data.get("session_policy") or session_policy or "ask"),
+            mission_profile=mission,
             deadline_at=deadline,
             allowed_ports=ports,
             allowed_protocols=protocols,
@@ -198,7 +303,8 @@ def assess_module_risk(module_or_info: Any, module_path: str = "") -> ModuleRisk
         info = getattr(module_or_info, "__info__", {}) or {}
     agent = info.get("agent") if isinstance(info, dict) else None
     if isinstance(agent, dict):
-        level = str(agent.get("risk") or agent.get("risk_level") or "").strip().lower()
+        raw_level = str(agent.get("risk") or agent.get("risk_level") or "").strip().lower()
+        level = "read" if raw_level == "passive" else raw_level
         if level in VALID_RISKS:
             effects = tuple(
                 str(value).strip().lower()
@@ -245,6 +351,91 @@ def assess_module_risk(module_or_info: Any, module_path: str = "") -> ModuleRisk
     return ModuleRisk("read", (), 1, True, False, False, "legacy heuristic")
 
 
+def normalize_mission_profile(value: Any) -> str:
+    key = str(value or "").strip().lower().replace("_", "-")
+    return MISSION_PROFILE_ALIASES.get(key, key)
+
+
+def _mission_catalog_block_reason(
+    policy: AgentRuntimePolicy,
+    risk: ModuleRisk,
+    *,
+    module_path: str,
+    knowledge_base: Optional[Dict[str, Any]] = None,
+) -> str:
+    mission = normalize_mission_profile(getattr(policy, "mission_profile", ""))
+    if not mission or mission == "internal-lab":
+        return ""
+
+    path = str(module_path or "").strip().lower()
+    effects = {str(value).lower() for value in (risk.effects or ())}
+
+    if mission == "bug-bounty-safe":
+        if path.startswith(BUG_BOUNTY_BLOCK_PREFIXES):
+            return "bug-bounty-safe catalog policy blocks post-exploit, payload, listener, DoS, and backdoor modules"
+        if any(token in path for token in BUG_BOUNTY_BLOCK_TOKENS):
+            return "bug-bounty-safe catalog policy blocks credential attacks, persistence, destructive writes, and noisy actions"
+        if risk.level in {"intrusive", "destructive"}:
+            return f"bug-bounty-safe catalog policy blocks {risk.level} modules"
+        if effects.intersection(NON_IDEMPOTENT_EFFECTS):
+            return "bug-bounty-safe catalog policy blocks non-idempotent target changes"
+        return ""
+
+    if mission == "ot-safe":
+        try:
+            from interfaces.command_system.builtin.agent.ot_policy import (
+                is_ot_destructive_module,
+                is_ot_module_path,
+                is_ot_recon_module,
+            )
+        except Exception:  # pragma: no cover - minimal import environments
+            is_ot_destructive_module = lambda _path: False  # type: ignore
+            is_ot_module_path = lambda _path: "/ics/" in str(_path).lower()  # type: ignore
+            is_ot_recon_module = lambda _path: "scanner/ics/" in str(_path).lower()  # type: ignore
+
+        if is_ot_destructive_module(path):
+            return "ot-safe catalog policy blocks PLC control, write, exploit, and DoS modules"
+        if path.startswith(OT_SAFE_BLOCK_PREFIXES):
+            return "ot-safe catalog policy blocks exploit, payload, listener, DoS, and backdoor modules"
+        if path.startswith("post/") and not is_ot_recon_module(path):
+            return "ot-safe catalog policy allows only OT gather/report post modules"
+        if is_ot_module_path(path) and not is_ot_recon_module(path):
+            return "ot-safe catalog policy allows OT recon/gather modules only"
+        if risk.level in {"intrusive", "destructive"}:
+            return f"ot-safe catalog policy blocks {risk.level} modules"
+        if effects.intersection(NON_IDEMPOTENT_EFFECTS):
+            return "ot-safe catalog policy blocks non-idempotent target changes"
+        return ""
+
+    if mission == "europol-passive":
+        if not any(path.startswith(prefix) for prefix in EUROPOL_PASSIVE_ALLOW_PREFIXES):
+            return "europol-passive catalog policy allows only passive OSINT and reporting modules"
+        if any(token in path for token in EUROPOL_PASSIVE_BLOCK_TOKENS):
+            return "europol-passive catalog policy blocks active scanning, credential attacks, and exploitation"
+        if path.startswith(("exploit/", "exploits/", "post/", "payloads/", "listeners/", "backdoors/")):
+            return "europol-passive catalog policy blocks offensive modules"
+        if risk.level in {"active", "intrusive", "destructive"}:
+            return f"europol-passive catalog policy blocks {risk.level} modules"
+        if effects.intersection(NON_IDEMPOTENT_EFFECTS):
+            return "europol-passive catalog policy blocks non-idempotent target changes"
+        return ""
+
+    if mission == "infra-discovery":
+        if path.startswith(INFRA_DISCOVERY_BLOCK_PREFIXES):
+            return "infra-discovery catalog policy allows scanner modules only"
+        if not any(path.startswith(prefix) for prefix in INFRA_DISCOVERY_ALLOW_PREFIXES):
+            return "infra-discovery catalog policy allows scanner/ and auxiliary/scanner/ modules only"
+        if any(token in path for token in INFRA_DISCOVERY_BLOCK_TOKENS):
+            return "infra-discovery catalog policy blocks bruteforce, DoS, and persistence modules"
+        if risk.level in {"intrusive", "destructive"}:
+            return f"infra-discovery catalog policy blocks {risk.level} modules"
+        if effects.intersection(NON_IDEMPOTENT_EFFECTS):
+            return "infra-discovery catalog policy blocks non-idempotent target changes"
+        return ""
+
+    return ""
+
+
 def module_policy_decision(
     policy: AgentRuntimePolicy,
     risk: ModuleRisk,
@@ -256,6 +447,68 @@ def module_policy_decision(
     if block is not None:
         return False, block.reason
     return True, "allowed by agent runtime policy"
+
+
+def evaluate_module_catalog_policy(
+    policy: AgentRuntimePolicy,
+    module_or_info: Any,
+    module_path: str = "",
+    *,
+    phase: str = "catalog",
+    knowledge_base: Optional[Dict[str, Any]] = None,
+) -> Optional[PolicyBlock]:
+    """
+    Runtime + mission-profile decision for catalog filtering and module launch.
+
+    ``evaluate_module_policy`` keeps the baseline risk approval semantics; this
+    wrapper adds mission presets such as ``ot-safe`` and ``bug-bounty-safe`` so
+    rejected modules are removed before ranking and explained consistently.
+    """
+    risk = assess_module_risk(module_or_info, module_path)
+    reason = _mission_catalog_block_reason(
+        policy,
+        risk,
+        module_path=module_path,
+        knowledge_base=knowledge_base,
+    )
+    if reason:
+        return PolicyBlock(
+            phase=phase,
+            module=module_path,
+            risk=risk.level,
+            reason=reason,
+            approval_needed=False,
+        )
+
+    block = evaluate_module_policy(
+        policy,
+        risk,
+        phase=phase,
+        module_path=module_path,
+    )
+    if block is not None:
+        return block
+
+    try:
+        from interfaces.command_system.builtin.agent.ot_policy import ot_module_block_reason
+
+        ot_reason = ot_module_block_reason(
+            module_path=module_path,
+            safety_profile=str(policy.safety_profile or "normal"),
+            knowledge_base=knowledge_base if isinstance(knowledge_base, dict) else {},
+            risk_approved=bool(policy.risk_approved(risk)),
+        )
+    except Exception:  # pragma: no cover - minimal import environments
+        ot_reason = ""
+    if ot_reason:
+        return PolicyBlock(
+            phase=phase,
+            module=module_path,
+            risk=risk.level,
+            reason=ot_reason,
+            approval_needed=False,
+        )
+    return None
 
 
 def evaluate_module_policy(

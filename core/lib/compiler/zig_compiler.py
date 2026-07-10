@@ -157,16 +157,100 @@ class ZigCompiler:
         zig_arch = arch_map.get(arch.lower(), arch.lower())
         zig_platform = platform_map.get(platform.lower(), platform.lower())
         
-        # Windows uses different format
+        # Windows: prefer -gnu triple so zig cc finds MinGW headers (windows.h) when cross-compiling.
         if platform.lower() == 'windows':
             if zig_arch == 'i386':
-                return 'i386-windows'
-            else:
-                return f'{zig_arch}-windows'
+                return 'i386-windows-gnu'
+            return f'{zig_arch}-windows-gnu'
         
         # Linux and other Unix-like
         return f'{zig_arch}-{zig_platform}'
     
+    @staticmethod
+    def _c_opt_level(optimization: str) -> str:
+        """Map Zig optimization names to clang -O flags for zig cc."""
+        mapping = {
+            'Debug': '-O0',
+            'ReleaseFast': '-O3',
+            'ReleaseSafe': '-O2',
+            'ReleaseSmall': '-Os',
+        }
+        return mapping.get(optimization, '-Os')
+
+    def _build_c_compile_cmd(self,
+                               source_file: str,
+                               output_path: str,
+                               target_triple: str,
+                               optimization: str,
+                               strip: bool,
+                               target_platform: str,
+                               windows_subsystem: Optional[str],
+                               extra_args: Optional[List[str]],
+                               compile_dir: str) -> List[str]:
+        """Build zig cc command for C sources (supports Intel inline asm on Windows)."""
+        cmd = [
+            self.zig_path,
+            'cc',
+            '-target', target_triple,
+            self._c_opt_level(optimization),
+            '-I', compile_dir,
+            source_file,
+            '-o', output_path.replace('\\', '/'),
+        ]
+        if strip:
+            cmd.append('-s')
+        if optimization == 'Debug':
+            cmd.append('-g')
+
+        extra = list(extra_args or [])
+        if target_platform.lower() == 'windows':
+            if not any(arg == '-masm=intel' for arg in extra):
+                cmd.append('-masm=intel')
+            if not any(arg == '-lc' for arg in extra):
+                cmd.append('-lc')
+            if not any(arg in ('-lkernel32', '-luser32') for arg in extra):
+                cmd.extend(['-lkernel32', '-luser32'])
+            if windows_subsystem == 'windows' and not any('subsystem' in arg for arg in extra):
+                cmd.append('-Wl,--subsystem,windows')
+        elif not any(arg == '-lc' for arg in extra):
+            cmd.append('-lc')
+
+        cmd.extend(extra)
+        return cmd
+
+    def compile_c(self,
+                  source_code: str,
+                  output_path: str,
+                  target_platform: str = 'windows',
+                  target_arch: str = 'x64',
+                  optimization: str = 'ReleaseSmall',
+                  strip: bool = True,
+                  static: bool = True,
+                  windows_subsystem: Optional[str] = None,
+                  include_dir: Optional[str] = None,
+                  extra_args: Optional[List[str]] = None) -> bool:
+        """Compile C source (e.g. inline asm syscall stubs) to executable via Zig/clang."""
+        extra = list(extra_args or [])
+        if include_dir:
+            include_flag = '-I' + include_dir.replace('\\', '/')
+            if include_flag not in extra:
+                extra.append(include_flag)
+        if target_platform.lower() == "windows" and not any(a == "-lc" for a in extra):
+            extra.append("-lc")
+        return self._compile_source(
+            source_code=source_code,
+            output_path=output_path,
+            source_name='main.c',
+            target_platform=target_platform,
+            target_arch=target_arch,
+            optimization=optimization,
+            strip=strip,
+            static=static,
+            windows_subsystem=windows_subsystem,
+            extra_args=extra,
+            include_dir=include_dir,
+        )
+
     def compile(self, 
                 source_code: str,
                 output_path: str,
@@ -197,12 +281,38 @@ class ZigCompiler:
             print_error("Zig compiler not available")
             return False
 
-        # Linux @cImport (unistd.h, etc.) only resolves when Zig links libc; without -lc you get
-        # "libc headers not available; compilation does not link against libc".
         extra_args = list(extra_args or [])
         if target_platform.lower() == "linux" and not any(a == "-lc" for a in extra_args):
             extra_args.append("-lc")
 
+        return self._compile_source(
+            source_code=source_code,
+            output_path=output_path,
+            source_name='main.zig',
+            target_platform=target_platform,
+            target_arch=target_arch,
+            optimization=optimization,
+            strip=strip,
+            static=static,
+            windows_subsystem=windows_subsystem,
+            extra_args=extra_args,
+        )
+
+    def _compile_source(self,
+                        source_code: str,
+                        output_path: str,
+                        source_name: str,
+                        target_platform: str = 'linux',
+                        target_arch: str = 'x64',
+                        optimization: str = 'ReleaseSmall',
+                        strip: bool = True,
+                        static: bool = True,
+                        windows_subsystem: Optional[str] = None,
+                        extra_args: Optional[List[str]] = None,
+                        include_dir: Optional[str] = None) -> bool:
+        if not self.is_available():
+            print_error("Zig compiler not available")
+            return False
         try:
             # Convert to absolute path first; handle bare filenames (no directory)
             output_path = os.path.abspath(output_path)
@@ -219,7 +329,14 @@ class ZigCompiler:
             compile_dir = os.path.join(output_dir, '.zig_compile')
             os.makedirs(compile_dir, exist_ok=True)
             self.temp_dir = compile_dir
-            source_file = os.path.join(self.temp_dir, 'main.zig')
+            source_file = os.path.join(self.temp_dir, source_name)
+
+            if include_dir and os.path.isdir(include_dir):
+                for header_name in os.listdir(include_dir):
+                    if header_name.endswith('.h'):
+                        src_header = os.path.join(include_dir, header_name)
+                        dst_header = os.path.join(self.temp_dir, header_name)
+                        shutil.copy2(src_header, dst_header)
             
             # Write source code to file
             with open(source_file, 'w', encoding='utf-8') as f:
@@ -229,7 +346,6 @@ class ZigCompiler:
             target_triple = self.get_target_triple(target_platform, target_arch)
             print_info(f"Compiling for target: {target_triple}")
             
-            # Use -femit-bin to output directly to target path (avoids move + Windows file lock)
             binary_name = os.path.basename(output_path)
             binary_name_no_ext = os.path.splitext(binary_name)[0]
 
@@ -239,38 +355,49 @@ class ZigCompiler:
             os.makedirs(workspace_cache, exist_ok=True)
             env['ZIG_LOCAL_CACHE_DIR'] = workspace_cache
 
-            # Build zig command: -femit-bin=path outputs directly (must be single arg)
-            # Use forward slashes on Windows to avoid backslash parsing issues
-            emit_bin_path = output_path.replace('\\', '/')
-            cmd = [
-                self.zig_path,
-                'build-exe',
-                source_file,
-                '-target', target_triple,
-                '-O', optimization,
-                '--name', binary_name_no_ext,
-                '-femit-bin=' + emit_bin_path,
-            ]
-            
-            # Note: Zig generates static binaries by default (since 0.4.0)
-            # Use -dynamic if you want a dynamic binary instead
-            if not static:
-                cmd.append('-dynamic')
-            
-            if strip:
-                cmd.append('-fstrip')  # Zig uses -fstrip (not --strip) to strip debug symbols
-                # Additional size reduction flags
-                cmd.append('-fno-stack-check')  # Disable stack overflow checking
-                cmd.append('-fno-unwind-tables')  # Disable unwind tables for smaller binary
-                cmd.append('-fsingle-threaded')  # Disable threading support for smaller binary
-                # Note: Zig handles optimization through -O flag
-                # Additional GCC/Clang-style flags are not supported by Zig
+            is_c_source = source_name.endswith('.c')
+            if is_c_source:
+                cmd = self._build_c_compile_cmd(
+                    source_file=source_file,
+                    output_path=output_path,
+                    target_triple=target_triple,
+                    optimization=optimization,
+                    strip=strip,
+                    target_platform=target_platform,
+                    windows_subsystem=windows_subsystem,
+                    extra_args=extra_args,
+                    compile_dir=self.temp_dir,
+                )
+            else:
+                # Use -femit-bin to output directly to target path (avoids move + Windows file lock)
+                emit_bin_path = output_path.replace('\\', '/')
+                cmd = [
+                    self.zig_path,
+                    'build-exe',
+                    source_file,
+                    '-target', target_triple,
+                    '-O', optimization,
+                    '--name', binary_name_no_ext,
+                    '-femit-bin=' + emit_bin_path,
+                ]
+                
+                if not static:
+                    cmd.append('-dynamic')
+                
+                if strip:
+                    cmd.append('-fstrip')
+                    cmd.append('-fno-stack-check')
+                    cmd.append('-fno-unwind-tables')
+                    cmd.append('-fsingle-threaded')
 
-            if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
-                cmd.extend(['--subsystem', 'windows'])
+                if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
+                    cmd.extend(['--subsystem', 'windows'])
 
-            if extra_args:
-                cmd.extend(extra_args)
+                if extra_args:
+                    cmd.extend(extra_args)
+
+                if target_platform.lower() == 'linux' and not any(a == '-lc' for a in extra_args or []):
+                    cmd.append('-lc')
 
             # Remove existing output file - lld-link on Windows often fails with "Permission denied"
             # when trying to overwrite an existing .exe (e.g. from a previous run)
@@ -288,7 +415,7 @@ class ZigCompiler:
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=60
+                timeout=180 if is_c_source else 60
             )
             
             if result.returncode != 0:

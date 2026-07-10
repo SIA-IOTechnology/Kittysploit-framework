@@ -12,7 +12,7 @@ from core.payload_templates.zig_meterpreter_reverse_tcp import ZigMeterpreterRev
 
 class Module(ZigMeterpreterReverseTcpBase, Payload):
     __info__ = {
-        'name': 'Zig Meterpreter Linux, Reverse TCP',
+        'name': 'Zig Meterpreter Linux, Reverse TCP (compat)',
         'description': 'Linux Meterpreter payload in Zig (compatibility path; requires Zig compiler)',
         'author': 'KittySploit Team',
         'version': '1.1.0',

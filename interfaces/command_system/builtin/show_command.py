@@ -33,8 +33,10 @@ class ShowCommand(BaseCommand):
         "listeners": "listener",
         "encoder": "encoder",
         "encoders": "encoder",
-        "obfuscator": "obfuscator",
-        "obfuscators": "obfuscator",
+        "transform": "transform",
+        "transforms": "transform",
+        "obfuscator": "transform",
+        "obfuscators": "transform",
         "workflow": "workflow",
         "workflows": "workflow",
         "docker": "docker_environment",
@@ -55,7 +57,8 @@ class ShowCommand(BaseCommand):
         ("post/", "post"),
         ("listeners/", "listener"),
         ("encoders/", "encoder"),
-        ("obfuscators/", "obfuscator"),
+        ("transforms/", "transform"),
+        ("obfuscators/", "transform"),
         ("workflow/", "workflow"),
         ("docker_environments/", "docker_environment"),
         ("browser_exploits/", "browser_exploit"),
@@ -73,7 +76,7 @@ class ShowCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|analysis|listeners|encoders|obfuscators|docker|backdoors]"
+        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|analysis|listeners|encoders|transforms|docker|backdoors]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
@@ -92,8 +95,10 @@ class ShowCommand(BaseCommand):
             "listener",  # alias
             "encoders",
             "encoder",  # alias
-            "obfuscators",
-            "obfuscator",  # alias
+            "transforms",
+            "transform",  # alias
+            "obfuscators",  # legacy alias
+            "obfuscator",  # legacy alias
             "workflows",
             "workflow",  # alias
             "docker",
@@ -207,8 +212,8 @@ Examples:
                 self._show_listeners()
             elif show_type in ("encoder", "encoders"):
                 self._show_modules_by_category("Encoder", "encoder")
-            elif show_type in ("obfuscator", "obfuscators"):
-                self._show_modules_by_category("Obfuscator", "obfuscator")
+            elif show_type in ("transform", "transforms", "obfuscator", "obfuscators"):
+                self._show_modules_by_category("Transform", "transform")
             elif show_type in ("workflow", "workflows"):
                 self._show_modules_by_category("Workflow", "workflow")
             elif show_type in ("docker", "environment", "environments"):
@@ -223,7 +228,7 @@ Examples:
                 print_error(f"Unknown show type: {show_type}")
                 print_info(
                     "Use 'show options', 'show advanced', 'show info', 'show modules', "
-                    "'show analysis', 'show listeners', 'show encoders', 'show obfuscators', "
+                    "'show analysis', 'show listeners', 'show encoders', 'show transforms', "
                     "'show nops', 'show workspaces', or 'show backdoors'"
                 )
                 return False
@@ -251,8 +256,8 @@ Examples:
         if hasattr(module, 'cve') and module.cve:
             print_info(f"CVE: {module.cve}")
         
-        # For obfuscators: show compatible payload client languages
-        if getattr(module, 'type', None) == 'obfuscator' or (hasattr(module.__class__, 'TYPE_MODULE') and getattr(module.__class__, 'TYPE_MODULE') == 'obfuscator'):
+        # For transforms: show compatible payload client languages
+        if getattr(module, 'type', None) == 'transform' or (hasattr(module.__class__, 'TYPE_MODULE') and getattr(module.__class__, 'TYPE_MODULE') == 'transform'):
             supported = getattr(module, 'get_supported_client_languages', lambda: getattr(module.__class__, 'SUPPORTED_CLIENT_LANGUAGES', []))()
             if supported:
                 print_info(f"Compatible with payloads (client language): {', '.join(supported)}")

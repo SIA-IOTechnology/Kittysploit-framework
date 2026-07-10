@@ -15,7 +15,7 @@ except ImportError:
 
 
 class SmbPipeTransport:
-    """Connexion IPC$ + pipe samr via pysmb."""
+    """Connexion IPC$ + named pipe DCE/RPC via pysmb."""
 
     def __init__(
         self,
@@ -25,6 +25,7 @@ class SmbPipeTransport:
         password: str = "",
         domain: str = "",
         remote_name: str = "",
+        pipe_name: str = "samr",
         timeout: int = 15,
     ) -> None:
         if not PYSMB_AVAILABLE:
@@ -37,6 +38,7 @@ class SmbPipeTransport:
         self.password = password
         self.domain = domain
         self.remote_name = remote_name or host
+        self.pipe_name = (pipe_name or "samr").strip("\\").split("\\")[-1]
         self.timeout = timeout
         self._conn: Optional[SMBConnection] = None
         self._tid: int = 0
@@ -56,7 +58,7 @@ class SmbPipeTransport:
         if not ok:
             raise ConnectionError(f"SMB connect failed to {self.host}:{self.port}")
         self._tid = self._conn.connectTree("IPC$")
-        self._fid = self._conn.openFile(self._tid, "samr")
+        self._fid = self._conn.openFile(self._tid, self.pipe_name)
 
     def disconnect(self) -> None:
         if self._conn and self._tid and self._fid:

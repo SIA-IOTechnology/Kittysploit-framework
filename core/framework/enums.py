@@ -40,6 +40,10 @@ class SessionType(Enum):
     COAP = "coap"
     DNS = "dns"
     EMAIL = "email"
+    SMB = "smb"
+    S7COMM = "s7comm"
+    MODBUS = "modbus"
+    QUIC = "quic"
 
 class ServiceType(Enum):
     """Service types"""

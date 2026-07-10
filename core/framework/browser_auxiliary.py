@@ -6,6 +6,7 @@ import time
 import uuid
 import functools
 from difflib import SequenceMatcher
+from typing import Any
 
 class BrowserAuxiliary(BaseModule):
 
@@ -38,6 +39,17 @@ class BrowserAuxiliary(BaseModule):
         """Reset auto-return flags - called by framework before each run()"""
         self._last_js_result = None
         self._execute_js_called = False
+
+    @staticmethod
+    def _to_bool(value: Any) -> bool:
+        """Safely convert framework option values to boolean."""
+        if hasattr(value, "value"):
+            value = value.value
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("true", "yes", "y", "1", "on")
+        return bool(value)
     
     def _auto_return_js(self, javascript_code: str):
         """
@@ -625,6 +637,35 @@ class BrowserAuxiliary(BaseModule):
             print_error(f"Error sending command to session: {e}")
             return False
     
+    def bootstrap_visual_debug(
+        self,
+        title: str,
+        subtitle: str = "",
+        enabled: bool = True,
+        timeout: float = 8.0,
+    ) -> bool:
+        """
+        Open the in-page visual debugger before delivering a heavy exploit payload.
+
+        Sends a small JS bundle first so the overlay appears even if the main
+        exploit script blocks the browser main thread or fails later.
+        """
+        if not enabled:
+            return True
+
+        from lib.js.generic import bundle_visual_debug_only
+
+        js = bundle_visual_debug_only(title, subtitle, enabled=True)
+        result = self.send_js_and_wait_for_response(js, timeout=timeout)
+        if result is None:
+            print_warning("Visual debug bootstrap timed out (continuing with exploit delivery)")
+            return False
+        if isinstance(result, str) and result.startswith("Error:"):
+            print_error(f"Visual debug bootstrap failed: {result}")
+            return False
+        print_info("Visual debug shell opened in target browser tab")
+        return True
+
     def send_js(self, javascript_code: str):
         """Send JavaScript code to execute on the target browser session (fire and forget)"""
         # Encode JavaScript if encoder is specified

@@ -11,12 +11,12 @@ import uuid
 import importlib
 
 
-class ObfuscatedSocketWrapper:
-    """Wraps a socket and applies encode/decode on send/recv using an obfuscator module. Tracks stream offset so multi-chunk traffic stays in sync."""
+class TransformedSocketWrapper:
+    """Wraps a socket and applies encode/decode on send/recv using a transform module."""
 
-    def __init__(self, sock, obfuscator):
+    def __init__(self, sock, transform):
         self._sock = sock
-        self._obf = obfuscator
+        self._xf = transform
         self._encode_offset = 0
         self._decode_offset = 0
 
@@ -25,9 +25,9 @@ class ObfuscatedSocketWrapper:
             data = data.encode("utf-8", errors="replace")
         data = bytes(data)
         try:
-            encoded = self._obf.encode(data, self._encode_offset)
+            encoded = self._xf.encode(data, self._encode_offset)
         except TypeError:
-            self._sock.sendall(self._obf.encode(data))
+            self._sock.sendall(self._xf.encode(data))
         else:
             self._sock.sendall(encoded)
             self._encode_offset += len(data)
@@ -38,9 +38,9 @@ class ObfuscatedSocketWrapper:
             data = data.encode("utf-8", errors="replace")
         data = bytes(data)
         try:
-            encoded = self._obf.encode(data, self._encode_offset)
+            encoded = self._xf.encode(data, self._encode_offset)
         except TypeError:
-            encoded = self._obf.encode(data)
+            encoded = self._xf.encode(data)
         else:
             self._sock.sendall(encoded)
             self._encode_offset += len(data)
@@ -52,9 +52,9 @@ class ObfuscatedSocketWrapper:
         if not data:
             return data
         try:
-            decoded = self._obf.decode(data, self._decode_offset)
+            decoded = self._xf.decode(data, self._decode_offset)
         except TypeError:
-            decoded = self._obf.decode(data)
+            decoded = self._xf.decode(data)
         else:
             self._decode_offset += len(data)
         return decoded
@@ -72,7 +72,7 @@ class Listener(BaseModule):
     TYPE_MODULE = "listener"
 
     timeout = OptInteger(30, "Connection timeout in seconds", False, advanced=True)
-    obfuscator = OptString("", "Obfuscator module - encodes C2 flux", False, advanced=True)
+    transform = OptString("", "C2 stream transform module - encodes C2 flux", False, advanced=True)
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -84,6 +84,7 @@ class Listener(BaseModule):
         self.listener_thread = None
         self.connections = {}  # Store active connections by conn_id (target:port)
         self._session_connections = {}  # Store connections by session_id for easy lookup
+        self._connections_lock = threading.Lock()
         self.session_count = 0
         
         # Common listener options
@@ -96,9 +97,9 @@ class Listener(BaseModule):
 #        self.timeout = OptPort(30, "Connection timeout in seconds", False)
 #        self.auto_start = OptBool(True, "Automatically start listener", False)
         
-        # Obfuscator: keep a loaded instance when obfuscator path is set (for options display/set)
-        self._obfuscator_instance = None
-        self._obfuscator_path = ""
+        # Transform: keep a loaded instance when transform path is set (for options display/set)
+        self._transform_instance = None
+        self._transform_path = ""
 
         # Listener configuration
         self.listener_id = str(uuid.uuid4())
@@ -111,73 +112,72 @@ class Listener(BaseModule):
             'uptime': 0
         }
 
-    def _get_obfuscator_path(self) -> str:
-        """Return current obfuscator option value (module path)."""
-        obf = getattr(self, "obfuscator", None)
-        if obf is None:
-            return ""
-        path = getattr(obf, "value", obf) if hasattr(obf, "value") else obf
-        return (path or "").strip()
+    def _get_transform_path(self) -> str:
+        """Return current transform option value (module path)."""
+        from core.framework.transform import get_transform_path_from_instance
+        return get_transform_path_from_instance(self)
 
-    def _ensure_obfuscator_loaded(self) -> None:
-        """Load or reload obfuscator instance when obfuscator option is set."""
-        path_str = self._get_obfuscator_path()
+    def _ensure_transform_loaded(self) -> None:
+        """Load or reload transform instance when transform option is set."""
+        path_str = self._get_transform_path()
         if not path_str:
-            self._obfuscator_instance = None
-            self._obfuscator_path = ""
+            self._transform_instance = None
+            self._transform_path = ""
             return
-        if self._obfuscator_instance is not None and self._obfuscator_path == path_str:
+        if self._transform_instance is not None and self._transform_path == path_str:
             return
         try:
             mod_path = "modules." + path_str.replace("/", ".")
             mod = importlib.import_module(mod_path)
-            obf_cls = getattr(mod, "Module", None)
-            if not obf_cls or not (hasattr(obf_cls, "encode") or hasattr(obf_cls, "decode")):
-                self._obfuscator_instance = None
-                self._obfuscator_path = ""
+            xf_cls = getattr(mod, "Module", None)
+            if not xf_cls or not (hasattr(xf_cls, "encode") or hasattr(xf_cls, "decode")):
+                self._transform_instance = None
+                self._transform_path = ""
                 return
-            self._obfuscator_instance = obf_cls(framework=getattr(self, "framework", None))
-            self._obfuscator_path = path_str
+            self._transform_instance = xf_cls(framework=getattr(self, "framework", None))
+            self._transform_path = path_str
         except Exception:
-            self._obfuscator_instance = None
-            self._obfuscator_path = ""
+            self._transform_instance = None
+            self._transform_path = ""
 
     def get_options(self) -> dict:
-        """Return listener options merged with obfuscator options when obfuscator is set."""
+        """Return listener options merged with transform options when transform is set."""
         opts = super().get_options()
-        path_str = self._get_obfuscator_path()
+        path_str = self._get_transform_path()
         if not path_str:
             return opts
-        self._ensure_obfuscator_loaded()
-        if self._obfuscator_instance is None:
+        self._ensure_transform_loaded()
+        if self._transform_instance is None:
             return opts
-        obf_opts = self._obfuscator_instance.get_options()
-        if obf_opts:
+        xf_opts = self._transform_instance.get_options()
+        if xf_opts:
             merged = dict(opts)
-            for name, data in obf_opts.items():
+            for name, data in xf_opts.items():
                 merged[name] = data
             return merged
         return opts
 
     def set_option(self, name: str, value: Any) -> bool:
-        """Set option on listener or on obfuscator instance when applicable."""
+        """Set option on listener or on transform instance when applicable."""
+        from core.framework.transform import LEGACY_OPTION
+        if name == LEGACY_OPTION:
+            name = "transform"
         own_opts = getattr(self, "exploit_attributes", {})
         if name in own_opts:
             return super().set_option(name, value)
-        self._ensure_obfuscator_loaded()
-        if self._obfuscator_instance is not None:
-            obf_opts = self._obfuscator_instance.get_options()
-            if name in obf_opts:
-                return self._obfuscator_instance.set_option(name, value)
+        self._ensure_transform_loaded()
+        if self._transform_instance is not None:
+            xf_opts = self._transform_instance.get_options()
+            if name in xf_opts:
+                return self._transform_instance.set_option(name, value)
         return False
 
     def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to obfuscator instance for obfuscator option names (e.g. show options)."""
+        """Delegate attribute access to transform instance for transform option names."""
         if name.startswith("_"):
             raise AttributeError(name)
-        self._ensure_obfuscator_loaded()
-        if self._obfuscator_instance is not None and name in self._obfuscator_instance.get_options():
-            return getattr(self._obfuscator_instance, name)
+        if self._transform_instance is not None and name in self._transform_instance.get_options():
+            return getattr(self._transform_instance, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def run(self):
@@ -347,6 +347,35 @@ class Listener(BaseModule):
             # Add platform from listener (set by exploit from payload __info__) so shell can show correct prompt
             if hasattr(self, 'session_platform') and self.session_platform:
                 session_data['platform'] = self.session_platform if isinstance(self.session_platform, str) else str(getattr(self.session_platform, 'value', self.session_platform)).lower()
+
+            if getattr(self, 'session_pty_mode', False):
+                session_data['pty_mode'] = True
+
+            if getattr(self, 'session_relay_encrypt', None) is not None:
+                session_data['relay_encrypted'] = bool(
+                    self.session_relay_encrypt.value
+                    if hasattr(self.session_relay_encrypt, 'value')
+                    else self.session_relay_encrypt
+                )
+            if getattr(self, 'session_relay_psk', None) not in (None, ''):
+                psk_val = (
+                    self.session_relay_psk.value
+                    if hasattr(self.session_relay_psk, 'value')
+                    else self.session_relay_psk
+                )
+                if psk_val:
+                    session_data['relay_psk_set'] = True
+            if getattr(self, 'session_relay_keepalive', None) is not None:
+                session_data['relay_keepalive'] = int(
+                    self.session_relay_keepalive.value
+                    if hasattr(self.session_relay_keepalive, 'value')
+                    else self.session_relay_keepalive
+                )
+
+            if getattr(self, 'session_implant_id', None):
+                session_data['implant_id'] = str(self.session_implant_id)
+            if getattr(self, 'session_implant_public_key', None):
+                session_data['implant_public_key_pem'] = str(self.session_implant_public_key)
             
             # Add username if available from listener
             if hasattr(self, 'username'):
@@ -365,22 +394,37 @@ class Listener(BaseModule):
                         # Skip non-serializable objects
                         pass
 
-            # Apply obfuscator if set (wrap connection so send/recv are encoded/decoded)
-            connection = self._wrap_connection_with_obfuscator(connection)
+            # Apply transform if set (wrap connection so send/recv are encoded/decoded)
+            connection = self._wrap_connection_with_transform(connection)
+
+            reconnect_session_id = self._find_reconnectable_session(session_data)
+            if reconnect_session_id:
+                session_id = self._reattach_session_connection(
+                    reconnect_session_id,
+                    connection,
+                    target,
+                    port,
+                    session_data,
+                )
+                if session_id:
+                    self.stats['connections_received'] += 1
+                    return session_id
+
+            session_data['transport_state'] = 'connected'
+            session_data['last_seen'] = time.time()
 
             # Create session
             session_id = self._create_session(handler, target, port, session_data)
 
             if session_id:
-                # Store connection object separately in memory (not in database)
-                conn_id = f"{target}:{port}"
-                self.connections[conn_id] = connection
-
-                # Also store mapping from session_id to connection for easy lookup
-                self._session_connections[session_id] = connection
-
+                label = session_data.get("client_id") or session_data.get("implant_id") or f"{target}:{port}"
+                self._register_session_connection(session_id, connection, target, port, str(label))
                 self.stats['connections_received'] += 1
-
+                if session_data.get("stager_line_mode"):
+                    print_info(
+                        "Stager shell session — use line mode (sessions interact). "
+                        "PTY relay is disabled for dup2+/bin/sh payloads."
+                    )
                 return session_id
             else:
                 return None
@@ -389,36 +433,138 @@ class Listener(BaseModule):
             print_error(f"Error creating session from connection data: {e}")
             return None
 
-    def _wrap_connection_with_obfuscator(self, connection):
-        """If obfuscator option is set, wrap the connection with encode/decode using the loaded obfuscator instance."""
-        path_str = self._get_obfuscator_path()
+    def _stable_identity(self, session_data: Dict[str, Any]) -> str:
+        return str(session_data.get("implant_id") or session_data.get("client_id") or "").strip()
+
+    def _find_reconnectable_session(self, session_data: Dict[str, Any]) -> Optional[str]:
+        identity = self._stable_identity(session_data)
+        if not identity:
+            return None
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return None
+        return self.framework.session_manager.find_disconnected_session_by_identity(
+            self.listener_id,
+            implant_id=str(session_data.get("implant_id") or ""),
+            client_id=str(session_data.get("client_id") or ""),
+        )
+
+    def _register_session_connection(
+        self,
+        session_id: str,
+        connection,
+        target: str,
+        port: int,
+        label: str,
+    ) -> Any:
+        """Store and monitor a live socket for a session."""
+        from core.framework.connection_watchdog import wrap_monitored_connection
+
+        conn_id = f"{target}:{port}"
+        with self._connections_lock:
+            old = self._session_connections.get(session_id)
+            if old is not None and old is not connection:
+                try:
+                    old.close()
+                except Exception:
+                    pass
+            monitored = wrap_monitored_connection(
+                connection,
+                session_id,
+                getattr(self, "framework", None),
+                label=label,
+            )
+            self._session_connections[session_id] = monitored
+            self.connections[conn_id] = monitored
+            return monitored
+
+    def _reattach_session_connection(
+        self,
+        session_id: str,
+        connection,
+        target: str,
+        port: int,
+        session_data: Dict[str, Any],
+    ) -> Optional[str]:
+        """Replace the transport for an existing disconnected session."""
+        label = session_data.get("client_id") or session_data.get("implant_id") or f"{target}:{port}"
+        monitored = self._register_session_connection(session_id, connection, target, port, str(label))
+
+        updates = {
+            "address": (target, port),
+            "connection_time": time.time(),
+            "transport_state": "connected",
+            "last_seen": time.time(),
+            "reconnected_at": time.time(),
+        }
+        for key in ("implant_id", "client_id", "protocol", "connection_type"):
+            if session_data.get(key) is not None:
+                updates[key] = session_data[key]
+
+        if self.framework and hasattr(self.framework, "session_manager"):
+            session = self.framework.session_manager.get_session(session_id)
+            if session:
+                session.host = target
+                session.port = int(port)
+            self.framework.session_manager.update_session_data(session_id, updates)
+
+        print_success(f"Session reconnected: {session_id}")
+        if self.framework and hasattr(self.framework, "notify_session_reconnected"):
+            self.framework.notify_session_reconnected(session_id, label=str(label))
+        return session_id
+
+    def remove_session_connection(self, session_id: str, *, close_socket: bool = True) -> None:
+        """Remove a session transport from listener maps."""
+        with self._connections_lock:
+            connection = self._session_connections.pop(session_id, None)
+            if connection is None:
+                return
+            stale_keys = [
+                conn_id
+                for conn_id, mapped in self.connections.items()
+                if mapped is connection
+            ]
+            for conn_id in stale_keys:
+                self.connections.pop(conn_id, None)
+            if close_socket:
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+    def _wrap_connection_with_transform(self, connection):
+        """If transform option is set, wrap the connection with encode/decode using the loaded transform instance."""
+        path_str = self._get_transform_path()
         if not path_str:
             return connection
-        self._ensure_obfuscator_loaded()
-        if self._obfuscator_instance is not None:
-            if not (hasattr(self._obfuscator_instance, "encode") and hasattr(self._obfuscator_instance, "decode")):
-                print_warning(f"Obfuscator module {path_str} has no encode/decode, skipping obfuscation")
+        self._ensure_transform_loaded()
+        if self._transform_instance is not None:
+            if not (hasattr(self._transform_instance, "encode") and hasattr(self._transform_instance, "decode")):
+                print_warning(f"Transform module {path_str} has no encode/decode, skipping transform")
                 return connection
-            print_success(f"Obfuscation enabled: {path_str}")
-            obf = getattr(self._obfuscator_instance, "connection_copy", lambda: self._obfuscator_instance)()
-            return ObfuscatedSocketWrapper(connection, obf)
+            print_success(f"C2 transform enabled: {path_str}")
+            xf = getattr(self._transform_instance, "connection_copy", lambda: self._transform_instance)()
+            return TransformedSocketWrapper(connection, xf)
         try:
             # Fallback: load on the fly if instance was never created (e.g. show options never called)
             mod_path = "modules." + path_str.replace("/", ".")
             mod = importlib.import_module(mod_path)
-            obf_cls = getattr(mod, "Module", None)
-            if not obf_cls:
-                print_warning(f"Obfuscator module {path_str} has no Module class, skipping obfuscation")
+            xf_cls = getattr(mod, "Module", None)
+            if not xf_cls:
+                print_warning(f"Transform module {path_str} has no Module class, skipping transform")
                 return connection
-            obf_instance = obf_cls(framework=getattr(self, "framework", None))
-            if not (hasattr(obf_instance, "encode") and hasattr(obf_instance, "decode")):
-                print_warning(f"Obfuscator module {path_str} has no encode/decode, skipping obfuscation")
+            xf_instance = xf_cls(framework=getattr(self, "framework", None))
+            if not (hasattr(xf_instance, "encode") and hasattr(xf_instance, "decode")):
+                print_warning(f"Transform module {path_str} has no encode/decode, skipping transform")
                 return connection
-            print_success(f"Obfuscation enabled: {path_str}")
-            return ObfuscatedSocketWrapper(connection, obf_instance)
+            print_success(f"C2 transform enabled: {path_str}")
+            return TransformedSocketWrapper(connection, xf_instance)
         except Exception as e:
-            print_warning(f"Could not load obfuscator {path_str}: {e}. Using raw connection.")
+            print_warning(f"Could not load transform {path_str}: {e}. Using raw connection.")
             return connection
+
+    def _wrap_connection_with_obfuscator(self, connection):
+        """Deprecated alias for _wrap_connection_with_transform."""
+        return self._wrap_connection_with_transform(connection)
 
     def start(self):
         """Start the listener in a background thread"""
@@ -831,16 +977,15 @@ class Listener(BaseModule):
                         # Skip non-serializable objects (like socket)
                         pass
             
+            session_data['transport_state'] = 'connected'
+            session_data['last_seen'] = time.time()
+
             # Create session
             session_id = self._create_session(handler_value, target, port, session_data)
             
             if session_id:
-                # Store connection object separately in memory (not in database)
-                conn_id = f"{target}:{port}"
-                self.connections[conn_id] = connection
-                
-                # Also store mapping from session_id to connection for easy lookup
-                self._session_connections[session_id] = connection
+                label = session_data.get("client_id") or session_data.get("implant_id") or f"{target}:{port}"
+                self._register_session_connection(session_id, connection, target, port, str(label))
                 
                 self.stats['connections_received'] += 1
                 

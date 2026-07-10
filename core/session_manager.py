@@ -366,6 +366,49 @@ class SessionManager:
         
         return session_id
     
+    def update_session_data(self, session_id: str, updates: Dict[str, Any]) -> bool:
+        """Merge updates into an in-memory session and sync to the database."""
+        session = self.sessions.get(session_id)
+        if not session:
+            return False
+        if updates:
+            session.data = {**(session.data or {}), **updates}
+            if "address" in updates and isinstance(updates["address"], (list, tuple)) and len(updates["address"]) >= 2:
+                session.host = str(updates["address"][0])
+                try:
+                    session.port = int(updates["address"][1])
+                except (TypeError, ValueError):
+                    pass
+        self._sync_session_to_db(session_id, session)
+        for callback in self.callbacks:
+            try:
+                callback("session_updated", session_id, session)
+            except Exception as e:
+                print_error(f"Error in session callback: {e}")
+        return True
+
+    def find_disconnected_session_by_identity(
+        self,
+        listener_id: str,
+        *,
+        implant_id: str = "",
+        client_id: str = "",
+    ) -> Optional[str]:
+        """Return a disconnected session id matching a stable implant identity."""
+        identity = str(implant_id or client_id or "").strip()
+        if not identity:
+            return None
+        for session_id, session in self.sessions.items():
+            data = session.data or {}
+            if data.get("listener_id") != listener_id:
+                continue
+            if data.get("transport_state") != "disconnected":
+                continue
+            existing = str(data.get("implant_id") or data.get("client_id") or "").strip()
+            if existing == identity:
+                return session_id
+        return None
+    
     def _play_session_sound(self):
         """Play sound notification when a session is created"""
         try:

@@ -88,7 +88,91 @@ class AgentDoctor:
             "ok": bool(list_mission_profiles()),
             "count": len(list_mission_profiles()),
         }
+        checks["operator_archetypes"] = self._check_operator_archetypes()
+        checks["evidence_gate"] = self._check_evidence_gate()
+        checks["context_pack"] = self._check_context_pack()
+        checks["adjudicate"] = self._check_adjudicate()
         return checks
+
+    @staticmethod
+    def _check_adjudicate() -> Dict[str, Any]:
+        try:
+            from interfaces.command_system.builtin.agent.adjudicate import (
+                adjudicate,
+                guard_exists_in_source,
+            )
+
+            panel = adjudicate([
+                {"verdict": "REFUTED", "killing_guard": {"file": "a.c", "line": 1, "quote": "if (n >= cap)"}},
+                {"verdict": "SURVIVED"},
+                {"verdict": "SURVIVED"},
+            ])
+            guard_ok = guard_exists_in_source(
+                {"file": "test.c", "line": 2, "quote": "if (n >= cap)"},
+                "void f() { if (n >= cap) return; sink(n); }",
+            )
+            return {
+                "ok": panel.get("verdict") == "SURVIVED" and guard_ok,
+                "panel_verdict": panel.get("verdict"),
+                "guard_cite_check": guard_ok,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+
+    @staticmethod
+    def _check_operator_archetypes() -> Dict[str, Any]:
+        try:
+            from interfaces.command_system.builtin.agent.operator_archetypes import (
+                ARCHETYPE_PROFILES,
+                list_operator_profiles,
+                resolve_operator_for_phase,
+            )
+
+            profiles = list_operator_profiles()
+            recon = resolve_operator_for_phase("scan")
+            return {
+                "ok": len(profiles) >= 6,
+                "count": len(profiles),
+                "sample": recon.key,
+                "archetypes": list(ARCHETYPE_PROFILES.keys()),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+
+    @staticmethod
+    def _check_evidence_gate() -> Dict[str, Any]:
+        try:
+            from interfaces.command_system.builtin.agent.evidence_gate import gate_live_finding
+
+            blocked = gate_live_finding({"vulnerable": True, "severity": "high"})
+            passed = gate_live_finding({
+                "vulnerable": True,
+                "evidence_records": [{"kind": "http", "summary": "status=200 body=uid=0"}],
+            })
+            return {
+                "ok": not blocked["passed"] and passed["passed"],
+                "blocks_empty": not blocked["passed"],
+                "passes_with_tool_output": passed["passed"],
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
+
+    @staticmethod
+    def _check_context_pack() -> Dict[str, Any]:
+        try:
+            from interfaces.command_system.builtin.agent.context_pack import pack_knowledge_context
+
+            packed = pack_knowledge_context(
+                {"tech_hints": ["php", "apache"], "risk_signals": ["waf"]},
+                objective="obtain-shell",
+            )
+            return {
+                "ok": bool(packed.get("text")),
+                "included": len(packed.get("included_sections", [])),
+                "dropped": len(packed.get("dropped_sections", [])),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:200]}
 
     def run_json(self) -> Dict[str, Any]:
         checks = self.run()

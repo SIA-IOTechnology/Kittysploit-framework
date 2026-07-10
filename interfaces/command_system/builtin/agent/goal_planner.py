@@ -56,6 +56,19 @@ GOAL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "default_budget": 8,
         "skip_exploitation": True,
     },
+    "infra-discovery": {
+        "allowed_action_types": ["prioritize", "run_followup"],
+        "terminal_conditions": ["dry_run_complete", "no_vulnerabilities"],
+        "default_budget": 70,
+        "skip_exploitation": True,
+        "suggested_workflows": [
+            "network-services",
+            "devops-panels",
+            "saas-panels",
+            "verification",
+            "service-discovery",
+        ],
+    },
 }
 
 
@@ -99,6 +112,35 @@ def operator_goal_from_mapping(mapping: Any) -> str:
 def _module_observed_in_kb(kb: Mapping[str, Any], *needles: str) -> bool:
     observed = [str(p).lower() for p in (kb.get("observed_modules") or []) if p]
     return any(any(n in p for n in needles) for p in observed)
+
+
+def kb_client_js_surface_ready(kb: Mapping[str, Any]) -> bool:
+    """True when client-side JS / source-map analysis is warranted."""
+    if not isinstance(kb, Mapping):
+        return False
+    signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
+    if signals.intersection({
+        "api_surface_detected",
+        "graphql_surface_detected",
+        "active_web_probe_completed",
+        "test_api_surface",
+    }):
+        return True
+    hints = {str(h).lower() for h in kb.get("tech_hints", []) or []}
+    if hints.intersection({"nextjs", "nodejs", "react", "javascript", "angular", "vue", "api"}):
+        return True
+    endpoints = [str(e).lower() for e in kb.get("discovered_endpoints", []) or []]
+    if any(".js" in e or "/_next/" in e or "/static/" in e for e in endpoints):
+        return True
+    request_intel = kb.get("request_intel") or {}
+    for row in (request_intel.get("interesting_requests") or [])[:16]:
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or row.get("path") or "").lower()
+        ctype = str(row.get("content_type") or "").lower()
+        if ".js" in url or "javascript" in ctype or "/static/" in url:
+            return True
+    return kb_api_surface_ready(kb)
 
 
 def kb_api_surface_ready(kb: Mapping[str, Any]) -> bool:
@@ -200,13 +242,15 @@ def kb_subdomain_surface_expandable(kb: Mapping[str, Any]) -> bool:
 SHELL_API_MODULE_LADDER: Sequence[tuple[str, str]] = (
     ("scanner/http/swagger_detect", "swagger_detect"),
     ("scanner/http/graphql_detect", "graphql_detect"),
+    ("auxiliary/osint/js_sourcemap_analyzer", "js_sourcemap"),
     ("auxiliary/osint/js_endpoint_extractor", "js_endpoint"),
     ("auxiliary/scanner/http/api_fuzzer", "api_fuzzer"),
 )
 
 SHELL_INJECTION_MODULE_LADDER: Sequence[tuple[str, str]] = (
     ("auxiliary/scanner/http/lfi_fuzzer", "lfi_fuzzer"),
-    ("auxiliary/scanner/http/sql_injection", "sql_injection"),
+    ("auxiliary/scanner/http/sqli_engine", "sqli_engine"),
+    ("post/http/sqli_shell", "sqli_shell"),
     ("auxiliary/scanner/http/ssrf_scanner", "ssrf_scanner"),
     ("auxiliary/scanner/http/xxe_scanner", "xxe_scanner"),
     ("auxiliary/scanner/http/php_injection", "php_injection"),
@@ -268,16 +312,21 @@ def suggest_shell_plan_followups(kb: Mapping[str, Any]) -> List[str]:
             seen_paths.add(path)
             out.append(path)
 
-    if kb_api_surface_ready(kb):
+    if kb_api_surface_ready(kb) or kb_client_js_surface_ready(kb):
         hints_blob = " ".join(str(h).lower() for h in kb.get("tech_hints", []) or [])
         ladder: List[tuple[str, str]] = list(SHELL_API_MODULE_LADDER)
-        if any(t in hints_blob for t in ("nextjs", "nodejs", "react", "javascript")):
-            js_first = [row for row in ladder if row[1] == "js_endpoint"]
-            rest = [row for row in ladder if row[1] != "js_endpoint"]
-            ladder = js_first + rest
+        js_first = kb_client_js_surface_ready(kb) or any(
+            t in hints_blob for t in ("nextjs", "nodejs", "react", "javascript")
+        )
+        if js_first:
+            js_rows = [row for row in ladder if row[1] in ("js_sourcemap", "js_endpoint")]
+            rest = [row for row in ladder if row[1] not in ("js_sourcemap", "js_endpoint")]
+            ladder = js_rows + rest
         for path, needle in ladder:
             if not _module_observed_in_kb(kb, needle):
                 _add(path)
+                if needle in ("js_sourcemap", "js_endpoint"):
+                    continue
                 break
 
     if kb_subdomain_surface_expandable(kb) and not _module_observed_in_kb(kb, "domain_surface_mapper", "domain_crtsh"):

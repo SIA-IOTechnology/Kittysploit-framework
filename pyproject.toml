@@ -82,6 +82,7 @@ dependencies = [
     "python-whois",
     "dnspython",
     "reportlab",
+    "pypdf>=5.0.0",
     "capstone>=5.0.0",
     "yara-python>=4.5.0",
     "jsonschema>=4.0.0",

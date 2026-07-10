@@ -156,6 +156,16 @@ def _info_extras_from_file(file_path: str) -> Dict[str, Any]:
     return extras
 
 
+def _normalize_cve(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            text = str(item).strip().upper()
+            if text:
+                return text
+        return ""
+    return str(value or "").strip().upper()
+
+
 def _string_list(value: Any) -> List[str]:
     if isinstance(value, str):
         text = value.strip()
@@ -202,7 +212,7 @@ def build_inventory_entry(module_path: str, file_path: str) -> ModuleInventoryEn
         module_type=str(module_type or ""),
         protocol=facets.get("protocol") or "",
         platform=facets.get("platform") or "",
-        cve=str(info.get("cve") or "").strip(),
+        cve=_normalize_cve(info.get("cve")),
         reliability=facets.get("reliability") or "",
         tags=[str(tag) for tag in (info.get("tags") or []) if str(tag).strip()],
         required_options=required_options,
@@ -249,16 +259,29 @@ def _duplicate_groups(
     return {key: paths for key, paths in groups.items() if len(paths) > 1}
 
 
+def _duplicate_cve_groups(entries: Iterable[ModuleInventoryEntry]) -> Dict[str, List[str]]:
+    """Flag CVE collisions only within the same module type (scanner+exploit pairs are OK)."""
+    groups: Dict[tuple[str, str], List[str]] = defaultdict(list)
+    for entry in entries:
+        cve = (entry.cve or "").strip().upper()
+        if not cve:
+            continue
+        groups[(cve, entry.module_type or "unknown")].append(entry.path)
+    return {
+        cve: paths
+        for (cve, _module_type), paths in groups.items()
+        if len(paths) > 1
+    }
+
+
 def _is_incomplete(entry: ModuleInventoryEntry) -> bool:
-    if entry.errors or entry.warnings:
+    if entry.errors:
         return True
     if not entry.name or not entry.description:
         return True
     if entry.module_type in {"exploits", "scanner", "auxiliary"} and not entry.protocol:
         return True
     if entry.module_type in {"exploits", "post"} and not entry.platform:
-        return True
-    if not entry.tags:
         return True
     return False
 
@@ -282,10 +305,7 @@ def analyze_inventory(entries: List[ModuleInventoryEntry]) -> InventoryAnalysis:
         entries,
         lambda item: (item.name or "").strip().lower(),
     )
-    duplicates_by_cve = _duplicate_groups(
-        entries,
-        lambda item: (item.cve or "").strip().upper(),
-    )
+    duplicates_by_cve = _duplicate_cve_groups(entries)
     duplicates_by_basename = _duplicate_groups(
         entries,
         lambda item: item.path.rsplit("/", 1)[-1].lower(),
@@ -301,7 +321,10 @@ def analyze_inventory(entries: List[ModuleInventoryEntry]) -> InventoryAnalysis:
 
     coverage_gaps: List[Dict[str, Any]] = []
     for protocol_name in EXPECTED_PROTOCOLS:
-        protocol_count = by_protocol.get(protocol_name, 0)
+        if protocol_name == "https":
+            protocol_count = by_protocol.get("https", 0) + by_protocol.get("http", 0)
+        else:
+            protocol_count = by_protocol.get(protocol_name, 0)
         if protocol_count < MIN_PROTOCOL_COVERAGE:
             coverage_gaps.append(
                 {

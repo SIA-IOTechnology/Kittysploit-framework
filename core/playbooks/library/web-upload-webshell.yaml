@@ -1,0 +1,33 @@
+id: web-upload-webshell
+version: "1"
+name: Generic upload to webshell
+source: bug-bounty
+domain: web
+tags: [upload, webshell, rce, php, asp]
+description: >
+  Probe generic multipart upload endpoints (non-WordPress) and verify harmless
+  execution marker placement.
+prerequisites:
+  signals_any:
+    - upload
+    - file_upload
+  tech_any:
+    - php
+    - asp
+    - java
+chain:
+  - id: upload_probe
+    capability: upload_path
+    module: auxiliary/scanner/http/generic_upload_probe
+    description: Multipart upload + execution marker verify
+  - id: shell_spawn
+    capability: shell
+    module: post/shell/multi/manage/spawn_reverse_shell
+    optional: true
+    description: Callback shell when upload RCE confirmed
+blockers:
+  - extension allowlist
+  - content-type validation
+  - WAF on multipart
+references:
+  - "Generic BB upload bypass chains outside CMS-specific plugins"

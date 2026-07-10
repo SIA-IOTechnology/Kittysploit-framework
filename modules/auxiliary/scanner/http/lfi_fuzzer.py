@@ -30,6 +30,14 @@ class Module(Auxiliary, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'chain': {
+            'produces_capabilities': [
+                'file_read',
+                {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
+                {'capability': 'log_file_path', 'from_detail': 'log_path'},
+            ],
+            'suggested_followups': ['auxiliary/scanner/http/lfi_log_poison'],
+        },
     },
     }
 
@@ -440,6 +448,18 @@ class Module(Auxiliary, Http_client):
             for i, result in enumerate(self.successful_payloads, 1):
                 print_info(f"  {i}. {result.get('payload')}")
                 print_info(f"     Indicator: {result.get('indicator')}")
+        chain_extra = {}
+        if self.successful_payloads:
+            first = self.successful_payloads[0]
+            param = self._param_name()
+            chain_extra = {
+                "lfi_param": param,
+                "lfi_path": str(first.get("payload") or "")[:512],
+                "parameter": param,
+            }
+            payload = str(first.get("payload") or "")
+            if "access.log" in payload or "error.log" in payload:
+                chain_extra["log_path"] = payload[:512]
         return finalize_http_scanner_run(
             self,
             self.successful_payloads,
@@ -449,10 +469,12 @@ class Module(Auxiliary, Http_client):
             findings_key="lfi_findings",
             hit_mapper=lambda hit: {
                 "payload": hit.get("payload"),
+                "parameter": self._param_name(),
                 "method": "GET",
                 "request_url": target_base_url(self),
                 "status_code": hit.get("status_code"),
                 "evidence_snippet": hit.get("content_preview") or hit.get("indicator"),
                 "indicators": [hit.get("indicator")] if hit.get("indicator") else [],
             },
+            vulnerability_info_extra=chain_extra,
         )

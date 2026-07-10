@@ -1,0 +1,104 @@
+id: ics-multi-vendor-deep
+version: "1"
+name: Multi-vendor OT deep assessment
+source: bug-bounty
+domain: ics
+tags: [ics, ot, modbus, s7comm, dnp3, bacnet, enip, iec104, opcua, scada]
+description: >
+  Extended OT assessment playbook beyond single-protocol chains — passive and
+  active discovery across Modbus, Siemens S7, DNP3, BACnet, EtherNet/IP, IEC 104,
+  and OPC UA, then post modules for register maps, DB reads, and anonymous OPC UA.
+  Reflects multi-protocol utility / manufacturing BB and CTF OT challenges.
+prerequisites:
+  signals_any:
+    - modbus
+    - s7comm
+    - ics
+    - scada
+    - ot
+  domains:
+    - ics
+    - ot
+chain:
+  - id: passive_recon
+    capability: file_read
+    module: auxiliary/scanner/ics/passive_sniffer
+    optional: true
+    description: SPAN/TAP or PCAP passive protocol fingerprinting
+  - id: modbus_identify
+    capability: credentials
+    module: auxiliary/scanner/ics/modbus_identify
+    description: Modbus TCP slave identification
+  - id: modbus_map
+    capability: file_read
+    module: post/ics/modbus/gather/map_registers
+    description: Holding/input register map enumeration
+  - id: modbus_write_check
+    capability: file_read
+    module: scanner/ics/modbus_write_enabled
+    description: Writable register detection
+  - id: s7_identify
+    capability: credentials
+    module: auxiliary/scanner/ics/s7comm_identify
+    description: Siemens CPU fingerprint and protection level
+  - id: s7_session
+    capability: authenticated_session
+    module: auxiliary/scanner/ics/s7comm_session_acquire
+    description: S7comm session when protection allows
+  - id: s7_read_db
+    capability: file_read
+    module: post/ics/manage/s7_read_db
+    description: Read PLC data blocks for logic and secrets
+  - id: dnp3_identify
+    capability: credentials
+    module: auxiliary/scanner/ics/dnp3_identify
+    description: DNP3 outstation identification
+  - id: dnp3_integrity
+    capability: file_read
+    module: auxiliary/scanner/ics/dnp3_integrity_poll
+    description: Integrity poll and point discovery
+  - id: bacnet_whois
+    capability: credentials
+    module: auxiliary/scanner/ics/bacnet_whois
+    description: BACnet device discovery
+  - id: bacnet_inventory
+    capability: file_read
+    module: post/ics/bacnet/gather/object_inventory
+    description: BACnet object inventory
+  - id: enip_identity
+    capability: credentials
+    module: auxiliary/scanner/ics/enip_list_identity
+    description: EtherNet/IP List Identity
+  - id: enip_tags
+    capability: file_read
+    module: post/ics/enip/gather/tag_enumeration
+    description: CIP tag enumeration on ENIP devices
+  - id: iec104_interrogate
+    capability: file_read
+    module: auxiliary/scanner/ics/iec104_interrogate
+    description: IEC 60870-5-104 interrogation
+  - id: iec104_dump
+    capability: file_read
+    module: post/ics/iec104/gather/interrogation_dump
+    description: Dump interrogation results
+  - id: opcua_anon
+    capability: authenticated_session
+    module: scanner/ics/opcua_anonymous
+    description: Anonymous OPC UA browse when enabled
+  - id: opcua_browse
+    capability: file_read
+    module: post/ics/opcua/gather/node_browser
+    description: OPC UA node tree and sensitive tags
+  - id: engagement_report
+    capability: file_read
+    module: analysis/reporting/ics_engagement_report
+    optional: true
+    description: Consolidated OT engagement report export
+blockers:
+  - Purdue L2/L1 segmentation
+  - PLC protection level 3 with password
+  - read-only OT engagement scope
+  - passive-only policy forbidding active polls
+references:
+  - "Extends ics-multi-protocol workflow with post/gather depth"
+  - "Utilities sector assessments often stack 4+ OT protocols on one gateway"

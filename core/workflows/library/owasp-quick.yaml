@@ -39,11 +39,11 @@ steps:
       ssl: "${ssl}"
     output_mapping:
       login_paths: login_paths
-    on_success: sql_injection
-    on_failure: sql_injection
-  sql_injection:
-    module: auxiliary/scanner/http/sql_injection
-    description: SQL injection probing on crawled surface (not blind-first)
+    on_success: sqli_engine
+    on_failure: sqli_engine
+  sqli_engine:
+    module: auxiliary/scanner/http/sqli_engine
+    description: Low-noise SQLi on crawled surface (sqli_engine)
     options:
       target: "${target}"
       port: "${port}"

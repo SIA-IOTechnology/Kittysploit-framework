@@ -30,7 +30,10 @@ class WorkflowsCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "List and run declarative workflow library (web-recon, owasp-quick, cloud-exposure, …)"
+        return (
+            "List and run declarative workflow library (web-recon, service-discovery, devops-panels, …). "
+            "Same workflows are also available via use workflow/<id>."
+        )
 
     @property
     def usage(self) -> str:
@@ -63,11 +66,18 @@ Options (run):
 Examples:
     workflows list
     workflows show web-recon
+    use workflow/web-recon
+    set target example.com
+    run
     workflows run web-recon --target example.com --dry-run
     workflows run osint-deep-recon --target acme.com --persona_name "Jane Doe"
+    workflows run osint-passive-recon -t acme.com --legal_basis "CASE-2026-001" --persona_name "Jane Doe"
     workflows run osint-deep-recon -t acme.com --run_login_bruteforce true
     workflows run client-retest --from-workspace
     workflows run owasp-quick -t https://lab.local --set port=8443 --set ssl=true
+    workflows run network-services --target 10.0.0.5
+    workflows run devops-panels --target app.example.com --port 443 --ssl true
+    workflows run service-discovery --target 10.0.0.5 --http_port 8443 --ssl true
         """
 
     def __init__(self, framework, session, output_handler):
@@ -244,14 +254,26 @@ Examples:
             return True
 
         if result.success:
-            print_success(
-                f"Workflow {result.workflow_id} finished in {result.duration_seconds:.1f}s "
-                f"({len(result.steps_executed)} steps)"
-            )
+            total = len(result.step_results or {})
+            matches = result.matches
+            if matches:
+                print_success(
+                    f"Workflow {result.workflow_id} finished in {result.duration_seconds:.1f}s "
+                    f"— {matches}/{total} step(s) matched"
+                )
+            elif total:
+                print_success(
+                    f"Workflow {result.workflow_id} finished in {result.duration_seconds:.1f}s "
+                    f"— {total} step(s) probed, no matches"
+                )
+            else:
+                print_success(
+                    f"Workflow {result.workflow_id} finished in {result.duration_seconds:.1f}s"
+                )
         else:
             print_warning(
-                f"Workflow {result.workflow_id} completed with failures "
-                f"({len(result.errors)} error(s))"
+                f"Workflow {result.workflow_id} stopped with "
+                f"{len(result.errors)} error(s)"
             )
         return result.success
 

@@ -21,7 +21,7 @@ from lib.protocols.samr.ndr import (
     unpack_user_all_information,
 )
 from lib.protocols.samr.smb_transport import SmbPipeTransport
-from lib.protocols.samr.types import SamAccountRecord
+from lib.protocols.samr.types import SamAccountRecord, SamAliasRecord, SamGroupMembership
 
 # [MS-SAMR] opnums
 SAMR_CONNECT2 = 57
@@ -30,11 +30,16 @@ SAMR_ENUMERATE_DOMAINS_IN_SAM_SERVER = 6
 SAMR_LOOKUP_DOMAIN_IN_SAM_SERVER = 12
 SAMR_OPEN_DOMAIN = 7
 SAMR_ENUMERATE_USERS_IN_DOMAIN = 13
+SAMR_ENUMERATE_ALIASES_IN_DOMAIN = 15
+SAMR_LOOKUP_IDS_IN_DOMAIN = 18
 SAMR_OPEN_USER = 34
 SAMR_QUERY_INFORMATION_USER = 36
+SAMR_OPEN_ALIAS = 27
+SAMR_GET_MEMBERS_IN_ALIAS = 33
 
 DOMAIN_LOOKUP_MAX = 0x00000008
 DOMAIN_ALL_ACCESS = 0x000F07FF
+ALIAS_READ = 0x00000004
 USER_READ_GENERAL = 0x00000010
 MAXIMUM_ALLOWED = 0x02000000
 USER_ALL_INFORMATION = 21
@@ -108,6 +113,57 @@ class SamrClient:
                 self._close_handle(domain_handle)
         finally:
             self._close_handle(server_handle)
+
+    def enumerate_aliases(self, max_aliases: int = 512) -> List[SamAliasRecord]:
+        server_handle = self._samr_connect()
+        try:
+            domain_name = self._pick_domain_name(server_handle)
+            domain_sid = self._lookup_domain(server_handle, domain_name)
+            domain_handle = self._open_domain(server_handle, domain_sid)
+            try:
+                return self._enumerate_aliases(domain_handle, domain_sid, max_aliases=max_aliases)
+            finally:
+                self._close_handle(domain_handle)
+        finally:
+            self._close_handle(server_handle)
+
+    def enumerate_group_membership(
+        self,
+        *,
+        alias_name: str = "",
+        max_aliases: int = 64,
+        max_members: int = 512,
+    ) -> List[SamGroupMembership]:
+        aliases = self.enumerate_aliases(max_aliases=max_aliases)
+        if alias_name:
+            needle = alias_name.strip().lower()
+            aliases = [item for item in aliases if item.name.lower() == needle]
+        memberships: List[SamGroupMembership] = []
+        server_handle = self._samr_connect()
+        try:
+            domain_name = self._pick_domain_name(server_handle)
+            domain_sid = self._lookup_domain(server_handle, domain_name)
+            domain_handle = self._open_domain(server_handle, domain_sid)
+            try:
+                for alias in aliases[:max_aliases]:
+                    members = self._get_alias_members(
+                        domain_handle,
+                        domain_sid,
+                        alias.rid,
+                        max_members=max_members,
+                    )
+                    memberships.append(
+                        SamGroupMembership(
+                            group_name=alias.name,
+                            group_rid=alias.rid,
+                            members=members,
+                        )
+                    )
+            finally:
+                self._close_handle(domain_handle)
+        finally:
+            self._close_handle(server_handle)
+        return memberships
 
     def _samr_connect(self) -> bytes:
         assert self._dce is not None
@@ -284,3 +340,114 @@ class SamrClient:
             self._dce.request(SAMR_CLOSE_HANDLE, pack_handle(handle))
         except Exception:
             pass
+
+    def _enumerate_aliases(
+        self,
+        domain_handle: bytes,
+        domain_sid: bytes,
+        max_aliases: int = 512,
+    ) -> List[SamAliasRecord]:
+        assert self._dce is not None
+        aliases: List[SamAliasRecord] = []
+        context = 0
+        while len(aliases) < max_aliases:
+            stub = (
+                pack_handle(domain_handle)
+                + pack_ulong(context)
+                + pack_ulong(0xFFFF)
+            )
+            resp = self._dce.request(SAMR_ENUMERATE_ALIASES_IN_DOMAIN, stub)
+            status, offset = unpack_ndr_return(resp)
+            if status not in (STATUS_SUCCESS, STATUS_MORE_ENTRIES):
+                break
+            context = struct.unpack_from("<I", resp, offset)[0]
+            offset += 4
+            if struct.unpack_from("<I", resp, offset)[0] == 0:
+                break
+            offset += 4
+            if offset + 12 > len(resp):
+                break
+            _max_count, _off, entry_count = struct.unpack_from("<III", resp, offset)
+            offset += 12
+            for _ in range(entry_count):
+                if offset + 8 > len(resp):
+                    break
+                rel_id = struct.unpack_from("<I", resp, offset)[0]
+                offset += 4
+                name, offset = unpack_unique_wstring(resp, offset)
+                if name:
+                    aliases.append(SamAliasRecord(name=name, rid=rel_id, domain_sid=domain_sid))
+                if len(aliases) >= max_aliases:
+                    break
+            if status != STATUS_MORE_ENTRIES:
+                break
+        return aliases
+
+    def _open_alias(self, domain_handle: bytes, alias_rid: int) -> bytes:
+        assert self._dce is not None
+        stub = pack_handle(domain_handle) + pack_ulong(ALIAS_READ) + pack_ulong(alias_rid)
+        resp = self._dce.request(SAMR_OPEN_ALIAS, stub)
+        status, offset = unpack_ndr_return(resp)
+        if status != STATUS_SUCCESS:
+            raise DceRpcError(f"SamrOpenAlias failed for RID {alias_rid}: 0x{status:08x}")
+        handle, _ = unpack_context_handle(resp, offset)
+        return handle
+
+    def _get_alias_members(
+        self,
+        domain_handle: bytes,
+        domain_sid: bytes,
+        alias_rid: int,
+        max_members: int = 512,
+    ) -> List[str]:
+        assert self._dce is not None
+        alias_handle = self._open_alias(domain_handle, alias_rid)
+        try:
+            resp = self._dce.request(SAMR_GET_MEMBERS_IN_ALIAS, pack_handle(alias_handle))
+            status, offset = unpack_ndr_return(resp)
+            if status != STATUS_SUCCESS:
+                return []
+            if struct.unpack_from("<I", resp, offset)[0] == 0:
+                return []
+            offset += 4
+            if offset + 4 > len(resp):
+                return []
+            count = struct.unpack_from("<I", resp, offset)[0]
+            offset += 4
+            members: List[str] = []
+            relative_ids: List[int] = []
+            domain_prefix = sid_bytes_to_str(domain_sid)
+            for _ in range(min(count, max_members)):
+                sid_bytes, offset = unpack_sid(resp, offset)
+                if not sid_bytes:
+                    continue
+                sid_text = sid_bytes_to_str(sid_bytes)
+                if sid_text.startswith(domain_prefix + "-"):
+                    relative_ids.append(int(sid_text.rsplit("-", 1)[-1]))
+                else:
+                    members.append(sid_text)
+            if relative_ids:
+                members.extend(self._lookup_relative_ids(domain_handle, relative_ids))
+            return members
+        finally:
+            self._close_handle(alias_handle)
+
+    def _lookup_relative_ids(self, domain_handle: bytes, relative_ids: List[int]) -> List[str]:
+        assert self._dce is not None
+        if not relative_ids:
+            return []
+        stub = pack_handle(domain_handle) + pack_ulong(len(relative_ids))
+        for rel_id in relative_ids:
+            stub += pack_ulong(rel_id)
+        resp = self._dce.request(SAMR_LOOKUP_IDS_IN_DOMAIN, stub)
+        status, offset = unpack_ndr_return(resp)
+        if status != STATUS_SUCCESS:
+            return [str(rid) for rid in relative_ids]
+        if struct.unpack_from("<I", resp, offset)[0] == 0:
+            return [str(rid) for rid in relative_ids]
+        offset += 4
+        names: List[str] = []
+        for _ in relative_ids:
+            name, offset = unpack_unique_wstring(resp, offset)
+            names.append(name or "?")
+        return names

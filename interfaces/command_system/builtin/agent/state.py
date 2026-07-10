@@ -67,6 +67,7 @@ class AgentState:
     reuse_proxy_auth: bool = False
     shell_hunter: bool = False
     llm_local: bool = False
+    refute_panel: bool = False
     llm_model: str = "llama3.1:8b"
     llm_endpoint: str = "http://127.0.0.1:11434/api/chat"
     max_modules: int = 40
@@ -144,6 +145,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "reuse_proxy_auth": state.reuse_proxy_auth,
         "shell_hunter": state.shell_hunter,
         "llm_local": state.llm_local,
+        "refute_panel": state.refute_panel,
         "llm_model": state.llm_model,
         "llm_endpoint": state.llm_endpoint,
         "max_modules": state.max_modules,
@@ -266,6 +268,7 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         reuse_proxy_auth=bool(d.get("reuse_proxy_auth", False)),
         shell_hunter=bool(d.get("shell_hunter", False)),
         llm_local=bool(d.get("llm_local", False)),
+        refute_panel=bool(d.get("refute_panel", False)),
         llm_model=str(d.get("llm_model", "llama3.1:8b")),
         llm_endpoint=str(d.get("llm_endpoint", "http://127.0.0.1:11434/api/chat")),
         max_modules=int(d.get("max_modules", 40)),

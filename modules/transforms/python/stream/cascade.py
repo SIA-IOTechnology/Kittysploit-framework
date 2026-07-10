@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Cascade stream obfuscator: multi-layer encoding (XOR + Additive + ROT) with a single master key.
+Cascade stream transform: multi-layer encoding (XOR + Additive + ROT) with a single master key.
 Designed for strong C2 traffic obfuscation and signature evasion.
 """
 
@@ -21,16 +21,16 @@ def _derive_key_bytes(key_str: str, min_len: int = 16) -> bytes:
     return raw
 
 
-class Module(Obfuscator):
+class Module(Transform):
     """
-    Cascade stream obfuscator: XOR → Additive → ROT with one master key.
+    Cascade stream transform: XOR → Additive → ROT with one master key.
     Strong multi-layer obfuscation; encode/decode use stream offset for chunk alignment.
     """
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "Cascade Stream Obfuscator",
+        "name": "Cascade Stream Transform",
         "description": "Multi-layer: XOR + Additive + ROT with a single master key. High obfuscation strength, stream-offset aware.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -80,7 +80,7 @@ class Module(Obfuscator):
         return bytes(out)
 
     def generate_client_code(self, language: str) -> Optional[str]:
-        """Generate Python code defining _obf_encode(d) and _obf_decode(d) with stream offsets."""
+        """Generate Python code defining _xf_encode(d) and _xf_decode(d) with stream offsets."""
         if language != "python":
             return None
         kb = self._key_bytes()
@@ -88,20 +88,20 @@ class Module(Obfuscator):
         # Emit key as bytes([...]) so client uses same derived key as server
         kb_repr = ",".join(str(b) for b in kb)
         return (
-            f"_obf_kb=bytes([{kb_repr}])\n"
-            "_obf_kl=len(_obf_kb)\n"
-            f"_obf_rot={shift}\n"
-            "_obf_doff=[0]\n_obf_eoff=[0]\n"
-            "def _obf_decode(d):\n"
-            " o=_obf_doff[0];out=bytearray(len(d))\n"
+            f"_xf_kb=bytes([{kb_repr}])\n"
+            "_xf_kl=len(_xf_kb)\n"
+            f"_xf_rot={shift}\n"
+            "_xf_doff=[0]\n_xf_eoff=[0]\n"
+            "def _xf_decode(d):\n"
+            " o=_xf_doff[0];out=bytearray(len(d))\n"
             " for i,b in enumerate(d):\n"
-            "  p=o+i;x=(b-_obf_rot)%256;x=(x-_obf_kb[p%_obf_kl])%256;x^=_obf_kb[p%_obf_kl]\n"
+            "  p=o+i;x=(b-_xf_rot)%256;x=(x-_xf_kb[p%_xf_kl])%256;x^=_xf_kb[p%_xf_kl]\n"
             "  out[i]=x\n"
-            " _obf_doff[0]+=len(d)\n return bytes(out)\n"
-            "def _obf_encode(d):\n"
-            " o=_obf_eoff[0];out=bytearray(len(d))\n"
+            " _xf_doff[0]+=len(d)\n return bytes(out)\n"
+            "def _xf_encode(d):\n"
+            " o=_xf_eoff[0];out=bytearray(len(d))\n"
             " for i,b in enumerate(d):\n"
-            "  p=o+i;x=b^_obf_kb[p%_obf_kl];x=(x+_obf_kb[p%_obf_kl])%256;x=(x+_obf_rot)%256\n"
+            "  p=o+i;x=b^_xf_kb[p%_xf_kl];x=(x+_xf_kb[p%_xf_kl])%256;x=(x+_xf_rot)%256\n"
             "  out[i]=x\n"
-            " _obf_eoff[0]+=len(d)\n return bytes(out)\n"
+            " _xf_eoff[0]+=len(d)\n return bytes(out)\n"
         )

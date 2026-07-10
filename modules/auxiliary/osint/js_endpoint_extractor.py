@@ -3,6 +3,7 @@ import json
 import re
 from urllib.parse import urljoin, urlparse
 from lib.protocols.http.http_client import Http_client
+from lib.osint.js_secrets import extract_secret_hints
 
 
 class Module(Auxiliary, Http_client):
@@ -11,6 +12,22 @@ class Module(Auxiliary, Http_client):
         "author": ["KittySploit Team"],
         "description": "Extract JS files and discover API endpoints/domains/keys from public client-side code.",
         "tags": ["osint", "passive", "web", "javascript"],
+        "agent": {
+            "risk": "passive",
+            "effects": ["network_probe"],
+            "expected_requests": 4,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["endpoints", "tech_hints", "risk_signals", "params"],
+            "chain": {
+                "produces_capabilities": ["graphql_endpoint"],
+                "suggested_followups": [
+                    "auxiliary/osint/js_sourcemap_analyzer",
+                    "auxiliary/scanner/http/graphql_abuse",
+                    "auxiliary/scanner/http/api_fuzzer",
+                ],
+            },
+        },
     }
 
     target = OptString("", "Target URL or domain", required=True)
@@ -155,8 +172,8 @@ class Module(Auxiliary, Http_client):
                 if d and "." in d:
                     domains.add(d.lower())
 
-            for kname, kval in self.KEY_RX.findall(body):
-                keys.append({"name": kname, "value_preview": kval[:6] + "***", "source": fetched})
+            for hint in extract_secret_hints(body, fetched):
+                keys.append(hint)
 
         # Keep external domains only (exclude target host).
         target_host = urlparse(final_url).hostname or ""
@@ -219,6 +236,30 @@ class Module(Auxiliary, Http_client):
         )
         print_info(f"Risk: {risk_level} ({risk_score})")
 
+        if findings.get("key_hints"):
+            print_info("-" * 72)
+            print_warning(f"Credential literals ({len(findings['key_hints'])} match(es))")
+            rows = [
+                [
+                    str(row.get("name") or "secret"),
+                    (str(row.get("value") or "")[:160] + "…") if len(str(row.get("value") or "")) > 160 else str(row.get("value") or ""),
+                    str(row.get("source") or "")[:80],
+                ]
+                for row in findings["key_hints"][:20]
+                if isinstance(row, dict)
+            ]
+            if rows:
+                print_table(["Name", "Value", "Source"], rows)
+            else:
+                print_info("No credential-like literals after i18n/noise filtering")
+
+        interesting = [e for e in findings.get("endpoints", []) if self._is_interesting_endpoint(e)]
+        if interesting:
+            print_info("-" * 72)
+            print_status(f"Interesting API endpoints ({min(len(interesting), 15)} shown)")
+            for ep in interesting[:15]:
+                print_info(f"  {ep}")
+
         if self.output_file:
             try:
                 with open(str(self.output_file), "w") as fp:
@@ -226,6 +267,14 @@ class Module(Auxiliary, Http_client):
                 print_success(f"Results saved to {self.output_file}")
             except Exception as e:
                 print_error(f"Failed to save output: {e}")
+        self.vulnerability_info = {
+            "reason": (
+                f"JS intel: {data['count_js']} files, {data['count_endpoints']} endpoints, "
+                f"{data['count_key_hints']} secret hints"
+            ),
+            "findings": findings,
+            "js_files": js_scanned,
+        }
         return data
 
     def get_graph_nodes(self, data):

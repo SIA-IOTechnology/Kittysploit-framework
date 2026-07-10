@@ -6,6 +6,7 @@ from typing import Any
 
 from core.framework.option import OptString, OptPort
 from core.framework.base_module import BaseModule
+from lib.scanner.target_utils import normalize_scanner_target
 
 
 def _get_opt(instance: Any, name: str) -> Any:
@@ -27,6 +28,7 @@ class Tcp_scanner_client(BaseModule):
 
     def _host(self) -> str:
         host = _get_opt(self, "target") or ""
+        host, _, _ = normalize_scanner_target(str(host))
         if not host:
             return ""
         try:

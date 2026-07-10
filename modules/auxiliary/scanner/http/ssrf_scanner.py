@@ -28,6 +28,18 @@ class Module(Auxiliary, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'chain': {
+            'produces_capabilities': [
+                'ssrf_primitive',
+                {'capability': 'ssrf_param', 'from_detail': 'ssrf_param'},
+            ],
+            'option_bindings': {
+                'ssrf_param': 'ssrf_param',
+            },
+            'suggested_followups': [
+                'auxiliary/scanner/http/ssrf_cloud_metadata_harvest',
+            ],
+        },
     },
     }
 
@@ -331,4 +343,19 @@ class Module(Auxiliary, Http_client):
             category="ssrf",
             findings_key="ssrf_findings",
             dedupe_keys=("method", "param", "payload"),
+            vulnerability_info_extra=self._chain_extra_from_vulns(),
         )
+
+    def _chain_extra_from_vulns(self) -> dict:
+        if not self.vulnerabilities:
+            return {}
+        top = self.vulnerabilities[0]
+        return {
+            k: v
+            for k, v in (
+                ("ssrf_param", str(top.get("param") or "")),
+                ("ssrf_method", str(top.get("method") or "GET").upper()),
+                ("ssrf_type", str(top.get("ssrf_type") or "")),
+            )
+            if v
+        }

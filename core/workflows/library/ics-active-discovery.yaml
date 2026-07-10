@@ -1,0 +1,97 @@
+id: ics-active-discovery
+version: "1"
+name: ICS Active Discovery
+description: >
+  Safe active OT reconnaissance — Modbus unit scan, Siemens S7 identify,
+  BACnet Who-Is, and EtherNet/IP List Identity against a single target.
+tags: [ics, ot, scada, siemens, modbus, discovery]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: modbus_identify
+steps:
+  modbus_identify:
+    module: auxiliary/scanner/ics/modbus_identify
+    description: Modbus TCP unit ID scan (port 502)
+    options:
+      target: "${target}"
+    on_success: s7comm_identify
+    on_failure: s7comm_identify
+  s7comm_identify:
+    module: auxiliary/scanner/ics/s7comm_identify
+    description: Siemens S7comm CPU and protection level (port 102)
+    options:
+      target: "${target}"
+    on_success: s7_protection_level
+    on_failure: s7_protection_level
+  s7_protection_level:
+    module: scanner/ics/s7_protection_level
+    description: Flag S7 PLCs without password protection
+    options:
+      target: "${target}"
+    on_success: bacnet_whois
+    on_failure: bacnet_whois
+  bacnet_whois:
+    module: auxiliary/scanner/ics/bacnet_whois
+    description: BACnet/IP Who-Is discovery (UDP 47808)
+    options:
+      target: "${target}"
+    on_success: bacnet_inventory
+    on_failure: bacnet_inventory
+  bacnet_inventory:
+    module: scanner/ics/bacnet_device_inventory
+    description: Read-only BACnet device and object inventory
+    options:
+      target: "${target}"
+      max_devices: "5"
+    on_success: iec61850_mms
+    on_failure: iec61850_mms
+  iec61850_mms:
+    module: auxiliary/scanner/ics/iec61850_mms_identify
+    description: IEC 61850 MMS probe on ISO-on-TCP port 102
+    options:
+      target: "${target}"
+    on_success: mqtt_broker
+    on_failure: mqtt_broker
+  mqtt_broker:
+    module: auxiliary/scanner/ics/mqtt_broker_identify
+    description: MQTT broker detection and anonymous access check
+    options:
+      target: "${target}"
+    on_success: mqtt_tls_broker
+    on_failure: mqtt_tls_broker
+  mqtt_tls_broker:
+    module: scanner/ics/mqtt_tls_detect
+    description: MQTT over TLS broker on port 8883
+    options:
+      target: "${target}"
+      port: "8883"
+    on_success: coap_service
+    on_failure: coap_service
+  coap_service:
+    module: scanner/udp/coap_detect
+    description: CoAP UDP service discovery
+    options:
+      target: "${target}"
+      port: "5683"
+    on_success: modbus_udp
+    on_failure: modbus_udp
+  modbus_udp:
+    module: scanner/udp/modbus_udp_detect
+    description: Modbus UDP responder on port 502
+    options:
+      target: "${target}"
+      port: "502"
+    on_success: enip_list_identity
+    on_failure: enip_list_identity
+  enip_list_identity:
+    module: auxiliary/scanner/ics/enip_list_identity
+    description: EtherNet/IP List Identity (UDP 44818)
+    options:
+      target: "${target}"
+    on_success: null
+    on_failure: null

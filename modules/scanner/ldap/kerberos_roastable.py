@@ -21,6 +21,10 @@ class Module(Scanner, Ad_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'chain': {
+            'produces_capabilities': ['kerberoast_targets'],
+            'suggested_followups': ['post/ldap/gather/kerberoastable_users'],
+        },
     },
     }
 

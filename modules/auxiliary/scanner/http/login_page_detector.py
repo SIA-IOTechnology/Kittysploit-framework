@@ -22,6 +22,10 @@ class Module(Auxiliary, Http_client):
         'reversible': True,
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'chain': {
+            'produces_capabilities': ['credentials'],
+            'suggested_followups': ['auxiliary/scanner/http/login/admin_login_bruteforce'],
+        },
     },
     }
 

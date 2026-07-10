@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
-import base64
+
+from lib.post.windows.session import WindowsSessionMixin
 
 
-class Module(Post):
+class Module(Post, WindowsSessionMixin):
     __info__ = {
         "name": "Windows PowerShell Exec",
         "description": "Execute a PowerShell command or script on a Windows shell or Meterpreter session and return its output.",
@@ -19,6 +20,50 @@ class Module(Post):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -30,40 +75,12 @@ class Module(Post):
     output_file = OptString("", "Remote file path to store output (empty = auto temp file)", False)
     cleanup = OptBool(True, "Delete the temporary remote output file when auto-generated", False)
 
-    def _execute_cmd(self, command: str) -> str:
-        if not command:
-            return ""
-        output = self.cmd_execute(command)
-        return output.strip() if output else ""
-
-    def _encode_powershell(self, script: str) -> str:
-        return base64.b64encode(script.encode("utf-16le")).decode("ascii")
-
-    def _remote_temp_dir(self) -> str:
-        output = self._execute_cmd("echo %TEMP%")
-        if output:
-            return output.splitlines()[0].strip().rstrip("\\")
-        return "C:\\Windows\\Temp"
-
-    def _powershell_prefix(self) -> str:
-        parts = ["powershell"]
-        if self.no_profile:
-            parts.append("-NoProfile")
-        if self.non_interactive:
-            parts.append("-NonInteractive")
-        parts.append("-ExecutionPolicy")
-        parts.append("Bypass")
-        return " ".join(parts)
-
     def _read_script_file(self) -> str:
         if not self.script_file:
             return ""
         if isinstance(self.script_file, list):
             return "".join(self.script_file)
         return str(self.script_file)
-
-    def _ps_single_quote(self, value: str) -> str:
-        return str(value).replace("'", "''")
 
     def _get_payload(self) -> str:
         inline_script = str(self.script or "").strip()
@@ -80,39 +97,39 @@ class Module(Post):
         raise ProcedureError(FailureType.ConfigurationError, "One of 'command', 'script', or 'script_file' must be set.")
 
     def _build_wrapper(self, payload: str, out_file: str) -> str:
-        out_file_escaped = self._ps_single_quote(out_file)
+        out_file_escaped = self.win_ps_single_quote(out_file)
         return (
             "$ProgressPreference='SilentlyContinue';"
             "$ErrorActionPreference='Continue';"
             f"& {{ {payload} }} 2>&1 | Out-File -FilePath '{out_file_escaped}' -Width 4096 -Encoding UTF8"
         )
 
-    def _read_remote_output(self, out_file: str) -> str:
-        return self._execute_cmd(f'type "{out_file}"')
-
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoProfile -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
-        return True
+        return self.win_require_powershell()
 
     def run(self):
+        if not self.check():
+            return False
+
         payload = self._get_payload()
         auto_output = False
         out_file = str(self.output_file or "").strip()
         if not out_file:
             auto_output = True
-            out_file = self._remote_temp_dir() + "\\powershell_exec.out"
+            out_file = self.win_remote_temp_dir() + "\\powershell_exec.out"
 
         wrapped = self._build_wrapper(payload, out_file)
-        encoded = self._encode_powershell(wrapped)
-        command = f"{self._powershell_prefix()} -EncodedCommand {encoded}"
+        encoded = self.win_encode_powershell(wrapped)
+        prefix = self.win_powershell_cli_prefix(
+            no_profile=bool(self.no_profile),
+            non_interactive=bool(self.non_interactive),
+        )
+        command = f"{prefix} -EncodedCommand {encoded}"
 
         print_status("Executing PowerShell payload...")
-        self._execute_cmd(command)
+        self.win_execute(command, timeout=60, wrap_job=False)
 
-        result = self._read_remote_output(out_file)
+        result = self.win_read_remote_text(out_file)
         if result:
             print_success("PowerShell execution completed")
             print_info(result)
@@ -120,6 +137,6 @@ class Module(Post):
             print_warning("No output was returned")
 
         if auto_output and self.cleanup:
-            self._execute_cmd(f'del /f /q "{out_file}"')
+            self.win_delete_remote([out_file])
 
         return True

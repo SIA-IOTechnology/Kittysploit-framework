@@ -13,8 +13,8 @@ class Module(Payload):
 			'handler': Handler.REVERSE
 		}
 
-	lhost = OptString('127.0.0.1', 'Connect to IP address', 'yes', False)
-	lport = OptPort(5555, 'Bind Port', 'yes', False)
+	lhost = OptString("127.0.0.1", "Connect-back IP address (reverse payloads)", True)
+	lport = OptPort(4444, "Connect-back TCP port (reverse payloads)", True)
 	
 	def generate(self):
 		

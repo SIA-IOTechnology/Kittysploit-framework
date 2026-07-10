@@ -1,1 +1,1 @@
-# PHP stream obfuscators.
+# PHP stream transforms.

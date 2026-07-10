@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import re
+from typing import Optional, Tuple
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 from lib.protocols.http.openemr_cve_2026_24849 import (
     LOGIN_PATH,
-    looks_like_etc_passwd,
     looks_like_openemr_login,
-    openemr_login,
     openemr_path,
-    openemr_read_file,
 )
+
+_PATCHED_VERSION = (7, 0, 4)
 
 
 class Module(Scanner, Http_client):
-
     __info__ = {
-        "name": "OpenEMR CVE-2026-24849 authenticated file-read detection",
+        "name": "OpenEMR CVE-2026-24849 detection",
         "description": (
-            "Authenticates to OpenEMR and probes the Fax/SMS EtherFax disposeDoc/disposeDocument "
-            "arbitrary file read affecting OpenEMR < 7.0.4."
+            "Fingerprints OpenEMR and flags versions < 7.0.4 affected by CVE-2026-24849 "
+            "(authenticated arbitrary file read in Fax/SMS EtherFax)."
         ),
         "author": ["doany1", "KittySploit Team"],
         "severity": "high",
@@ -31,80 +32,125 @@ class Module(Scanner, Http_client):
         "modules": [
             "exploits/multi/http/openemr_cve_2026_24849_file_read",
         ],
-        "tags": ["web", "scanner", "openemr", "authenticated", "file-read", "cve-2026-24849"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "tags": ["web", "scanner", "openemr", "file-read", "cve-2026-24849"],
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 2,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": [],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "file_read", "from_detail": "lfi_path"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "exploits/multi/http/openemr_cve_2026_24849_file_read",
+                ],
+            },
+        },
     }
 
     port = OptPort(80, "OpenEMR HTTP port", True)
     ssl = OptBool(False, "Use HTTPS", True, advanced=True)
     base_path = OptString("/openemr", "OpenEMR base path (use / if installed at web root)", required=True)
     site = OptString("default", "OpenEMR site id", required=True)
-    username = OptString("", "OpenEMR username for active check", required=True)
-    password = OptString("", "OpenEMR password for active check", required=True)
-    probe_file = OptString(
-        "/etc/passwd",
-        "Root-owned file used for confirmation; avoid files the web user can delete",
-        required=False,
-        advanced=True,
+
+    _VERSION_PATTERNS = (
+        re.compile(r"OpenEMR\s+v?(\d+\.\d+\.\d+)", re.I),
+        re.compile(r"v(\d+\.\d+\.\d+)\s*\|\s*OpenEMR", re.I),
+        re.compile(r"openemr[^0-9]{0,20}(\d+\.\d+\.\d+)", re.I),
     )
 
-    def _fingerprint_login(self) -> bool:
-        resp = self.http_request(
-            method="GET",
-            path=openemr_path(self.base_path, LOGIN_PATH),
-            params={"site": self.site or "default"},
-            allow_redirects=True,
-            timeout=15,
-        )
-        return bool(resp and resp.status_code == 200 and looks_like_openemr_login(resp.text or ""))
+    @staticmethod
+    def _version_tuple(value: str) -> Tuple[int, ...]:
+        parts = []
+        for item in re.findall(r"\d+", value or "")[:4]:
+            parts.append(int(item))
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+
+    def _parse_version(self, text: str) -> str:
+        for pattern in self._VERSION_PATTERNS:
+            match = pattern.search(text or "")
+            if match:
+                return match.group(1).strip()
+        return ""
+
+    def _is_vulnerable(self, version: str) -> bool:
+        return self._version_tuple(version) < _PATCHED_VERSION
 
     def run(self):
         try:
-            login_seen = self._fingerprint_login()
-            if not login_seen:
+            resp = self.http_request(
+                method="GET",
+                path=openemr_path(self.base_path, LOGIN_PATH),
+                params={"site": self.site or "default"},
+                allow_redirects=True,
+                timeout=max(int(self.timeout or 10), 15),
+            )
+            if not resp or resp.status_code != 200:
                 return False
 
-            openemr_login(self, self.base_path, self.site, self.username, self.password)
-            data, status, action = openemr_read_file(
-                self,
-                self.base_path,
-                self.site,
-                self.probe_file or "/etc/passwd",
-                timeout=20,
-            )
-        except Exception as e:
-            print_error(f"Scanner failed: {e}")
-            return False
+            body = resp.text or ""
+            if not looks_like_openemr_login(body):
+                return False
 
-        if status == "session":
-            print_error("OpenEMR login page detected, but supplied credentials/site were rejected")
-            return False
+            version = self._parse_version(body)
+            path = openemr_path(self.base_path, LOGIN_PATH)
 
-        if status == "missing":
+            if not version:
+                self.set_info(
+                    severity="info",
+                    cve="CVE-2026-24849",
+                    reason="OpenEMR login detected but version could not be extracted",
+                    path=path,
+                )
+                return True
+
+            if self._is_vulnerable(version):
+                self.set_info(
+                    severity="high",
+                    cve="CVE-2026-24849",
+                    reason=(
+                        f"OpenEMR {version} detected at {path}; "
+                        "< 7.0.4 is within CVE-2026-24849 affected range"
+                    ),
+                    version=version,
+                    path=path,
+                    confidence="high",
+                )
+                return True
+
             self.set_info(
                 severity="info",
-                cve="CVE-2026-24849",
-                reason="OpenEMR login detected; authenticated probe did not reach a readable Fax/SMS EtherFax file-read",
+                reason=f"OpenEMR {version} detected at {path}; appears patched for CVE-2026-24849",
+                version=version,
+                path=path,
             )
             return False
-
-        probe = str(self.probe_file or "/etc/passwd")
-        high_confidence = probe == "/etc/passwd" and looks_like_etc_passwd(data or "")
-        self.set_info(
-            severity="high",
-            cve="CVE-2026-24849",
-            reason=(
-                f"Authenticated OpenEMR Fax/SMS file-read returned {len(data or '')} bytes "
-                f"from {probe} via {action}"
-            ),
-            confidence="high" if high_confidence else "medium",
-            action=action,
-        )
-        return True
+        except Exception as exc:
+            print_error(f"Scanner failed: {exc}")
+            return False

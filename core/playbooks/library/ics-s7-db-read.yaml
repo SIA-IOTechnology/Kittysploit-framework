@@ -1,0 +1,34 @@
+id: ics-s7-db-read
+version: "1"
+name: S7comm session to DB read
+source: bug-bounty
+domain: ics
+tags: [s7comm, siemens, plc, read]
+description: >
+  Siemens S7 PLC exposed on TCP/102 — identify CPU, acquire comm session,
+  read data block contents for sensitive logic or credentials.
+prerequisites:
+  signals_any:
+    - s7comm
+    - siemens
+  domains:
+    - ics
+    - ot
+chain:
+  - id: identify_s7
+    capability: credentials
+    module: auxiliary/scanner/ics/s7comm_identify
+    description: Fingerprint S7 CPU and protection level
+  - id: acquire_session
+    capability: authenticated_session
+    module: auxiliary/scanner/ics/s7comm_session_acquire
+    description: Establish S7comm session when protection allows
+  - id: read_db
+    capability: file_read
+    module: post/ics/manage/s7_read_db
+    description: Read DB block contents
+blockers:
+  - protection level 3 with password
+  - PLC in STOP or access denied
+references:
+  - "Typical Siemens OT assessment write-up: S7 on :102 → unauthenticated DB read"

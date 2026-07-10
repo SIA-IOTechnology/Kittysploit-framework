@@ -1,9 +1,10 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import re
 
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Gather Protection Enumeration",
@@ -18,6 +19,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -147,6 +198,10 @@ class Module(Post, System):
     }
 
     def run(self):
+
+        if not self.linux_require_linux():
+            return False
+
         print_status("Enumerating Linux protections and security software...")
         self._print_host_info()
 
@@ -164,8 +219,8 @@ class Module(Post, System):
 
     def _print_host_info(self):
         distro = self.get_sysinfo().get("distro", "linux")
-        kernel = self._clean_text(self.cmd_exec("uname -r 2>/dev/null"))
-        hostname = self._clean_text(self.cmd_exec("hostname 2>/dev/null"))
+        kernel = self._clean_text(self.linux_execute("uname -r 2>/dev/null"))
+        hostname = self._clean_text(self.linux_execute("hostname 2>/dev/null"))
         if hostname:
             print_info(f"Host: {hostname}")
         print_info(f"Distro: {distro}")
@@ -188,7 +243,7 @@ class Module(Post, System):
         return lines[-1] if lines else ""
 
     def _read_proc_flag(self, path):
-        value = self._clean_text(self.cmd_exec(f"cat {path} 2>/dev/null"))
+        value = self._clean_text(self.linux_execute(f"cat {path} 2>/dev/null"))
         return value if value else None
 
     def _is_true(self, path, true_values):
@@ -198,7 +253,7 @@ class Module(Post, System):
         return value in true_values
 
     def _command_has_keyword(self, command, keywords):
-        output = self._clean_text(self.cmd_exec(command))
+        output = self._clean_text(self.linux_execute(command))
         if not output:
             return False
         lowered = output.lower()
@@ -227,7 +282,7 @@ class Module(Post, System):
                 print_success(message)
                 findings.append(message)
 
-        selinux_mode = self._clean_text(self.cmd_exec("getenforce 2>/dev/null"))
+        selinux_mode = self._clean_text(self.linux_execute("getenforce 2>/dev/null"))
         if selinux_mode:
             mode = selinux_mode.lower()
             if mode == "enforcing":
@@ -266,7 +321,7 @@ class Module(Post, System):
             if not self.command_exists(binary):
                 continue
 
-            path = self._clean_text(self.cmd_exec(f"command -v {binary} 2>/dev/null"))
+            path = self._clean_text(self.linux_execute(f"command -v {binary} 2>/dev/null"))
             if not self._is_safe_path(path):
                 continue
 
@@ -278,7 +333,7 @@ class Module(Post, System):
             print_warning("No known security executable found in PATH")
 
     def _path_exists(self, path):
-        output = self._clean_text(self.cmd_exec(f'test -e "{path}" && echo true'))
+        output = self._clean_text(self.linux_execute(f'test -e "{path}" && echo true'))
         return output == "true"
 
     def _find_paths(self):

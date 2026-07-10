@@ -1,8 +1,9 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Flush IPTables Rules",
@@ -17,10 +18,64 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
     def run(self):
+
+        if not self.linux_require_linux():
+            return False
+
         print_status("Applying firewall rules reset...")
         ipv4_done = self._flush_table_family("iptables")
         ipv6_done = self._flush_table_family("ip6tables")
@@ -33,7 +88,7 @@ class Module(Post, System):
         return True
 
     def _run_cmd(self, command):
-        output = self.cmd_exec(f"{command} 2>/dev/null")
+        output = self.linux_execute(f"{command} 2>/dev/null")
         if not output:
             return True, ""
         lowered = output.lower()

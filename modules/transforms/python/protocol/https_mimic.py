@@ -37,7 +37,7 @@ SERVER_HELLO_BYTES = (
 )
 
 
-class Module(Obfuscator):
+class Module(Transform):
     """
     HTTPS mimic: fake TLS handshake (Client Hello / Server Hello) then Application Data.
     Wireshark will show the flow as HTTPS (handshake + TLS Application Data).
@@ -46,7 +46,7 @@ class Module(Obfuscator):
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "HTTPS Mimic Obfuscator",
+        "name": "HTTPS Mimic Transform",
         "description": "Sends fake TLS 1.2 Client/Server Hello at start, then TLS Application Data.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -108,18 +108,18 @@ class Module(Obfuscator):
         return b"".join(out)
 
     def generate_client_code(self, language: str) -> Optional[str]:
-        """Generate Python: send Client Hello once after connect, then _obf_encode/_obf_decode (skip handshake in decode)."""
+        """Generate Python: send Client Hello once after connect, then _xf_encode/_xf_decode (skip handshake in decode)."""
         if language != "python":
             return None
         # Client Hello as bytes literal (escape for Python)
         ch_hex = CLIENT_HELLO_BYTES.hex()
         ch_repr = "bytes.fromhex('" + ch_hex + "')"
         return (
-            "_obf_buf=bytearray()\n"
-            "_obf_client_hello=" + ch_repr + "\n"
-            "def _obf_send_client_hello(sock):\n"
-            " sock.sendall(_obf_client_hello)\n"
-            "def _obf_encode(d):\n"
+            "_xf_buf=bytearray()\n"
+            "_xf_client_hello=" + ch_repr + "\n"
+            "def _xf_send_client_hello(sock):\n"
+            " sock.sendall(_xf_client_hello)\n"
+            "def _xf_encode(d):\n"
             " if not d: return d\n"
             " out=[]\n"
             " i=0\n"
@@ -128,14 +128,14 @@ class Module(Obfuscator):
             "  h=bytes([0x17,0x03,0x03,(len(c)>>8)&0xFF,len(c)&0xFF])\n"
             "  out.append(h+c)\n"
             " return b''.join(out)\n"
-            "def _obf_decode(d):\n"
-            " _obf_buf.extend(d)\n"
+            "def _xf_decode(d):\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
-            " while len(_obf_buf)>=5:\n"
-            "  rt=_obf_buf[0];fl=(_obf_buf[3]<<8)|_obf_buf[4]\n"
-            "  if fl>16384: _obf_buf.pop(0); continue\n"
-            "  if len(_obf_buf)<5+fl: break\n"
-            "  frag=bytes(_obf_buf[5:5+fl]); del _obf_buf[:5+fl]\n"
+            " while len(_xf_buf)>=5:\n"
+            "  rt=_xf_buf[0];fl=(_xf_buf[3]<<8)|_xf_buf[4]\n"
+            "  if fl>16384: _xf_buf.pop(0); continue\n"
+            "  if len(_xf_buf)<5+fl: break\n"
+            "  frag=bytes(_xf_buf[5:5+fl]); del _xf_buf[:5+fl]\n"
             "  if rt==0x17: out.append(frag)\n"
             " return b''.join(out)\n"
         )

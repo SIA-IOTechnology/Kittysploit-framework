@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-WebSocket mimic obfuscator.
+WebSocket mimic transform.
 
 The first server-side encode prepends an HTTP 101 response, generated client
 code prepends an HTTP Upgrade request, then traffic is wrapped in binary
@@ -38,13 +38,13 @@ CLIENT_UPGRADE = (
 )
 
 
-class Module(Obfuscator):
-    """WebSocket binary frame mimic obfuscator."""
+class Module(Transform):
+    """WebSocket binary frame mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "WebSocket Mimic Obfuscator",
+        "name": "WebSocket Mimic Transform",
         "description": "Wraps C2 bytes in WebSocket-like binary frames with an initial HTTP Upgrade exchange.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -149,45 +149,45 @@ class Module(Obfuscator):
         client_upgrade = CLIENT_UPGRADE.hex()
         return (
             "import os\n"
-            "_obf_buf=bytearray()\n"
-            "_obf_first=[True]\n"
-            f"_obf_client_upgrade=bytes.fromhex('{client_upgrade}')\n"
-            "def _obf_frame(c):\n"
+            "_xf_buf=bytearray()\n"
+            "_xf_first=[True]\n"
+            f"_xf_client_upgrade=bytes.fromhex('{client_upgrade}')\n"
+            "def _xf_frame(c):\n"
             " if len(c)>65535: c=c[:65535]\n"
             " h=bytes([0x82])\n"
             " if len(c)<126: h+=bytes([0x80|len(c)])\n"
             " else: h+=bytes([0x80|126,(len(c)>>8)&0xFF,len(c)&0xFF])\n"
             " m=os.urandom(4)\n"
             " return h+m+bytes(b^m[i%4] for i,b in enumerate(c))\n"
-            "def _obf_encode(d):\n"
+            "def _xf_encode(d):\n"
             " if not d: return d\n"
             " out=[]\n"
-            " if _obf_first[0]: out.append(_obf_client_upgrade); _obf_first[0]=False\n"
+            " if _xf_first[0]: out.append(_xf_client_upgrade); _xf_first[0]=False\n"
             " i=0\n"
-            " while i<len(d): c=d[i:i+65535]; i+=65535; out.append(_obf_frame(c))\n"
+            " while i<len(d): c=d[i:i+65535]; i+=65535; out.append(_xf_frame(c))\n"
             " return b''.join(out)\n"
-            "def _obf_decode(d):\n"
-            " _obf_buf.extend(d)\n"
+            "def _xf_decode(d):\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
-            " while _obf_buf:\n"
-            "  if _obf_buf.startswith((b'HTTP/',b'GET ',b'POST ')):\n"
-            "   e=_obf_buf.find(b'\\r\\n\\r\\n')\n"
+            " while _xf_buf:\n"
+            "  if _xf_buf.startswith((b'HTTP/',b'GET ',b'POST ')):\n"
+            "   e=_xf_buf.find(b'\\r\\n\\r\\n')\n"
             "   if e==-1: break\n"
-            "   del _obf_buf[:e+4]\n"
-            "  if len(_obf_buf)<2: break\n"
-            "  masked=bool(_obf_buf[1]&0x80); ln=_obf_buf[1]&0x7F; pos=2\n"
+            "   del _xf_buf[:e+4]\n"
+            "  if len(_xf_buf)<2: break\n"
+            "  masked=bool(_xf_buf[1]&0x80); ln=_xf_buf[1]&0x7F; pos=2\n"
             "  if ln==126:\n"
-            "   if len(_obf_buf)<4: break\n"
-            "   ln=(_obf_buf[2]<<8)|_obf_buf[3]; pos=4\n"
-            "  elif ln==127: _obf_buf.pop(0); continue\n"
-            "  if ln>65535: _obf_buf.pop(0); continue\n"
+            "   if len(_xf_buf)<4: break\n"
+            "   ln=(_xf_buf[2]<<8)|_xf_buf[3]; pos=4\n"
+            "  elif ln==127: _xf_buf.pop(0); continue\n"
+            "  if ln>65535: _xf_buf.pop(0); continue\n"
             "  mask=b''\n"
             "  if masked:\n"
-            "   if len(_obf_buf)<pos+4: break\n"
-            "   mask=bytes(_obf_buf[pos:pos+4]); pos+=4\n"
+            "   if len(_xf_buf)<pos+4: break\n"
+            "   mask=bytes(_xf_buf[pos:pos+4]); pos+=4\n"
             "  end=pos+ln\n"
-            "  if len(_obf_buf)<end: break\n"
-            "  p=bytes(_obf_buf[pos:end]); del _obf_buf[:end]\n"
+            "  if len(_xf_buf)<end: break\n"
+            "  p=bytes(_xf_buf[pos:end]); del _xf_buf[:end]\n"
             "  if masked: p=bytes(b^mask[i%4] for i,b in enumerate(p))\n"
             "  out.append(p)\n"
             " return b''.join(out)\n"

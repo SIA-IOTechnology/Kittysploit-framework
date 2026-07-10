@@ -1,0 +1,31 @@
+id: web-sqli-to-shell
+version: "1"
+name: SQL injection to interactive shell
+source: bug-bounty
+domain: web
+tags: [sqli, mysql, rce, shell]
+description: >
+  Union/stacked SQLi confirmed on a web app, escalate via SQLi shell post module
+  when the database user can write or invoke OS primitives.
+prerequisites:
+  signals_any:
+    - sql_injection
+  tech_any:
+    - php
+    - mysql
+    - mariadb
+chain:
+  - id: confirm_sqli
+    capability: db_access
+    module: auxiliary/scanner/http/sqli_engine
+    description: Fingerprint and confirm injectable parameter
+  - id: sqli_shell
+    capability: shell
+    module: post/http/sqli_shell
+    description: Attempt OS shell via SQLi primitives
+blockers:
+  - read-only DB user
+  - WAF blocking stacked queries
+  - no FILE privilege on MySQL
+references:
+  - "Typical BB chain when sqli_engine finds injectable param with stacked/union support"

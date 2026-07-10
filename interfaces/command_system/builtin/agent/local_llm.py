@@ -195,17 +195,31 @@ class LocalLLMService:
         return None
 
     def query_local_llm(
-        self, endpoint: str, model: str, payload: Dict[str, Any], timeout: int = 20
+        self,
+        endpoint: str,
+        model: str,
+        payload: Dict[str, Any],
+        timeout: int = 20,
+        *,
+        strategic: bool = False,
     ) -> Optional[Dict[str, Any]]:
         instruction = (
-            "You are a pentest planning assistant. "
+            "You are a pentest planning assistant operating as a mission coordinator. "
             "Reply ONLY a valid JSON object. "
             "Required keys: selected_paths (array), rationale (string). "
             "Optional keys: next_actions (array of {type,path,priority,options}), "
-            "max_requests_next_phase (int), stop_conditions (array), reasoning_confidence (0..1)."
-            "Allowed next_actions.type values: prioritize, run_followup, run_exploit, skip. "
+            "max_requests_next_phase (int), stop_conditions (array), reasoning_confidence (0..1). "
+            "Allowed next_actions.type values: prioritize, run_followup, run_exploit, run_post, skip. "
+            "Use run_followup for scanner/auxiliary validation, run_post for post/ modules, "
+            "run_exploit for exploits/ paths. "
             "Use run_followup when manual verification is needed for potential vulnerabilities."
         )
+        if strategic:
+            instruction += (
+                " STRATEGIC MODE: chain or WAF blockers may be present in strategic_context. "
+                "Prefer grounded bypass variants, option_bindings from unlocked_capabilities, "
+                "and playbook_hint next_steps over repeating failed modules."
+            )
         return self.query_json(
             endpoint=endpoint,
             model=model,

@@ -1,8 +1,9 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import re
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Virtual Machine Detection",
@@ -19,6 +20,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -53,6 +104,9 @@ class Module(Post, System):
     def run(self):
         """Detect virtual machine using multiple techniques"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Detecting virtual machine environment...")
         
         vm_detected = False
@@ -141,9 +195,9 @@ class Module(Post, System):
         """Check DMI system information"""
         try:
             # Check product name
-            product_name = self.cmd_exec("cat /sys/class/dmi/id/product_name 2>/dev/null").strip().lower()
-            sys_vendor = self.cmd_exec("cat /sys/class/dmi/id/sys_vendor 2>/dev/null").strip().lower()
-            board_vendor = self.cmd_exec("cat /sys/class/dmi/id/board_vendor 2>/dev/null").strip().lower()
+            product_name = self.linux_execute("cat /sys/class/dmi/id/product_name 2>/dev/null").strip().lower()
+            sys_vendor = self.linux_execute("cat /sys/class/dmi/id/sys_vendor 2>/dev/null").strip().lower()
+            board_vendor = self.linux_execute("cat /sys/class/dmi/id/board_vendor 2>/dev/null").strip().lower()
             
             if not product_name and not sys_vendor:
                 return None
@@ -249,7 +303,7 @@ class Module(Post, System):
         }
         
         try:
-            lsmod_output = self.cmd_exec("lsmod 2>/dev/null").lower()
+            lsmod_output = self.linux_execute("lsmod 2>/dev/null").lower()
             if not lsmod_output:
                 return None
             
@@ -268,7 +322,7 @@ class Module(Post, System):
     def _check_cpu_info(self):
         """Check CPU information for VM indicators"""
         try:
-            cpuinfo = self.cmd_exec("cat /proc/cpuinfo 2>/dev/null").lower()
+            cpuinfo = self.linux_execute("cat /proc/cpuinfo 2>/dev/null").lower()
             if not cpuinfo:
                 return None
             
@@ -300,7 +354,7 @@ class Module(Post, System):
     def _check_systemd_detect_virt(self):
         """Check using systemd-detect-virt command"""
         try:
-            raw_output = self.cmd_exec("systemd-detect-virt 2>/dev/null")
+            raw_output = self.linux_execute("systemd-detect-virt 2>/dev/null")
             if not raw_output:
                 return None
 
@@ -337,13 +391,13 @@ class Module(Post, System):
         """Check using dmidecode command"""
         try:
             # Check if dmidecode is available
-            dmidecode_check = self.cmd_exec("which dmidecode 2>/dev/null").strip()
+            dmidecode_check = self.linux_execute("which dmidecode 2>/dev/null").strip()
             if not dmidecode_check:
                 return None
             
             # Get system information
-            sys_info = self.cmd_exec("dmidecode -s system-manufacturer 2>/dev/null").strip().lower()
-            product_name = self.cmd_exec("dmidecode -s system-product-name 2>/dev/null").strip().lower()
+            sys_info = self.linux_execute("dmidecode -s system-manufacturer 2>/dev/null").strip().lower()
+            product_name = self.linux_execute("dmidecode -s system-product-name 2>/dev/null").strip().lower()
             
             if not sys_info and not product_name:
                 return None
@@ -397,8 +451,8 @@ class Module(Post, System):
         """Check device tree for ARM-based VMs"""
         try:
             # Check for device tree (common on ARM systems)
-            model = self.cmd_exec("cat /proc/device-tree/model 2>/dev/null").strip().lower()
-            compatible = self.cmd_exec("cat /proc/device-tree/compatible 2>/dev/null").strip().lower()
+            model = self.linux_execute("cat /proc/device-tree/model 2>/dev/null").strip().lower()
+            compatible = self.linux_execute("cat /proc/device-tree/compatible 2>/dev/null").strip().lower()
             
             if not model and not compatible:
                 return None

@@ -12,7 +12,7 @@ from core.payload_templates.zig_meterpreter_bind_tcp import ZigMeterpreterBindTc
 
 class Module(ZigMeterpreterBindTcpBase, Payload):
     __info__ = {
-        'name': 'Zig Meterpreter Linux, Bind TCP',
+        'name': 'Zig Meterpreter Linux, Bind TCP (compat)',
         'description': 'Linux Meterpreter bind TCP payload in Zig (compatibility path; requires Zig compiler)',
         'author': 'KittySploit Team',
         'version': '1.1.0',

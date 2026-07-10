@@ -1,0 +1,30 @@
+id: ics-qnx-qconn-rce
+version: "1"
+name: QNX qconn remote code execution
+source: ctf
+domain: ics
+tags: [qnx, qconn, ics, rce]
+description: >
+  QNX target with qconn (TCP/8000) exposed — direct remote command execution
+  when the debug service is reachable without authentication.
+prerequisites:
+  signals_any:
+    - qconn
+    - qnx
+  domains:
+    - ics
+    - ot
+chain:
+  - id: confirm_qconn
+    capability: credentials
+    module: auxiliary/scanner/ics/qconn_identify
+    description: Fingerprint qconn on TCP/8000
+  - id: qconn_rce
+    capability: rce
+    module: exploits/ics/qnx/qconn_rce
+    description: Execute commands via qconn debug protocol
+blockers:
+  - qconn authentication enabled
+  - segmented OT network
+references:
+  - "CTF / lab pattern for exposed QNX qconn on industrial gateways"

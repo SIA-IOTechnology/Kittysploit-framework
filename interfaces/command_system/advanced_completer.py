@@ -36,7 +36,7 @@ class AdvancedCompleter(Completer):
         self._command_cache: List[str] = []
         self._modules_cache: List[str] = []
         self._payload_paths_cache: List[str] = []
-        self._obfuscator_paths_cache: List[str] = []
+        self._transform_paths_cache: List[str] = []
         self._subcommand_cache: Dict[str, List[str]] = {}
         self._logged_completion_errors: Set[str] = set()
 
@@ -55,7 +55,7 @@ class AdvancedCompleter(Completer):
             self._last_discovery_generation = -1
             self._modules_cache = []
             self._payload_paths_cache = []
-            self._obfuscator_paths_cache = []
+            self._transform_paths_cache = []
 
     # ------------------------------------------------------------------ #
     # Completion entry point
@@ -196,13 +196,13 @@ class AdvancedCompleter(Completer):
                         "metasploit-payload-completions",
                         "Metasploit payload completion provider failed",
                     )
-        elif option_lower == "obfuscator":
-            suggestions = self._collect_obfuscator_paths()
+        elif option_lower in ("transform", "obfuscator"):
+            suggestions = self._collect_transform_paths()
 
         if not suggestions:
             return
 
-        display_meta = "Payload" if option_lower == "payload" else ("Obfuscator" if option_lower == "obfuscator" else None)
+        display_meta = "Payload" if option_lower == "payload" else ("Transform" if option_lower in ("transform", "obfuscator") else None)
         for value in self._filter_items(suggestions, partial):
             yield Completion(value, start_position=-len(partial), display_meta=display_meta or "Value")
 
@@ -369,7 +369,7 @@ class AdvancedCompleter(Completer):
             if module_loader is None:
                 self._modules_cache = []
                 self._payload_paths_cache = []
-                self._obfuscator_paths_cache = []
+                self._transform_paths_cache = []
             else:
                 discovered = module_loader.discover_modules()
                 module_paths = sorted(discovered.keys())
@@ -377,8 +377,9 @@ class AdvancedCompleter(Completer):
                 self._payload_paths_cache = sorted(
                     path for path in module_paths if path.startswith("payloads/")
                 )
-                self._obfuscator_paths_cache = sorted(
-                    path for path in module_paths if path.startswith("obfuscators/")
+                self._transform_paths_cache = sorted(
+                    path for path in module_paths
+                    if path.startswith("transforms/") or path.startswith("obfuscators/")
                 )
         except Exception:
             self._log_completion_error(
@@ -388,7 +389,7 @@ class AdvancedCompleter(Completer):
             )
             self._modules_cache = []
             self._payload_paths_cache = []
-            self._obfuscator_paths_cache = []
+            self._transform_paths_cache = []
         self._last_discovery_generation = generation
 
     def _get_modules(self) -> List[str]:
@@ -507,10 +508,14 @@ class AdvancedCompleter(Completer):
             )
             return None
 
-    def _collect_obfuscator_paths(self) -> List[str]:
-        """Collect all available obfuscator module paths"""
+    def _collect_transform_paths(self) -> List[str]:
+        """Collect all available C2 stream transform module paths"""
         self._ensure_module_paths_cache()
-        return list(self._obfuscator_paths_cache)
+        return list(self._transform_paths_cache)
+
+    def _collect_obfuscator_paths(self) -> List[str]:
+        """Deprecated alias for _collect_transform_paths()."""
+        return self._collect_transform_paths()
 
     def _log_completion_error(self, key: str, message: str, level: int = logging.DEBUG) -> None:
         """Log noisy completion failures once so interactive typing stays usable."""

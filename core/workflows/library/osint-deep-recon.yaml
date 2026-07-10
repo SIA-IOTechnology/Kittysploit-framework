@@ -36,6 +36,16 @@ steps:
       check_subdomains: "true"
       check_headers: "true"
       max_subdomains: "25"
+    on_success: passive_dns
+    on_failure: passive_dns
+  passive_dns:
+    module: auxiliary/osint/passive_dns_aggregator
+    description: Aggregate CT and permutation-based subdomains
+    options:
+      target: "${target}"
+      include_ct: "true"
+      include_permutations: "true"
+      resolve_a: "false"
     on_success: wayback
     on_failure: wayback
   wayback:

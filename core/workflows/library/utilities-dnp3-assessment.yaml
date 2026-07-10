@@ -1,0 +1,66 @@
+id: utilities-dnp3-assessment
+version: "1"
+name: Utilities DNP3 Assessment
+description: >
+  Phase 3 DNP3 deep assessment for electric/water/gas outstations — identify,
+  integrity poll, unsolicited check, point read, and consolidated reporting.
+tags: [ics, ot, dnp3, utilities, assessment, phase3]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  target:
+    description: DNP3 outstation IP or hostname
+    required: true
+  dest_address:
+    description: DNP3 destination link address
+    default: "1"
+  src_address:
+    description: DNP3 master source link address
+    default: "1024"
+start_step: dnp3_identify
+steps:
+  dnp3_identify:
+    module: auxiliary/scanner/ics/dnp3_identify
+    description: Link status and device attributes (group 60)
+    options:
+      target: "${target}"
+      dest_address: "${dest_address}"
+      src_address: "${src_address}"
+    on_success: dnp3_integrity
+    on_failure: dnp3_integrity
+  dnp3_integrity:
+    module: auxiliary/scanner/ics/dnp3_integrity_poll
+    description: Integrity-style read of binary/analog points
+    options:
+      target: "${target}"
+      dest_address: "${dest_address}"
+      src_address: "${src_address}"
+    on_success: dnp3_unsolicited
+    on_failure: dnp3_unsolicited
+  dnp3_unsolicited:
+    module: scanner/ics/dnp3_unsolicited
+    description: Check if unsolicited responses can be configured
+    options:
+      target: "${target}"
+    on_success: dnp3_read_points
+    on_failure: dnp3_read_points
+  dnp3_read_points:
+    module: post/ics/dnp3/gather/read_points
+    description: Read binary input points (group 1)
+    options:
+      target: "${target}"
+      dest_address: "${dest_address}"
+      src_address: "${src_address}"
+      object_type: "binary_input"
+      count: "10"
+    on_success: engagement_report
+    on_failure: engagement_report
+  engagement_report:
+    module: analysis/reporting/ics_engagement_report
+    description: Utilities DNP3 engagement report
+    options:
+      title: "Utilities DNP3 Assessment Report"
+      sync_workspace: "true"
+    on_success: done
+    on_failure: done

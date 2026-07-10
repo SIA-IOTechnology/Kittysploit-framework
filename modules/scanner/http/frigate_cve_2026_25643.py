@@ -5,6 +5,7 @@ import json
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.response_validation import is_html_response, looks_like_html, parse_json_response
 
 
 class Module(Scanner, Http_client):
@@ -26,14 +27,37 @@ class Module(Scanner, Http_client):
             "exploits/multi/http/frigate_cve_2026_25643_rce",
         ],
         "tags": ["web", "scanner", "frigate", "nvr", "go2rtc", "config-injection", "rce"],
-        "agent": {
-            "risk": "active",
-            "effects": ["network_probe"],
-            "expected_requests": 2,
-            "reversible": True,
-            "approval_required": False,
-            "produces": ["tech_hints", "risk_signals", "endpoints"],
-        },
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'cost': 1.0,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
+    },
     }
 
     base_path = OptString("/", "Frigate base path", required=False)
@@ -99,6 +123,8 @@ class Module(Scanner, Http_client):
         try:
             data = response.json()
         except Exception:
+            if is_html_response(response):
+                return ""
             return ""
 
         if isinstance(data, dict):
@@ -107,10 +133,24 @@ class Module(Scanner, Http_client):
 
     @staticmethod
     def _looks_like_frigate(body: str) -> bool:
-        if not body:
+        if not body or looks_like_html(body):
             return False
         text = body.lower()
         return "frigate" in text or "go2rtc" in text
+
+    @staticmethod
+    def _looks_like_frigate_config(content: str) -> bool:
+        if not content or looks_like_html(content):
+            return False
+        text = str(content).strip()
+        if text.startswith('"') and text.endswith('"'):
+            try:
+                text = json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        blob = str(text).lower()
+        markers = ("mqtt:", "cameras:", "detectors:", "ffmpeg:", "birdseye:", '"mqtt"', '"cameras"')
+        return sum(1 for marker in markers if marker in blob) >= 2
 
     def _fingerprint_frigate(self) -> bool:
         version = self._fetch_version()
@@ -137,7 +177,7 @@ class Module(Scanner, Http_client):
             return False
 
         content = (response.text or "").strip()
-        if not content:
+        if not content or is_html_response(response, content):
             return False
 
         if content.startswith('"') and content.endswith('"'):
@@ -146,7 +186,7 @@ class Module(Scanner, Http_client):
             except json.JSONDecodeError:
                 pass
 
-        return bool(str(content).strip())
+        return self._looks_like_frigate_config(str(content))
 
     def check(self):
         is_frigate = self._fingerprint_frigate()

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-TLS/HTTPS mimic obfuscator: wraps C2 traffic in TLS Application Data records
+TLS/HTTPS mimic transform: wraps C2 traffic in TLS Application Data records
 so the stream looks like HTTPS (TLS 1.2) on the wire while using plain TCP.
 Each encode() wraps data in a TLS record (type=23, version=0x0303, length, payload).
 Decode is stateful: buffers incoming bytes and parses records, returning payloads only.
@@ -19,7 +19,7 @@ TLS_VERSION_1_2 = (0x03, 0x03)
 TLS_MAX_FRAGMENT = 16384  # 2^14
 
 
-class Module(Obfuscator):
+class Module(Transform):
     """
     TLS/HTTPS mimic: wrap traffic in TLS Application Data records.
     Makes raw TCP look like HTTPS on the wire (TLS record structure only; payload is not encrypted).
@@ -28,7 +28,7 @@ class Module(Obfuscator):
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "TLS/HTTPS Mimic Obfuscator",
+        "name": "TLS/HTTPS Mimic Transform",
         "description": "Wraps C2 stream in TLS 1.2 Application Data records so traffic looks like HTTPS on the wire (plain TCP).",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -89,8 +89,8 @@ class Module(Obfuscator):
         if language != "python":
             return None
         return (
-            "_obf_buf=bytearray()\n"
-            "def _obf_encode(d):\n"
+            "_xf_buf=bytearray()\n"
+            "def _xf_encode(d):\n"
             " if not d: return d\n"
             " out=[]\n"
             " i=0\n"
@@ -99,13 +99,13 @@ class Module(Obfuscator):
             "  h=bytes([0x17,0x03,0x03,(len(c)>>8)&0xFF,len(c)&0xFF])\n"
             "  out.append(h+c)\n"
             " return b''.join(out)\n"
-            "def _obf_decode(d):\n"
-            " _obf_buf.extend(d)\n"
+            "def _xf_decode(d):\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
-            " while len(_obf_buf)>=5:\n"
-            "  fl=(_obf_buf[3]<<8)|_obf_buf[4]\n"
-            "  if fl>16384: _obf_buf.pop(0); continue\n"
-            "  if len(_obf_buf)<5+fl: break\n"
-            "  out.append(bytes(_obf_buf[5:5+fl])); del _obf_buf[:5+fl]\n"
+            " while len(_xf_buf)>=5:\n"
+            "  fl=(_xf_buf[3]<<8)|_xf_buf[4]\n"
+            "  if fl>16384: _xf_buf.pop(0); continue\n"
+            "  if len(_xf_buf)<5+fl: break\n"
+            "  out.append(bytes(_xf_buf[5:5+fl])); del _xf_buf[:5+fl]\n"
             " return b''.join(out)\n"
         )

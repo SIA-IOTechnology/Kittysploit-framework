@@ -14,9 +14,14 @@ from urllib.parse import urlparse
 from core.framework.workflow import Workflow, WorkflowStep
 from core.framework.module_context import capture_module_context, restore_module_context
 from core.output_handler import print_error, print_info, print_success, print_warning
+from core.scanner.probe_failure import is_soft_probe_failure
 from core.workflows.definition import WorkflowDefinition, WorkflowStepDefinition, WorkflowVariableSpec
 
 _VAR_PATTERN = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def _is_soft_probe_failure(exc: Exception) -> bool:
+    return is_soft_probe_failure(exc)
 
 
 @dataclass
@@ -30,6 +35,10 @@ class WorkflowRunResult:
     context_data: Dict[str, Any] = field(default_factory=dict)
     errors: Dict[str, str] = field(default_factory=dict)
     plan: List[Dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def matches(self) -> int:
+        return sum(1 for value in (self.step_results or {}).values() if value)
 
 
 class WorkflowEngine:
@@ -58,7 +67,9 @@ class WorkflowEngine:
             if value is not None and name not in resolved:
                 resolved[name] = str(value)
 
-        return resolved
+        from lib.scanner.target_utils import apply_url_target_to_variables
+
+        return apply_url_target_to_variables(resolved)
 
     def build_workflow(
         self,
@@ -112,6 +123,7 @@ class WorkflowEngine:
             errors: Dict[str, str] = {}
             current = definition.start_step
             overall_success = True
+            quiet_probes = bool(definition.policy.get("quiet_probes"))
 
             while current:
                 step_def = definition.steps.get(current)
@@ -125,7 +137,8 @@ class WorkflowEngine:
                     current = step_def.on_success
                     continue
 
-                print_info(f"Executing step: {current} — {step_def.description or step_def.name}")
+                if not quiet_probes:
+                    print_info(f"Executing step: {current} — {step_def.description or step_def.name}")
                 executed.append(current)
 
                 try:
@@ -136,10 +149,12 @@ class WorkflowEngine:
                     step_results[current] = ok
                     context["results"][current] = ok
                     if ok:
-                        print_success(f"Step {current} completed")
+                        label = step_def.description or step_def.name or current
+                        print_success(f"Match: {current} — {label}")
                         current = step_def.on_success
                     else:
-                        print_warning(f"Step {current} failed")
+                        if not quiet_probes and not definition.continue_on_failure:
+                            print_warning(f"Step {current} failed")
                         overall_success = False
                         if definition.continue_on_failure and step_def.on_failure:
                             current = step_def.on_failure
@@ -148,17 +163,32 @@ class WorkflowEngine:
                         else:
                             current = step_def.on_failure
                 except Exception as exc:
-                    msg = str(exc)
-                    errors[current] = msg
                     step_results[current] = False
                     context["results"][current] = False
                     overall_success = False
-                    print_error(f"Step {current} error: {msg}")
-                    current = step_def.on_failure
+                    if _is_soft_probe_failure(exc):
+                        if not quiet_probes and not definition.continue_on_failure:
+                            print_warning(f"Step {current} failed")
+                        if definition.continue_on_failure and step_def.on_failure:
+                            current = step_def.on_failure
+                        elif definition.continue_on_failure and step_def.on_success:
+                            current = step_def.on_success
+                        else:
+                            current = step_def.on_failure
+                    else:
+                        msg = str(exc)
+                        errors[current] = msg
+                        print_error(f"Step {current} error: {msg}")
+                        current = step_def.on_failure
+
+            if definition.continue_on_failure:
+                workflow_success = not errors
+            else:
+                workflow_success = overall_success and not errors
 
             return WorkflowRunResult(
                 workflow_id=definition.workflow_id,
-                success=overall_success and not errors,
+                success=workflow_success,
                 dry_run=False,
                 duration_seconds=time.time() - started,
                 steps_executed=executed,
@@ -244,6 +274,45 @@ class WorkflowEngine:
             outputs = step.extract_outputs(module)
             context["data"].update(outputs)
 
+        if "osint/" in str(step_def.module or ""):
+            from core.osint.evidence import envelope_osint_details
+            from core.osint.opsec import OsintOpsecJournal
+
+            journal = context.setdefault(
+                "_osint_opsec_journal",
+                OsintOpsecJournal(
+                    case_id=str(context["data"].get("target") or ""),
+                    legal_basis=str(context["data"].get("legal_basis") or ""),
+                    passive_only=True,
+                ),
+            )
+            violation = journal.check_passive_violation(str(step_def.module or ""))
+            if violation:
+                print_warning(violation)
+                return False
+
+            osint_results = context.setdefault("osint_module_results", [])
+            details = result if isinstance(result, dict) else {}
+            target = str(context["data"].get("target", ""))
+            row = {
+                "module": step_def.module,
+                "path": step_def.module,
+                "status": "error" if isinstance(details, dict) and details.get("error") else "safe",
+                "target": target,
+                "details": envelope_osint_details(
+                    details,
+                    module_path=str(step_def.module or ""),
+                    target=target,
+                ),
+            }
+            osint_results.append(row)
+            journal.record(
+                action="module_complete",
+                module=str(step_def.module or ""),
+                target=target,
+                status=str(row.get("status") or "ok"),
+            )
+
         return bool(result)
 
     def _run_builtin(
@@ -276,6 +345,37 @@ class WorkflowEngine:
                 )
             )
             return write_purple_export_bundle(self.framework, output_dir, context["data"])
+        if action == "osint_evidence_export":
+            output_dir = Path(
+                self._substitute_string(
+                    step_def.options.get("output_dir", "artifacts/osint/${target}"),
+                    {**variables, **context["data"]},
+                )
+            )
+            return write_osint_evidence_export_bundle(
+                output_dir,
+                context,
+                legal_basis=self._substitute_string(
+                    str(step_def.options.get("legal_basis", "")),
+                    {**variables, **context["data"]},
+                ),
+                tlp=self._substitute_string(
+                    str(step_def.options.get("tlp", "AMBER")),
+                    {**variables, **context["data"]},
+                ),
+                retention_days=self._substitute_string(
+                    str(step_def.options.get("retention_days", "90")),
+                    {**variables, **context["data"]},
+                ),
+                data_controller=self._substitute_string(
+                    str(step_def.options.get("data_controller", "")),
+                    {**variables, **context["data"]},
+                ),
+                recipient_org=self._substitute_string(
+                    str(step_def.options.get("recipient_org", "")),
+                    {**variables, **context["data"]},
+                ),
+            )
         if action == "client_retest_summary":
             return write_client_retest_summary(
                 self.framework,
@@ -375,6 +475,80 @@ def resolve_workspace_primary_target(framework) -> Optional[str]:
     if address.startswith("http://") or address.startswith("https://"):
         return address
     return address
+
+
+def write_osint_evidence_export_bundle(
+    output_dir: Path,
+    context: Dict[str, Any],
+    *,
+    legal_basis: str = "",
+    tlp: str = "AMBER",
+    retention_days: str = "90",
+    data_controller: str = "",
+    recipient_org: str = "",
+) -> bool:
+    from core.osint.gdpr import OsintRetentionPolicy
+    from core.osint.intel_synthesis import synthesize_intel_graph
+    from core.osint.password_profiling import organization_root_domain
+    from core.osint.persist import write_osint_evidence_bundle
+
+    data = dict(context.get("data") or {})
+    module_results = list(context.get("osint_module_results") or [])
+    target = str(data.get("target") or "")
+    root = organization_root_domain(target)
+    persona = str(data.get("persona_name") or "")
+
+    identities = {"emails": [], "handles": [], "names": []}
+    if persona:
+        identities["names"].append(persona)
+    for row in module_results:
+        details = row.get("details") if isinstance(row, dict) else {}
+        if not isinstance(details, dict):
+            continue
+        for email in details.get("emails") or []:
+            identities["emails"].append(str(email))
+        for finding in details.get("findings") or []:
+            if isinstance(finding, dict) and finding.get("handle"):
+                identities["handles"].append(str(finding["handle"]))
+
+    synthesis = synthesize_intel_graph(
+        module_results,
+        root_domain=root,
+        identities=identities,
+        persona_seed=persona,
+    )
+    try:
+        pii_days = max(1, int(str(retention_days or "90").strip()))
+    except ValueError:
+        pii_days = OsintRetentionPolicy.from_osint_config().pii_days
+    base_policy = OsintRetentionPolicy.from_osint_config()
+    policy = OsintRetentionPolicy(
+        pii_days=pii_days,
+        ioc_days=base_policy.ioc_days,
+        audit_days=base_policy.audit_days,
+        legal_basis_required=base_policy.legal_basis_required,
+        pseudonymize_exports=base_policy.pseudonymize_exports,
+        data_controller=data_controller or str(data.get("data_controller") or base_policy.data_controller),
+        processing_purpose=base_policy.processing_purpose,
+        lawful_basis_article=base_policy.lawful_basis_article,
+    )
+    paths = write_osint_evidence_bundle(
+        module_results=module_results,
+        synthesis=synthesis,
+        output_dir=output_dir,
+        run_id=str(data.get("workflow_id") or "workflow-osint"),
+        legal_basis=legal_basis,
+        target=root,
+        tlp=tlp,
+        actor="workflow",
+        passive_only=True,
+        opsec_journal=context.get("_osint_opsec_journal"),
+        retention_policy=policy,
+        data_controller=data_controller,
+        recipient_org=recipient_org,
+    )
+    print_success(f"OSINT evidence bundle written to {output_dir} (manifest: {paths.get('manifest', '')})")
+    return True
 
 
 def write_purple_export_bundle(framework, output_dir: Path, context_data: Dict[str, Any]) -> bool:

@@ -1,0 +1,47 @@
+id: ics-passive-to-active
+version: "1"
+name: OT passive sniff to active identify
+source: internal
+domain: ot
+tags: [ics, ot, passive, modbus, s7comm, dnp3, scada]
+description: >
+  Passive SPAN/TAP discovery of OT protocols followed by targeted active identify
+  modules per observed traffic — agent handoff without LLM.
+prerequisites:
+  signals_any:
+    - ics
+    - ot
+    - scada
+  capabilities:
+    - ot_assets
+chain:
+  - id: passive_sniff
+    capability: ot_assets
+    module: auxiliary/scanner/ics/passive_sniffer
+    description: Passive protocol inventory on SPAN/TAP
+  - id: modbus_identify
+    capability: credentials
+    module: auxiliary/scanner/ics/modbus_identify
+    optional: true
+    description: Active Modbus identify when modbus seen
+  - id: s7_identify
+    capability: credentials
+    module: auxiliary/scanner/ics/s7comm_identify
+    optional: true
+    description: Active S7comm identify when s7comm seen
+  - id: dnp3_identify
+    capability: dnp3_access
+    module: auxiliary/scanner/ics/dnp3_identify
+    optional: true
+    description: Active DNP3 identify when dnp3 seen
+  - id: dnp3_read
+    capability: file_read
+    module: post/ics/gather/dnp3_read_points
+    optional: true
+    description: Read binary/analog points after DNP3 identify
+blockers:
+  - no SPAN/TAP visibility
+  - passive-only engagement policy
+  - PLC rate limiting on active probes
+references:
+  - "OT safe assessment workflow passive → active handoff"

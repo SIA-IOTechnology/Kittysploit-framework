@@ -1,0 +1,64 @@
+id: linux-shell-privesc-pivot
+version: "1"
+name: Linux shell to privesc and network pivot
+source: ctf
+domain: internal
+tags: [linux, shell, privesc, suid, container, pivot, persistence, post-exploit]
+description: >
+  Post-exploitation chain after initial foothold on Linux — profile the shell,
+  hunt SUID and container escapes, apply privesc suggester output, establish
+  persistence, autoroute through the host, and scan adjacent internal networks.
+  Common in CTF privesc + pivot write-ups and red-team lab reports.
+prerequisites:
+  signals_any:
+    - shell
+    - linux
+    - rce
+  capabilities:
+    - shell
+chain:
+  - id: capability_profile
+    capability: file_read
+    module: post/shell/multi/gather/shell_capability_profiler
+    description: Map shell constraints (restricted, containerized, sudo)
+  - id: privesc_hints
+    capability: root
+    module: post/shell/multi/gather/privesc_suggester
+    description: Automated privesc vector suggestions on the host
+  - id: suid_hunt
+    capability: root
+    module: post/shell/linux/gather/suid_sgid_hunt
+    description: SUID/SGID binaries useful for local privilege escalation
+  - id: container_check
+    capability: root
+    module: post/shell/linux/gather/container_escape_check
+    description: Docker/k8s escape indicators when foothold is containerized
+  - id: cred_harvest
+    capability: credentials
+    module: post/shell/linux/gather/gather_credentials
+    description: Local configs, SSH keys, cloud metadata, DB connection strings
+  - id: ld_preload_persist
+    capability: root
+    module: post/shell/linux/persistence/ld_preload
+    optional: true
+    description: LD_PRELOAD persistence after root or writable ld.so paths
+  - id: autoroute
+    capability: authenticated_session
+    module: post/shell/multi/manage/pivot_autoroute
+    description: Add internal routes through compromised host
+  - id: internal_scan
+    capability: credentials
+    module: post/shell/linux/pivot/scan_internal_network
+    description: Discover peers and services on pivoted segments
+  - id: socks_pivot
+    capability: authenticated_session
+    module: post/shell/linux/pivot/socks_proxy
+    optional: true
+    description: SOCKS proxy for manual tooling through the foothold
+blockers:
+  - restricted / rbash shell
+  - AppArmor or SELinux enforcing
+  - egress filtering on pivot ports
+  - ephemeral container without writable persistence paths
+references:
+  - "CTF classic: shell → privesc → /etc/passwd or root flag → pivot to DB subnet"

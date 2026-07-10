@@ -1,0 +1,206 @@
+id: osint-passive-recon
+version: "1"
+name: OSINT Passive Recon (LE)
+description: >
+  Strictly passive OSINT chain for law-enforcement and authorized intelligence
+  collection. No login bruteforce, credential generation, or active scanning.
+  Produces evidence ledger and STIX export bundle.
+tags: [osint, passive, le, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target organization domain (e.g. example.com)
+    required: true
+  persona_name:
+    description: Optional person full name for identity correlation
+    default: ""
+  legal_basis:
+    description: Mandate or legal authorization reference (case number, warrant ID)
+    default: ""
+  tlp:
+    description: Traffic Light Protocol classification (WHITE, GREEN, AMBER, RED)
+    default: "AMBER"
+  retention_days:
+    description: PII retention window in days (GDPR)
+    default: "90"
+  data_controller:
+    description: Data controller organization name for GDPR records
+    default: ""
+  recipient_org:
+    description: UMF recipient organization (Member State unit / Europol desk)
+    default: ""
+  org_query:
+    description: Optional reverse WHOIS query (org name, email, or keyword; empty skips gracefully)
+    default: ""
+start_step: surface
+steps:
+  surface:
+    module: auxiliary/osint/domain_surface_mapper
+    description: DNS, CT subdomains, and HTTP security headers
+    options:
+      target: "${target}"
+      resolve_dns: "true"
+      check_subdomains: "true"
+      check_headers: "true"
+      max_subdomains: "25"
+      output_file: "artifacts/osint/${target}/surface.json"
+    on_success: passive_dns
+    on_failure: passive_dns
+  passive_dns:
+    module: auxiliary/osint/passive_dns_aggregator
+    description: Aggregate CT and permutation-based subdomains
+    options:
+      target: "${target}"
+      include_ct: "true"
+      include_permutations: "true"
+      resolve_a: "false"
+      output_file: "artifacts/osint/${target}/passive_dns.json"
+    on_success: domain_crtsh
+    on_failure: domain_crtsh
+  domain_crtsh:
+    module: auxiliary/osint/domain_crtsh
+    description: Certificate transparency subdomain and issuer tracking
+    options:
+      target: "${target}"
+    on_success: takeover_hints
+    on_failure: takeover_hints
+  takeover_hints:
+    module: auxiliary/osint/subdomain_takeover_hint
+    description: Flag dangling CNAME and takeover-prone subdomains
+    options:
+      target: "${target}"
+      max_subdomains: "30"
+      output_file: "artifacts/osint/${target}/takeover_hints.json"
+    on_success: wayback
+    on_failure: wayback
+  wayback:
+    module: auxiliary/osint/wayback_surface_hunter
+    description: Historical sensitive URLs from Internet Archive
+    options:
+      target: "${target}"
+      max_urls: "400"
+      min_score: "50"
+      output_file: "artifacts/osint/${target}/wayback.json"
+    on_success: origin_ip
+    on_failure: origin_ip
+  origin_ip:
+    module: auxiliary/osint/cdn_origin_ip_finder
+    description: Probable origin IPs behind CDN
+    options:
+      target: "${target}"
+      scan_cert_subdomains: "true"
+      max_cert_names: "150"
+      output_file: "artifacts/osint/${target}/origin_ip.json"
+    on_success: github
+    on_failure: github
+  github:
+    module: auxiliary/osint/github_org_exposure
+    description: Public GitHub repos and secret/workflow risks
+    options:
+      target: "${target}"
+      max_repos: "20"
+      output_file: "artifacts/osint/${target}/github.json"
+    on_success: emails
+    on_failure: emails
+  emails:
+    module: auxiliary/osint/email_pattern_harvester
+    description: Email addresses and patterns from passive sources
+    options:
+      target: "${target}"
+      scan_cert_names: "true"
+      output_file: "artifacts/osint/${target}/emails.json"
+    on_success: identity
+    on_failure: identity
+  identity:
+    module: auxiliary/osint/identity_handle_hunter
+    description: Discover public identity handles (requires persona_name or distinctive query)
+    options:
+      query: "${persona_name}"
+      query_type: "name"
+      max_results: "20"
+      min_confidence: "80"
+      output_file: "artifacts/osint/${target}/identity.json"
+    on_success: breach
+    on_failure: breach
+  breach:
+    module: auxiliary/osint/breach_exposure_score
+    description: Passive breach exposure scoring for domain or harvested emails
+    options:
+      target: "${target}"
+      target_type: "domain"
+      output_file: "artifacts/osint/${target}/breach.json"
+    on_success: saas
+    on_failure: saas
+  saas:
+    module: auxiliary/osint/saas_tenant_discovery
+    description: SaaS and IdP tenant discovery (Okta, M365, Google, etc.)
+    options:
+      target: "${target}"
+      scan_cert_subdomains: "true"
+      output_file: "artifacts/osint/${target}/saas.json"
+    on_success: reverse_whois
+    on_failure: reverse_whois
+  reverse_whois:
+    module: auxiliary/osint/reverse_whois_org_mapper
+    description: Reverse WHOIS pivot on registrant org or keyword (optional)
+    options:
+      query: "${org_query}"
+      query_type: "keyword"
+      output_file: "artifacts/osint/${target}/reverse_whois.json"
+    on_success: telegram
+    on_failure: telegram
+  telegram:
+    module: auxiliary/osint/telegram_channel_profiler
+    description: Public Telegram channel profiling via t.me previews
+    options:
+      target: "${target}"
+      max_channels: "15"
+      output_file: "artifacts/osint/${target}/telegram.json"
+    on_success: darkweb
+    on_failure: darkweb
+  darkweb:
+    module: auxiliary/osint/darkweb_mention_hunter
+    description: Darkweb/breach mentions via authorized IntelX provider (no Tor scraping)
+    options:
+      target: "${target}"
+      max_results: "25"
+      output_file: "artifacts/osint/${target}/darkweb.json"
+    on_success: crypto
+    on_failure: crypto
+  crypto:
+    module: auxiliary/osint/crypto_address_pivot
+    description: Extract and enrich cryptocurrency addresses from OSINT artifacts
+    options:
+      target: "${target}"
+      source_file: "artifacts/osint/${target}/darkweb.json"
+      enrich: "true"
+      max_addresses: "12"
+      output_file: "artifacts/osint/${target}/crypto.json"
+    on_success: identity_graph
+    on_failure: identity_graph
+  identity_graph:
+    module: auxiliary/osint/identity_exposure_graph
+    description: Correlate identity artifacts into an exposure graph
+    options:
+      query: "${persona_name}"
+      identity_file: "artifacts/osint/${target}/identity.json"
+      breach_file: "artifacts/osint/${target}/breach.json"
+      domain_surface_file: "artifacts/osint/${target}/surface.json"
+      output_file: "artifacts/osint/${target}/identity_graph.json"
+    on_success: export_bundle
+    on_failure: export_bundle
+  export_bundle:
+    type: builtin
+    action: osint_evidence_export
+    description: Write evidence ledger, module results, synthesis, and STIX bundle
+    options:
+      output_dir: "artifacts/osint/${target}"
+      legal_basis: "${legal_basis}"
+      tlp: "${tlp}"
+      retention_days: "${retention_days}"
+      data_controller: "${data_controller}"
+      recipient_org: "${recipient_org}"
+    on_success: null
+    on_failure: null

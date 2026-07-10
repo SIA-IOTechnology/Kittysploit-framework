@@ -10,6 +10,7 @@ import subprocess
 import shlex
 import socket
 import select
+import threading
 import time
 import re
 import ntpath
@@ -19,6 +20,8 @@ from core.output_handler import print_info, print_error
 
 class ClassicShell(BaseShell):
     """Classic shell implementation for standard sessions"""
+
+    _CMD_MARKER = "__KS_CMD_END__"
     
     def __init__(self, session_id: str, session_type: str = "standard", framework=None):
         super().__init__(session_id, session_type)
@@ -27,6 +30,8 @@ class ClassicShell(BaseShell):
         self.is_windows = False
         self.platform_detected = False
         self._windows_cwd_strategy: Optional[str] = None
+        self._identity_synced = False
+        self._transport_lock = threading.Lock()
         
         # Initialize environment (will be updated based on detected OS)
         self.environment_vars = {
@@ -58,6 +63,64 @@ class ClassicShell(BaseShell):
         
         # Initialize connection from framework
         self._initialize_connection()
+
+    def _connection_alive(self) -> bool:
+        """Return True when a socket-backed session is still connected."""
+        conn = self.connection
+        if conn is None:
+            return False
+        if getattr(conn, "_closed", False):
+            return False
+        return True
+
+    def _normalize_connection(self) -> None:
+        if not self._connection_alive():
+            self.connection = None
+
+    def _is_remote_session(self) -> bool:
+        """True when this shell is backed by a listener-created session."""
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return False
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session:
+            return False
+        return bool((session.data or {}).get("listener_id"))
+
+    def _disconnect_error(self) -> Dict[str, Any]:
+        return {
+            "output": "",
+            "status": 1,
+            "error": "Remote session disconnected; use sessions list or wait for implant reconnect",
+            "session_disconnected": True,
+        }
+
+    def is_session_available(self) -> bool:
+        """Return True when a remote session has a live transport."""
+        self._refresh_connection()
+        self._normalize_connection()
+        return self._connection_alive()
+
+    def ensure_live_connection(self) -> bool:
+        return self.is_session_available()
+
+    def _refresh_connection(self) -> None:
+        """Re-bind socket from listener when shell was created after a drop/reconnect."""
+        if self._connection_alive():
+            return
+        self.connection = None
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session:
+            return
+        listener_id = (getattr(session, "data", None) or {}).get("listener_id")
+        listener = (getattr(self.framework, "active_listeners", None) or {}).get(listener_id)
+        if not listener:
+            return
+        if hasattr(listener, "_session_connections"):
+            conn = listener._session_connections.get(self.session_id)
+            if conn is not None and not getattr(conn, "_closed", False):
+                self.connection = conn
     
     @property
     def shell_name(self) -> str:
@@ -210,9 +273,14 @@ class ClassicShell(BaseShell):
             return ""
 
         lines = [line.strip() for line in str(raw).splitlines() if line.strip()]
-        if not lines:
-            return ""
-        return os.path.normpath(lines[-1])
+        for line in reversed(lines):
+            if not line.startswith("/"):
+                continue
+            lower = line.lower()
+            if ";" in line or "echo" in lower or self._CMD_MARKER in line:
+                continue
+            return os.path.normpath(line)
+        return ""
 
     def _looks_like_remote_prompt_line(self, line: str) -> bool:
         """Return True when a line is just a remote shell prompt."""
@@ -247,6 +315,101 @@ class ClassicShell(BaseShell):
             return True
 
         return False
+
+    def _looks_like_wrapped_command_echo(self, line: str, command: str) -> bool:
+        """Filter interactive bash/sh echoes of the marker-wrapped command."""
+        if not line:
+            return False
+        line_stripped = line.strip()
+        if self._CMD_MARKER in line_stripped:
+            return True
+        cmd = (command or "").strip()
+        if not cmd:
+            return False
+        wrapped = self._wrap_unix_command(cmd)
+        if wrapped in line_stripped:
+            return True
+        if f"({cmd})" in line_stripped and "printf" in line_stripped:
+            return True
+        if re.search(r'[#$]\s*\(', line_stripped) and cmd in line_stripped:
+            return True
+        return False
+
+    def _reset_socket_timeout(self) -> None:
+        conn = self.connection
+        if conn is None:
+            return
+        try:
+            conn.settimeout(None)
+        except Exception:
+            pass
+
+    def _drain_pending_output(self, timeout: float = 0.4) -> None:
+        """Discard unread bytes (interactive shell prompts) before framed commands."""
+        if not self.connection:
+            return
+        deadline = time.time() + max(0.05, float(timeout))
+        try:
+            self.connection.settimeout(0.1)
+            while self.connection and time.time() < deadline:
+                try:
+                    chunk = self.connection.recv(4096)
+                    if not chunk:
+                        self.connection = None
+                        break
+                except (TimeoutError, socket.timeout):
+                    break
+        finally:
+            self._reset_socket_timeout()
+
+    def _first_response_line(self, raw: Optional[str]) -> str:
+        """Return the first meaningful line from a framed remote response."""
+        if not raw:
+            return ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or self._CMD_MARKER in line:
+                continue
+            if self._looks_like_remote_prompt_line(line):
+                continue
+            return line
+        return ""
+
+    def _sync_remote_identity(self) -> bool:
+        """Populate prompt fields from the remote host (stager / line-mode shells)."""
+        if not self.connection or getattr(self, "_identity_synced", False):
+            return bool(getattr(self, "_identity_synced", False))
+
+        user = self._first_response_line(self._send_command_raw("whoami", timeout=3.0))
+        host = self._first_response_line(self._send_command_raw("hostname", timeout=3.0))
+        cwd_raw = self._send_command_raw("pwd", timeout=3.0)
+        cwd = self._clean_path(cwd_raw) if cwd_raw else ""
+
+        if user and " " not in user and "/" not in user:
+            self.username = user
+            self.is_root = user == "root"
+        if host and " " not in host and "/" not in host and host != user:
+            self.hostname = host
+        if cwd and cwd.startswith("/") and ";" not in cwd and "echo" not in cwd.lower():
+            self.current_directory = cwd
+
+        synced = bool(self.username and self.username != "user")
+        if synced:
+            self.is_windows = False
+            self.platform_detected = True
+            self._identity_synced = True
+        return synced
+
+    def prepare_interactive_session(self) -> bool:
+        """Drain noise and sync remote prompt metadata before operator input."""
+        self._refresh_connection()
+        self._normalize_connection()
+        if not self._connection_alive():
+            return False
+        if self._sync_remote_identity():
+            return True
+        time.sleep(0.1)
+        return self._sync_remote_identity()
 
     def _fetch_remote_cwd(self, timeout: float = 2.0) -> Optional[str]:
         """Try multiple commands to retrieve the remote current directory."""
@@ -378,9 +541,9 @@ class ClassicShell(BaseShell):
                             self.is_windows = False
                             self.platform_detected = True
                             self.hostname = "localhost"
-                    # Detect platform only if not already set (sends cd / echo %OS% etc.)
-                    if self.connection and not self.platform_detected:
-                        self._detect_platform()
+                    # Platform detection is deferred to the first execute_command() call
+                    # so we do not spam the implant before the interactive shell attaches.
+                    self._normalize_connection()
         except Exception as e:
             print_error(f"Error initializing connection: {e}")
     
@@ -390,6 +553,20 @@ class ClassicShell(BaseShell):
             return
         
         try:
+            # Prefer a single lightweight probe for Unix-like targets first.
+            uname_result = self._send_command_raw('uname -s', timeout=2)
+            if uname_result:
+                uname_lower = uname_result.strip().lower()
+                if any(token in uname_lower for token in ('linux', 'darwin', 'freebsd', 'openbsd', 'netbsd')):
+                    self.is_windows = False
+                    self.platform_detected = True
+                    pwd_result = self._send_command_raw('pwd', timeout=2)
+                    if pwd_result:
+                        cleaned = self._clean_path(pwd_result)
+                        if cleaned:
+                            self.current_directory = cleaned
+                    return
+
             # Try multiple detection methods for Windows
             # Method 1: Try 'cd' command on Windows (returns current directory)
             result = self._send_command_raw('cd', timeout=2)
@@ -490,58 +667,142 @@ class ClassicShell(BaseShell):
             self.is_windows = False
             self.platform_detected = True
     
-    def _send_command_raw(self, command: str, timeout: float = 5.0) -> Optional[str]:
-        """Send a raw command via socket and receive response"""
-        if not self.connection:
-            return None
-        
-        try:
-            # Send command with newline
-            cmd_bytes = (command + '\r\n').encode('utf-8', errors='ignore')
-            self.connection.sendall(cmd_bytes)
-            
-            # Receive response with timeout
-            self.connection.settimeout(timeout)
-            response = b''
-            start_time = time.time()
-            max_wait = timeout
-            
-            while time.time() - start_time < max_wait:
-                try:
-                    data = self.connection.recv(4096)
-                    if not data:
-                        break
-                    response += data
-                    # Wait a bit more to see if more data is coming
-                    time.sleep(0.2)
-                    # Try to receive more if available (non-blocking check)
-                    self.connection.settimeout(0.2)
-                    try:
-                        more_data = self.connection.recv(4096)
-                        if more_data:
-                            response += more_data
-                        else:
-                            # No more data, we're done
-                            break
-                    except socket.timeout:
-                        # No more data available
-                        break
-                except socket.timeout:
-                    # If we have some data, return it
-                    if response:
+    def _use_command_marker(self) -> bool:
+        """Framed Unix commands use a trailing marker; raw stagers use echo + idle recv."""
+        return not self.is_windows and not self._session_stager_line_mode()
+
+    def _wrap_unix_command(self, command: str) -> str:
+        """Wrap command so the remote prints a known end marker (non-stager Unix shells)."""
+        cmd = (command or "").strip()
+        if not cmd:
+            return cmd
+        return f"({cmd}) 2>&1; printf '\\n{self._CMD_MARKER}\\n'"
+
+    def _looks_like_stager_command_echo(self, line: str, command: str) -> bool:
+        """Filter echoed lines from dumb TCP shells (bash /dev/tcp, dup2+/bin/sh)."""
+        if not line or not command:
+            return False
+        line_stripped = line.strip()
+        cmd = command.strip()
+        if line_stripped == cmd:
+            return True
+        if line_stripped.startswith(cmd + " "):
+            return True
+        return False
+
+    def _recv_until_idle(self, timeout: float, *, idle_seconds: float = 0.35) -> bytes:
+        """Read until the peer stops sending for idle_seconds or timeout elapses."""
+        response = b""
+        start_time = time.time()
+        max_wait = max(0.2, float(timeout))
+        last_data_at = 0.0
+
+        while self.connection and time.time() - start_time < max_wait:
+            remaining = max_wait - (time.time() - start_time)
+            if remaining <= 0:
+                break
+            try:
+                self.connection.settimeout(min(0.3, remaining))
+                data = self.connection.recv(4096)
+                if not data:
+                    break
+                response += data
+                last_data_at = time.time()
+            except (TimeoutError, socket.timeout):
+                if response and last_data_at and (time.time() - last_data_at) >= idle_seconds:
+                    break
+                continue
+
+        return response
+
+    def _recv_until_framed(self, *, use_marker: bool, timeout: float) -> bytes:
+        """Read socket data until a marker arrives, idle timeout, or EOF."""
+        response = b""
+        marker_bytes = self._CMD_MARKER.encode("utf-8")
+        start_time = time.time()
+        max_wait = max(0.2, float(timeout))
+
+        while self.connection and time.time() - start_time < max_wait:
+            remaining = max_wait - (time.time() - start_time)
+            if remaining <= 0:
+                break
+            try:
+                self.connection.settimeout(min(0.35, remaining))
+                data = self.connection.recv(4096)
+                if not data:
+                    self._refresh_connection()
+                    if not self._connection_alive():
+                        self.connection = None
+                    break
+                response += data
+                if use_marker and marker_bytes in response:
+                    break
+            except (TimeoutError, socket.timeout):
+                if use_marker:
+                    if marker_bytes in response:
                         break
                     continue
-            
-            # Decode response
-            if response:
+                if response:
+                    break
+                continue
+            except AttributeError:
+                break
+
+        return response
+
+    def _no_response_error(self) -> Dict[str, Any]:
+        if self._connection_alive():
+            return {
+                "output": "",
+                "status": 1,
+                "error": "No response from remote shell (timeout)",
+            }
+        return self._disconnect_error()
+
+    def _send_command_raw(self, command: str, timeout: float = 5.0) -> Optional[str]:
+        """Send a raw command via socket and receive response"""
+        with self._transport_lock:
+            self._refresh_connection()
+            self._normalize_connection()
+            if not self.connection:
+                return None
+
+            try:
+                # Windows shells expect CRLF; Unix /bin/sh treats bare CR as part of the command name.
+                newline = '\r\n' if self.is_windows else '\n'
+                outbound = command
+                stager_mode = self._session_stager_line_mode()
+                use_marker = self._use_command_marker() and bool((command or "").strip())
+                if use_marker:
+                    outbound = self._wrap_unix_command(command)
+                effective_timeout = max(float(timeout), 8.0) if stager_mode else float(timeout)
+                cmd_bytes = (outbound + newline).encode('utf-8', errors='ignore')
+                self.connection.sendall(cmd_bytes)
+
+                if stager_mode:
+                    response = self._recv_until_idle(effective_timeout)
+                else:
+                    response = self._recv_until_framed(use_marker=use_marker, timeout=effective_timeout)
+
+                self._reset_socket_timeout()
+
+                if not stager_mode and use_marker and self._CMD_MARKER.encode("utf-8") not in response:
+                    return None
+
+                if not response:
+                    return None
+
+                # Decode response
                 decoded = response.decode('utf-8', errors='ignore')
+                if use_marker and self._CMD_MARKER in decoded:
+                    decoded = decoded.rsplit(self._CMD_MARKER, 1)[0]
                 # Remove command echo / PowerShell prompts if present
                 lines = decoded.split('\n')
                 filtered_lines = []
                 current_path_windows = None
                 if self.is_windows:
                     current_path_windows = self._normalize_windows_path_for_prompt(self.current_directory).rstrip("\\").lower()
-                
+
                 for line in lines:
                     line_stripped = line.strip()
                     # Skip empty lines
@@ -549,6 +810,12 @@ class ClassicShell(BaseShell):
                         continue
                     # Skip remote prompt-only lines to avoid double prompt in interactive shell.
                     if self._looks_like_remote_prompt_line(line_stripped):
+                        continue
+                    if self._looks_like_wrapped_command_echo(line_stripped, command):
+                        continue
+                    if self._session_stager_line_mode() and self._looks_like_stager_command_echo(line_stripped, command):
+                        continue
+                    if self._CMD_MARKER in line_stripped:
                         continue
                     line_lower = line_stripped.lower()
                     # Skip Windows CMD banner lines (so they never appear in command output)
@@ -576,24 +843,23 @@ class ClassicShell(BaseShell):
                         if path_candidate == current_path_windows:
                             continue
                     filtered_lines.append(line)
-                
+
                 result = '\n'.join(filtered_lines).strip()
                 return result if result else None
-            return None
-        except (ConnectionResetError, BrokenPipeError) as e:
-            print_error(f"Connection closed by target: {e}")
-            self.connection = None
-            return None
-        except OSError as e:
-            if getattr(e, 'winerror', None) == 10054 or getattr(e, 'errno', None) == 10054:
-                print_error("Connection closed by target (WinError 10054). The payload process may have exited.")
+            except (ConnectionResetError, BrokenPipeError) as e:
+                print_error(f"Connection closed by target: {e}")
                 self.connection = None
                 return None
-            print_error(f"Error sending command: {e}")
-            return None
-        except Exception as e:
-            print_error(f"Error sending command: {e}")
-            return None
+            except OSError as e:
+                if getattr(e, 'winerror', None) == 10054 or getattr(e, 'errno', None) == 10054:
+                    print_error("Connection closed by target (WinError 10054). The payload process may have exited.")
+                    self.connection = None
+                    return None
+                print_error(f"Error sending command: {e}")
+                return None
+            except Exception as e:
+                print_error(f"Error sending command: {e}")
+                return None
     
     def _filter_output(self, output: str) -> str:
         """Filter output to remove unwanted lines like 'Répertoire' or 'Directory'"""
@@ -614,6 +880,11 @@ class ClassicShell(BaseShell):
                 continue
             
             line_lower = line_stripped.lower()
+            
+            if self._CMD_MARKER in line_stripped:
+                continue
+            if self._looks_like_remote_prompt_line(line_stripped):
+                continue
             
             # Skip lines containing directory labels in various languages
             if any(keyword in line_lower for keyword in [
@@ -671,11 +942,15 @@ class ClassicShell(BaseShell):
         
         # Add to history
         self.add_to_history(command)
+
+        self._refresh_connection()
+        self._normalize_connection()
         
         # If we have a connection, use it to execute commands remotely
         if self.connection:
-            # Detect platform on first command if not already detected
-            if not self.platform_detected:
+            if not getattr(self, "_identity_synced", False):
+                self._sync_remote_identity()
+            elif not self.platform_detected:
                 self._detect_platform()
             
             # Parse command
@@ -736,7 +1011,8 @@ class ClassicShell(BaseShell):
                     
                     return {'output': result + '\n' if result else '', 'status': 0, 'error': ''}
                 else:
-                    # Fallback to built-in if remote fails
+                    if self._is_remote_session():
+                        return self._no_response_error()
                     if cmd in self.builtin_commands:
                         return self.builtin_commands[cmd](args)
             
@@ -754,8 +1030,15 @@ class ClassicShell(BaseShell):
                         self._set_current_directory(new_dir)
                 return {'output': filtered_result + '\n' if filtered_result else '', 'status': 0, 'error': ''}
             else:
-                return {'output': '', 'status': 1, 'error': 'Connection lost or no response'}
+                return self._no_response_error() if self._is_remote_session() else {
+                    'output': '',
+                    'status': 1,
+                    'error': 'Connection lost or no response',
+                }
         
+        if self._is_remote_session():
+            return self._disconnect_error()
+
         # Fallback: execute locally if no connection (for testing/development)
         # Parse command
         try:
@@ -873,6 +1156,21 @@ class ClassicShell(BaseShell):
             return self._cmd_dir(args)
         
         try:
+            if args and any(str(a).startswith("-") for a in args):
+                result = subprocess.run(
+                    ["ls", *args],
+                    cwd=self.current_directory,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                output = result.stdout or result.stderr
+                return {
+                    'output': output + ('\n' if output and not output.endswith('\n') else ''),
+                    'status': result.returncode,
+                    'error': '' if result.returncode == 0 else (result.stderr or '').strip(),
+                }
+
             if not args:
                 target_dir = self.current_directory
             else:
@@ -1030,3 +1328,126 @@ class ClassicShell(BaseShell):
         """Exit shell"""
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}
+
+    def _session_pty_mode(self) -> bool:
+        """Return True when the session was created with a PTY-capable payload."""
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return False
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session or not getattr(session, "data", None):
+            return False
+        return bool(session.data.get("pty_mode"))
+
+    def _session_stager_line_mode(self) -> bool:
+        """True for raw dup2+/bin/sh stagers that require line-based framing."""
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return False
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session or not getattr(session, "data", None):
+            return False
+        return bool(session.data.get("stager_line_mode"))
+
+    def supports_pty_mode(self) -> bool:
+        """True only for payloads that explicitly negotiated PTY mode."""
+        if not self.connection:
+            return False
+        if self._session_stager_line_mode():
+            return False
+        from lib.shell.pty_runtime import terminal_raw_supported
+
+        if not terminal_raw_supported():
+            return False
+        return self._session_pty_mode()
+
+    def _peek_socket_prefix(self, max_len: int = 72) -> bytes:
+        """Non-destructively inspect pending socket bytes (stager-safe)."""
+        if not self.connection:
+            return b""
+        sock = self.connection
+        inner = getattr(sock, "_inner", sock)
+        inner = getattr(inner, "_sock", inner)
+        if not hasattr(inner, "recv"):
+            return b""
+        old_timeout = None
+        if hasattr(inner, "gettimeout"):
+            try:
+                old_timeout = inner.gettimeout()
+            except Exception:
+                old_timeout = None
+        try:
+            if hasattr(inner, "settimeout"):
+                inner.settimeout(0.0)
+            if hasattr(socket, "MSG_PEEK"):
+                return inner.recv(max_len, socket.MSG_PEEK) or b""
+            return b""
+        except (BlockingIOError, TimeoutError, socket.timeout):
+            return b""
+        except Exception:
+            return b""
+        finally:
+            if hasattr(inner, "settimeout") and old_timeout is not None:
+                try:
+                    inner.settimeout(old_timeout)
+                except Exception:
+                    pass
+
+    def start_interactive_shell_loop(self) -> bool:
+        """
+        Persistent PTY/ConPTY relay — full terminal (tab completion, sudo, pagers).
+
+        Ctrl+] returns to KittySploit without killing the remote session.
+        """
+        if not self.connection:
+            print_error("No socket connection available for PTY mode.")
+            return False
+
+        from lib.shell.pty_runtime import PTY_MAGIC, relay_socket_terminal
+
+        from lib.implant.identity import HELLO_MAGIC
+        from core.output_handler import print_info, print_error
+
+        old_timeout = None
+        if hasattr(self.connection, "gettimeout"):
+            try:
+                old_timeout = self.connection.gettimeout()
+            except Exception:
+                old_timeout = None
+
+        # Non-destructive peek: stager sockets must not be drained before /bin/sh is ready.
+        try:
+            peek = self._peek_socket_prefix(len(PTY_MAGIC) + 64)
+            if not peek.startswith(PTY_MAGIC) and not self._session_pty_mode():
+                print_info("Stager shell detected — use line mode (PTY skipped).")
+                return False
+            if peek.startswith(PTY_MAGIC):
+                consumed = self.connection.recv(len(PTY_MAGIC))
+                peek = peek[len(consumed) :]
+            hello_prefix = f"{HELLO_MAGIC}:".encode()
+            if peek.startswith(hello_prefix) and b"\n" in peek:
+                line, _, rest = peek.partition(b"\n")
+                self.connection.recv(len(line) + 1)
+                peek = rest
+            if peek:
+                import sys
+
+                sys.stdout.buffer.write(peek)
+                sys.stdout.flush()
+        except Exception:
+            pass
+        finally:
+            if hasattr(self.connection, "settimeout"):
+                try:
+                    self.connection.settimeout(old_timeout)
+                except Exception:
+                    pass
+
+        label = "ConPTY" if self.is_windows or self._session_pty_mode() else "PTY"
+        print_info(f"Interactive {label} mode — tab completion, sudo, full TTY.")
+        print_info("Press Ctrl+] to return to KittySploit (session stays open).")
+
+        ok = relay_socket_terminal(self.connection)
+        if not ok:
+            print_error("PTY relay failed (non-interactive console?). Falling back to line mode.")
+            return False
+        print_info("Returned from PTY mode.")
+        return True

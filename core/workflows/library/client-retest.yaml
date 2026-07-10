@@ -30,8 +30,8 @@ steps:
     on_success: sql_retest
     on_failure: sql_retest
   sql_retest:
-    module: auxiliary/scanner/http/sql_injection
-    description: Retest SQL injection
+    module: auxiliary/scanner/http/sqli_engine
+    description: Retest SQL injection (sqli_engine)
     options:
       target: "${target}"
       port: "${port}"

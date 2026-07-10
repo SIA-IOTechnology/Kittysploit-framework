@@ -1,9 +1,9 @@
 id: web-recon
-version: "1"
+version: "2"
 name: Web Reconnaissance
 description: >
-  Passive-to-light active web surface mapping — DNS/CT subdomains, login pages,
-  API discovery, and debug leak checks for authorized targets.
+  Passive-to-light active web surface mapping — DNS/CT subdomains, directory discovery,
+  TLS/HSTS/WAF checks, API discovery, and debug leak checks for authorized targets.
 tags: [web, recon, quick-win]
 policy:
   safe_only: true
@@ -23,6 +23,16 @@ steps:
       target: "${target}"
       check_subdomains: "true"
       check_headers: "true"
+    on_success: passive_dns
+    on_failure: passive_dns
+  passive_dns:
+    module: auxiliary/osint/passive_dns_aggregator
+    description: Aggregate CT and permutation-based subdomains
+    options:
+      target: "${target}"
+      include_ct: "true"
+      include_permutations: "true"
+      resolve_a: "false"
     on_success: login_detect
     on_failure: login_detect
   login_detect:
@@ -32,6 +42,36 @@ steps:
       target: "${target}"
       port: "${port}"
       ssl: "${ssl}"
+    on_success: directory_bruteforce
+    on_failure: directory_bruteforce
+  directory_bruteforce:
+    module: auxiliary/scanner/http/directory_bruteforce
+    description: Probe common hidden paths and admin surfaces
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      max_paths: "60"
+    on_success: tls_hsts
+    on_failure: tls_hsts
+  tls_hsts:
+    module: auxiliary/scanner/http/ssl_tls_hsts_ocsp_audit
+    description: Audit HTTP to HTTPS redirect, HSTS, and OCSP stapling
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      check_ocsp: "true"
+    on_success: waf_fingerprint
+    on_failure: waf_fingerprint
+  waf_fingerprint:
+    module: scanner/http/waf_fingerprint
+    description: Fingerprint WAF/CDN from headers and blocking behavior
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      path: "/"
     on_success: api_discovery
     on_failure: api_discovery
   api_discovery:
@@ -41,6 +81,16 @@ steps:
       target: "${target}"
       port: "${port}"
       ssl: "${ssl}"
+    on_success: openapi_abuse
+    on_failure: openapi_abuse
+  openapi_abuse:
+    module: auxiliary/scanner/http/openapi_schema_abuse
+    description: Probe exposed OpenAPI/Swagger specs for unauthenticated routes
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      max_endpoints: "15"
     on_success: debug_leaks
     on_failure: debug_leaks
   debug_leaks:

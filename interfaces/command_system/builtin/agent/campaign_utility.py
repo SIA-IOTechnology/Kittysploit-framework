@@ -21,7 +21,11 @@ from interfaces.command_system.builtin.agent.module_scoring import (
 )
 from interfaces.command_system.builtin.agent.module_state_match import compute_generic_module_score
 from interfaces.command_system.builtin.agent.action_planner import planner_alignment_bonus
-from interfaces.command_system.builtin.agent.attack_chain_memory import chain_readiness_bonus
+from interfaces.command_system.builtin.agent.attack_chain_memory import (
+    chain_observation_penalty,
+    chain_readiness_bonus,
+)
+from core.playbooks.coverage import playbook_readiness_bonus
 from interfaces.command_system.builtin.agent.goal_planner import (
     is_shell_operator_goal,
     operator_goal_from_mapping,
@@ -110,7 +114,7 @@ def shell_goal_gain_bonus(path_lower: str, kb: Dict[str, Any]) -> float:
         bonus += 1.55
     if "domain_surface" in path_lower or "domain_crtsh" in path_lower:
         bonus += 1.25
-    if any(x in path_lower for x in ("lfi", "sqli", "sql_injection", "rce", "inject", "xxe", "ssrf", "php_injection", "nodejs_injection")):
+    if any(x in path_lower for x in ("lfi", "sqli", "sqli_engine", "sql_injection", "rce", "inject", "xxe", "ssrf", "php_injection", "nodejs_injection")):
         bonus += 1.2
     signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
     if signals.intersection({"api_surface_detected", "test_api_surface"}) and "api" in path_lower:
@@ -202,6 +206,14 @@ def module_utility(
         pass
     try:
         u += chain_readiness_bonus(module, kb if isinstance(kb, dict) else {})
+    except Exception:
+        pass
+    try:
+        u -= chain_observation_penalty(module, kb if isinstance(kb, dict) else {})
+    except Exception:
+        pass
+    try:
+        u += playbook_readiness_bonus(module, kb if isinstance(kb, dict) else {})
     except Exception:
         pass
     return u

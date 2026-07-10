@@ -10,6 +10,7 @@ import time
 
 from core.framework.option import OptString, OptPort, OptBool
 from core.framework.base_module import BaseModule
+from lib.scanner.target_utils import normalize_scanner_target
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,11 @@ class Http_client(BaseModule):
             target = get_option_value(self.target)
         elif hasattr(self, 'rhost'):
             target = get_option_value(self.rhost)
-        
+
+        host, _url_port, url_ssl = normalize_scanner_target(str(target or ""))
+        if host:
+            target = host
+
         if hasattr(self, 'port'):
             port = get_option_value(self.port)
         elif hasattr(self, 'rport'):
@@ -214,8 +219,10 @@ class Http_client(BaseModule):
         if not port:
             raise ValueError("port not set. Please set port option (or rport for compatibility).")
         
-        # Determine protocol based on ssl option or port
-        if hasattr(self, 'ssl'):
+        # Determine protocol based on ssl option or URL scheme
+        if url_ssl is not None:
+            protocol = 'https' if url_ssl else 'http'
+        elif hasattr(self, 'ssl'):
             ssl_enabled = self._to_bool(get_option_value(self.ssl))
             protocol = 'https' if ssl_enabled else 'http'
         else:

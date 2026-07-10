@@ -225,7 +225,7 @@ class DatabaseManager:
             # Liste complète des types de modules attendus
             expected_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 
                             'listeners', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 
-                            'encoders', 'backdoors', 'shortcut']
+                            'encoders', 'transform', 'backdoors', 'shortcut', 'analysis']
             
             # Check if constraint already includes all expected types
             with engine.connect() as conn:
@@ -246,7 +246,8 @@ class DatabaseManager:
                     has_unique_path = ('UNIQUE ("path")' in sql_str) or ('UNIQUE(path)' in sql_str) or ('UNIQUE (path)' in sql_str)
 
                     # If schema already matches expectations, no migration needed.
-                    if has_all_types and (not has_unique_name) and has_unique_path:
+                    uses_legacy_obfuscator_type = "'obfuscator'" in sql_str
+                    if has_all_types and (not has_unique_name) and has_unique_path and not uses_legacy_obfuscator_type:
                         return True
             
             # Need to migrate: recreate table with correct constraint
@@ -288,10 +289,23 @@ class DatabaseManager:
                 from core.models.models import Module
                 Module.__table__.create(engine)
                 
-                # Copy data back using INSERT INTO ... SELECT FROM
+                # Copy data back using INSERT INTO ... SELECT FROM (normalize legacy types/paths)
                 if column_names:
                     col_names = ', '.join(f'"{col}"' for col in column_names)
-                    copy_sql = f'INSERT INTO modules ({col_names}) SELECT {col_names} FROM modules_backup'
+                    select_exprs = []
+                    for col in column_names:
+                        if col == 'type':
+                            select_exprs.append(
+                                'CASE WHEN "type" = \'obfuscator\' THEN \'transform\' ELSE "type" END'
+                            )
+                        elif col == 'path':
+                            select_exprs.append(
+                                'REPLACE("path", \'obfuscators/\', \'transforms/\')'
+                            )
+                        else:
+                            select_exprs.append(f'"{col}"')
+                    select_cols = ', '.join(select_exprs)
+                    copy_sql = f'INSERT INTO modules ({col_names}) SELECT {select_cols} FROM modules_backup'
                     conn.execute(text(copy_sql))
                 
                 # Drop backup table (this will also drop any remaining indexes associated with it)

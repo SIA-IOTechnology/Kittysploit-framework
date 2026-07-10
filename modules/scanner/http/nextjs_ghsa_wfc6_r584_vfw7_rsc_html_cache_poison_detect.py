@@ -3,92 +3,42 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
-from lib.scanner.http.nextjs_probe import ensure_nextjs_target
+from lib.scanner.http.nextjs_probe import run_nextjs_version_scan
 
 
 class Module(Scanner, Http_client):
     __info__ = {
-        "name": "Next.js RSC / HTML cache poisoning (GHSA-wfc6) — detect",
+        "name": "Next.js RSC / HTML cache poisoning (GHSA-wfc6) detection",
         "description": (
-            "Baseline GET, GET with RSC + Next-Router-Prefetch, clean GET again; flags text/html bodies "
-            "that still look like RSC Flight framing."
+            "Fingerprints Next.js and flags versions < 16.2.5 affected by GHSA-wfc6-r584-vfw7 "
+            "(RSC misclassified as text/html cache poisoning)."
         ),
         "author": ["KittySploit Team"],
-        "severity": "medium",
+        "severity": "high",
+        "advisory": "GHSA-wfc6-r584-vfw7",
         "references": ["https://github.com/advisories/GHSA-wfc6-r584-vfw7"],
-        "tags": ["scanner", "http", "nextjs", "rsc", "cache"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "modules": [
+            "auxiliary/scanner/http/nextjs_ghsa_wfc6_r584_vfw7_rsc_html_cache_poison",
+        ],
+        "tags": ["scanner", "nextjs", "cache-poison", "rsc", "ghsa-wfc6"],
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 1,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+        },
     }
 
-    rsc_header_value = OptString("text/x-component", "RSC header value for poison request", required=False, advanced=True)
-
-    def _o(self, opt):
-        if hasattr(opt, "value"):
-            return opt.value
-        if hasattr(opt, "__get__"):
-            try:
-                return opt.__get__(self, type(self))
-            except Exception:
-                pass
-        return opt
-
-    def _url(self):
-        t, p = str(self._o(self.target) or "").strip(), int(self._o(self.port))
-        proto = "https" if self._to_bool(self._o(self.ssl)) else "http"
-        path = str(self.path).strip() or "/"
-        if not path.startswith("/"):
-            path = "/" + path
-        return f"{proto}://{t}:{p}{path}"
-
-    def _get(self, extra_headers=None):
-        url = self._url()
-        kw = dict(timeout=float(self._o(self.timeout)))
-        if extra_headers:
-            kw["headers"] = extra_headers
-        try:
-            r = self.get(url, **kw)
-            ct = (r.headers.get("Content-Type") or "").lower()
-            return r.status_code, ct, r.content[:2048], None
-        except Exception as e:
-            return -1, "", b"", str(e)
-        finally:
-            if extra_headers:
-                for k in extra_headers:
-                    self.session.headers.pop(k, None)
-
-    @staticmethod
-    def _rsc_framing(body: bytes) -> bool:
-        if not body:
-            return False
-        return body.startswith(b"0:") or b"$react" in body or b'"$",' in body
-
     def run(self):
-        if not ensure_nextjs_target(self):
-            return False
-        _, _, _, e1 = self._get()
-        if e1:
-            self.set_info(reason=f"baseline: {e1}")
-            return False
-        rv = str(self._o(self.rsc_header_value) or "text/x-component").strip() or "text/x-component"
-        _, ct2, b2, e2 = self._get({"RSC": rv, "Next-Router-Prefetch": "1"})
-        if e2:
-            self.set_info(reason=f"poison: {e2}")
-            return False
-        _, ct3, b3, e3 = self._get()
-        if e3:
-            self.set_info(reason=f"reread: {e3}")
-            return False
-        if "text/html" in (ct3 or "") and self._rsc_framing(b3):
-            self.set_info(reason="re-read text/html + Flight framing", confidence="medium")
-            return True
-        if "text/html" in (ct2 or "") and self._rsc_framing(b2):
-            self.set_info(reason="poison text/html + Flight framing", confidence="medium")
-            return True
-        return False
+        return run_nextjs_version_scan(
+            self,
+            advisory="GHSA-wfc6-r584-vfw7",
+            patched_version="16.2.5",
+            issue_label="GHSA-wfc6 RSC/HTML cache poisoning",
+            severity="high",
+        )

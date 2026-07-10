@@ -13,13 +13,13 @@ FRAME_SUFFIX = b"\n"
 MAX_FRAME_SIZE = 1024 * 1024
 
 
-class Module(Obfuscator):
-    """Compressed Base64 framed stream obfuscator."""
+class Module(Transform):
+    """Compressed Base64 framed stream transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "Zlib Base64 Frame Obfuscator",
+        "name": "Zlib Base64 Frame Transform",
         "description": "Compresses each C2 chunk with zlib, then frames it as a length-prefixed Base64 line.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -90,19 +90,19 @@ class Module(Obfuscator):
         level = self._level()
         return (
             "import base64,struct,zlib\n"
-            f"_obf_zlevel={level}\n"
-            "_obf_buf=bytearray()\n"
-            "def _obf_encode(d):\n"
+            f"_xf_zlevel={level}\n"
+            "_xf_buf=bytearray()\n"
+            "def _xf_encode(d):\n"
             " if not d: return d\n"
-            " c=zlib.compress(d,_obf_zlevel)\n"
+            " c=zlib.compress(d,_xf_zlevel)\n"
             " return b'KZ64 '+base64.b64encode(struct.pack('>I',len(d))+c)+b'\\n'\n"
-            "def _obf_decode(d):\n"
-            " _obf_buf.extend(d)\n"
+            "def _xf_decode(d):\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
             " while True:\n"
-            "  i=_obf_buf.find(b'\\n')\n"
+            "  i=_xf_buf.find(b'\\n')\n"
             "  if i==-1: break\n"
-            "  line=bytes(_obf_buf[:i]).strip(); del _obf_buf[:i+1]\n"
+            "  line=bytes(_xf_buf[:i]).strip(); del _xf_buf[:i+1]\n"
             "  if not line.startswith(b'KZ64 '): continue\n"
             "  try: raw=base64.b64decode(line[5:],validate=True)\n"
             "  except Exception: continue\n"

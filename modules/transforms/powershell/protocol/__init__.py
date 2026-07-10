@@ -1,1 +1,1 @@
-# PowerShell protocol-mimic obfuscators.
+# PowerShell protocol-mimic transforms.

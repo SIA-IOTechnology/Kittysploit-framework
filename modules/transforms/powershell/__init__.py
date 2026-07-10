@@ -1,1 +1,1 @@
-# PowerShell client obfuscators.
+# PowerShell client transforms.

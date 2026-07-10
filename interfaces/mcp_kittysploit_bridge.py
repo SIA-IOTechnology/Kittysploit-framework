@@ -150,8 +150,10 @@ MODULE_TYPE_ALIASES = {
     "listeners": "listeners",
     "nop": "nops",
     "nops": "nops",
-    "obfuscator": "obfuscator",
-    "obfuscators": "obfuscator",
+    "transform": "transform",
+    "transforms": "transform",
+    "obfuscator": "transform",
+    "obfuscators": "transform",
     "payload": "payloads",
     "payloads": "payloads",
     "post": "post",
@@ -212,7 +214,7 @@ FAMILY_HINTS = {
 KEYWORD_EXPANSIONS = {
     "wordpress": ["wordpress", "wp"],
     "woocommerce": ["woocommerce", "wordpress"],
-    "sqli": ["sqli", "sql", "sql_injection"],
+    "sqli": ["sqli", "sqli_engine", "sql", "sql_injection"],
     "sql": ["sql", "sqli", "database"],
     "xss": ["xss", "cross_site_scripting"],
     "csrf": ["csrf", "cross_site_request_forgery"],
@@ -379,7 +381,7 @@ TARGET_PATTERN = re.compile(
 
 MODULE_PATH_PATTERN = re.compile(
     r"\b(?:auxiliary|backdoors|browser_auxiliary|browser_exploits|docker_environments|"
-    r"encoders|exploits|listeners|modules|obfuscators|payloads|post|scanner|shortcut|workflow)"
+    r"encoders|exploits|listeners|modules|transforms|obfuscators|payloads|post|scanner|shortcut|workflow)"
     r"/[a-z0-9_./-]+\b",
     re.I,
 )
@@ -491,6 +493,7 @@ def _looks_like_command(request: str) -> bool:
             "listeners",
             "modules",
             "nops",
+            "transforms",
             "obfuscators",
             "options",
             "payloads",

@@ -78,3 +78,41 @@ def extract_server_details(response: str) -> Dict[str, str]:
         "role": extract_info_field(response, r"role:(\w+)"),
     }
     return {key: value for key, value in details.items() if value}
+
+
+def probe_redis_unauth_write(host: str, port: int = 6379, timeout: float = 3.0) -> dict:
+    """Test whether Redis accepts unauthenticated SET/DEL."""
+    key = "kittysploit:probe"
+    set_cmd = f"*3\r\n$3\r\nSET\r\n${len(key)}\r\n{key}\r\n$1\r\n1\r\n".encode()
+    del_cmd = f"*2\r\n$3\r\nDEL\r\n${len(key)}\r\n{key}\r\n".encode()
+    result = {"detected": False, "writable": False, "error": ""}
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect((host, int(port)))
+        sock.sendall(set_cmd)
+        set_resp = sock.recv(128).decode("utf-8", errors="replace")
+        if not set_resp:
+            result["error"] = "empty_set_response"
+            return result
+        if set_resp.startswith("-NOAUTH") or "authentication required" in set_resp.lower():
+            result["detected"] = True
+            return result
+        if set_resp.startswith("+OK") or set_resp.startswith(":"):
+            result["detected"] = True
+            result["writable"] = True
+            try:
+                sock.sendall(del_cmd)
+                sock.recv(64)
+            except Exception:
+                pass
+            return result
+        if "redis" in set_resp.lower() or set_resp.startswith("$"):
+            result["detected"] = True
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+    finally:
+        sock.close()

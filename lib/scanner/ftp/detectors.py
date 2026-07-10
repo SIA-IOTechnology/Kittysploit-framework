@@ -1,41 +1,42 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""FTP banner detection helpers."""
 
-"""
-FTP Detectors - Helpers pour détecter des serveurs FTP
-"""
+from __future__ import annotations
 
-import re
-from typing import Optional
-
-
-def detect_vsftpd(banner: str) -> Optional[str]:
-    """Détecte vsftpd et retourne la version, ou None"""
-    if not banner:
-        return None
-    match = re.search(r'vsFTPd ([\d.]+)', banner, re.IGNORECASE)
-    return match.group(1) if match else None
+import socket
+from typing import Dict, Optional
 
 
-def detect_proftpd(banner: str) -> Optional[str]:
-    """Détecte ProFTPD et retourne la version, ou None"""
-    if not banner:
-        return None
-    match = re.search(r'ProFTPD ([\d.]+)', banner, re.IGNORECASE)
-    return match.group(1) if match else None
-
-
-def detect_filezilla(banner: str) -> Optional[str]:
-    """Détecte FileZilla Server et retourne la version, ou None"""
-    if not banner:
-        return None
-    match = re.search(r'FileZilla Server ([\d.]+)', banner, re.IGNORECASE)
-    return match.group(1) if match else None
-
-
-def detect_pureftpd(banner: str) -> Optional[str]:
-    """Détecte Pure-FTPd et retourne la version, ou None"""
-    if not banner:
-        return None
-    match = re.search(r'Pure-FTPd ([\d.]+)', banner, re.IGNORECASE)
-    return match.group(1) if match else None
+def probe_ftp_banner(host: str, port: int = 21, timeout: float = 5.0) -> Dict[str, object]:
+    result: Dict[str, object] = {
+        "detected": False,
+        "banner": "",
+        "product": "",
+        "error": "",
+    }
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect((host, int(port)))
+        data = sock.recv(512)
+        if not data:
+            result["error"] = "empty_banner"
+            return result
+        banner = data.decode("utf-8", errors="replace").strip()
+        result["banner"] = banner
+        if not banner.upper().startswith("220"):
+            result["error"] = "not_ftp_welcome"
+            return result
+        result["detected"] = True
+        low = banner.lower()
+        for product in ("vsftpd", "proftpd", "pure-ftpd", "filezilla", "microsoft ftp"):
+            if product in low:
+                result["product"] = product
+                break
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+    finally:
+        sock.close()

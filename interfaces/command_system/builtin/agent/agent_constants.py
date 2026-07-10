@@ -30,6 +30,13 @@ SAFE_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
     "fuzzer",
     "write_access",
     "file_download",
+    "/dos/ics/",
+    "stop_cpu",
+    "plc_control",
+    "quantum_plc",
+    "rpc_integer_overflow",
+    "profinet_dcp_set_ip",
+    "qconn_rce",
 )
 
 DISCREET_PROFILE_BLOCKED_MODULE_SUBSTRINGS: Final[Tuple[str, ...]] = (
@@ -211,6 +218,7 @@ SAFE_FOLLOWUP_ACTION_TYPES: Final[FrozenSet[str]] = frozenset({
     "prioritize",
     "run_followup",
     "run_exploit",
+    "run_post",
     "skip",
 })
 
@@ -236,6 +244,7 @@ NOTABLE_CATALOG_KEYWORDS: Final[Tuple[str, ...]] = (
     "injection",
     "xss",
     "sqli",
+    "sqli_engine",
     "lfi",
     "ssrf",
     "xxe",
@@ -249,7 +258,30 @@ NOTABLE_CATALOG_KEYWORDS: Final[Tuple[str, ...]] = (
     "client_js",
     "webhook",
     "secret",
+    "actuator",
+    "gitlab",
+    "jira",
+    "confluence",
+    "harbor",
+    "argocd",
+    "traefik",
+    "consul",
+    "etcd",
+    "log4j",
+    "spring4shell",
+    "prometheus",
+    "portainer",
+    "redis_unauth",
+    "memcached",
+    "kubernetes",
+    "exchange",
+    "owa",
 )
+
+# Preferred low-noise SQLi modules (scanner → post-exploitation chain).
+HTTP_SQLI_SCANNER_MODULE: Final[str] = "auxiliary/scanner/http/sqli_engine"
+HTTP_SQLI_SCANNER_MODULE_LEGACY: Final[str] = "auxiliary/scanner/http/sql_injection"
+HTTP_SQLI_POST_MODULE: Final[str] = "post/http/sqli_shell"
 
 # Paths treated as pure technology detection (noise unless strong signal in message)
 PURE_DETECTION_PATH_MARKERS: Final[Tuple[str, ...]] = (
@@ -258,7 +290,32 @@ PURE_DETECTION_PATH_MARKERS: Final[Tuple[str, ...]] = (
     "scanner/http/joomla_detect",
     "scanner/http/swagger_detect",
     "scanner/http/graphql_detect",
+    "scanner/http/gitlab_detect",
+    "scanner/http/jira_detect",
+    "scanner/http/confluence_detect",
+    "scanner/http/jenkins_detect",
+    "scanner/http/grafana_detect",
+    "scanner/http/kibana_detect",
+    "scanner/http/prometheus_detect",
+    "scanner/http/portainer_detect",
+    "scanner/http/harbor_detect",
+    "scanner/http/argocd_detect",
+    "scanner/http/nexus_detect",
+    "scanner/http/sonarqube_detect",
+    "scanner/http/teamcity_detect",
+    "scanner/http/rancher_detect",
+    "scanner/http/bitbucket_detect",
+    "scanner/http/netlify_detect",
+    "scanner/http/vercel_detect",
+    "scanner/http/okta_detect",
+    "scanner/http/auth0_detect",
+    "scanner/ssh/openssh_banner_detect",
+    "scanner/tcp/rdp_service_detect",
+    "scanner/tcp/vnc_service_detect",
     "server_banner",
+    "waf_fingerprint",
+    "robots_txt_detect",
+    "grpc_reflection_detect",
 )
 
 # Phrases that override pure-detection classification (real vuln / session)
@@ -288,6 +345,7 @@ NEXTJS_HINT_TOKENS: Final[Tuple[str, ...]] = (
 )
 
 CLIENT_JS_INTEL_MODULES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/js_sourcemap_analyzer",
     "auxiliary/osint/js_endpoint_extractor",
     "auxiliary/osint/webhook_api_leak_analyzer",
     "auxiliary/osint/secret_leak_access_validator",
@@ -297,6 +355,15 @@ CLIENT_JS_INTEL_MODULES: Final[Tuple[str, ...]] = (
 EXPANDED_SURFACE_MODULE_PREFIXES: Final[Tuple[str, ...]] = (
     "auxiliary/osint/",
     "scanner/cloud/",
+    "scanner/ssh/",
+    "scanner/tcp/",
+    "scanner/udp/",
+    "scanner/postgresql/",
+    "scanner/redis/",
+    "scanner/mongodb/",
+    "scanner/mssql/",
+    "scanner/mysql/",
+    "scanner/cassandra/",
     "auxiliary/aws/",
     "auxiliary/azure/",
     "auxiliary/gcp/",
@@ -421,7 +488,9 @@ DEFAULT_MODULE_CONTEXT_PRIORS: Final[Dict[str, Dict[str, float]]] = {
     "authenticated_session": {
         "crawler": 0.4,
         "xss_scanner": 0.55,
-        "sql_injection": 0.55,
+        "sqli_engine": 0.72,
+        "sql_injection": 0.45,
+        "sqli_shell": 0.68,
         "lfi_fuzzer": 0.5,
         "wp_plugin_scanner": 0.65,
         "wordpress_enum_user": 0.55,

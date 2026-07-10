@@ -1,0 +1,63 @@
+id: php-lfi-waf-bypass-persist
+version: "1"
+name: PHP LFI to disable_functions bypass and persistence
+source: ctf
+domain: web
+tags: [php, lfi, disable_functions, waf, persistence, rce]
+description: >
+  Advanced PHP CTF chain when shell_functions are disabled — confirm LFI, probe
+  WAF/filter behavior, chain PHP disable_function bypass techniques (FFI, backtrace,
+  sendmail), deploy auto_prepend persistence, and establish reverse shell.
+prerequisites:
+  signals_any:
+    - lfi
+    - path_traversal
+    - php
+  tech_any:
+    - php
+chain:
+  - id: lfi_confirm
+    capability: file_read
+    module: auxiliary/scanner/http/lfi_fuzzer
+    description: Confirm local file inclusion primitive
+  - id: phpconf_gather
+    capability: file_read
+    module: post/php/gather/phpconf
+    description: Read disable_functions, open_basedir, and hardening via LFI/shell
+  - id: disable_func_check
+    capability: file_read
+    module: post/php/system/check_disable_func
+    description: Probe which execution primitives remain available
+  - id: waf_probe
+    capability: poisoned_payload
+    module: post/php/manage/waf_bypass_probe
+    description: Map WAF/filter evasion for PHP payload delivery
+  - id: ffi_bypass
+    capability: rce
+    module: post/php/exploits/php7-4_ffi_disable_func_bypass
+    optional: true
+    description: PHP 7.4+ FFI disable_functions bypass when FFI enabled
+  - id: backtrace_bypass
+    capability: rce
+    module: post/php/exploits/php7_backtrace_bypass
+    optional: true
+    description: Backtrace-based bypass on older PHP 7.x builds
+  - id: sendmail_rce
+    capability: rce
+    module: post/php/exploits/mail_sendmail_rce
+    optional: true
+    description: sendmail -be@ log poisoning style RCE when mail() available
+  - id: auto_prepend
+    capability: rce
+    module: post/php/persistence/auto_prepend_combo
+    description: .user.ini / auto_prepend_file persistence after code execution
+  - id: reverse_shell
+    capability: shell
+    module: post/php/shell/reverse_tcp_sh
+    description: PHP reverse shell callback
+blockers:
+  - open_basedir strictly enforced
+  - disable_functions blocks FFI, mail, and proc_open
+  - hardened PHP-FPM pool isolation
+references:
+  - "CTF PHP hardening challenges: LFI + disable_functions + persistence combo"

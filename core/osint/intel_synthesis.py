@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
+from core.osint.evidence import utc_now_z
 from core.osint.identity_handles import is_generic_handle
 from core.osint.password_profiling import organization_root_domain
 
@@ -48,7 +49,11 @@ def should_run_agent_intel_step(
     if step == "identity":
         return bool(str(persona_seed or "").strip())
     if step == "breach":
-        return bool(distinct_org_emails(identities))
+        return bool(distinct_org_emails(identities)) or bool(root_domain)
+    if step == "darkweb":
+        return bool(root_domain) or bool(distinct_org_emails(identities))
+    if step == "crypto":
+        return bool(root_domain)
     return True
 
 
@@ -109,7 +114,7 @@ def synthesize_intel_graph(
         path = _module_path(row)
         details = _details(row)
 
-        if "domain_surface_mapper" in path or "domain_crtsh" in path:
+        if "domain_surface_mapper" in path or "domain_crtsh" in path or "passive_dns_aggregator" in path:
             for sub in details.get("subdomains", []) or []:
                 subdomains.append(str(sub).lower())
 
@@ -167,6 +172,50 @@ def synthesize_intel_graph(
                     "confidence": 0.8,
                     "reason": f"{high} high-risk public repository signal(s)",
                 })
+
+        if "telegram_channel_profiler" in path:
+            count = _safe_int(details.get("channel_count"))
+            if count:
+                signals.append(f"telegram_surface:{count}")
+                for finding in details.get("findings", []) or []:
+                    if not isinstance(finding, dict):
+                        continue
+                    handle = str(finding.get("username") or "")
+                    if not handle:
+                        continue
+                    pid = f"profile:telegram:{handle}"
+                    add_node(pid, "profile", f"@{handle}", url=finding.get("url"), confidence=finding.get("confidence"))
+                    link(pid, org_id, "telegram_channel")
+
+        if "darkweb_mention_hunter" in path:
+            mentions = _safe_int(details.get("mention_count"))
+            score = _safe_int(details.get("risk_score"))
+            if mentions:
+                signals.append(f"darkweb_mentions:{mentions}")
+                sid = f"signal:darkweb:{root}"
+                add_node(sid, "signal", f"Darkweb mentions ({mentions})", score=score)
+                link(sid, org_id, "darkweb_signal")
+                if score >= 40:
+                    priority_actions.append({
+                        "action": "review_darkweb_exposure",
+                        "confidence": min(0.9, score / 100.0),
+                        "reason": f"{mentions} darkweb/breach mention(s), risk score {score}",
+                    })
+
+        if "crypto_address_pivot" in path:
+            count = _safe_int(details.get("address_count"))
+            if count:
+                signals.append(f"crypto_addresses:{count}")
+            for finding in details.get("findings", []) or []:
+                if not isinstance(finding, dict):
+                    continue
+                addr = str(finding.get("address") or "")
+                if not addr:
+                    continue
+                cid = f"crypto:{addr[:24]}"
+                chain = str(finding.get("chain") or "unknown")
+                add_node(cid, "signal", f"{chain}:{addr[:18]}…", url=finding.get("source_url"))
+                link(cid, org_id, "crypto_wallet")
 
     for sub in sorted(set(subdomains))[:25]:
         sid = f"host:{sub}"
@@ -255,6 +304,7 @@ def merge_osint_synthesis_into_knowledge_base(
     knowledge_base["osint_summary"] = list(synthesis.get("summary_lines") or [])
     knowledge_base["osint_priority_actions"] = list(synthesis.get("priority_actions") or [])
     knowledge_base["osint_signals"] = list(synthesis.get("signals") or [])
+    knowledge_base["osint_collected_at"] = utc_now_z()
     if synthesis.get("persona_seed"):
         knowledge_base["persona_name"] = str(synthesis.get("persona_seed"))
 

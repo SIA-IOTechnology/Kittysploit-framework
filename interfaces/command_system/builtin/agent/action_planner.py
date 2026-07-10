@@ -300,8 +300,10 @@ def _infer_produces(path_lower: str, blob: str) -> Dict[str, float]:
     """Heuristic ``produces`` map from module path + metadata blob."""
     if "bruteforce" in path_lower or "admin_login" in path_lower:
         return {"authenticated_session": 0.55, "credentials": 0.35, "session_cookie": 0.4}
-    if "sql_injection" in path_lower or path_lower.endswith("/sqli") or "django_sqli" in path_lower:
+    if "sql_injection" in path_lower or "sqli_engine" in path_lower or path_lower.endswith("/sqli") or "django_sqli" in path_lower:
         return {"db_access": 0.75, "credentials": 0.25, "rce": 0.12, "auth_bypass": 0.15}
+    if "sqli_shell" in path_lower:
+        return {"db_access": 0.85, "credentials": 0.45, "shell": 0.08}
     if "xss" in path_lower or "cors" in path_lower:
         return {"auth_bypass": 0.2, "credentials": 0.08}
     if "lfi" in path_lower or "rfi" in path_lower or "path_traversal" in path_lower:

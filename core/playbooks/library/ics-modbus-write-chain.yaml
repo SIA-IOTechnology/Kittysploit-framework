@@ -1,0 +1,34 @@
+id: ics-modbus-write-chain
+version: "1"
+name: Modbus identify to register write
+source: bug-bounty
+domain: ics
+tags: [modbus, ot, plc, write]
+description: >
+  OT assessment path — identify Modbus TCP slave, confirm write-enabled holding
+  registers, then attempt a controlled register write in lab scope.
+prerequisites:
+  signals_any:
+    - modbus
+    - modbus_tcp
+  domains:
+    - ics
+    - ot
+chain:
+  - id: identify_modbus
+    capability: credentials
+    module: auxiliary/scanner/ics/modbus_identify
+    description: Enumerate Modbus unit and register map hints
+  - id: check_write
+    capability: file_read
+    module: scanner/ics/modbus_write_enabled
+    description: Detect writable holding registers
+  - id: controlled_write
+    capability: rce
+    module: post/ics/manage/modbus_write_register
+    description: Write a single register (lab / approved scope only)
+blockers:
+  - write protection on PLC
+  - out-of-scope production OT
+references:
+  - "Common OT pentest report: Modbus exposed → writable registers"

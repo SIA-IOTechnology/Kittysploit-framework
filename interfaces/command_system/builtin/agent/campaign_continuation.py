@@ -12,6 +12,7 @@ from interfaces.command_system.builtin.agent.goal_planner import (
     _module_observed_in_kb,
     is_shell_operator_goal,
     kb_api_surface_ready,
+    kb_client_js_surface_ready,
     kb_subdomain_surface_expandable,
     suggest_shell_plan_followups,
 )
@@ -32,17 +33,12 @@ def kb_has_unscanned_subdomains(kb: Mapping[str, Any]) -> bool:
 def kb_has_untested_js_endpoints(kb: Mapping[str, Any]) -> bool:
     if not isinstance(kb, dict):
         return False
-    hints = {str(h).lower() for h in kb.get("tech_hints", []) or []}
-    conf = kb.get("tech_confidence", {}) or {}
-    js_stack = bool(hints.intersection(_JS_HINTS))
-    js_stack = js_stack or float(conf.get("nextjs", 0.0) or 0.0) >= 0.4
-    js_stack = js_stack or float(conf.get("nodejs", 0.0) or 0.0) >= 0.4
-    if not js_stack:
-        endpoints = [str(e).lower() for e in kb.get("discovered_endpoints", []) or []]
-        js_stack = any(".js" in e or "/_next/" in e for e in endpoints)
-    if not js_stack:
+    if not kb_client_js_surface_ready(kb):
         return False
-    return not _module_observed_in_kb(kb, "js_endpoint")
+    return (
+        not _module_observed_in_kb(kb, "js_endpoint")
+        or not _module_observed_in_kb(kb, "js_sourcemap")
+    )
 
 
 def kb_has_untested_api(kb: Mapping[str, Any]) -> bool:

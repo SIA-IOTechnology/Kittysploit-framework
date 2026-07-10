@@ -126,7 +126,7 @@ class OptPayload(Option):
                 # Determine which options to copy based on handler type
                 if handler_type == 'reverse':
                     # For reverse shells, copy connection options and payload transforms.
-                    reverse_options = ['lhost', 'lport', 'encoder', 'obfuscator']
+                    reverse_options = ['lhost', 'lport', 'encoder', 'transform']
                     for option_name in reverse_options:
                         if hasattr(instance, option_name) and option_name in payload_options:
                             instance_value = getattr(instance, option_name)
@@ -141,8 +141,16 @@ class OptPayload(Option):
                                         payload_opt.value = value_to_set
                                     else:
                                         setattr(payload_module, option_name, value_to_set)
-                    # Copy obfuscator options (e.g. key) from exploit to payload if both have them
-                    if hasattr(instance, 'obfuscator') and get_option_value(getattr(instance, 'obfuscator', None)):
+                    # Copy transform path (supports legacy obfuscator option on exploit)
+                    xf_path = ""
+                    try:
+                        from core.framework.transform import get_transform_path_from_instance
+                        xf_path = get_transform_path_from_instance(instance)
+                        if xf_path and hasattr(payload_module, 'set_option'):
+                            payload_module.set_option('transform', xf_path)
+                    except Exception:
+                        pass
+                    if xf_path:
                         payload_opts_after = getattr(payload_module, 'get_options', lambda: {})()
                         for option_name in payload_opts_after:
                             if option_name not in reverse_options and hasattr(instance, option_name):

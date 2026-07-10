@@ -1,0 +1,50 @@
+id: n8n-full-chain-rce
+version: "1"
+name: n8n authentication bypass to full chain RCE
+source: bug-bounty
+domain: web
+tags: [n8n, jwt, lfi, sqlite, rce, workflow, nodejs]
+description: >
+  Complex n8n bug bounty chain (CVE-2026-21858 + CVE-2025-68613 style) — detect
+  vulnerable instance, abuse path traversal / config read to recover encryption
+  key and SQLite database, forge admin JWT, import malicious workflow, achieve
+  unauthenticated command execution.
+prerequisites:
+  signals_any:
+    - n8n
+    - nodejs
+  tech_any:
+    - n8n
+    - nodejs
+chain:
+  - id: version_detect
+    capability: credentials
+    module: scanner/http/n8n_cve_2026_21858_2025_68613
+    description: Fingerprint n8n version and exposure
+  - id: config_read
+    capability: file_read
+    module: null
+    description: Read ~/.n8n/config for encryption key (inside full-chain exploit)
+  - id: sqlite_dump
+    capability: db_access
+    module: null
+    description: Download database.sqlite and extract user password hash
+  - id: jwt_forgery
+    capability: authenticated_session
+    module: null
+    description: Forge n8n-auth JWT with recovered key
+  - id: full_chain_rce
+    capability: rce
+    module: exploits/linux/http/n8n_full_chain_rce
+    description: End-to-end exploit module chaining LFI + JWT + workflow import
+  - id: post_shell
+    capability: shell
+    module: post/shell/multi/manage/spawn_reverse_shell
+    optional: true
+    description: Stabilize reverse shell after RCE primitive
+blockers:
+  - n8n >= patched version
+  - reverse proxy stripping workflow import
+  - hardened container filesystem (no home dir read)
+references:
+  - "Public n8n full-chain write-ups: config leak → JWT → workflow RCE"

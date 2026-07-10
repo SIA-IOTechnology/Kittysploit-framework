@@ -1,0 +1,394 @@
+id: devops-panels
+version: "1"
+name: DevOps Panels & Misconfig Discovery
+description: >
+  HTTP panel and misconfiguration sweep — DevOps UIs, observability stacks,
+  secrets exposure, and Java CVE fingerprints (Log4Shell / Spring4Shell).
+tags: [discovery, scanner, devops, panels, misconfig, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target hostname or URL
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: spring_actuator
+steps:
+  spring_actuator:
+    module: scanner/http/spring_actuator_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: spring_cloud_gateway
+    on_failure: spring_cloud_gateway
+  spring_cloud_gateway:
+    module: scanner/http/spring_cloud_gateway_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: gitlab_panel
+    on_failure: gitlab_panel
+  gitlab_panel:
+    module: scanner/http/gitlab_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: jira_panel
+    on_failure: jira_panel
+  jira_panel:
+    module: scanner/http/jira_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: confluence_panel
+    on_failure: confluence_panel
+  confluence_panel:
+    module: scanner/http/confluence_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: confluence_preauth
+    on_failure: confluence_preauth
+  confluence_preauth:
+    module: scanner/http/confluence_preauth_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: jenkins_panel
+    on_failure: jenkins_panel
+  jenkins_panel:
+    module: scanner/http/jenkins_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: sonarqube_panel
+    on_failure: sonarqube_panel
+  sonarqube_panel:
+    module: scanner/http/sonarqube_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: harbor_panel
+    on_failure: harbor_panel
+  harbor_panel:
+    module: scanner/http/harbor_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: argocd_panel
+    on_failure: argocd_panel
+  argocd_panel:
+    module: scanner/http/argocd_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: k8s_dashboard
+    on_failure: k8s_dashboard
+  k8s_dashboard:
+    module: scanner/http/kubernetes_dashboard_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: portainer_panel
+    on_failure: portainer_panel
+  portainer_panel:
+    module: scanner/http/portainer_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: traefik_panel
+    on_failure: traefik_panel
+  traefik_panel:
+    module: scanner/http/traefik_dashboard_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: prometheus_panel
+    on_failure: prometheus_panel
+  prometheus_panel:
+    module: scanner/http/prometheus_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: grafana_panel
+    on_failure: grafana_panel
+  grafana_panel:
+    module: scanner/http/grafana_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: kibana_panel
+    on_failure: kibana_panel
+  kibana_panel:
+    module: scanner/http/kibana_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: elasticsearch_panel
+    on_failure: elasticsearch_panel
+  elasticsearch_panel:
+    module: scanner/http/elasticsearch_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: consul_panel
+    on_failure: consul_panel
+  consul_panel:
+    module: scanner/http/consul_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: etcd_panel
+    on_failure: etcd_panel
+  etcd_panel:
+    module: scanner/http/etcd_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: docker_registry
+    on_failure: docker_registry
+  docker_registry:
+    module: scanner/http/docker_registry_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: tomcat_manager
+    on_failure: tomcat_manager
+  tomcat_manager:
+    module: scanner/http/tomcat_manager_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: exchange_owa
+    on_failure: exchange_owa
+  exchange_owa:
+    module: scanner/http/exchange_owa_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: phpmyadmin_setup
+    on_failure: phpmyadmin_setup
+  phpmyadmin_setup:
+    module: scanner/http/phpmyadmin_setup_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: exposed_git
+    on_failure: exposed_git
+  exposed_git:
+    module: scanner/http/exposed_git_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: exposed_env
+    on_failure: exposed_env
+  exposed_env:
+    module: scanner/http/exposed_env_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: log4j_probe
+    on_failure: log4j_probe
+  log4j_probe:
+    module: scanner/http/log4j_header_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: spring4shell_probe
+    on_failure: spring4shell_probe
+  spring4shell_probe:
+    module: scanner/http/spring4shell_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: zabbix_panel
+    on_failure: zabbix_panel
+  zabbix_panel:
+    module: scanner/http/zabbix_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: keycloak_panel
+    on_failure: keycloak_panel
+  keycloak_panel:
+    module: scanner/http/keycloak_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: gitea_panel
+    on_failure: gitea_panel
+  gitea_panel:
+    module: scanner/http/gitea_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: vault_panel
+    on_failure: vault_panel
+  vault_panel:
+    module: scanner/http/vault_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: airflow_panel
+    on_failure: airflow_panel
+  airflow_panel:
+    module: scanner/http/airflow_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: jupyter_panel
+    on_failure: jupyter_panel
+  jupyter_panel:
+    module: scanner/http/jupyter_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: superset_panel
+    on_failure: superset_panel
+  superset_panel:
+    module: scanner/http/superset_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: adminer_panel
+    on_failure: adminer_panel
+  adminer_panel:
+    module: scanner/http/adminer_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: mongo_express_panel
+    on_failure: mongo_express_panel
+  mongo_express_panel:
+    module: scanner/http/mongo_express_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: pgadmin_panel
+    on_failure: pgadmin_panel
+  pgadmin_panel:
+    module: scanner/http/pgadmin_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: neo4j_panel
+    on_failure: neo4j_panel
+  neo4j_panel:
+    module: scanner/http/neo4j_browser_detect
+    options:
+      target: "${target}"
+      port: "7474"
+      ssl: "false"
+    on_success: thinkphp_fingerprint
+    on_failure: thinkphp_fingerprint
+  thinkphp_fingerprint:
+    module: scanner/http/thinkphp_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: moveit_panel
+    on_failure: moveit_panel
+  moveit_panel:
+    module: scanner/http/moveit_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: teamcity_panel
+    on_failure: teamcity_panel
+  teamcity_panel:
+    module: scanner/http/teamcity_detect
+    options:
+      target: "${target}"
+      port: "8111"
+      ssl: "false"
+    on_success: rancher_panel
+    on_failure: rancher_panel
+  rancher_panel:
+    module: scanner/http/rancher_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: bitbucket_panel
+    on_failure: bitbucket_panel
+  bitbucket_panel:
+    module: scanner/http/bitbucket_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: graylog_panel
+    on_failure: graylog_panel
+  graylog_panel:
+    module: scanner/http/graylog_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: splunk_panel
+    on_failure: splunk_panel
+  splunk_panel:
+    module: scanner/http/splunk_detect
+    options:
+      target: "${target}"
+      port: "8000"
+      ssl: "false"
+    on_success: clickhouse_panel
+    on_failure: clickhouse_panel
+  clickhouse_panel:
+    module: scanner/http/clickhouse_detect
+    options:
+      target: "${target}"
+      port: "8123"
+      ssl: "false"
+    on_success: activemq_console
+    on_failure: activemq_console
+  activemq_console:
+    module: scanner/http/activemq_console_detect
+    options:
+      target: "${target}"
+      port: "8161"
+      ssl: "false"
+    on_success: null
+    on_failure: null

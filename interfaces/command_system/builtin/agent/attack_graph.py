@@ -49,7 +49,22 @@ class AttackGraph:
         self.edges.append(edge)
 
     def best_next_action(self) -> Optional[Dict[str, Any]]:
-        candidates = [edge for edge in self.edges if not edge.abandoned_reason]
+        def _actionable(edge: AttackEdge) -> bool:
+            action = str(edge.action or "")
+            return action.startswith((
+                "scanner/",
+                "auxiliary/",
+                "exploit/",
+                "exploits/",
+                "post/",
+                "weaponize:",
+                "validate:",
+            ))
+
+        candidates = [
+            edge for edge in self.edges
+            if not edge.abandoned_reason and _actionable(edge)
+        ]
         if not candidates:
             return None
         ranked = sorted(

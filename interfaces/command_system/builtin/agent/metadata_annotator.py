@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from interfaces.command_system.builtin.agent.runtime_policy import assess_module_risk
+from interfaces.command_system.builtin.agent.metadata_chain_inference import (
+    chain_is_empty,
+    enrich_agent_metadata,
+    infer_chain_metadata,
+    infer_requires_metadata,
+)
 
 DEFAULT_FAMILIES: Sequence[str] = (
     "scanner",
@@ -61,14 +67,24 @@ def infer_agent_metadata(module_path: str, info: Optional[Dict[str, Any]] = None
     effects = list(risk.effects) or (
         ["network_probe"] if risk.level in {"read", "active"} else ["active_exploitation"]
     )
-    return {
+    chain = infer_chain_metadata(module_path, info)
+    requires = infer_requires_metadata(module_path, info)
+    agent: Dict[str, Any] = {
         "risk": risk.level,
         "effects": effects,
         "expected_requests": expected,
         "reversible": bool(risk.reversible),
         "approval_required": bool(risk.approval_required),
         "produces": produces,
+        "cost": "medium",
+        "noise": "low" if family_key in {"scanner"} else "medium",
+        "value": "high" if family_key in {"exploits", "post"} else "medium",
     }
+    if not chain_is_empty(chain):
+        agent["chain"] = chain
+    if requires:
+        agent["requires"] = requires
+    return agent
 
 
 def _format_agent_block(agent: Dict[str, Any], indent: str = "        ") -> str:
@@ -81,9 +97,26 @@ def _format_agent_block(agent: Dict[str, Any], indent: str = "        ") -> str:
         f"{inner}'reversible': {str(bool(agent['reversible']))},",
         f"{inner}'approval_required': {str(bool(agent['approval_required']))},",
         f"{inner}'produces': {agent['produces']!r},",
-        f"{indent}}},",
     ]
+    for optional in ("cost", "noise", "value"):
+        if optional in agent:
+            lines.append(f"{inner}'{optional}': {agent[optional]!r},")
+    if agent.get("requires"):
+        lines.append(f"{inner}'requires': {_repr_dict(agent['requires'], inner)},")
+    if agent.get("chain"):
+        lines.append(f"{inner}'chain': {_repr_dict(agent['chain'], inner)},")
+    lines.append(f"{indent}}},")
     return "\n".join(lines)
+
+
+def _repr_dict(value: Dict[str, Any], inner: str) -> str:
+    import pprint
+
+    rendered = pprint.pformat(value, width=100, sort_dicts=False)
+    rendered_lines = rendered.splitlines()
+    if len(rendered_lines) == 1:
+        return rendered
+    return "\n".join(inner + line for line in rendered_lines)
 
 
 def _find_info_dict_node(tree: ast.AST) -> Optional[ast.Dict]:
@@ -206,6 +239,85 @@ def inject_agent_into_source(source: str, module_path: str) -> Optional[str]:
     return "\n".join(lines) + ("\n" if source.endswith("\n") else "")
 
 
+def upgrade_agent_in_source(source: str, module_path: str) -> Optional[str]:
+    """Inject or enrich chain/requires on an existing agent block."""
+    if "__info__" not in source or "'agent'" not in source and '"agent"' not in source:
+        return None
+    info = _load_info_dict(source)
+    if not isinstance(info, dict):
+        return None
+    existing = info.get("agent") if isinstance(info.get("agent"), dict) else {}
+    enriched = enrich_agent_metadata(module_path, existing, info)
+    from interfaces.command_system.builtin.agent.agent_module_meta import normalize_agent_block
+
+    normalized_existing = normalize_agent_block(existing) or {}
+    normalized_enriched = normalize_agent_block(enriched) or {}
+    if not chain_is_empty(normalized_existing.get("chain")):
+        return None
+    if chain_is_empty(normalized_enriched.get("chain")) and not normalized_enriched.get("requires"):
+        return None
+    return _replace_agent_block(source, module_path, enriched, info)
+
+
+def _replace_agent_block(
+    source: str,
+    module_path: str,
+    agent: Dict[str, Any],
+    info: Dict[str, Any],
+) -> Optional[str]:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    info_node = _find_info_dict_node(tree)
+    if info_node is None or not _info_dict_has_agent(info_node):
+        return inject_agent_into_source(source, module_path)
+    start = int(info_node.lineno or 1) - 1
+    end = int(info_node.end_lineno or start + 1)
+    lines = source.splitlines()
+    # Remove old agent key from __info__ dict text and append enriched block before closing brace
+    closing_idx = end - 1
+    closing = lines[closing_idx]
+    base_indent = closing[: len(closing) - len(closing.lstrip())]
+    # Strip lines belonging to agent sub-dict
+    agent_start = None
+    for idx in range(start, closing_idx + 1):
+        stripped = lines[idx].strip()
+        if stripped.startswith("'agent'") or stripped.startswith('"agent"'):
+            agent_start = idx
+            break
+    if agent_start is None:
+        return inject_agent_into_source(source, module_path)
+    agent_end = agent_start + 1
+    depth = 0
+    for idx in range(agent_start, closing_idx + 1):
+        line = lines[idx]
+        depth += line.count("{") - line.count("}")
+        if idx > agent_start and depth <= 0:
+            agent_end = idx
+            break
+    else:
+        agent_end = closing_idx
+    block = _format_agent_block(agent, base_indent)
+    new_lines = lines[:agent_start] + [block] + lines[agent_end + 1 :]
+    return "\n".join(new_lines) + ("\n" if source.endswith("\n") else "")
+
+
+def upgrade_module_file(file_path: Path, module_path: str, *, dry_run: bool = True) -> Tuple[bool, str]:
+    source = file_path.read_text(encoding="utf-8", errors="ignore")
+    if "'agent'" not in source and '"agent"' not in source:
+        updated = inject_agent_into_source(source, module_path)
+        action = "inject"
+    else:
+        updated = upgrade_agent_in_source(source, module_path)
+        action = "upgrade"
+    if not updated:
+        return False, "skipped"
+    if not dry_run:
+        file_path.write_text(updated, encoding="utf-8")
+    return True, action if not dry_run else f"would_{action}"
+
+
 def annotate_module_file(file_path: Path, module_path: str, *, dry_run: bool = True) -> Tuple[bool, str]:
     source = file_path.read_text(encoding="utf-8", errors="ignore")
     repaired = repair_missing_comma_before_agent(source)
@@ -218,6 +330,52 @@ def annotate_module_file(file_path: Path, module_path: str, *, dry_run: bool = T
     if not dry_run:
         file_path.write_text(updated, encoding="utf-8")
     return True, "updated" if not dry_run else "would_update"
+
+
+def upgrade_catalog(
+    discovered: Dict[str, str],
+    extract_info: Any,
+    *,
+    families: Iterable[str] = DEFAULT_FAMILIES,
+    dry_run: bool = True,
+    limit: int = 0,
+) -> Dict[str, Any]:
+    families = tuple(families)
+    updated = skipped = errors = 0
+    rows: List[Dict[str, str]] = []
+    count = 0
+    for module_path in sorted(discovered):
+        if families and not any(
+            module_path.startswith(f"{family}/") or module_path == family for family in families
+        ):
+            continue
+        file_path = Path(discovered[module_path])
+        if not file_path.is_file():
+            skipped += 1
+            continue
+        count += 1
+        if limit > 0 and count > limit:
+            break
+        try:
+            ok, status = upgrade_module_file(file_path, module_path, dry_run=dry_run)
+        except OSError as exc:
+            errors += 1
+            rows.append({"path": module_path, "status": f"error: {exc}"})
+            continue
+        if ok:
+            updated += 1
+            rows.append({"path": module_path, "status": status})
+        else:
+            skipped += 1
+    return {
+        "dry_run": dry_run,
+        "mode": "upgrade",
+        "families": list(families),
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+        "sample": rows[:20],
+    }
 
 
 def annotate_catalog(

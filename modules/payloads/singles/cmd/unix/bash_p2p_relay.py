@@ -9,8 +9,8 @@ class Module(Payload):
     __info__ = {
         "name": "Unix Command Shell, P2P Relay (via Bash)",
         "description": (
-            "Connect to a P2P relay hub as AGENT and spawn an interactive shell "
-            "once an operator joins the same token room."
+            "Connect to a P2P relay hub as AGENT (cleartext KSRL v1). "
+            "For E2E encryption + PTY use payloads/singles/cmd/unix/python_p2p_relay."
         ),
         "category": PayloadCategory.CMD,
         "platform": Platform.UNIX,

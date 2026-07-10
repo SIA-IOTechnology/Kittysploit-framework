@@ -47,6 +47,20 @@ AGENT_INTEL_PIPELINE: Tuple[Tuple[str, str], ...] = (
     ("saas", "auxiliary/osint/saas_tenant_discovery"),
 )
 
+# Law-enforcement passive pipeline — no password profiling or credential generation.
+AGENT_INTEL_PIPELINE_PASSIVE: Tuple[Tuple[str, str], ...] = (
+    ("surface", "auxiliary/osint/domain_surface_mapper"),
+    ("wayback", "auxiliary/osint/wayback_surface_hunter"),
+    ("emails", "auxiliary/osint/email_pattern_harvester"),
+    ("identity", "auxiliary/osint/identity_handle_hunter"),
+    ("telegram", "auxiliary/osint/telegram_channel_profiler"),
+    ("darkweb", "auxiliary/osint/darkweb_mention_hunter"),
+    ("crypto", "auxiliary/osint/crypto_address_pivot"),
+    ("breach", "auxiliary/osint/breach_exposure_score"),
+    ("saas", "auxiliary/osint/saas_tenant_discovery"),
+    ("github", "auxiliary/osint/github_org_exposure"),
+)
+
 
 def _dedupe_preserve(items: Iterable[str], *, limit: int) -> List[str]:
     seen: Set[str] = set()
@@ -370,6 +384,23 @@ def build_intel_option_overrides(
             "check_headers": True,
             "max_subdomains": "25",
         }
+    if path == "auxiliary/osint/wayback_surface_hunter":
+        return {"target": root, "max_urls": "400", "min_score": "50"}
+    if path == "auxiliary/osint/github_org_exposure":
+        return {"target": root, "max_repos": "20"}
+    if path == "auxiliary/osint/telegram_channel_profiler":
+        return {"target": root, "max_channels": "15"}
+    if path == "auxiliary/osint/darkweb_mention_hunter":
+        seed = root
+        emails = _distinct_org_emails(identities, root)
+        if emails:
+            seed = emails[0]
+        return {"target": seed}
+    if path == "auxiliary/osint/crypto_address_pivot":
+        return {
+            "target": root,
+            "enrich": True,
+        }
     if path == "auxiliary/osint/saas_tenant_discovery":
         return {"target": root, "scan_cert_subdomains": True}
     return {"target": root}
@@ -379,14 +410,16 @@ def pick_agent_intel_pipeline_modules(
     catalog_modules: Sequence[Mapping[str, Any]],
     *,
     max_steps: int = EXPANDED_SURFACE_INTEL_MAX_MODULES,
+    pipeline: Optional[Sequence[Tuple[str, str]]] = None,
 ) -> List[Dict[str, Any]]:
+    steps = pipeline or AGENT_INTEL_PIPELINE
     by_path = {
         str(row.get("path", "")).strip(): dict(row)
         for row in catalog_modules or []
         if str(row.get("path", "")).strip()
     }
     picked: List[Dict[str, Any]] = []
-    for _step, path in AGENT_INTEL_PIPELINE:
+    for _step, path in steps:
         row = by_path.get(path)
         if row:
             picked.append(row)
@@ -402,20 +435,29 @@ def run_agent_intel_pipeline(
     root_domain: str,
     persona_seed: str = "",
     max_steps: int = EXPANDED_SURFACE_INTEL_MAX_MODULES,
+    passive_only: bool = False,
+    evidence_collector: Any = None,
+    opsec_journal: Any = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     Run OSINT modules in context-aware phases.
 
     Each step updates identities from prior results before the next module runs.
+    When ``passive_only`` is set, credential profiling steps are excluded.
     """
     root = organization_root_domain(root_domain)
-    pipeline = pick_agent_intel_pipeline_modules(catalog_modules, max_steps=max_steps)
+    step_pipeline = AGENT_INTEL_PIPELINE_PASSIVE if passive_only else AGENT_INTEL_PIPELINE
+    pipeline = pick_agent_intel_pipeline_modules(
+        catalog_modules,
+        max_steps=max_steps,
+        pipeline=step_pipeline,
+    )
     all_results: List[Dict[str, Any]] = []
     running_identities: Dict[str, List[str]] = {"emails": [], "handles": [], "names": []}
     if persona_seed:
         running_identities["names"].append(str(persona_seed).strip())
 
-    for step, path in AGENT_INTEL_PIPELINE:
+    for step, path in step_pipeline:
         module = next((row for row in pipeline if str(row.get("path", "")) == path), None)
         if not module:
             continue
@@ -427,6 +469,11 @@ def run_agent_intel_pipeline(
         ):
             continue
 
+        if opsec_journal is not None:
+            violation = opsec_journal.check_passive_violation(path)
+            if violation:
+                continue
+
         overrides = {
             path: build_intel_option_overrides(
                 path,
@@ -436,7 +483,33 @@ def run_agent_intel_pipeline(
             )
         }
         batch = execute_modules([module], overrides)
-        all_results.extend(list(batch or []))
+        for row in list(batch or []):
+            if not isinstance(row, dict):
+                continue
+            row = dict(row)
+            row.setdefault("target", root)
+            if evidence_collector is not None:
+                try:
+                    row = evidence_collector.record_module_result(row)
+                except Exception:
+                    from core.osint.evidence import envelope_module_result_row
+
+                    row = envelope_module_result_row(row)
+            else:
+                from core.osint.evidence import envelope_module_result_row
+
+                row = envelope_module_result_row(row)
+            all_results.append(row)
+            if opsec_journal is not None:
+                try:
+                    opsec_journal.record(
+                        action="module_complete",
+                        module=path,
+                        target=root,
+                        status=str(row.get("status") or "ok"),
+                    )
+                except Exception:
+                    pass
 
         harvested = harvest_identities_from_results(all_results, root_domain=root)
         for key in ("emails", "handles", "names"):
@@ -451,4 +524,9 @@ def run_agent_intel_pipeline(
         identities=running_identities,
         persona_seed=persona_seed,
     )
+    if evidence_collector is not None:
+        try:
+            evidence_collector.record_synthesis(synthesis)
+        except Exception:
+            pass
     return all_results, synthesis

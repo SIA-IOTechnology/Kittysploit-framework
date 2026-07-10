@@ -121,6 +121,7 @@ def build_action_decision_report(
     kb: Mapping[str, Any],
     *,
     campaign_goal: str = "",
+    phase: str = "",
     reason: str = "",
     matching_finding: Optional[Dict[str, Any]] = None,
     stack_mismatch_fn: Optional[Callable[[str, Dict[str, Any]], str]] = None,
@@ -188,7 +189,7 @@ def build_action_decision_report(
         "evidence": ev,
         "rejected_alternatives": all_rejected[:6],
         "risk": {
-            "level": risk,
+            "level": risk.level,
             "cost": round(float(risk_cost if risk_cost is not None else estimate_network_cost(low)), 3),
             "notes": risk_notes,
         },
@@ -206,4 +207,22 @@ def build_action_decision_report(
         report["risk_cost"] = round(float(risk_cost), 3)
     if campaign_goal:
         report["campaign_goal"] = campaign_goal
+    try:
+        from interfaces.command_system.builtin.agent.operator_archetypes import (
+            operator_context_for_phase,
+        )
+
+        op = operator_context_for_phase(
+            phase or str(kb.get("current_phase") or "plan"),
+            campaign_goal=campaign_goal,
+            module_path=path,
+        )
+        report["operator"] = {
+            "archetype": op.get("archetype"),
+            "name": op.get("name"),
+            "mitre_tactics": op.get("mitre_tactics", []),
+            "maturity": op.get("maturity"),
+        }
+    except Exception:
+        pass
     return report

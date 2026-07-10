@@ -29,6 +29,22 @@ from threading import Lock
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+from lib.protocols.http.sqli_engine import (
+    HttpParameterOracle,
+    SqliEngine,
+    TECHNIQUE_TO_DETECTION_KIND,
+    TECHNIQUE_TO_RESULT_NAME,
+    boolean_evidence as sqli_boolean_evidence,
+    contains_sqli_error,
+)
+from lib.protocols.http.sqli_engine.oracles import (
+    ORDER_BY_PARAM_HINTS,
+    is_json_api_entry,
+    probe_json_body_sqli,
+    probe_order_by_sqli,
+)
+from lib.protocols.http.sqli_engine.oracles.header import probe_login_headers
+
 try:
     import requests
     import urllib3
@@ -1397,6 +1413,8 @@ class WebVulnScannerPlugin(Plugin):
         if not baseline_resp:
             return 0
 
+        hits += self._probe_sqli_headers(entry)
+
         for param in sorted(entry["params"].keys()):
             if not self._should_probe_param(param):
                 continue
@@ -1448,107 +1466,196 @@ class WebVulnScannerPlugin(Plugin):
                 deduped.append(attack)
         return deduped
 
+    def _sqli_engine(self) -> SqliEngine:
+        delay_s = 5 if self.aggressive else 3
+        max_req = 14 if not self.stealth_mode else 10
+        return SqliEngine(
+            allow_time=not self.waf_detected,
+            allow_union=True,
+            time_delay=delay_s,
+            waf_detected=self.waf_detected,
+            max_requests=max_req,
+            stop_on_first=True,
+        )
+
+    def _record_sqli_scan(
+        self,
+        entry: Dict[str, Any],
+        param: str,
+        scan,
+        *,
+        context: str = "",
+    ) -> int:
+        if not getattr(scan, "vulnerable", False):
+            return 0
+        technique = getattr(scan, "technique", "") or ""
+        name = TECHNIQUE_TO_RESULT_NAME.get(technique, "SQL Injection")
+        if context:
+            name = f"{name} ({context})"
+        detection_kind = TECHNIQUE_TO_DETECTION_KIND.get(technique, "sqli_error")
+        evidence = getattr(scan, "evidence", "") or ""
+        if getattr(scan, "dbms", None):
+            evidence = f"{evidence} [dbms={scan.dbms}]".strip()
+        self.linked_modules.add("post/http/sqli_shell")
+        return self._record_result(
+            source="active",
+            name=name,
+            url=entry["url"],
+            method=entry["method"],
+            parameter=param,
+            severity="high",
+            confidence=0,
+            evidence=evidence,
+            payload=getattr(scan, "payload", "") or "",
+            repro=self._build_repro_command(entry, param, getattr(scan, "payload", "") or ""),
+            signal="sqli",
+            detection_kind=detection_kind,
+            metadata={"dbms": getattr(scan, "dbms", None), "request_count": getattr(scan, "request_count", 0)},
+        )
+
+    def _probe_sqli_headers(self, entry: Dict[str, Any]) -> int:
+        def send_with_header(header_name: str, value: str):
+            if not self._reserve_plugin_request(1):
+                return None, 0.0
+            lim = getattr(self._probe_local, "limit", None)
+            if lim is not None and getattr(self._probe_local, "count", 0) >= lim:
+                return None, 0.0
+            if lim is not None:
+                self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
+            try:
+                started = time.monotonic()
+                headers = {header_name: value}
+                if entry["method"] == "POST":
+                    response = self.session.post(
+                        entry["url"],
+                        data=dict(entry["params"]),
+                        headers=headers,
+                        timeout=self.timeout,
+                        allow_redirects=True,
+                        verify=False,
+                    )
+                else:
+                    response = self.session.get(
+                        entry["url"],
+                        params=dict(entry["params"]),
+                        headers=headers,
+                        timeout=self.timeout,
+                        allow_redirects=True,
+                        verify=False,
+                    )
+                self._stealth_on_status(response.status_code)
+                return response, time.monotonic() - started
+            except Exception as exc:
+                self._note_http_failure()
+                self._verbose(f"Header SQLi probe failed: {exc}")
+                return None, 0.0
+
+        hit = probe_login_headers(
+            send_with_header,
+            path=entry.get("path") or "",
+            url=entry.get("url") or "",
+        )
+        if not hit:
+            return 0
+
+        header_name = (hit.label or "header").split(":")[0].strip()
+
+        class _Scan:
+            vulnerable = True
+            technique = hit.technique
+            payload = hit.payload
+            evidence = hit.evidence
+            dbms = hit.dbms
+            request_count = 2
+
+        return self._record_sqli_scan(entry, header_name, _Scan(), context="header")
+
     def _probe_sqli(self, entry: Dict[str, Any], param: str, baseline_resp, baseline_time: float) -> int:
-        hits = 0
         original = entry["params"].get(param, "") or "1"
-        quote_tests = [
-            (f"{original}'", "single-quote"),
-            (f'{original}"', "double-quote"),
-            (f"{original}`", "backtick"),
-            (f"{original}' OR '1'='1", "OR tautology"),
-            (f"{original}' OR '1'='1'--", "OR tautology comment"),
-            (f"{original}' OR 1=1--", "numeric OR comment"),
-            (f"{original}) OR ('1'='1", "paren OR"),
-            (f"{original}' AND '1'='2", "AND false (error probe)"),
-        ]
-        for error_payload, label in quote_tests:
-            error_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, error_payload))
-            if error_resp and self._contains_sqli_error(error_resp.text):
-                hits += self._record_result(
-                    source="active",
-                    name="SQL Injection (error-based)",
-                    url=entry["url"],
-                    method=entry["method"],
-                    parameter=param,
-                    severity="high",
-                    confidence=0,
-                    evidence=f"Database error after {label} payload",
-                    payload=error_payload,
-                    repro=self._build_repro_command(entry, param, error_payload),
-                    signal="sqli",
-                    detection_kind="sqli_error",
-                )
-                break
 
-        true_payload = f"{original} AND 1=1"
-        false_payload = f"{original} AND 1=2"
-        true_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, true_payload))
-        false_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, false_payload))
-        boolean_evidence = self._boolean_sqli_evidence(baseline_resp, true_resp, false_resp)
-        if boolean_evidence:
-            hits += self._record_result(
-                source="active",
-                name="SQL Injection (boolean-based)",
-                url=entry["url"],
-                method=entry["method"],
-                parameter=param,
-                severity="high",
-                confidence=0,
-                evidence=boolean_evidence,
-                payload=false_payload,
-                repro=self._build_repro_command(entry, param, false_payload),
-                signal="sqli",
-                detection_kind="sqli_boolean",
-            )
-
-        numeric_base = original.strip() if original.strip().isdigit() else "1"
-        n_true = f"{numeric_base} AND 1=1"
-        n_false = f"{numeric_base} AND 1=2"
-        n_base_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, numeric_base))
-        nt_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, n_true))
-        nf_resp, _ = self._send_entry_request(entry, self._mutated_params(entry, param, n_false))
-        alt_bool = self._boolean_sqli_evidence(n_base_resp or baseline_resp, nt_resp, nf_resp)
-        if alt_bool:
-            hits += self._record_result(
-                source="active",
-                name="SQL Injection (boolean-based, numeric context)",
-                url=entry["url"],
-                method=entry["method"],
-                parameter=param,
-                severity="high",
-                confidence=0,
-                evidence=alt_bool,
-                payload=n_false,
-                repro=self._build_repro_command(entry, param, n_false),
-                signal="sqli",
-                detection_kind="sqli_boolean_numeric",
-            )
-
-        if not self.waf_detected:
-            delay_s = 5 if self.aggressive else 3
-            time_payload = f"{original}' AND SLEEP({delay_s})-- "
-            _, elapsed = self._send_entry_request(
+        def send_payload(payload: str, timeout: Optional[int] = None):
+            return self._send_entry_request(
                 entry,
-                self._mutated_params(entry, param, time_payload),
-                timeout=max(self.timeout + delay_s + 2, delay_s + 6),
+                self._mutated_params(entry, param, payload),
+                timeout=timeout,
             )
-            threshold = max(baseline_time + (2.5 if not self.aggressive else 3.5), 3.2 if not self.aggressive else 4.8)
-            if elapsed and elapsed >= threshold:
-                hits += self._record_result(
-                    source="active",
-                    name="SQL Injection (time-based)",
-                    url=entry["url"],
-                    method=entry["method"],
-                    parameter=param,
-                    severity="high",
-                    confidence=0,
-                    evidence=f"Delayed response ({elapsed:.2f}s vs baseline {baseline_time:.2f}s)",
-                    payload=time_payload,
-                    repro=self._build_repro_command(entry, param, time_payload),
-                    signal="sqli",
-                    detection_kind="sqli_time",
-                )
-        return hits
+
+        oracle = HttpParameterOracle(original_value=original, send_payload=send_payload)
+        engine = self._sqli_engine()
+        scan = engine.scan_parameter(
+            oracle,
+            param=param,
+            method=entry["method"],
+            path=entry.get("path") or "/",
+        )
+        if scan.vulnerable:
+            return self._record_sqli_scan(entry, param, scan)
+
+        specialized = []
+        if param.lower() in ORDER_BY_PARAM_HINTS:
+            ob_hit = probe_order_by_sqli(send_payload, original)
+            if ob_hit:
+                specialized.append(ob_hit)
+
+        if (
+            is_json_api_entry(
+                path=entry.get("path") or "",
+                url=entry.get("url") or "",
+                method=entry.get("method") or "GET",
+                content_type=entry.get("content_type") or entry.get("enctype") or "",
+            )
+            and entry.get("method") == "POST"
+        ):
+
+            def send_json(body: Dict[str, Any]):
+                if not self._reserve_plugin_request(1):
+                    return None, 0.0
+                lim = getattr(self._probe_local, "limit", None)
+                if lim is not None and getattr(self._probe_local, "count", 0) >= lim:
+                    return None, 0.0
+                if lim is not None:
+                    self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
+                try:
+                    started = time.monotonic()
+                    response = self.session.post(
+                        entry["url"],
+                        json=body,
+                        timeout=self.timeout,
+                        allow_redirects=True,
+                        verify=False,
+                    )
+                    self._stealth_on_status(response.status_code)
+                    return response, time.monotonic() - started
+                except Exception as exc:
+                    self._note_http_failure()
+                    self._verbose(f"JSON SQLi probe failed: {exc}")
+                    return None, 0.0
+
+            json_hit = probe_json_body_sqli(send_json, entry["params"], param)
+            if json_hit:
+                specialized.append(json_hit)
+
+        if not specialized:
+            return 0
+
+        best = max(specialized, key=lambda h: h.confidence)
+
+        class _Scan:
+            vulnerable = True
+            technique = best.technique
+            payload = best.payload
+            evidence = best.evidence
+            dbms = best.dbms
+            request_count = oracle.request_count + 4
+            all_hits = [best]
+
+        context = ""
+        label = (best.label or "").lower()
+        if "order" in label:
+            context = "ORDER BY"
+        elif "json" in label:
+            context = "JSON body"
+        return self._record_sqli_scan(entry, param, _Scan(), context=context)
 
     def _probe_xss(self, entry: Dict[str, Any], param: str) -> int:
         marker = "KSPXSS"
@@ -1747,30 +1854,20 @@ class WebVulnScannerPlugin(Plugin):
         return params
 
     def _contains_sqli_error(self, text: str) -> bool:
-        lowered = (text or "").lower()
-        return any(error in lowered for error in SQLI_ERRORS)
+        return contains_sqli_error(text)
 
     def _boolean_sqli_evidence(self, baseline_resp, true_resp, false_resp) -> str:
-        if not baseline_resp or not true_resp or not false_resp:
-            return ""
+        from lib.protocols.http.sqli_engine.oracle import ProbeResponse
 
-        baseline_len = len(baseline_resp.text or "")
-        true_len = len(true_resp.text or "")
-        false_len = len(false_resp.text or "")
-        delta_true = abs(true_len - baseline_len)
-        delta_false = abs(false_len - true_len)
-
-        if (
-            baseline_resp.status_code == true_resp.status_code
-            and abs(false_resp.status_code - baseline_resp.status_code) <= 1
-            and delta_true <= max(60, int(baseline_len * 0.08))
-            and delta_false >= max(120, int(max(true_len, false_len) * 0.12))
-        ):
-            return (
-                "Boolean response drift detected "
-                f"(baseline={baseline_len}, true={true_len}, false={false_len})"
+        def _as_probe(resp) -> ProbeResponse:
+            if resp is None:
+                return ProbeResponse()
+            return ProbeResponse(
+                status_code=int(getattr(resp, "status_code", 0) or 0),
+                text=str(getattr(resp, "text", None) or ""),
             )
-        return ""
+
+        return sqli_boolean_evidence(_as_probe(baseline_resp), _as_probe(true_resp), _as_probe(false_resp))
 
     def _lfi_evidence(self, text: str) -> Tuple[str, str]:
         """Return (detection_kind, human evidence) or ("", "")."""
@@ -1828,6 +1925,8 @@ class WebVulnScannerPlugin(Plugin):
 
             if "sql_injection" in lower or "sqli" in lower:
                 score += 38
+            if "post/http/sqli_shell" in lower:
+                score += 45
             if "php_injection" in lower and "php" in self.tech_tokens:
                 score += 28
             if "xss" in lower or "cross_site" in lower:
@@ -1849,7 +1948,14 @@ class WebVulnScannerPlugin(Plugin):
             "exploits/linux/http/",
             "exploits/multi/http/",
         )
-        return module_path.startswith(prefixes)
+        if module_path.startswith(prefixes):
+            return True
+        if module_path.startswith("post/http/") and self.results_by_signal("sqli"):
+            return True
+        return False
+
+    def results_by_signal(self, signal: str) -> List[Dict[str, Any]]:
+        return [r for r in self.results if (r.get("signal") or "") == signal]
 
     def _run_followup_checks(self, candidates: List[Dict[str, Any]]):
         with ThreadPoolExecutor(max_workers=min(self.threads, len(candidates) or 1)) as executor:

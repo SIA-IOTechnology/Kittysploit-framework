@@ -5,25 +5,18 @@ import re
 
 from kittysploit import *
 from lib.protocols.http.camaleon_cve_2024_46987 import (
-    auth_token_cookie_dict,
-    camaleon_download_private_path,
     camaleon_page_path,
     normalize_camaleon_base_path,
-    response_body_suggests_passwd_read,
-    response_ok_for_traversal_probe,
-    traversal_param_etc_passwd,
 )
 from lib.protocols.http.http_client import Http_client
 
 
 class Module(Scanner, Http_client):
-
     __info__ = {
-        "name": "Camaleon CMS CVE-2024-46987 (path traversal) detection",
+        "name": "Camaleon CMS CVE-2024-46987 detection",
         "description": (
-            "Fingerprints Camaleon CMS and heuristically flags versions ≤ 2.9.0 as affected by "
-            "CVE-2024-46987 (authenticated path traversal in /admin/media/download_private_file). "
-            "Optional AUTH_TOKEN runs a safe read probe of /etc/passwd when credentials are available."
+            "Fingerprints Camaleon CMS and flags versions <= 2.9.0 affected by CVE-2024-46987 "
+            "(authenticated path traversal in /admin/media/download_private_file)."
         ),
         "author": ["KittySploit Team"],
         "severity": "high",
@@ -36,23 +29,46 @@ class Module(Scanner, Http_client):
             "auxiliary/admin/http/camaleon_cms_cve_2024_46987_traversal",
         ],
         "tags": ["web", "scanner", "camaleon", "rails", "lfi", "path-traversal", "cve-2024-46987"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 2,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": [],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "file_read", "from_detail": "lfi_path"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "auxiliary/admin/http/camaleon_cms_cve_2024_46987_traversal",
+                ],
+            },
+        },
     }
 
     base_path = OptString("/", "Camaleon base URL path", required=False)
-    auth_token = OptString(
-        "",
-        "Optional admin auth_token cookie for active traversal probe (/etc/passwd)",
-        required=False,
-    )
-    depth = OptInteger(7, "Traversal depth for active probe (same as auxiliary default)", required=False, advanced=True)
 
     _VERSION_RES = (
         re.compile(r"camaleon[_\s-]?cms[^0-9]{0,40}(\d+\.\d+\.\d+)", re.I),
@@ -61,71 +77,52 @@ class Module(Scanner, Http_client):
         re.compile(r"version[^0-9]{0,24}(\d+\.\d+\.\d+)", re.I),
     )
 
-    def _prefix(self) -> str:
-        return normalize_camaleon_base_path(self.base_path)
-
     def _page_path(self, suffix: str) -> str:
         return camaleon_page_path(self.base_path, suffix)
 
     @staticmethod
-    def _version_tuple(v: str):
+    def _version_tuple(value: str):
         parts = []
-        for t in str(v).split("."):
-            digits = "".join(c for c in t if c.isdigit())
+        for token in str(value).split("."):
+            digits = "".join(ch for ch in token if ch.isdigit())
             parts.append(int(digits) if digits else 0)
         while len(parts) < 3:
             parts.append(0)
         return tuple(parts[:3])
 
-    def _version_lte(self, v: str, limit: str = "2.9.0") -> bool:
-        return self._version_tuple(v) <= self._version_tuple(limit)
+    def _version_lte(self, value: str, limit: str = "2.9.0") -> bool:
+        return self._version_tuple(value) <= self._version_tuple(limit)
 
     def _extract_version(self, body: str) -> str:
-        if not body:
-            return ""
-        for rx in self._VERSION_RES:
-            m = rx.search(body)
-            if m:
-                return m.group(1)
+        for pattern in self._VERSION_RES:
+            match = pattern.search(body or "")
+            if match:
+                return match.group(1)
         return ""
 
-    def _fingerprint_camaleon(self, body: str) -> bool:
+    @staticmethod
+    def _fingerprint_camaleon(body: str) -> bool:
         if not body:
             return False
         low = body.lower()
-        if "camaleon" in low:
-            return True
-        if "camaleon_cms" in low:
-            return True
-        if "/camaleon/" in low and ("gem" in low or "rails" in low):
-            return True
-        return False
-
-    def _probe_traversal(self) -> bool:
-        cookies = auth_token_cookie_dict(self.auth_token)
-        if not cookies:
-            return False
-        depth = max(1, int(self.depth or 7))
-        file_param = traversal_param_etc_passwd(depth)
-        path = camaleon_download_private_path(self.base_path, file_param)
-        resp = self.http_request(
-            method="GET",
-            path=path,
-            cookies=cookies,
-            allow_redirects=False,
-            timeout=15,
+        return (
+            "camaleon" in low
+            or "camaleon_cms" in low
+            or ("/camaleon/" in low and ("gem" in low or "rails" in low))
         )
-        if not response_ok_for_traversal_probe(resp):
-            return False
-        return response_body_suggests_passwd_read(resp.text or "")
 
     def run(self):
         try:
             bodies = []
             for rel in ("/", "/admin/login", "/admin"):
-                r = self.http_request(method="GET", path=self._page_path(rel), allow_redirects=True, timeout=15)
-                if r and r.status_code == 200 and r.text:
-                    bodies.append(r.text)
+                response = self.http_request(
+                    method="GET",
+                    path=self._page_path(rel),
+                    allow_redirects=True,
+                    timeout=15,
+                )
+                if response and response.status_code == 200 and response.text:
+                    bodies.append(response.text)
 
             if not bodies:
                 return False
@@ -135,43 +132,34 @@ class Module(Scanner, Http_client):
                 return False
 
             version = self._extract_version(combined)
-
-            if str(self.auth_token or "").strip() and self._probe_traversal():
+            if not version:
                 self.set_info(
-                    severity="critical",
+                    severity="info",
                     cve="CVE-2024-46987",
-                    reason=(
-                        "Camaleon CMS detected; authenticated traversal read of /etc/passwd succeeded "
-                        f"(version hint: {version or 'unknown'})"
-                    ),
-                    version_hint=version or None,
+                    reason="Camaleon CMS detected but version could not be extracted",
+                    path=normalize_camaleon_base_path(self.base_path) or "/",
                 )
                 return True
 
-            if version:
-                if self._version_lte(version, "2.9.0"):
-                    self.set_info(
-                        severity="high",
-                        cve="CVE-2024-46987",
-                        reason=(
-                            f"Camaleon CMS version hint {version} (≤ 2.9.0) — likely affected; "
-                            "confirm with admin auth_token via auxiliary module"
-                        ),
-                        version_hint=version,
-                    )
-                    return True
-                print_status(f"Camaleon version hint {version} (> 2.9.0); likely patched for CVE-2024-46987")
-                return False
+            if self._version_lte(version, "2.9.0"):
+                self.set_info(
+                    severity="high",
+                    cve="CVE-2024-46987",
+                    reason=(
+                        f"Camaleon CMS {version} detected (<= 2.9.0); "
+                        "within CVE-2024-46987 affected range"
+                    ),
+                    version=version,
+                    confidence="high",
+                )
+                return True
 
             self.set_info(
-                severity="medium",
-                cve="CVE-2024-46987",
-                reason=(
-                    "Camaleon CMS fingerprint without reliable version; "
-                    "set AUTH_TOKEN for active check or use auxiliary with admin session"
-                ),
+                severity="info",
+                reason=f"Camaleon CMS {version} detected; appears patched for CVE-2024-46987",
+                version=version,
             )
-            return True
-        except Exception as e:
-            print_error(f"Scanner failed: {e}")
+            return False
+        except Exception as exc:
+            print_error(f"Scanner failed: {exc}")
             return False

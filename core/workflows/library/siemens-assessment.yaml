@@ -1,0 +1,50 @@
+id: siemens-assessment
+version: "1"
+name: Siemens OT Assessment
+description: >
+  Safe-to-moderate Siemens/ICS assessment chain — passive discovery, active S7 identify,
+  protection level check, session acquire, and targeted DB read when authorized.
+tags: [ics, ot, siemens, scada, assessment]
+policy:
+  intrusive: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target PLC IP or hostname
+    required: true
+start_step: s7_identify
+steps:
+  s7_identify:
+    module: auxiliary/scanner/ics/s7comm_identify
+    description: Identify Siemens S7 CPU and protection level
+    options:
+      target: "${target}"
+    on_success: s7_protection
+    on_failure: s7_protection
+  s7_protection:
+    module: scanner/ics/s7_protection_level
+    description: Flag PLCs without password protection
+    options:
+      target: "${target}"
+    on_success: s7_session
+    on_failure: s7_session
+  s7_session:
+    module: auxiliary/scanner/ics/s7comm_session_acquire
+    description: Open an S7comm framework session
+    options:
+      target: "${target}"
+      create_session: "true"
+    output_mapping:
+      session_id: s7_session_id
+    on_success: s7_read_db
+    on_failure: done
+  s7_read_db:
+    module: post/ics/manage/s7_read_db
+    description: Read a small DB sample from the acquired session
+    options:
+      session_id: "${s7_session_id}"
+      db_number: "1"
+      start: "0"
+      size: "16"
+    on_success: done
+    on_failure: done

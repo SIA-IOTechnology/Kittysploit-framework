@@ -33,6 +33,41 @@ except ImportError:
     POLICY_ENGINE_AVAILABLE = False
 
 
+        # Legacy paths kept for backward compatibility after module moves/renames.
+MODULE_PATH_ALIASES: Dict[str, str] = {
+    "evasion/windows/x64/direct_syscall_evasion": "backdoors/windows/evasion/direct_syscall_evasion",
+    "evasion/windows/x64/syscall_indirect_evasion": "backdoors/windows/evasion/syscall_indirect_evasion",
+    "evasion/windows/x64/encrypted_dropper_evasion": "backdoors/windows/evasion/encrypted_dropper_evasion",
+    "evasion/windows/powershell_stager_evasion": "backdoors/windows/evasion/powershell_stager_evasion",
+    "evasion/windows/zig_shell_evasion": "backdoors/windows/evasion/zig_shell_evasion",
+    "evasion/windows/process_hollowing_evasion": "backdoors/windows/evasion/process_hollowing_evasion",
+    "evasion/windows/module_stomping_evasion": "backdoors/windows/evasion/module_stomping_evasion",
+    "evasion/windows/early_bird_evasion": "backdoors/windows/evasion/early_bird_evasion",
+    "evasion/windows/srdi_evasion": "backdoors/windows/evasion/srdi_evasion",
+    "evasion/windows/herpaderping_evasion": "backdoors/windows/evasion/herpaderping_evasion",
+    "evasion/windows/etw_amsi_patch_evasion": "backdoors/windows/evasion/etw_amsi_patch_evasion",
+    "evasion/windows/sleep_obfuscation_evasion": "backdoors/windows/evasion/sleep_obfuscation_evasion",
+    "evasion/linux/x64/ebpf_evasion": "backdoors/linux/evasion/ebpf_evasion",
+    "evasion/linux/x64/ptrace_inject_evasion": "backdoors/linux/evasion/ptrace_inject_evasion",
+    "evasion/linux/x64/userfaultfd_evasion": "backdoors/linux/evasion/userfaultfd_evasion",
+    "evasion/linux/ebpf_evasion": "backdoors/linux/evasion/ebpf_evasion",
+    "evasion/linux/ptrace_inject_evasion": "backdoors/linux/evasion/ptrace_inject_evasion",
+    "evasion/linux/userfaultfd_evasion": "backdoors/linux/evasion/userfaultfd_evasion",
+    "evasion/linux/x64/elf_shellcode_loader": "backdoors/linux/evasion/elf_shellcode_loader",
+    "evasion/linux/elf_shellcode_loader": "backdoors/linux/evasion/elf_shellcode_loader",
+    "evasion/linux/x64/memfd_exec_evasion": "backdoors/linux/evasion/memfd_exec_evasion",
+    "evasion/linux/memfd_exec_evasion": "backdoors/linux/evasion/memfd_exec_evasion",
+    "evasion/linux/x64/zig_reverse_evasion": "backdoors/linux/evasion/zig_reverse_evasion",
+    "evasion/linux/zig_reverse_evasion": "backdoors/linux/evasion/zig_reverse_evasion",
+    "evasion/linux/x64/ld_preload_evasion": "backdoors/linux/evasion/ld_preload_evasion",
+    "evasion/linux/ld_preload_evasion": "backdoors/linux/evasion/ld_preload_evasion",
+    "evasion/linux/x64/deb_evasion_packaging": "backdoors/linux/evasion/deb_evasion_packaging",
+    "evasion/linux/deb_evasion_packaging": "backdoors/linux/evasion/deb_evasion_packaging",
+    "evasion/linux/x64/proc_mem_evasion": "backdoors/linux/evasion/proc_mem_evasion",
+    "evasion/linux/proc_mem_evasion": "backdoors/linux/evasion/proc_mem_evasion",
+}
+
+
 class LoadFailureKind(str, Enum):
     NOT_FOUND = "not_found"
     CONTRACT = "contract"
@@ -106,6 +141,45 @@ class ModuleLoader:
         with_py = os.path.join(self.modules_path, normalized.replace("/", os.sep) + ".py")
         without_py = os.path.join(self.modules_path, normalized.replace("/", os.sep))
         return with_py, without_py
+
+    def resolve_module_source_file(
+        self,
+        module_path: str,
+        discovered_ref: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve a module path to an on-disk source file (including library YAML workflows)."""
+        module_path = str(module_path or "").strip().strip("/")
+        if not module_path:
+            return None
+
+        ref = discovered_ref
+        if ref is None:
+            discovered = self.discover_modules()
+            ref = discovered.get(module_path)
+            if ref is None:
+                file_format_path = module_path.replace(".", "/")
+                ref = discovered.get(file_format_path)
+
+        if ref:
+            from core.workflows.module_bridge import (
+                is_library_workflow_uri,
+                resolve_library_workflow_yaml_path,
+                workflow_id_from_uri,
+            )
+
+            if is_library_workflow_uri(ref):
+                try:
+                    return str(resolve_library_workflow_yaml_path(workflow_id_from_uri(ref)))
+                except FileNotFoundError:
+                    return None
+            if os.path.isfile(ref):
+                return ref
+
+        file_format_path = module_path.replace(".", "/")
+        py_candidate = os.path.join(self.modules_path, file_format_path.replace("/", os.sep) + ".py")
+        if os.path.isfile(py_candidate):
+            return py_candidate
+        return None
 
     def _discovered_paths_list(self) -> List[str]:
         if self._discovered_paths_cache is None:
@@ -459,6 +533,9 @@ class ModuleLoader:
         extensions_modules = self._discover_extension_modules()
         modules.update(extensions_modules)
 
+        for path, uri in self._discover_library_workflow_modules().items():
+            modules.setdefault(path, uri)
+
         self._discovered_modules_cache = modules
         self._discovered_paths_cache = sorted(modules.keys())
         return modules
@@ -537,6 +614,7 @@ class ModuleLoader:
         """
         self.last_load_failure = None
         try:
+            module_path = MODULE_PATH_ALIASES.get(module_path, module_path)
             if module_path.startswith("modules/marketplace/"):
                 return self._load_extension_module(module_path, load_only, framework, silent)
 
@@ -546,6 +624,14 @@ class ModuleLoader:
             elif os.path.isfile(module_file_alt):
                 resolved_file = module_file_alt
             else:
+                library_module = self._load_library_workflow_module(
+                    module_path,
+                    load_only=load_only,
+                    framework=framework,
+                    silent=silent,
+                )
+                if library_module is not None:
+                    return library_module
                 self._fail(
                     module_path,
                     LoadFailureKind.NOT_FOUND,
@@ -968,8 +1054,49 @@ class ModuleLoader:
                             
                             # Add the module to the list
                             modules[module_path] = os.path.join(root, file)
-        
+
+        modules.update(self._discover_library_workflow_modules())
         return modules
+
+    def _discover_library_workflow_modules(self) -> Dict[str, str]:
+        try:
+            from core.workflows.module_bridge import discover_library_workflow_modules
+
+            return discover_library_workflow_modules(self.modules_path)
+        except Exception as exc:
+            logging.debug("Library workflow discovery skipped: %s", exc)
+            return {}
+
+    def _load_library_workflow_module(
+        self,
+        module_path: str,
+        *,
+        load_only: bool = False,
+        framework=None,
+        silent: bool = False,
+    ) -> Optional[Any]:
+        try:
+            from core.workflows.module_bridge import load_library_workflow_module
+
+            instance = load_library_workflow_module(module_path, framework=framework)
+            if instance is None:
+                return None
+            if not load_only:
+                self.modules_cache[module_path] = instance
+            return instance
+        except FileNotFoundError:
+            return None
+        except Exception as exc:
+            logging.debug("Library workflow load failed for %s: %s", module_path, exc)
+            if not silent:
+                self._fail(
+                    module_path,
+                    LoadFailureKind.IMPORT_ERROR,
+                    "Failed to load declarative workflow library module",
+                    cause=f"{type(exc).__name__}: {exc}",
+                    silent=silent,
+                )
+            return None
     
     def _is_module_type_path(self, module_path: str, module_type: str) -> bool:
         """Check if a module path corresponds to the specified type"""
@@ -1042,7 +1169,15 @@ class ModuleLoader:
 
         for module_path, file_path in discovered_modules.items():
             try:
-                meta = extract_module_search_metadata(file_path)
+                if str(file_path).startswith("library://"):
+                    from core.workflows.module_bridge import (
+                        library_workflow_search_metadata,
+                        workflow_id_from_uri,
+                    )
+
+                    meta = library_workflow_search_metadata(workflow_id_from_uri(file_path))
+                else:
+                    meta = extract_module_search_metadata(file_path)
                 facets = extract_search_facets(meta, module_path)
                 tags_list = meta.get("tags") or []
                 opts = {"_search": {key: value for key, value in facets.items() if value}}

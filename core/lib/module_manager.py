@@ -57,9 +57,13 @@ class ModuleManager:
         """Get all listener modules"""
         return self.get_modules_by_type("listener")
 
+    def get_transforms(self) -> Dict[str, Any]:
+        """Get all C2 stream transform modules"""
+        return self.get_modules_by_type("transform")
+
     def get_obfuscators(self) -> Dict[str, Any]:
-        """Get all obfuscator modules"""
-        return self.get_modules_by_type("obfuscator")
+        """Deprecated alias for get_transforms()."""
+        return self.get_transforms()
     
     def get_environments(self) -> Dict[str, Any]:
         """Get all environment modules"""
@@ -99,7 +103,7 @@ class ModuleManager:
         # Get modules by type
         module_types = [
             "exploit", "auxiliary", "payload", "listener", 
-            "obfuscator", "environment", "browser_auxiliary", "browser_exploit"
+            "transform", "environment", "browser_auxiliary", "browser_exploit"
         ]
         
         for module_type in module_types:

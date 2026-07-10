@@ -27,6 +27,8 @@ SUPPORTED_TYPES = {
     "exploit",
     "listeners",
     "listener",
+    "transform",
+    "transforms",
     "obfuscator",
     "obfuscators",
     "payloads",
@@ -56,12 +58,21 @@ PROTOCOL_PATH_HINTS = (
     ("scanner/ldap/", "ldap"),
     ("scanner/smb/", "smb"),
     ("scanner/ftp/", "ftp"),
+    ("auxiliary/scanner/ftp/", "ftp"),
     ("scanner/ssh/", "ssh"),
     ("scanner/mysql/", "mysql"),
+    ("post/mysql/", "mysql"),
     ("scanner/redis/", "redis"),
+    ("post/redis/", "redis"),
     ("scanner/cloud/", "cloud"),
     ("scanner/telecom/", "telecom"),
     ("scanner/tcp/", "tcp"),
+    ("scanner/ics/mqtt", "mqtt"),
+    ("auxiliary/scanner/ics/mqtt", "mqtt"),
+    ("listeners/iot/mqtt", "mqtt"),
+    ("listeners/covert/dns", "dns"),
+    ("auxiliary/osint/", "dns"),
+    ("auxiliary/gather/brute_dns", "dns"),
     ("listeners/web/", "http"),
     ("listeners/multi/", "tcp"),
 )
@@ -156,6 +167,52 @@ def normalize_reliability(value: Any) -> str:
     return RELIABILITY_ALIASES.get(text, text)
 
 
+def infer_platform_from_module_path(module_path: str) -> str:
+    path = (module_path or "").lower().replace("\\", "/")
+    if path.startswith("modules/"):
+        path = path[len("modules/") :]
+    hints = (
+        ("/shell/linux/", "linux"),
+        ("/linux/", "linux"),
+        ("/windows/", "windows"),
+        ("/android/", "android"),
+        ("/php/", "php"),
+        ("/gcp/", "cloud"),
+        ("/aws/", "cloud"),
+        ("/azure/", "cloud"),
+        ("/ics/", "ics"),
+        ("/adb/", "android"),
+        ("/wp_", "php"),
+        ("/wordpress", "php"),
+    )
+    for fragment, platform in hints:
+        if fragment in path:
+            return platform
+    parts = path.split("/")
+    if len(parts) >= 2 and parts[0] == "exploits":
+        if parts[1] in {"linux", "windows", "android", "unix"}:
+            return parts[1]
+        if parts[1] in {"multi", "ctf"}:
+            return "multi"
+    if len(parts) >= 2 and parts[0] == "post" and parts[1] in {
+        "mysql",
+        "postgresql",
+        "redis",
+        "mongodb",
+        "mssql",
+        "http",
+        "ftp",
+        "ldap",
+        "smb",
+        "quic",
+        "canbus",
+        "elasticsearch",
+        "email",
+    }:
+        return "multi"
+    return ""
+
+
 def infer_protocol_from_module_path(module_path: str) -> str:
     path = (module_path or "").lower().replace("\\", "/")
     if not path.startswith("modules/"):
@@ -166,6 +223,10 @@ def infer_protocol_from_module_path(module_path: str) -> str:
         if normalized.startswith(prefix):
             return protocol
     parts = normalized.split("/")
+    if len(parts) >= 3 and parts[0] == "auxiliary" and parts[1] == "scanner":
+        return parts[2]
+    if len(parts) >= 2 and parts[0] == "post":
+        return parts[1]
     if len(parts) >= 2 and parts[0] in {"scanner", "auxiliary", "exploits", "exploit", "listeners", "listener"}:
         candidate = parts[1]
         if candidate not in {"multi", "linux", "windows", "unix", "scanner"}:
@@ -176,7 +237,7 @@ def infer_protocol_from_module_path(module_path: str) -> str:
 
 
 def extract_search_facets(meta: Dict[str, Any], module_path: str) -> Dict[str, str]:
-    platform = normalize_platform(meta.get("platform"))
+    platform = normalize_platform(meta.get("platform")) or infer_platform_from_module_path(module_path)
     protocol = str(meta.get("protocol") or "").strip().lower() or infer_protocol_from_module_path(module_path)
     reliability = normalize_reliability(meta.get("reliability") or meta.get("severity") or meta.get("confidence"))
     return {

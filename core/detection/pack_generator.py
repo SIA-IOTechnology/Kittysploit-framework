@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import unquote
 
+from core.detection.post_telemetry import enrich_edr_hypotheses, enrich_expected_logs
+
 
 @dataclass
 class GeneratedPack:
@@ -171,7 +173,7 @@ Generated from KittySploit module `{self.module_path}`.
             "- Treat generated rules as a starting point: test with authorized replay traffic and known-benign service activity.",
             "- Record false positives and promote stable indicators into organization-specific detections.",
         ])
-        return "\n".join(lines) + "\n"
+        return "\n".join(enrich_edr_hypotheses(lines, self.module_path)) + "\n"
 
     def render_sigma(self) -> str:
         title = self.info.get("name") or self.slug
@@ -286,7 +288,7 @@ event http_request(c: connection, method: string, original_URI: string, unescape
 
     def expected_logs(self) -> Dict[str, Any]:
         sample_uri = "/" + (self._network_indicators()[0] if self._network_indicators() else self.slug)
-        return {
+        base = {
             "schema_version": "1.0",
             "module": self.module_path,
             "expected_sources": [
@@ -321,6 +323,7 @@ event http_request(c: connection, method: string, original_URI: string, unescape
             ],
             "indicators": self.indicators,
         }
+        return enrich_expected_logs(base, self.module_path)
 
     def test_fixtures(self) -> Dict[str, Any]:
         return {
@@ -496,6 +499,16 @@ if __name__ == "__main__":
         return score
 
     def _sigma_selection(self) -> Dict[str, Dict[str, List[str]]]:
+        from core.detection.post_telemetry import get_post_telemetry
+
+        profile = get_post_telemetry(self.module_path)
+        if profile and profile.get("sigma_hints"):
+            return {
+                "selection_post_telemetry": {
+                    "CommandLine|contains": list(profile["sigma_hints"][:8]),
+                }
+            }
+
         network = self._network_indicators()
         artifact = self._artifact_indicators()
         selections = {}

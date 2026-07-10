@@ -1,0 +1,405 @@
+id: service-discovery
+version: "1"
+name: Service & Panel Discovery
+description: >
+  Multi-layer host discovery — TCP/UDP services (SSH, RDP, VNC, WinRM, databases,
+  cache, SNMP) followed by HTTP panel and misconfiguration scanners inspired by
+  Nuclei exposed-panels and technology templates.
+tags: [discovery, scanner, network, panels, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+  http_port:
+    description: HTTPS/HTTP port for web panel phase
+    default: "443"
+  ssl:
+    description: Use TLS for HTTP panel phase
+    default: "true"
+start_step: ssh_banner
+steps:
+  ssh_banner:
+    module: scanner/ssh/openssh_banner_detect
+    description: SSH banner fingerprint (OpenSSH/Dropbear)
+    options:
+      target: "${target}"
+      port: "22"
+    on_success: rdp_service
+    on_failure: rdp_service
+  rdp_service:
+    module: scanner/tcp/rdp_service_detect
+    description: RDP service on TCP 3389
+    options:
+      target: "${target}"
+      port: "3389"
+    on_success: vnc_service
+    on_failure: vnc_service
+  vnc_service:
+    module: scanner/tcp/vnc_service_detect
+    description: VNC/RFB service on TCP 5900
+    options:
+      target: "${target}"
+      port: "5900"
+    on_success: winrm_service
+    on_failure: winrm_service
+  winrm_service:
+    module: scanner/tcp/winrm_detect
+    description: WinRM /wsman on TCP 5985
+    options:
+      target: "${target}"
+      port: "5985"
+      ssl: "false"
+    on_success: postgresql_info
+    on_failure: postgresql_info
+  postgresql_info:
+    module: scanner/postgresql/postgresql_info_detect
+    description: PostgreSQL startup handshake
+    options:
+      target: "${target}"
+      port: "5432"
+    on_success: mysql_info
+    on_failure: mysql_info
+  mysql_info:
+    module: scanner/mysql/mysql_info_detect
+    description: MySQL handshake fingerprint
+    options:
+      target: "${target}"
+      port: "3306"
+    on_success: mssql_info
+    on_failure: mssql_info
+  mssql_info:
+    module: scanner/mssql/mssql_info_detect
+    description: MSSQL TDS prelogin fingerprint
+    options:
+      target: "${target}"
+      port: "1433"
+    on_success: mongodb_unauth
+    on_failure: mongodb_unauth
+  mongodb_unauth:
+    module: scanner/mongodb/mongodb_unauth_detect
+    description: MongoDB exposure and unauthenticated access
+    options:
+      target: "${target}"
+      port: "27017"
+    on_success: redis_info
+    on_failure: redis_info
+  redis_info:
+    module: scanner/redis/redis_info_detect
+    description: Redis INFO enumeration
+    options:
+      target: "${target}"
+      port: "6379"
+    on_success: redis_unauth_write
+    on_failure: redis_unauth_write
+  redis_unauth_write:
+    module: scanner/redis/redis_unauth_write_detect
+    description: Redis unauthenticated write test
+    options:
+      target: "${target}"
+      port: "6379"
+    on_success: memcached_detect
+    on_failure: memcached_detect
+  memcached_detect:
+    module: scanner/tcp/memcached_detect
+    description: Memcached stats without authentication
+    options:
+      target: "${target}"
+      port: "11211"
+    on_success: snmp_service
+    on_failure: snmp_service
+  snmp_service:
+    module: scanner/udp/snmp_service_detect
+    description: SNMP sysDescr via public community
+    options:
+      target: "${target}"
+      port: "161"
+      community: "public"
+    on_success: spring_actuator
+    on_failure: spring_actuator
+  spring_actuator:
+    module: scanner/http/spring_actuator_detect
+    description: Spring Boot Actuator endpoints
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: gitlab_panel
+    on_failure: gitlab_panel
+  gitlab_panel:
+    module: scanner/http/gitlab_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: jira_panel
+    on_failure: jira_panel
+  jira_panel:
+    module: scanner/http/jira_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: confluence_panel
+    on_failure: confluence_panel
+  confluence_panel:
+    module: scanner/http/confluence_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: confluence_preauth
+    on_failure: confluence_preauth
+  confluence_preauth:
+    module: scanner/http/confluence_preauth_detect
+    description: Confluence OGNL pre-auth fingerprint (CVE-2022-26134)
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: jenkins_panel
+    on_failure: jenkins_panel
+  jenkins_panel:
+    module: scanner/http/jenkins_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: sonarqube_panel
+    on_failure: sonarqube_panel
+  sonarqube_panel:
+    module: scanner/http/sonarqube_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: harbor_panel
+    on_failure: harbor_panel
+  harbor_panel:
+    module: scanner/http/harbor_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: argocd_panel
+    on_failure: argocd_panel
+  argocd_panel:
+    module: scanner/http/argocd_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: k8s_dashboard
+    on_failure: k8s_dashboard
+  k8s_dashboard:
+    module: scanner/http/kubernetes_dashboard_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: portainer_panel
+    on_failure: portainer_panel
+  portainer_panel:
+    module: scanner/http/portainer_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: traefik_panel
+    on_failure: traefik_panel
+  traefik_panel:
+    module: scanner/http/traefik_dashboard_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: prometheus_panel
+    on_failure: prometheus_panel
+  prometheus_panel:
+    module: scanner/http/prometheus_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: grafana_panel
+    on_failure: grafana_panel
+  grafana_panel:
+    module: scanner/http/grafana_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: kibana_panel
+    on_failure: kibana_panel
+  kibana_panel:
+    module: scanner/http/kibana_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: elasticsearch_panel
+    on_failure: elasticsearch_panel
+  elasticsearch_panel:
+    module: scanner/http/elasticsearch_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: consul_panel
+    on_failure: consul_panel
+  consul_panel:
+    module: scanner/http/consul_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: etcd_panel
+    on_failure: etcd_panel
+  etcd_panel:
+    module: scanner/http/etcd_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: docker_registry
+    on_failure: docker_registry
+  docker_registry:
+    module: scanner/http/docker_registry_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: tomcat_manager
+    on_failure: tomcat_manager
+  tomcat_manager:
+    module: scanner/http/tomcat_manager_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: exchange_owa
+    on_failure: exchange_owa
+  exchange_owa:
+    module: scanner/http/exchange_owa_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: phpmyadmin_setup
+    on_failure: phpmyadmin_setup
+  phpmyadmin_setup:
+    module: scanner/http/phpmyadmin_setup_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: nexus_panel
+    on_failure: nexus_panel
+  nexus_panel:
+    module: scanner/http/nexus_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: rabbitmq_panel
+    on_failure: rabbitmq_panel
+  rabbitmq_panel:
+    module: scanner/http/rabbitmq_management_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: couchdb_panel
+    on_failure: couchdb_panel
+  couchdb_panel:
+    module: scanner/http/couchdb_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: solr_panel
+    on_failure: solr_panel
+  solr_panel:
+    module: scanner/http/solr_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: minio_panel
+    on_failure: minio_panel
+  minio_panel:
+    module: scanner/http/minio_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: weblogic_panel
+    on_failure: weblogic_panel
+  weblogic_panel:
+    module: scanner/http/weblogic_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: influxdb_panel
+    on_failure: influxdb_panel
+  influxdb_panel:
+    module: scanner/http/influxdb_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: phppgadmin_panel
+    on_failure: phppgadmin_panel
+  phppgadmin_panel:
+    module: scanner/http/phppgadmin_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: exposed_git
+    on_failure: exposed_git
+  exposed_git:
+    module: scanner/http/exposed_git_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: exposed_env
+    on_failure: exposed_env
+  exposed_env:
+    module: scanner/http/exposed_env_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: sensitive_files
+    on_failure: sensitive_files
+  sensitive_files:
+    module: scanner/http/sensitive_files_detect
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: log4j_probe
+    on_failure: log4j_probe
+  log4j_probe:
+    module: scanner/http/log4j_header_detect
+    description: Log4Shell header reflection probe (CVE-2021-44228)
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: spring4shell_probe
+    on_failure: spring4shell_probe
+  spring4shell_probe:
+    module: scanner/http/spring4shell_detect
+    description: Spring4Shell parameter binding probe (CVE-2022-22965)
+    options:
+      target: "${target}"
+      port: "${http_port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

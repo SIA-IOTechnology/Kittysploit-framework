@@ -1,0 +1,46 @@
+id: siemens-deep-assessment
+version: "1"
+name: Siemens Deep Assessment
+description: >
+  Phase 3 Siemens OT chain — module enumeration, protection check, program-transfer
+  probe, optional password spray, and HMI default credential testing.
+tags: [ics, ot, siemens, assessment, phase3]
+policy:
+  intrusive: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target PLC or HMI IP
+    required: true
+  hmi_port: "80"
+start_step: s7_module_enum
+steps:
+  s7_module_enum:
+    module: auxiliary/scanner/ics/s7_module_enum
+    description: Enumerate rack/slot modules via SZL
+    options:
+      target: "${target}"
+    on_success: s7_protection
+    on_failure: s7_protection
+  s7_protection:
+    module: scanner/ics/s7_protection_level
+    description: Check S7 password protection level
+    options:
+      target: "${target}"
+    on_success: s7_program_transfer
+    on_failure: s7_program_transfer
+  s7_program_transfer:
+    module: scanner/ics/s7_program_transfer_detect
+    description: Probe S7 upload/download job channel
+    options:
+      target: "${target}"
+    on_success: hmi_defaults
+    on_failure: hmi_defaults
+  hmi_defaults:
+    module: auxiliary/scanner/ics/hmi_default_creds
+    description: Test common HMI default credentials
+    options:
+      target: "${target}"
+      port: "${hmi_port}"
+    on_success: done
+    on_failure: done

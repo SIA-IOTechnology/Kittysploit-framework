@@ -1,0 +1,194 @@
+id: saas-panels
+version: "1"
+name: SaaS, Identity & AI Panel Discovery
+description: >
+  HTTP discovery for identity providers, collaboration suites, observability,
+  data platforms, AI/ML UIs, and PaaS hosting markers.
+tags: [discovery, scanner, saas, iam, ai, panels, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target hostname or URL
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: okta_panel
+steps:
+  okta_panel:
+    module: scanner/http/okta_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: auth0_panel
+    on_failure: auth0_panel
+  auth0_panel:
+    module: scanner/http/auth0_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: sharepoint_panel
+    on_failure: sharepoint_panel
+  sharepoint_panel:
+    module: scanner/http/sharepoint_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: netlify_hosting
+    on_failure: netlify_hosting
+  netlify_hosting:
+    module: scanner/http/netlify_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: vercel_hosting
+    on_failure: vercel_hosting
+  vercel_hosting:
+    module: scanner/http/vercel_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: teamcity_panel
+    on_failure: teamcity_panel
+  teamcity_panel:
+    module: scanner/http/teamcity_detect
+    options:
+      target: "${target}"
+      port: "8111"
+      ssl: "false"
+    on_success: rancher_panel
+    on_failure: rancher_panel
+  rancher_panel:
+    module: scanner/http/rancher_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: bitbucket_panel
+    on_failure: bitbucket_panel
+  bitbucket_panel:
+    module: scanner/http/bitbucket_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: mattermost_panel
+    on_failure: mattermost_panel
+  mattermost_panel:
+    module: scanner/http/mattermost_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: rocketchat_panel
+    on_failure: rocketchat_panel
+  rocketchat_panel:
+    module: scanner/http/rocketchat_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: nextcloud_panel
+    on_failure: nextcloud_panel
+  nextcloud_panel:
+    module: scanner/http/nextcloud_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: strapi_panel
+    on_failure: strapi_panel
+  strapi_panel:
+    module: scanner/http/strapi_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: graylog_panel
+    on_failure: graylog_panel
+  graylog_panel:
+    module: scanner/http/graylog_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: splunk_panel
+    on_failure: splunk_panel
+  splunk_panel:
+    module: scanner/http/splunk_detect
+    options:
+      target: "${target}"
+      port: "8000"
+      ssl: "false"
+    on_success: clickhouse_panel
+    on_failure: clickhouse_panel
+  clickhouse_panel:
+    module: scanner/http/clickhouse_detect
+    options:
+      target: "${target}"
+      port: "8123"
+      ssl: "false"
+    on_success: activemq_console
+    on_failure: activemq_console
+  activemq_console:
+    module: scanner/http/activemq_console_detect
+    options:
+      target: "${target}"
+      port: "8161"
+      ssl: "false"
+    on_success: citrix_gateway
+    on_failure: citrix_gateway
+  citrix_gateway:
+    module: scanner/http/citrix_gateway_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: mlflow_panel
+    on_failure: mlflow_panel
+  mlflow_panel:
+    module: scanner/http/mlflow_detect
+    options:
+      target: "${target}"
+      port: "5000"
+      ssl: "false"
+    on_success: ollama_api
+    on_failure: ollama_api
+  ollama_api:
+    module: scanner/http/ollama_detect
+    options:
+      target: "${target}"
+      port: "11434"
+      ssl: "false"
+    on_success: openwebui_panel
+    on_failure: openwebui_panel
+  openwebui_panel:
+    module: scanner/http/openwebui_detect
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: comfyui_panel
+    on_failure: comfyui_panel
+  comfyui_panel:
+    module: scanner/http/comfyui_detect
+    options:
+      target: "${target}"
+      port: "8188"
+      ssl: "false"
+    on_success: zookeeper_service
+    on_failure: zookeeper_service
+  zookeeper_service:
+    module: scanner/tcp/zookeeper_detect
+    description: Zookeeper coordination service on TCP 2181
+    options:
+      target: "${target}"
+      port: "2181"
+    on_success: null
+    on_failure: null

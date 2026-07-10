@@ -1467,8 +1467,11 @@ class MeterpreterShell(BaseShell):
         if os_hint == "windows":
             modules = [
                 ("modules/post/shell/windows/gather/enum_system", "enumerate OS, user, token and privilege context"),
-                ("modules/post/shell/windows/exploits/fodhelper_uac_bypass", "try a UAC bypass when the session is already a local admin"),
-                ("modules/post/shell/windows/exploits/bypassuac", "review available UAC bypass techniques"),
+                ("modules/post/shell/windows/gather/edr_audit", "audit Defender, PPL, Credential Guard and EDR processes"),
+                ("modules/post/shell/windows/exploits/uac_fodhelper", "try a UAC bypass when the session is already a local admin"),
+                ("modules/post/shell/windows/exploits/uac_auto", "try UAC bypass techniques in order"),
+                ("modules/post/shell/windows/gather/uac_audit", "audit UAC level and token filtering before escalation"),
+                ("modules/post/shell/windows/manage/amsi_bypass", "patch AMSI before running PowerShell payloads"),
                 ("modules/post/shell/windows/manage/migrate", "move into a more stable/high-value process after privilege changes"),
             ]
         elif os_hint == "linux":

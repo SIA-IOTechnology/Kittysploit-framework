@@ -1,0 +1,142 @@
+id: network-services
+version: "1"
+name: Network Services Discovery
+description: >
+  Fast TCP/UDP service fingerprint — SSH, RDP, VNC, WinRM, databases, cache,
+  and SNMP. Use before devops-panels or service-discovery HTTP phase.
+tags: [discovery, scanner, network, tcp, udp, quick-win]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: ssh_banner
+steps:
+  ssh_banner:
+    module: scanner/ssh/openssh_banner_detect
+    options:
+      target: "${target}"
+      port: "22"
+    on_success: rdp_service
+    on_failure: rdp_service
+  rdp_service:
+    module: scanner/tcp/rdp_service_detect
+    options:
+      target: "${target}"
+      port: "3389"
+    on_success: vnc_service
+    on_failure: vnc_service
+  vnc_service:
+    module: scanner/tcp/vnc_service_detect
+    options:
+      target: "${target}"
+      port: "5900"
+    on_success: winrm_service
+    on_failure: winrm_service
+  winrm_service:
+    module: scanner/tcp/winrm_detect
+    options:
+      target: "${target}"
+      port: "5985"
+      ssl: "false"
+    on_success: postgresql_info
+    on_failure: postgresql_info
+  postgresql_info:
+    module: scanner/postgresql/postgresql_info_detect
+    options:
+      target: "${target}"
+      port: "5432"
+    on_success: mysql_info
+    on_failure: mysql_info
+  mysql_info:
+    module: scanner/mysql/mysql_info_detect
+    options:
+      target: "${target}"
+      port: "3306"
+    on_success: mssql_info
+    on_failure: mssql_info
+  mssql_info:
+    module: scanner/mssql/mssql_info_detect
+    options:
+      target: "${target}"
+      port: "1433"
+    on_success: mongodb_unauth
+    on_failure: mongodb_unauth
+  mongodb_unauth:
+    module: scanner/mongodb/mongodb_unauth_detect
+    options:
+      target: "${target}"
+      port: "27017"
+    on_success: redis_info
+    on_failure: redis_info
+  redis_info:
+    module: scanner/redis/redis_info_detect
+    options:
+      target: "${target}"
+      port: "6379"
+    on_success: redis_unauth_write
+    on_failure: redis_unauth_write
+  redis_unauth_write:
+    module: scanner/redis/redis_unauth_write_detect
+    options:
+      target: "${target}"
+      port: "6379"
+    on_success: memcached_detect
+    on_failure: memcached_detect
+  memcached_detect:
+    module: scanner/tcp/memcached_detect
+    options:
+      target: "${target}"
+      port: "11211"
+    on_success: snmp_service
+    on_failure: snmp_service
+  snmp_service:
+    module: scanner/udp/snmp_service_detect
+    options:
+      target: "${target}"
+      port: "161"
+      community: "public"
+    on_success: ftp_banner
+    on_failure: ftp_banner
+  ftp_banner:
+    module: scanner/ftp/ftp_banner_detect
+    description: FTP welcome banner fingerprint
+    options:
+      target: "${target}"
+      port: "21"
+    on_success: telnet_banner
+    on_failure: telnet_banner
+  telnet_banner:
+    module: scanner/tcp/telnet_banner_detect
+    description: Telnet service banner
+    options:
+      target: "${target}"
+      port: "23"
+    on_success: cassandra_native
+    on_failure: cassandra_native
+  cassandra_native:
+    module: scanner/cassandra/cassandra_native_detect
+    description: Cassandra CQL native protocol
+    options:
+      target: "${target}"
+      port: "9042"
+    on_success: rabbitmq_amqp
+    on_failure: rabbitmq_amqp
+  rabbitmq_amqp:
+    module: scanner/tcp/rabbitmq_amqp_detect
+    description: RabbitMQ AMQP service
+    options:
+      target: "${target}"
+      port: "5672"
+    on_success: zookeeper_service
+    on_failure: zookeeper_service
+  zookeeper_service:
+    module: scanner/tcp/zookeeper_detect
+    description: Zookeeper coordination service
+    options:
+      target: "${target}"
+      port: "2181"
+    on_success: null
+    on_failure: null

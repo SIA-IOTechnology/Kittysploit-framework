@@ -9,13 +9,11 @@ _AFFECTED_VERSION = "3.4.5"
 
 
 class Module(Scanner, Http_client, Phpsysinfo):
-
     __info__ = {
-        "name": "phpSysInfo CVE-2026-55584 (PSI_ALLOWED IP allowlist bypass) detection",
+        "name": "phpSysInfo CVE-2026-55584 detection",
         "description": (
-            "Detects phpSysInfo <= 3.4.5 instances where PSI_ALLOWED can be bypassed by "
-            "spoofing X-Forwarded-For or Client-IP before REMOTE_ADDR is checked. "
-            "Probes xml.php with a baseline request, then common allowlisted IP candidates."
+            "Fingerprints phpSysInfo and flags versions <= 3.4.5 affected by CVE-2026-55584 "
+            "(PSI_ALLOWED IP allowlist bypass via X-Forwarded-For / Client-IP)."
         ),
         "author": ["KittySploit Team"],
         "severity": "high",
@@ -33,119 +31,106 @@ class Module(Scanner, Http_client, Phpsysinfo):
             "phpsysinfo",
             "disclosure",
             "allowlist",
-            "bypass",
             "cve-2026-55584",
         ],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
-            "expected_requests": 4,
+            "expected_requests": 2,
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": [],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "file_read", "from_detail": "lfi_path"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "auxiliary/admin/http/phpsysinfo_cve_2026_55584_info_disclosure",
+                ],
+            },
         },
     }
 
     base_path = OptString("/", "phpSysInfo base URL path (e.g. /phpsysinfo)", required=False)
-    spoof_ip = OptString(
-        "",
-        "Known allowlisted IP to try first (optional; common private/resolver IPs are also tested)",
-        required=False,
-    )
-    header_mode = OptString(
-        "all",
-        "Bypass header to use: all, x-forwarded-for, client-ip",
-        required=False,
-        advanced=True,
-    )
 
     def run(self):
         try:
-            result = self.phpsysinfo_probe_allowlist_bypass(
-                base_path=self.base_path,
-                spoof_ip=self.spoof_ip,
-                header_mode=self.header_mode,
-                timeout=max(int(self.timeout or 10), 10),
+            version = ""
+            evidence_path = ""
+            for path in self.phpsysinfo_index_paths(self.base_path):
+                response = self.http_request(
+                    method="GET",
+                    path=path,
+                    allow_redirects=True,
+                    timeout=max(int(self.timeout or 10), 10),
+                )
+                if not response or response.status_code != 200:
+                    continue
+                body = response.text or ""
+                if not self.phpsysinfo_looks_like_page(body):
+                    continue
+                evidence_path = path
+                version = self.phpsysinfo_extract_version(body)
+                if version:
+                    break
+
+            if not evidence_path:
+                return False
+
+            if not version:
+                self.set_info(
+                    severity="info",
+                    cve="CVE-2026-55584",
+                    reason="phpSysInfo detected but version could not be extracted",
+                    path=evidence_path,
+                )
+                return True
+
+            if self.phpsysinfo_version_lte(version, _AFFECTED_VERSION):
+                self.set_info(
+                    severity="high",
+                    cve="CVE-2026-55584",
+                    reason=(
+                        f"phpSysInfo {version} detected at {evidence_path}; "
+                        f"<= {_AFFECTED_VERSION} is within CVE-2026-55584 affected range"
+                    ),
+                    version=version,
+                    path=evidence_path,
+                    confidence="high",
+                )
+                return True
+
+            self.set_info(
+                severity="info",
+                reason=(
+                    f"phpSysInfo {version} detected at {evidence_path}; "
+                    "appears patched for CVE-2026-55584"
+                ),
+                version=version,
+                path=evidence_path,
             )
+            return False
         except Exception as exc:
             print_error(f"Scanner failed: {exc}")
             return False
-
-        status = result.get("status")
-        version = str(result.get("version") or "")
-        reason = str(result.get("reason") or "")
-
-        if status == "bypass":
-            detail = reason
-            if version:
-                detail += f"; version hint {version}"
-            self.set_info(
-                severity="high",
-                cve="CVE-2026-55584",
-                reason=detail,
-                confidence="high",
-                xml_path=result.get("xml_path"),
-                spoof_ip=result.get("spoof_ip"),
-                header=result.get("header_name"),
-            )
-            print_success(
-                f"Bypass confirmed via {result.get('header_name')}: {result.get('spoof_ip')} "
-                f"on {result.get('xml_path')}"
-            )
-            return True
-
-        if status == "open":
-            if version and self.phpsysinfo_version_lte(version, _AFFECTED_VERSION):
-                self.set_info(
-                    severity="medium",
-                    cve="CVE-2026-55584",
-                    reason=(
-                        f"phpSysInfo {version} exposes xml.php without allowlist denial; "
-                        f"version <= {_AFFECTED_VERSION} may be affected if PSI_ALLOWED is enabled"
-                    ),
-                    confidence="medium",
-                    xml_path=result.get("xml_path"),
-                )
-                print_warning(
-                    f"xml.php is reachable (version hint {version}); allowlist bypass not required to read XML"
-                )
-                return True
-
-            self.set_info(
-                severity="info",
-                reason=reason,
-                xml_path=result.get("xml_path"),
-            )
-            print_info("xml.php is reachable without allowlist denial")
-            return True
-
-        if status == "denied":
-            self.set_info(
-                severity="info",
-                cve="CVE-2026-55584",
-                reason=reason,
-                confidence="low",
-                xml_path=result.get("xml_path"),
-            )
-            print_warning("Allowlist denial seen; bypass not confirmed with default spoof IPs")
-            return False
-
-        if status == "not_found":
-            if version and self.phpsysinfo_version_lte(version, _AFFECTED_VERSION):
-                self.set_info(
-                    severity="medium",
-                    cve="CVE-2026-55584",
-                    reason=f"{reason}; version hint {version} (<= {_AFFECTED_VERSION})",
-                    confidence="low",
-                )
-                print_warning(reason)
-                return True
-
-            print_status(reason)
-            return False
-
-        if status == "error":
-            print_error(reason)
-            return False
-
-        return False

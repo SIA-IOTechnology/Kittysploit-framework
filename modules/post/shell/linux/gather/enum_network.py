@@ -1,7 +1,8 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux Network Enumeration",
@@ -18,12 +19,65 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
     def run(self):
         """Enumerate network information"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Starting network enumeration...")
         
         # 1. Network Interfaces
@@ -59,7 +113,7 @@ class Module(Post, System):
         try:
             # Get all interfaces using ip command (preferred)
             if self.command_exists('ip'):
-                interfaces_output = self.cmd_exec("ip -o addr show 2>/dev/null")
+                interfaces_output = self.linux_execute("ip -o addr show 2>/dev/null")
                 if interfaces_output and "error" not in interfaces_output.lower():
                     print_info("Network Interfaces (ip addr):")
                     for line in interfaces_output.strip().split('\n'):
@@ -67,20 +121,20 @@ class Module(Post, System):
                             print_info(f"  {line}")
                 else:
                     # Fallback to ifconfig
-                    ifconfig_output = self.cmd_exec("ifconfig -a 2>/dev/null || ipconfig 2>/dev/null")
+                    ifconfig_output = self.linux_execute("ifconfig -a 2>/dev/null || ipconfig 2>/dev/null")
                     if ifconfig_output:
                         print_info("Network Interfaces (ifconfig):")
                         print_info(ifconfig_output)
             else:
                 # Fallback to ifconfig
-                ifconfig_output = self.cmd_exec("ifconfig -a 2>/dev/null")
+                ifconfig_output = self.linux_execute("ifconfig -a 2>/dev/null")
                 if ifconfig_output:
                     print_info("Network Interfaces (ifconfig):")
                     print_info(ifconfig_output)
             
             # Get MAC addresses
             print_status("MAC Addresses:")
-            mac_output = self.cmd_exec("cat /sys/class/net/*/address 2>/dev/null | head -20")
+            mac_output = self.linux_execute("cat /sys/class/net/*/address 2>/dev/null | head -20")
             if mac_output and mac_output.strip():
                 for line in mac_output.strip().split('\n'):
                     if line.strip():
@@ -89,7 +143,7 @@ class Module(Post, System):
             
             # Get interface statistics
             print_status("Interface Statistics:")
-            stats_output = self.cmd_exec("cat /proc/net/dev 2>/dev/null")
+            stats_output = self.linux_execute("cat /proc/net/dev 2>/dev/null")
             if stats_output:
                 print_info(stats_output)
                 
@@ -105,7 +159,7 @@ class Module(Post, System):
         try:
             # Get routing table using ip command
             if self.command_exists('ip'):
-                routes_output = self.cmd_exec("ip route show 2>/dev/null")
+                routes_output = self.linux_execute("ip route show 2>/dev/null")
                 if routes_output:
                     print_info("Routing Table (ip route):")
                     for line in routes_output.strip().split('\n'):
@@ -113,20 +167,20 @@ class Module(Post, System):
                             print_info(f"  {line}")
             else:
                 # Fallback to route command
-                route_output = self.cmd_exec("route -n 2>/dev/null || route 2>/dev/null")
+                route_output = self.linux_execute("route -n 2>/dev/null || route 2>/dev/null")
                 if route_output:
                     print_info("Routing Table (route):")
                     print_info(route_output)
             
             # Get default gateway
             print_status("Default Gateway:")
-            gateway = self.cmd_exec("ip route | grep default 2>/dev/null || route -n | grep '^0.0.0.0' 2>/dev/null")
+            gateway = self.linux_execute("ip route | grep default 2>/dev/null || route -n | grep '^0.0.0.0' 2>/dev/null")
             if gateway:
                 print_info(f"  {gateway.strip()}")
             
             # Get ARP table
             print_status("ARP Table:")
-            arp_output = self.cmd_exec("arp -a 2>/dev/null || ip neigh show 2>/dev/null")
+            arp_output = self.linux_execute("arp -a 2>/dev/null || ip neigh show 2>/dev/null")
             if arp_output:
                 for line in arp_output.strip().split('\n'):
                     if line.strip():
@@ -145,7 +199,7 @@ class Module(Post, System):
             # Try ss command first (modern replacement for netstat)
             if self.command_exists('ss'):
                 # TCP connections
-                tcp_output = self.cmd_exec("ss -tunap 2>/dev/null | head -50")
+                tcp_output = self.linux_execute("ss -tunap 2>/dev/null | head -50")
                 if tcp_output:
                     print_info("TCP Connections (ss):")
                     for line in tcp_output.strip().split('\n'):
@@ -153,7 +207,7 @@ class Module(Post, System):
                             print_info(f"  {line}")
                 
                 # UDP connections
-                udp_output = self.cmd_exec("ss -uap 2>/dev/null | head -30")
+                udp_output = self.linux_execute("ss -uap 2>/dev/null | head -30")
                 if udp_output:
                     print_info("UDP Connections (ss):")
                     for line in udp_output.strip().split('\n'):
@@ -162,13 +216,13 @@ class Module(Post, System):
             else:
                 # Fallback to netstat
                 if self.command_exists('netstat'):
-                    tcp_output = self.cmd_exec("netstat -tunap 2>/dev/null | head -50")
+                    tcp_output = self.linux_execute("netstat -tunap 2>/dev/null | head -50")
                     if tcp_output:
                         print_info("Network Connections (netstat):")
                         print_info(tcp_output)
             
             # Get established connections count
-            established = self.cmd_exec("ss -tn state established 2>/dev/null | wc -l || netstat -tn 2>/dev/null | grep ESTABLISHED | wc -l")
+            established = self.linux_execute("ss -tn state established 2>/dev/null | wc -l || netstat -tn 2>/dev/null | grep ESTABLISHED | wc -l")
             if established and established.strip().isdigit():
                 print_info(f"Established connections: {established.strip()}")
                 
@@ -184,14 +238,14 @@ class Module(Post, System):
         try:
             # Get listening ports using ss
             if self.command_exists('ss'):
-                listen_output = self.cmd_exec("ss -tlnp 2>/dev/null")
+                listen_output = self.linux_execute("ss -tlnp 2>/dev/null")
                 if listen_output:
                     print_info("Listening TCP Ports (ss):")
                     for line in listen_output.strip().split('\n'):
                         if line.strip() and not line.strip().startswith('State'):
                             print_info(f"  {line}")
                 
-                udp_listen = self.cmd_exec("ss -ulnp 2>/dev/null")
+                udp_listen = self.linux_execute("ss -ulnp 2>/dev/null")
                 if udp_listen:
                     print_info("Listening UDP Ports (ss):")
                     for line in udp_listen.strip().split('\n'):
@@ -200,7 +254,7 @@ class Module(Post, System):
             else:
                 # Fallback to netstat
                 if self.command_exists('netstat'):
-                    listen_output = self.cmd_exec("netstat -tlnp 2>/dev/null || netstat -tln 2>/dev/null")
+                    listen_output = self.linux_execute("netstat -tlnp 2>/dev/null || netstat -tln 2>/dev/null")
                     if listen_output:
                         print_info("Listening Ports (netstat):")
                         print_info(listen_output)
@@ -225,7 +279,7 @@ class Module(Post, System):
             
             # Check which common ports are listening
             for port, service in common_ports.items():
-                check = self.cmd_exec(f"ss -tln 2>/dev/null | grep ':{port} ' || netstat -tln 2>/dev/null | grep ':{port} '")
+                check = self.linux_execute(f"ss -tln 2>/dev/null | grep ':{port} ' || netstat -tln 2>/dev/null | grep ':{port} '")
                 if check and check.strip():
                     print_info(f"  Port {port}: {service} (LISTENING)")
                     
@@ -243,14 +297,14 @@ class Module(Post, System):
             if self.command_exists('iptables'):
                 print_status("iptables Rules:")
                 # Get iptables rules (requires root for full output)
-                iptables_output = self.cmd_exec("iptables -L -n -v 2>/dev/null")
+                iptables_output = self.linux_execute("iptables -L -n -v 2>/dev/null")
                 if iptables_output and "Permission denied" not in iptables_output:
                     print_info(iptables_output)
                 else:
                     print_warning("  Cannot read iptables rules (requires root privileges)")
                 
                 # Get NAT rules
-                nat_output = self.cmd_exec("iptables -t nat -L -n -v 2>/dev/null")
+                nat_output = self.linux_execute("iptables -t nat -L -n -v 2>/dev/null")
                 if nat_output and "Permission denied" not in nat_output:
                     print_status("NAT Rules:")
                     print_info(nat_output)
@@ -258,11 +312,11 @@ class Module(Post, System):
             # Check for firewalld
             if self.command_exists('firewall-cmd'):
                 print_status("firewalld Status:")
-                firewalld_status = self.cmd_exec("firewall-cmd --state 2>/dev/null")
+                firewalld_status = self.linux_execute("firewall-cmd --state 2>/dev/null")
                 if firewalld_status:
                     print_info(f"  Status: {firewalld_status.strip()}")
                 
-                firewalld_zones = self.cmd_exec("firewall-cmd --list-all-zones 2>/dev/null")
+                firewalld_zones = self.linux_execute("firewall-cmd --list-all-zones 2>/dev/null")
                 if firewalld_zones:
                     print_info("Firewalld Zones:")
                     print_info(firewalld_zones)
@@ -270,14 +324,14 @@ class Module(Post, System):
             # Check for UFW
             if self.command_exists('ufw'):
                 print_status("UFW Status:")
-                ufw_status = self.cmd_exec("ufw status verbose 2>/dev/null")
+                ufw_status = self.linux_execute("ufw status verbose 2>/dev/null")
                 if ufw_status:
                     print_info(ufw_status)
             
             # Check for nftables (modern replacement for iptables)
             if self.command_exists('nft'):
                 print_status("nftables Rules:")
-                nft_output = self.cmd_exec("nft list ruleset 2>/dev/null")
+                nft_output = self.linux_execute("nft list ruleset 2>/dev/null")
                 if nft_output and "Permission denied" not in nft_output:
                     print_info(nft_output)
                 else:
@@ -325,7 +379,7 @@ class Module(Post, System):
             print_status("DNS Resolution Test:")
             test_domains = ['google.com', 'github.com', 'microsoft.com']
             for domain in test_domains:
-                dns_test = self.cmd_exec(f"getent hosts {domain} 2>/dev/null || host {domain} 2>/dev/null | head -1")
+                dns_test = self.linux_execute(f"getent hosts {domain} 2>/dev/null || host {domain} 2>/dev/null | head -1")
                 if dns_test and dns_test.strip():
                     print_info(f"  {domain}: {dns_test.strip()}")
             
@@ -359,7 +413,7 @@ class Module(Post, System):
             for log_file in log_files:
                 if self.file_exist(log_file):
                     # Try to extract SSH connection attempts
-                    ssh_logs = self.cmd_exec(f"grep -i 'ssh\\|connection' {log_file} 2>/dev/null | tail -20")
+                    ssh_logs = self.linux_execute(f"grep -i 'ssh\\|connection' {log_file} 2>/dev/null | tail -20")
                     if ssh_logs:
                         print_info(f"From {log_file}:")
                         for line in ssh_logs.strip().split('\n'):
@@ -369,7 +423,7 @@ class Module(Post, System):
             
             # Check for netstat history (if available in logs)
             print_status("Network Statistics:")
-            netstat_history = self.cmd_exec("cat /proc/net/sockstat 2>/dev/null")
+            netstat_history = self.linux_execute("cat /proc/net/sockstat 2>/dev/null")
             if netstat_history:
                 print_info(netstat_history)
             
@@ -382,12 +436,12 @@ class Module(Post, System):
             
             # Check for connection tracking (if available)
             if self.file_exist("/proc/net/ip_conntrack"):
-                conntrack = self.cmd_exec("cat /proc/net/ip_conntrack 2>/dev/null | head -20")
+                conntrack = self.linux_execute("cat /proc/net/ip_conntrack 2>/dev/null | head -20")
                 if conntrack:
                     print_status("Connection Tracking:")
                     print_info(conntrack)
             elif self.file_exist("/proc/net/nf_conntrack"):
-                conntrack = self.cmd_exec("cat /proc/net/nf_conntrack 2>/dev/null | head -20")
+                conntrack = self.linux_execute("cat /proc/net/nf_conntrack 2>/dev/null | head -20")
                 if conntrack:
                     print_status("Connection Tracking (nf_conntrack):")
                     print_info(conntrack)

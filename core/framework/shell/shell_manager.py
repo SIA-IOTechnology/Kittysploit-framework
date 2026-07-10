@@ -49,6 +49,8 @@ from .aws_sqs_shell import AWSSQSShell
 from .aws_sqs_command_shell import AWSSQSCommandShell
 from .android_shell import AndroidShell
 from .email_shell import EmailShell
+from .quic_shell import QuicShell
+from .http_cmd_shell import HttpCmdShell
 
 # Shells that need optional third-party packages are loaded lazily
 # so the framework can start even when those packages are missing.
@@ -60,6 +62,9 @@ MongoDBShell = _lazy_import('.mongodb_shell', 'MongoDBShell')
 ElasticsearchShell = _lazy_import('.elasticsearch_shell', 'ElasticsearchShell')
 MSSQLShell = _lazy_import('.mssql_shell', 'MSSQLShell')
 WinRMShell = _lazy_import('.winrm_shell', 'WinRMShell')
+SMBShell = _lazy_import('.smb_shell', 'SMBShell')
+S7CommShell = _lazy_import('.s7comm_shell', 'S7CommShell')
+ModbusShell = _lazy_import('.modbus_shell', 'ModbusShell')
 PollingShell = _lazy_import('.polling_shell', 'PollingShell')
 AzureRunCommandShell = _lazy_import('.azure_run_command_shell', 'AzureRunCommandShell')
 GcpComputeSshShell = _lazy_import('.gcp_compute_ssh_shell', 'GcpComputeSshShell')
@@ -84,6 +89,9 @@ class ShellManager:
             'elasticsearch': ElasticsearchShell,
             'mssql': MSSQLShell,
             'winrm': WinRMShell,
+            'smb': SMBShell,
+            's7comm': S7CommShell,
+            'modbus': ModbusShell,
             'polling': PollingShell,
             'azure_run_command': AzureRunCommandShell,
             'gcp_compute_ssh': GcpComputeSshShell,
@@ -95,6 +103,8 @@ class ShellManager:
             'aws_sqs_command': AWSSQSCommandShell,
             'android': AndroidShell,
             'email': EmailShell,
+            'quic': QuicShell,
+            'http_cmd': HttpCmdShell,
         }
         self.active_shell: Optional[str] = None
     
@@ -128,7 +138,7 @@ class ShellManager:
                     return None
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "smb", "s7comm", "modbus", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "quic", "http_cmd", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -228,6 +238,12 @@ class ShellManager:
                         shell_type = 'mssql'
                     elif session_type == 'winrm':
                         shell_type = 'winrm'
+                    elif session_type == 'smb':
+                        shell_type = 'smb'
+                    elif session_type == 's7comm':
+                        shell_type = 's7comm'
+                    elif session_type == 'modbus':
+                        shell_type = 'modbus'
                     elif session_type == 'polling':
                         shell_type = 'polling'
                     elif session_type == 'azure_run_command':
@@ -242,6 +258,8 @@ class ShellManager:
                         shell_type = 'dns'
                     elif session_type == 'ftp':
                         shell_type = 'ftp'
+                    elif session_type == 'quic':
+                        shell_type = 'quic'
                     elif session_type == 'aws' or session_type == 'aws_sqs':
                         # Check if it's a command executor or interactive shell
                         if session_data and session_data.get('command_executor'):

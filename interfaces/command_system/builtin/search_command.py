@@ -176,22 +176,27 @@ Examples:
                 for module in sorted(matches, key=lambda m: (m.get("path") or "").lower()):
                     path = _one_line(module.get("path") or "")
                     mtype = _one_line(module.get("type") or "—")
-                    title = _one_line(module.get("name") or "—")
                     cve = _one_line(module.get("cve") or "—")
                     protocol = _one_line(module.get("protocol") or "—")
                     reliability = _one_line(module.get("reliability") or "—")
                     updated = _one_line((module.get("updated_at") or "")[:10] or "—")
                     desc = _one_line(module.get("description") or "")
-                    rows.append([path, mtype, title, cve, protocol, reliability, updated, desc])
+                    rows.append([path, mtype, cve, protocol, reliability, updated, desc])
 
                 print_table(
-                    ["Path", "Type", "Name", "CVE", "Proto", "Rel.", "Updated", "Description"],
+                    ["Path", "Type", "CVE", "Proto", "Rel.", "Updated", "Description"],
                     rows,
                     max_width=120,
                     expand_to_terminal=True,
-                    column_min_widths={"Path": 36, "Type": 10, "Name": 18, "Description": 24},
+                    column_min_widths={
+                        "Path": 36,
+                        "Type": 10,
+                        "CVE": 15,
+                        "Updated": 10,
+                        "Description": 24,
+                    },
                     protect_full_width_headers=(),
-                    wrap_extra_headers=("name", "path", "description"),
+                    wrap_extra_headers=("path", "description"),
                 )
                 print_empty()
                 print_info("KittySploit select with: use <Path>")

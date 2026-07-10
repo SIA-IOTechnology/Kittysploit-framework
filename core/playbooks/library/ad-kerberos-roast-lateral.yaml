@@ -1,0 +1,76 @@
+id: ad-kerberos-roast-lateral
+version: "1"
+name: AD Kerberos roast to lateral movement
+source: bug-bounty
+domain: internal
+tags: [ad, ldap, kerberos, kerberoast, asrep, smb, lateral, windows]
+description: >
+  Multi-phase Active Directory path seen in internal BB and CTF write-ups — enumerate
+  domain users without auth, bind with recovered or spray credentials, harvest
+  Kerberoastable and AS-REP roastable accounts, audit dangerous delegations, then
+  pivot to SMB execution on a high-value host.
+prerequisites:
+  signals_any:
+    - ldap
+    - smb
+    - active_directory
+    - domain_controller
+  domains:
+    - internal
+    - ad
+  capabilities: []
+chain:
+  - id: samr_user_enum
+    capability: credentials
+    module: auxiliary/scanner/samr/user_enum
+    description: Anonymous or guest SAMR user enumeration
+  - id: password_policy
+    capability: db_access
+    module: scanner/ldap/password_policy
+    description: Weak password policy aids spray and roast cracking
+  - id: kerberoast_scan
+    capability: credentials
+    module: scanner/ldap/kerberos_roastable
+    description: Identify SPN accounts vulnerable to Kerberoasting
+  - id: asrep_scan
+    capability: credentials
+    module: scanner/ldap/asrep_roastable
+    description: Find accounts without pre-authentication (AS-REP roast)
+  - id: kerberoast_harvest
+    capability: credentials
+    module: post/ldap/gather/kerberoastable_users
+    description: Export roastable user details for offline cracking
+  - id: delegation_audit
+    capability: admin_access
+    module: post/ldap/gather/delegation_audit
+    description: Unconstrained / constrained delegation misconfigurations
+  - id: unconstrained_scan
+    capability: admin_access
+    module: scanner/ldap/unconstrained_delegation
+    description: Hosts trusted for unconstrained delegation
+  - id: shadow_creds
+    capability: authenticated_session
+    module: post/ldap/shadow_credentials_auto
+    optional: true
+    description: Shadow credentials when GenericWrite on target computer
+  - id: smb_session
+    capability: authenticated_session
+    module: auxiliary/scanner/smb/session_acquire
+    description: Reuse cracked or sprayed creds for SMB session
+  - id: lateral_shell
+    capability: shell
+    module: post/smb/manage/deploy_reverse_shell
+    description: Remote execution over acquired SMB session
+  - id: winrm_enum
+    capability: authenticated_session
+    module: post/winrm/gather/enum_system
+    optional: true
+    description: WinRM system enumeration when port 5985/5986 is reachable
+blockers:
+  - no LDAP/SMB reachability to DC
+  - AES-only service accounts (harder Kerberoast)
+  - EPA / channel binding on LDAP
+  - LAPS and strong unique passwords
+references:
+  - "HTB / internal BB pattern: enum → roast → crack → SMB pivot"
+  - "Similar to workflow ad-enum-safe extended with post-ldap and SMB execution"

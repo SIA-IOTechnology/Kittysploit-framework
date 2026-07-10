@@ -1,0 +1,66 @@
+id: wordpress-plugin-takeover
+version: "1"
+name: WordPress plugin chain to site takeover
+source: bug-bounty
+domain: web
+tags: [wordpress, cms, plugin, sqli, lfi, rce, takeover, persistence]
+description: >
+  Long-form WordPress bug bounty chain — fingerprint CMS and plugins, enumerate
+  users, chase plugin-specific vulns (LFI/SQLi/RCE), escalate to DB-backed admin
+  takeover, then plant persistence. Mirrors multi-report BB chains on mature WP
+  targets.
+prerequisites:
+  signals_any:
+    - wordpress
+    - wp-content
+  tech_any:
+    - wordpress
+    - php
+    - mysql
+chain:
+  - id: plugin_surface
+    capability: file_read
+    module: auxiliary/scanner/http/wp_plugin_scanner
+    description: Enumerate installed plugins and known weak versions
+  - id: user_enum
+    capability: credentials
+    module: auxiliary/scanner/http/wordpress_enum_user
+    description: WordPress author/user enumeration for spray and takeover targets
+  - id: login_surface
+    capability: credentials
+    module: auxiliary/scanner/http/login_page_detector
+    description: Locate wp-login and custom auth endpoints
+  - id: plugin_lfi
+    capability: file_read
+    module: auxiliary/scanner/http/wordpress_madara_cve_2025_4524_lfi
+    optional: true
+    description: Example plugin LFI path (Madara); swap for detected plugin CVE
+  - id: plugin_sqli
+    capability: db_access
+    module: exploits/multi/http/wordpress_events_calendar_cve_2026_49772_sqli
+    optional: true
+    description: Plugin SQLi → data extraction when Events Calendar vulnerable
+  - id: sqli_confirm
+    capability: db_access
+    module: auxiliary/scanner/http/sqli_engine
+    description: Generic SQLi confirmation on injectable plugin parameters
+  - id: db_takeover
+    capability: admin_access
+    module: post/php/database/wordpress_user_takeover
+    description: Reset WP admin password via database access (SQLi or creds)
+  - id: webshell_persist
+    capability: rce
+    module: post/shell/linux/persistence/wordpress_dropper
+    description: Drop theme/plugin persistence after shell or file write
+  - id: backdoor_plugin
+    capability: rce
+    module: backdoors/php/wordpress_plugin
+    optional: true
+    description: Alternate persistence via malicious plugin upload when possible
+blockers:
+  - WAF on wp-admin and plugin paths
+  - hardened file permissions on wp-content
+  - 2FA on administrator accounts
+  - no SQLi/file-write primitive
+references:
+  - "Composite of multiple WP BB reports: plugin CVE + user enum + DB takeover"

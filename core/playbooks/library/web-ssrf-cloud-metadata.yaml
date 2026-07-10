@@ -1,0 +1,36 @@
+id: web-ssrf-cloud-metadata
+version: "1"
+name: SSRF to cloud metadata harvest
+source: bug-bounty
+domain: web
+tags: [ssrf, cloud, aws, gcp, azure, metadata, imds]
+description: >
+  Confirmed SSRF primitive used to reach cloud instance metadata and IAM role hints.
+prerequisites:
+  signals_any:
+    - ssrf
+    - cloud
+  tech_any:
+    - aws
+    - gcp
+    - azure
+chain:
+  - id: ssrf_scan
+    capability: ssrf_primitive
+    module: auxiliary/scanner/http/ssrf_scanner
+    description: Find injectable URL/fetch parameters
+  - id: metadata_harvest
+    capability: cloud_credentials
+    module: auxiliary/scanner/http/ssrf_cloud_metadata_harvest
+    description: Pull IMDS/computeMetadata via SSRF param
+  - id: aws_enum
+    capability: cloud_identity
+    module: post/aws/gather/enum_ec2_metadata
+    optional: true
+    description: Full EC2 metadata when shell/session on instance
+blockers:
+  - IMDSv2 with hop limit 1
+  - egress filtering to 169.254.169.254
+  - SSRF allowlist on metadata paths
+references:
+  - "Common BB chain SSRF → 169.254.169.254 → IAM creds"

@@ -185,18 +185,30 @@ class ModuleSyncManager:
             
             for module_path, file_path in discovered_modules.items():
                 try:
-                    # Static parse __info__ only — no import (avoids payload / dependency init spam)
-                    meta = extract_module_sync_metadata(file_path)
+                    if str(file_path).startswith("library://"):
+                        from core.workflows.module_bridge import (
+                            library_workflow_sync_metadata,
+                            resolve_library_workflow_yaml_path,
+                            workflow_id_from_uri,
+                        )
+
+                        workflow_id = workflow_id_from_uri(file_path)
+                        meta = library_workflow_sync_metadata(workflow_id)
+                        yaml_path = resolve_library_workflow_yaml_path(workflow_id)
+                        file_hash = self._calculate_file_hash(str(yaml_path))
+                        file_mtime_timestamp = os.path.getmtime(yaml_path)
+                    else:
+                        # Static parse __info__ only — no import (avoids payload / dependency init spam)
+                        meta = extract_module_sync_metadata(file_path)
+                        file_hash = self._calculate_file_hash(file_path)
+                        file_mtime_timestamp = os.path.getmtime(file_path)
+
                     default_name = module_path.split("/")[-1].replace("_", " ")
                     name = self._normalize_to_string(meta.get("name") or "") or default_name
                     if not name.strip():
                         name = default_name
 
-                    # Calculate file hash for change detection
-                    file_hash = self._calculate_file_hash(file_path)
-
                     # Convert file modification time to datetime
-                    file_mtime_timestamp = os.path.getmtime(file_path)
                     file_mtime = datetime.fromtimestamp(file_mtime_timestamp)
 
                     module_type = self._detect_module_type_from_path(module_path)
@@ -437,7 +449,7 @@ class ModuleSyncManager:
         path = (module_path or "").lower()
         
         # Valid types according to CHECK constraint in models.py
-        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 'listeners', 'encoders', 'obfuscator', 'analysis']
+        valid_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 'listeners', 'encoders', 'transform', 'analysis']
         
         # Module path prefixes mapping (must match valid types in CHECK constraint)
         type_mapping = {
@@ -453,7 +465,8 @@ class ModuleSyncManager:
             'browser_auxiliary/': 'auxiliary',  # Map to auxiliary
             'listeners/': 'listeners',
             'encoders/': 'encoders',
-            'obfuscators/': 'obfuscator',
+            'transforms/': 'transform',
+            'obfuscators/': 'transform',
         }
         
         # Check for type in path
@@ -485,8 +498,8 @@ class ModuleSyncManager:
                 return 'listeners'
             elif first_part == 'encoder':
                 return 'encoders'
-            elif first_part == 'obfuscator':
-                return 'obfuscator'
+            elif first_part in ('transform', 'obfuscator'):
+                return 'transform'
         
         # Default to 'auxiliary' if we can't determine (safest fallback)
         return 'auxiliary'
@@ -604,12 +617,17 @@ class ModuleSyncManager:
                 
                 stats = {'total': total}
                 
-                # Count by type
-                for module_type in ['exploits', 'auxiliary', 'payloads', 'listeners', 'post', 'scanner', 'encoder', 'obfuscator']:
+                # Count by type (merge legacy obfuscator rows into transform)
+                for module_type in ['exploits', 'auxiliary', 'payloads', 'listeners', 'post', 'scanner', 'encoder', 'transform']:
                     count = session.query(Module).filter(
                         and_(Module.type == module_type, Module.is_active == True)
                     ).count()
                     stats[module_type] = count
+                legacy_obfuscator = session.query(Module).filter(
+                    and_(Module.type == 'obfuscator', Module.is_active == True)
+                ).count()
+                if legacy_obfuscator:
+                    stats['transform'] = stats.get('transform', 0) + legacy_obfuscator
                 
                 return stats
                 

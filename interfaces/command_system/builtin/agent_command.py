@@ -92,6 +92,7 @@ Usage:
     agent profiles                        List mission profile presets
     agent metadata [--json]               Audit module agent metadata coverage
     agent metadata annotate [--apply]     Inject inferred agent blocks (dry-run by default)
+    agent metadata upgrade [--apply]      Enrich existing agent blocks with chain metadata
 
 Target & workflow:
     <target>                              Hostname, IP, or URL
@@ -149,6 +150,7 @@ TLS:
 
 LLM:
     --llm-local                           Use local LLM (Ollama)
+    --refute-panel                        Run skeptic refutation panel on findings (analyze phase)
     --llm-model MODEL                     Model name (default: llama3.1:8b)
     --llm-endpoint URL                    Chat API endpoint
 
@@ -238,6 +240,11 @@ Examples:
         parser.add_argument("--no-exploit", action="store_true")
         parser.add_argument("--verbose", "-v", action="store_true")
         parser.add_argument("--llm-local", action="store_true")
+        parser.add_argument(
+            "--refute-panel",
+            action="store_true",
+            help="Run multi-refuter skeptic panel during analysis to block overclaimed findings.",
+        )
         parser.add_argument("--llm-model", type=str, default="llama3.1:8b")
         parser.add_argument("--llm-endpoint", type=str, default="http://127.0.0.1:11434/api/chat")
         parser.add_argument("--max-modules", type=int, default=40)
@@ -289,7 +296,7 @@ Examples:
         )
         parser.add_argument(
             "--profile",
-            help="Mission profile preset: passive, safe-web, authenticated-audit, api-review, internal-lab, detection-validation, training-lab.",
+            help="Mission profile preset. Use `agent profiles` to list available policies.",
         )
         parser.add_argument(
             "--request-budget",
@@ -398,6 +405,8 @@ Examples:
         if sub == "metadata":
             if len(args) >= 2 and str(args[1]).lower() == "annotate":
                 return self._run_metadata_annotate(args[2:])
+            if len(args) >= 2 and str(args[1]).lower() == "upgrade":
+                return self._run_metadata_upgrade(args[2:])
             return self._run_metadata(args[1:])
         try:
             parsed = self.parser.parse_args(args)
@@ -442,6 +451,7 @@ Examples:
         self._agent.report.set_paths(paths)
         self._agent.core._module_perf.set_paths(paths)
         self._agent.core._module_ctx.set_paths(paths)
+        self._agent.core._module_health.set_paths(paths)
 
         approved_risks = []
         for value in parsed.approve_risk or []:
@@ -457,6 +467,7 @@ Examples:
                 dry_run=parsed.dry_run,
                 plan_only=parsed.plan_only,
                 session_policy="never" if parsed.no_interact else parsed.session_policy,
+                mission_profile=profile_overrides.get("catalog_policy") or parsed.profile or "",
                 deadline_seconds=parsed.deadline,
                 policy_file=parsed.policy,
             )
@@ -583,6 +594,7 @@ Examples:
             reuse_proxy_auth=bool(parsed.reuse_proxy_auth),
             shell_hunter=bool(parsed.shell_hunter),
             llm_local=parsed.llm_local,
+            refute_panel=bool(getattr(parsed, "refute_panel", False)),
             llm_model=parsed.llm_model,
             llm_endpoint=parsed.llm_endpoint,
             max_modules=max_modules,
@@ -609,6 +621,8 @@ Examples:
                 "discovered_params": [],
                 "login_paths": [],
                 "risk_signals": [],
+                "mission_profile": str(parsed.profile or ""),
+                "catalog_policy": getattr(runtime_policy, "mission_profile", ""),
                 "operator_campaign_goal": normalized_operator_goal or "",
                 "shell_hunter_mode": bool(parsed.shell_hunter or shell_goal),
                 "persona_name": str(getattr(parsed, "persona_name", "") or "").strip(),
@@ -766,6 +780,11 @@ Examples:
             print_info(json.dumps(audit, indent=2))
             return True
         print_info(format_audit_table(audit))
+        chain_ratio = float(audit.get("chain_coverage_ratio", 0) or 0)
+        print_info(
+            f"Effective chain coverage: {audit.get('chain_ready', 0)}/"
+            f"{audit.get('total_modules', 0)} ({chain_ratio * 100:.1f}%)"
+        )
         if int(audit.get("compliant", 0) or 0) == 0:
             print_warning(
                 "No module exposes compliant agent metadata yet. "
@@ -808,4 +827,41 @@ Examples:
         else:
             self._agent.module_catalog.invalidate_module_catalog_cache()
             print_success(f"Annotated {payload.get('updated', 0)} module file(s).")
+        return True
+
+    def _run_metadata_upgrade(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.metadata_annotator import (
+            DEFAULT_FAMILIES,
+            upgrade_catalog,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        dry_run = "--apply" not in tokens
+        families = DEFAULT_FAMILIES
+        if "--family" in tokens:
+            idx = tokens.index("--family")
+            if idx + 1 < len(tokens):
+                families = tuple(part.strip() for part in tokens[idx + 1].split(",") if part.strip())
+        limit = 0
+        if "--limit" in tokens:
+            idx = tokens.index("--limit")
+            if idx + 1 < len(tokens):
+                try:
+                    limit = max(0, int(tokens[idx + 1]))
+                except ValueError:
+                    limit = 0
+        discovered = self._agent.module_catalog._get_module_catalog()
+        payload = upgrade_catalog(
+            discovered,
+            self._agent.module_catalog.extract_static_module_metadata,
+            families=families,
+            dry_run=dry_run,
+            limit=limit,
+        )
+        print_info(json.dumps(payload, indent=2))
+        if dry_run:
+            print_warning("Dry-run only. Re-run with --apply to write chain metadata blocks.")
+        else:
+            self._agent.module_catalog.invalidate_module_catalog_cache()
+            print_success(f"Upgraded {payload.get('updated', 0)} module file(s).")
         return True

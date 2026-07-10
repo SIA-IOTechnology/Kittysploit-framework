@@ -110,7 +110,98 @@ def enrich_scanner_result(result: Dict[str, Any], target_info: Optional[Dict[str
         enriched["cve"] = extract_cve(enriched)
     enriched["evidence"] = extract_evidence(enriched)
     enriched["vulnerability_key"] = vulnerability_key(enriched)
-    return enriched
+    return suppress_noise_finding(suppress_speculative_finding(enriched))
+
+
+_INFO_SEVERITIES = frozenset({"info", "informational"})
+
+_NOISE_PATH_MARKERS = (
+    "server_banner",
+    "waf_fingerprint",
+    "robots_txt",
+    "grpc_reflection_detect",
+)
+
+
+def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop info-level technology fingerprints that are not actionable vulnerabilities."""
+    item = dict(result or {})
+    if not item.get("vulnerable"):
+        return item
+
+    path = str(item.get("path") or "").lower()
+    severity = str(item.get("severity") or "").lower()
+    message = str(item.get("message") or "").lower()
+
+    if "grpc_reflection_detect" in path and (
+        "reflection not confirmed" in message or "heuristic" in message
+    ):
+        item["vulnerable"] = False
+        item["status"] = "safe"
+        item["suppressed_reason"] = "suppressed inconclusive gRPC reflection probe"
+        return item
+
+    if severity not in _INFO_SEVERITIES:
+        return item
+
+    if any(marker in path for marker in _NOISE_PATH_MARKERS):
+        item["vulnerable"] = False
+        item["status"] = "safe"
+        item["suppressed_reason"] = "suppressed info-level technology detection"
+        return item
+
+    try:
+        from interfaces.command_system.builtin.agent.agent_constants import (
+            PURE_DETECTION_PATH_MARKERS,
+            STRONG_VULN_SIGNAL_PHRASES,
+        )
+    except ImportError:
+        return item
+
+    if any(marker in path for marker in PURE_DETECTION_PATH_MARKERS):
+        if not any(phrase in message for phrase in STRONG_VULN_SIGNAL_PHRASES):
+            item["vulnerable"] = False
+            item["status"] = "safe"
+            item["suppressed_reason"] = "suppressed pure detection (info)"
+    return item
+
+
+def suppress_speculative_finding(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop CVE rows that only have weak/indirect evidence (common on SPA catch-all hosts)."""
+    item = dict(result or {})
+    if not item.get("vulnerable"):
+        return item
+    if not extract_cve(item):
+        return item
+
+    details = item.get("details") or {}
+    confidence = str(
+        details.get("confidence")
+        or item.get("confidence")
+        or ""
+    ).strip().lower()
+
+    if confidence in {"high", "confirmed", "critical"}:
+        return item
+
+    message = str(item.get("message") or "").lower()
+    speculative_phrases = (
+        "potentially vulnerable",
+        "version unknown",
+        "json parsing failed",
+        "unparseable",
+        "inconclusive",
+        "likely vulnerable",
+        "expected vulnerable range",
+        "active probes disabled",
+    )
+    if confidence in {"low", "medium", "unknown", ""} or any(p in message for p in speculative_phrases):
+        item["vulnerable"] = False
+        item["status"] = "safe"
+        item["suppressed_reason"] = (
+            f"suppressed speculative CVE finding (confidence={confidence or 'unknown'})"
+        )
+    return item
 
 
 def deduplicate_scanner_results(

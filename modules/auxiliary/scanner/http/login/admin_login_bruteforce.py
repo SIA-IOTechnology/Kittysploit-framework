@@ -22,6 +22,18 @@ class Module(Auxiliary, Http_client):
         'reversible': False,
         'approval_required': True,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'chain': {
+            'consumes_capabilities': ['credentials'],
+            'produces_capabilities': [
+                {'capability': 'session_cookie', 'from_detail': 'cookie_header'},
+                'authenticated_session',
+                {'capability': 'landing_path', 'from_detail': 'post_login_final_path'},
+            ],
+            'option_bindings': {
+                'path': 'landing_path',
+            },
+            'suggested_followups': ['post/http/gather/authenticated_surface'],
+        },
     },
     }
 

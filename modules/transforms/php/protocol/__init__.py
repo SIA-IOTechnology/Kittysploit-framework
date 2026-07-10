@@ -1,1 +1,1 @@
-# PHP protocol-mimic obfuscators.
+# PHP protocol-mimic transforms.

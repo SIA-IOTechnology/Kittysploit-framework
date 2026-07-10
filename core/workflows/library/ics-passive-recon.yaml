@@ -1,0 +1,50 @@
+id: ics-passive-recon
+version: "1"
+name: ICS Passive Recon
+description: >
+  Passive OT discovery on a SPAN/TAP interface or PCAP replay, then export the JSON
+  report and sync workspace intel.
+tags: [ics, ot, passive, recon, scada]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  iface:
+    description: Capture interface (live mode)
+    default: "eth0"
+  pcap:
+    description: Optional PCAP file instead of live capture
+    default: ""
+  timeout:
+    description: Live capture duration in seconds
+    default: "30"
+start_step: passive_sniffer
+steps:
+  passive_sniffer:
+    module: auxiliary/scanner/ics/passive_sniffer
+    description: Passive ICS/SCADA traffic analysis
+    options:
+      iface: "${iface}"
+      pcap: "${pcap}"
+      timeout: "${timeout}"
+    output_mapping:
+      last_report_path: passive_report_file
+    on_success: export_report
+    on_failure: export_report
+  export_report:
+    module: post/ics/gather/export_passive_report
+    description: Export passive JSON and sync workspace
+    options:
+      session_id: "passive"
+      report_file: "${passive_report_file}"
+      sync_workspace: "true"
+    on_success: engagement_report
+    on_failure: engagement_report
+  engagement_report:
+    module: analysis/reporting/ics_engagement_report
+    description: Build consolidated ICS engagement report
+    options:
+      passive_report: "${passive_report_file}"
+      sync_workspace: "true"
+    on_success: done
+    on_failure: done

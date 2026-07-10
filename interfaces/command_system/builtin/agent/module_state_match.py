@@ -12,7 +12,10 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Set
 
 from interfaces.command_system.builtin.agent.agent_module_meta import has_agent_planner_meta
-from interfaces.command_system.builtin.agent.attack_chain_memory import capabilities_satisfied
+from interfaces.command_system.builtin.agent.attack_chain_memory import (
+    capabilities_satisfied,
+    chain_observation_penalty,
+)
 from interfaces.command_system.builtin.agent.goal_planner import kb_api_surface_ready
 from interfaces.command_system.builtin.agent.module_scoring import estimate_network_cost, module_path_lower
 
@@ -239,10 +242,9 @@ def compute_generic_module_score(
     agent = module.get("agent")
     if not has_agent_planner_meta(agent):
         return None
+    path = module_path_lower(module)
     if not module_matches_state(agent, kb, module_path=path):
         return -1.0
-
-    path = module_path_lower(module)
     cost_meta = float(agent.get("cost", 1.0))
     noise = float(agent.get("noise", 0.5))
     value = float(agent.get("value", 1.0))
@@ -281,4 +283,8 @@ def compute_generic_module_score(
     red = 0.2 if path in executed_paths else 0.0
 
     score = (value + hint_bonus) * hist * ctxm * (1.0 - red) / (cost_eff * noise_eff)
+    try:
+        score -= 0.45 * chain_observation_penalty(module, kb)
+    except Exception:
+        pass
     return float(score)

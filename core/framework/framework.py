@@ -177,6 +177,136 @@ class Framework:
         
         self.current_collab: Optional[Any] = None
     
+    def notify_session_disconnected(
+        self,
+        session_id: str,
+        *,
+        reason: str = "connection_lost",
+        label: str = "",
+        connection_token: str = "",
+    ) -> None:
+        """Global disconnect alert for socket-backed sessions."""
+        import time
+        from core.output_handler import print_warning
+        from core.framework.runtime.events import EventType
+
+        session = self.session_manager.get_session(session_id)
+        if session and connection_token:
+            listener_id = (session.data or {}).get("listener_id")
+            listener = (getattr(self, "active_listeners", None) or {}).get(listener_id)
+            if listener:
+                current = getattr(listener, "_session_connections", {}).get(session_id)
+                current_token = getattr(current, "connection_id", None)
+                if current_token and current_token != connection_token:
+                    return
+
+        protocol = "unknown"
+        implant_id = label
+        if session and session.data:
+            protocol = session.data.get("protocol") or session.data.get("connection_type") or protocol
+            implant_id = session.data.get("implant_id") or session.data.get("client_id") or implant_id
+            if session.data.get("transport_state") == "disconnected" and reason == "connection_lost":
+                self._detach_shell_connection(session_id)
+                return
+
+        print_warning(
+            f"Session {session_id[:8]} disconnected "
+            f"({protocol}{f', implant {implant_id}' if implant_id else ''}) — {reason}"
+        )
+
+        if session:
+            self.session_manager.update_session_data(
+                session_id,
+                {
+                    "transport_state": "disconnected",
+                    "disconnected_at": time.time(),
+                },
+            )
+
+        self._cleanup_listener_transport(session_id, close_socket=False)
+
+        if hasattr(self, "event_bus") and self.event_bus:
+            self.event_bus.publish(
+                EventType.SESSION_CLOSED,
+                {
+                    "session_id": session_id,
+                    "reason": reason,
+                    "protocol": protocol,
+                    "implant_id": implant_id,
+                },
+                source="connection_watchdog",
+            )
+
+        self._detach_shell_connection(session_id)
+
+    def notify_session_reconnected(
+        self,
+        session_id: str,
+        *,
+        label: str = "",
+    ) -> None:
+        """Notify components that a session transport was reattached."""
+        import time
+        from core.output_handler import print_success
+        from core.framework.runtime.events import EventType
+
+        session = self.session_manager.get_session(session_id)
+        implant_id = label
+        if session and session.data:
+            implant_id = session.data.get("implant_id") or session.data.get("client_id") or implant_id
+
+        print_success(
+            f"Session {session_id[:8]} reconnected"
+            f"{f' (implant {implant_id})' if implant_id else ''}"
+        )
+
+        if hasattr(self, "event_bus") and self.event_bus:
+            self.event_bus.publish(
+                EventType.SESSION_RECONNECTED,
+                {
+                    "session_id": session_id,
+                    "implant_id": implant_id,
+                },
+                source="listener",
+            )
+
+        shell = self.shell_manager.get_shell(session_id)
+        if shell:
+            refresh = getattr(shell, "_refresh_connection", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
+            normalize = getattr(shell, "_normalize_connection", None)
+            if callable(normalize):
+                try:
+                    normalize()
+                except Exception:
+                    pass
+
+    def _cleanup_listener_transport(self, session_id: str, *, close_socket: bool = True) -> None:
+        session = self.session_manager.get_session(session_id)
+        if not session:
+            return
+        listener_id = (session.data or {}).get("listener_id")
+        listener = (getattr(self, "active_listeners", None) or {}).get(listener_id)
+        if listener and hasattr(listener, "remove_session_connection"):
+            listener.remove_session_connection(session_id, close_socket=close_socket)
+
+    def _detach_shell_connection(self, session_id: str) -> None:
+        shell = self.shell_manager.get_shell(session_id)
+        if not shell:
+            return
+        if hasattr(shell, "connection"):
+            shell.connection = None
+        normalize = getattr(shell, "_normalize_connection", None)
+        if callable(normalize):
+            try:
+                normalize()
+            except Exception:
+                pass
+    
     def check_charter_acceptance(self) -> bool:
         """
         Check if the charter has been accepted by the user
@@ -403,7 +533,7 @@ class Framework:
                 ('modules/post', 'post'),
                 ('modules/payloads', 'payloads'),
                 ('modules/encoders', 'encoders'),
-                ('modules/obfuscators', 'obfuscators'),
+                ('modules/transforms', 'transforms'),
                 ('modules/backdoors', 'backdoors'),
                 ('modules/shortcut', 'shortcut'),
                 ('modules/analysis', 'analysis'),
@@ -494,7 +624,7 @@ class Framework:
         """
         try:
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'obfuscators', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
             counts = {}
             
             # Récupérer les comptages depuis la base de données
@@ -505,6 +635,10 @@ class Framework:
                         count = session.query(Module).filter_by(type=module_type, is_active=True).count()
                         if count > 0:
                             counts[module_type] = count
+                    for legacy_type in ('transform', 'obfuscator'):
+                        count = session.query(Module).filter_by(type=legacy_type, is_active=True).count()
+                        if count > 0:
+                            counts[legacy_type] = counts.get(legacy_type, 0) + count
                 except Exception as db_error:
                     # Si erreur de base de données (schéma obsolète), ignorer et continuer avec filesystem
                     pass
@@ -522,12 +656,24 @@ class Framework:
                 plugin_count = len(self.plugin_manager.list_plugins())
                 if plugin_count > 0:
                     counts['plugins'] = plugin_count
-            
-            return counts
+
+            return self._normalize_module_count_keys(counts)
             
         except Exception as e:
             self.output_handler.print_error(f"Erreur lors du comptage des modules par type: {str(e)}")
             return {}
+    
+    def _normalize_module_count_keys(self, counts: Dict[str, int]) -> Dict[str, int]:
+        """Merge legacy transform type keys into the banner/CLI canonical 'transforms' bucket."""
+        normalized = dict(counts or {})
+        legacy_transform_total = 0
+        for legacy_key in ('obfuscator', 'transform'):
+            legacy_transform_total += int(normalized.pop(legacy_key, 0) or 0)
+        if legacy_transform_total:
+            # Filesystem discovery may already populate 'transforms'; never double-count DB legacy rows.
+            current = int(normalized.get('transforms', 0) or 0)
+            normalized['transforms'] = max(current, legacy_transform_total)
+        return normalized
     
     def _count_modules_from_files(self) -> Dict[str, int]:
         """
@@ -548,7 +694,7 @@ class Framework:
                 return counts
             
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'obfuscators', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
             
             for module_type in module_types:
                 # Map module_type to directory name
@@ -556,6 +702,20 @@ class Framework:
                     type_path = os.path.join(modules_path, 'docker_environments')
                 else:
                     type_path = os.path.join(modules_path, module_type)
+
+                if module_type == 'workflow' and getattr(self, 'module_loader', None):
+                    discovered = self.module_loader.discover_modules()
+                    count = sum(1 for path in discovered if path.startswith('workflow/'))
+                    if count > 0:
+                        counts[module_type] = count
+                    continue
+
+                if module_type == 'transforms' and getattr(self, 'module_loader', None):
+                    discovered = self.module_loader.discover_modules()
+                    count = sum(1 for path in discovered if path.startswith('transforms/'))
+                    if count > 0:
+                        counts[module_type] = count
+                    continue
                 
                 if os.path.exists(type_path):
                     count = 0
@@ -654,6 +814,47 @@ class Framework:
                             platform_str = getattr(pl, 'value', None) or str(pl).lower()
                             if platform_str:
                                 setattr(module, 'session_platform', platform_str)
+                        use_pty = getattr(prev, 'use_pty', None)
+                        if use_pty is not None:
+                            pty_val = use_pty.value if hasattr(use_pty, 'value') else use_pty
+                            setattr(module, 'session_pty_mode', bool(pty_val))
+                        for opt_name, attr in (
+                            ('encrypt', 'session_relay_encrypt'),
+                            ('relay_psk', 'session_relay_psk'),
+                            ('keepalive_interval', 'session_relay_keepalive'),
+                        ):
+                            opt = getattr(prev, opt_name, None)
+                            if opt is not None:
+                                val = opt.value if hasattr(opt, 'value') else opt
+                                setattr(module, attr, val)
+                                if hasattr(module, 'set_option'):
+                                    try:
+                                        module.set_option(opt_name, val)
+                                    except Exception:
+                                        pass
+                                elif hasattr(module, opt_name):
+                                    target_opt = getattr(module, opt_name)
+                                    if hasattr(target_opt, 'value'):
+                                        target_opt.value = val
+                        relay_token = getattr(prev, 'relay_token', None)
+                        if relay_token is not None and hasattr(module, 'relay_token'):
+                            tok_val = relay_token.value if hasattr(relay_token, 'value') else relay_token
+                            try:
+                                module.set_option('relay_token', tok_val)
+                            except Exception:
+                                if hasattr(module.relay_token, 'value'):
+                                    module.relay_token.value = tok_val
+                        identity = getattr(prev, '_implant_identity_obj', None)
+                        pub = getattr(prev, '_implant_public_key_pem', None)
+                        if identity is not None:
+                            setattr(module, 'session_implant_id', identity.implant_id)
+                        if pub:
+                            setattr(module, 'session_implant_public_key', pub)
+                            if hasattr(module, 'set_option'):
+                                try:
+                                    module.set_option('implant_public_key', pub)
+                                except Exception:
+                                    pass
                 self.current_module = module
                 
                 # Enregistrer pour hot reload

@@ -1,0 +1,33 @@
+id: web-lfi-log-poison
+version: "1"
+name: LFI to RCE via log poisoning
+source: ctf
+domain: web
+tags: [lfi, log_poison, rce, file_read]
+description: >
+  Local file inclusion on a PHP app, poison access logs or session files,
+  then include the poisoned path for code execution.
+prerequisites:
+  signals_any:
+    - lfi
+    - path_traversal
+  tech_any:
+    - php
+chain:
+  - id: confirm_lfi
+    capability: file_read
+    module: auxiliary/scanner/http/lfi_fuzzer
+    description: Confirm path traversal / LFI primitive
+  - id: poison_log
+    capability: poisoned_payload
+    module: auxiliary/scanner/http/lfi_log_poison
+    description: Poison access log via User-Agent and re-include via LFI
+  - id: trigger_rce
+    capability: rce
+    module: auxiliary/scanner/http/lfi_log_poison
+    description: RCE confirmed when log poison step executes PHP payload
+blockers:
+  - open_basedir restrictions
+  - log rotation / remote logging
+references:
+  - "CTF classic: LFI + /var/log/apache2/access.log poisoning"

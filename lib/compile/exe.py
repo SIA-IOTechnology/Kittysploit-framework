@@ -21,6 +21,24 @@ class ExeCompiler(BaseModule):
             self._zig_compiler = ZigCompiler()
         return self._zig_compiler
 
+    def generate_pe_from_c(self, source_code: str, output_path: str, target_arch: str = "x64", include_dir: str | None = None) -> bool:
+        """Compile C source to Windows PE executable via Zig."""
+        compiler = self._get_zig_compiler()
+        if not compiler.is_available():
+            print_error("Zig compiler not available; cannot generate PE from C.")
+            return False
+        return compiler.compile_c(
+            source_code=source_code,
+            output_path=output_path,
+            target_platform="windows",
+            target_arch=target_arch,
+            optimization="ReleaseSmall",
+            strip=True,
+            static=True,
+            windows_subsystem="windows",
+            include_dir=include_dir,
+        )
+
     def generate_pe(self, source_code: str, output_path: str, target_arch: str = "x86_64") -> bool:
         """Compile Zig source to Windows PE executable."""
         compiler = self._get_zig_compiler()

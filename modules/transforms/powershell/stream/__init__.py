@@ -1,1 +1,1 @@
-# PowerShell stream obfuscators.
+# PowerShell stream transforms.

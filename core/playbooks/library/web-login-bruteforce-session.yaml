@@ -1,0 +1,33 @@
+id: web-login-bruteforce-session
+version: "1"
+name: Login brute-force to authenticated session
+source: bug-bounty
+domain: web
+tags: [auth, bruteforce, session, login]
+description: >
+  Classic bug bounty path — discover a login panel, brute-force weak credentials,
+  obtain a session cookie, then pivot to authenticated testing.
+prerequisites:
+  signals_any:
+    - login_surface_detected
+    - login_form_detected
+    - login_redirect_detected
+  tech_any: []
+chain:
+  - id: discover_login
+    capability: credentials
+    module: auxiliary/scanner/http/login_page_detector
+    description: Locate login and admin panels
+  - id: bruteforce_login
+    capability: session_cookie
+    module: auxiliary/scanner/http/login/admin_login_bruteforce
+    description: Attempt credential reuse / weak password login
+  - id: authenticated_pivot
+    capability: authenticated_session
+    module: post/http/gather/authenticated_surface
+    description: Map privileged endpoints after successful login
+blockers:
+  - account lockout or CAPTCHA
+  - MFA on login
+references:
+  - "Common BB report pattern: login panel → weak creds → session hijack testing"

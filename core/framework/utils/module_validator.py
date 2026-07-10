@@ -167,7 +167,11 @@ class ModuleValidator:
         else:
             # Check if Module class inherits from a base class that already has run()
             inherits_from_base_with_run = False
-            base_classes_with_run = ["DockerEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener", "Post", "Scanner", "Encoder", "Obfuscator"]
+            base_classes_with_run = [
+                "DockerEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
+                "Post", "Scanner", "Encoder", "Transform", "Backdoor",
+                "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
+            ]
             
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef) and node.name == "Module":

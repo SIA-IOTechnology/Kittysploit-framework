@@ -9,6 +9,14 @@ from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_status, print_success, print_table
 
 
+# Aliases accepted by tuto <type> (not listed in tuto overview table).
+TUTO_TYPE_ALIASES = {
+    "transform": "transforms",
+    "obfuscator": "transforms",
+    "obfuscators": "transforms",
+}
+
+
 # English explanations for each module type (short summary + detailed text)
 MODULE_TYPE_TUTORIALS = {
     "exploits": {
@@ -21,12 +29,12 @@ Exploits are modules that leverage known or discovered vulnerabilities to execut
   2. show options              Display and set required options (rhost, rport, payload, etc.)
   3. set payload <path>        Choose a payload (use compatible_payloads to list compatible ones)
   4. set rhost / rport         Set target host and port
-  5. set obfuscator <path>     (optional) Same obfuscator for listener and payload (e.g. obfuscators/python/stream/xor); set key if needed
+  5. set transform <path>      (optional) Same transform for listener and payload (e.g. transforms/python/stream/xor); set key if needed
   6. run                       Execute the exploit
 
   Tips:
   - Use 'check' to test if the target is vulnerable without attacking.
-  - For reverse shells, the exploit can start a listener automatically; if you set obfuscator on the exploit, it is applied to both the listener and the payload when you run.
+  - For reverse shells, the exploit can start a listener automatically; if you set transform on the exploit, it is applied to both the listener and the payload when you run.
   - Required options are marked; use 'show options' and set all required fields.
 """,
     },
@@ -57,12 +65,12 @@ Payloads are the code delivered and executed on the target after a successful ex
   3. show payloads or compatible_payloads   List payloads compatible with the current exploit
   4. set payload <payload_path>             e.g. set payload payloads/singles/cmd/unix/bash_reverse_tcp
   5. set LHOST / LPORT (and any payload-specific options)
-  6. If your LISTENER uses an obfuscator: set obfuscator <same path> and set the same options (e.g. key) on the payload, then generate/run
+  6. If your LISTENER uses a transform: set transform <same path> and set the same options (e.g. key) on the payload, then generate/run
   7. run or generate
 
   Tips:
   - For reverse payloads, start a listener (use a listener module, set options, run) before running the exploit.
-  - If the listener has obfuscator set (e.g. obfuscators/python/stream/xor with key 'mykey'), you must set the same obfuscator and key on the payload when generating, so both sides encode/decode the C2 stream the same way.
+  - If the listener has transform set (e.g. transforms/python/stream/xor with key 'mykey'), you must set the same transform and key on the payload when generating, so both sides encode/decode the C2 stream the same way.
   - Staged payloads use a small stager that fetches the rest; single payloads are self-contained.
 """,
     },
@@ -81,19 +89,19 @@ Encoders transform payloads (e.g. base64, XOR) to evade signature-based detectio
   - Use 'show encoders' to list available encoders.
 """,
     },
-    "obfuscators": {
-        "summary": "Obfuscate C2 traffic between the listener and the target (encode/decode stream).",
+    "transforms": {
+        "summary": "Transform C2 traffic between the listener and the target (encode/decode stream).",
         "detail": """
-Obfuscators apply encode/decode to the communication stream between the framework listener and the target, making traffic harder to detect or analyze.
+Transforms apply encode/decode to the communication stream between the framework listener and the target, making traffic harder to detect or analyze.
 
   How to use:
-  1. On the LISTENER: use <listener_path>, then set obfuscator <path> (e.g. obfuscators/python/stream/xor), set key and other obfuscator options, set lhost/lport, run.
-  2. On the PAYLOAD: when generating the payload (use <payload>, set lhost/lport), set the SAME obfuscator and SAME options (e.g. key) as the listener, then generate/run.
+  1. On the LISTENER: use <listener_path>, then set transform <path> (e.g. transforms/python/stream/xor), set key and other transform options, set lhost/lport, run.
+  2. On the PAYLOAD: when generating the payload (use <payload>, set lhost/lport), set the SAME transform and SAME options (e.g. key) as the listener, then generate/run.
 
   Important:
-  - If the listener uses an obfuscator, the generated payload MUST use the same obfuscator and same options (e.g. XOR key). Otherwise the C2 channel will not work (both sides must encode/decode the same way).
-  - Compatibility: each obfuscator declares which payload client languages it supports (e.g. python, powershell). Each payload declares its client language. Only compatible obfuscator+payload pairs work; if you set an incompatible obfuscator on a payload, generation will warn and produce a non-obfuscated payload. Use 'show info' on an obfuscator to see "Compatible with payloads (client language): ...".
-  - Use 'show obfuscators' to list available obfuscator modules.
+  - If the listener uses a transform, the generated payload MUST use the same transform and same options (e.g. XOR key). Otherwise the C2 channel will not work (both sides must encode/decode the same way).
+  - Compatibility: each transform declares which payload client languages it supports (e.g. python, powershell). Each payload declares its client language. Only compatible transform+payload pairs work; if you set an incompatible transform on a payload, generation will warn and produce a payload without stream transform. Use 'show info' on a transform to see "Compatible with payloads (client language): ...".
+  - Use 'show transforms' to list available transform modules.
 """,
     },
     "listeners": {
@@ -103,14 +111,14 @@ Listeners wait for incoming connections from exploited targets (e.g. reverse she
 
   How to use:
   1. use <listener_path>       e.g. use listeners/multi/reverse_tcp
-  2. show options              Set LHOST, LPORT, payload (if applicable), obfuscator (optional)
+  2. show options              Set LHOST, LPORT, payload (if applicable), transform (optional)
   3. set lhost <your_ip>
   4. set lport <port>
   5. run                       Start the listener; use 'sessions' to see new sessions
 
   Tips:
   - Match the listener type and port to the payload (e.g. reverse_tcp payload needs a reverse_tcp listener).
-  - Optional 'obfuscator' option can encode the C2 stream; set it before run.
+  - Optional 'transform' option can encode the C2 stream; set it before run.
 """,
     },
     "post": {
@@ -151,12 +159,14 @@ Scanner modules probe targets (hosts, ports, services) to find vulnerabilities o
 Workflow modules chain multiple steps (e.g. scan then exploit) into a single run. They automate common attack sequences.
 
   How to use:
-  1. use <workflow_path>       e.g. use workflow/simple_workflow
+  1. use <workflow_path>       e.g. use workflow/web-recon
   2. show options              Configure workflow targets and steps
   3. set options as required by the workflow
   4. run                       Execute the workflow
 
   Tips:
+  - Library workflows from core/workflows/library/ are available as workflow/<id>
+    (e.g. use workflow/osint-deep-recon). You can also run them with workflows run <id>.
   - Options depend on the workflow; check show options and the module description.
 """,
     },
@@ -289,6 +299,7 @@ class TutoCommand(BaseCommand):
             self._show_all_types()
             return True
         module_type = args[0].strip().lower()
+        module_type = TUTO_TYPE_ALIASES.get(module_type, module_type)
         if module_type in MODULE_TYPE_TUTORIALS:
             self._show_type_detail(module_type)
             return True
@@ -313,7 +324,7 @@ class TutoCommand(BaseCommand):
         ]
         print_table(headers, rows, max_width=100)
         print_info("")
-        print_status("Usage: tuto <module_type>  – e.g. tuto exploits, tuto listeners")
+        print_status("Usage: tuto <module_type>  – e.g. tuto exploits, tuto transforms, tuto listeners")
         print_info("")
 
     def _show_type_detail(self, module_type: str):

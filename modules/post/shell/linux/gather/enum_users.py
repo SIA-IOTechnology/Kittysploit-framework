@@ -1,7 +1,8 @@
 from kittysploit import *
 from lib.post.linux.system import System
+from lib.post.linux.session import LinuxSessionMixin
 
-class Module(Post, System):
+class Module(Post, System, LinuxSessionMixin):
 
     __info__ = {
         "name": "Linux User Enumeration",
@@ -18,12 +19,65 @@ class Module(Post, System):
         'reversible': False,
         'approval_required': True,
         'produces': ['risk_signals'],
+        'cost': 1.5,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 's7comm', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''},
+                                   {'capability': 'db_access', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
     },
     }
 
     def run(self):
         """Enumerate user and permission information"""
         
+        if not self.linux_require_linux():
+            return False
+
         print_status("Starting user enumeration...")
         
         # 1. User Accounts
@@ -139,11 +193,11 @@ class Module(Post, System):
             
             # Get currently logged in users
             print_status("Currently Logged In Users:")
-            who_output = self.cmd_exec("who 2>/dev/null")
+            who_output = self.linux_execute("who 2>/dev/null")
             if who_output:
                 print_info(who_output)
             
-            w_output = self.cmd_exec("w 2>/dev/null")
+            w_output = self.linux_execute("w 2>/dev/null")
             if w_output:
                 print_info("Detailed user activity (w):")
                 print_info(w_output)
@@ -198,11 +252,11 @@ class Module(Post, System):
             
             # Get current user's groups
             print_status("Current User Groups:")
-            groups_output = self.cmd_exec("groups 2>/dev/null")
+            groups_output = self.linux_execute("groups 2>/dev/null")
             if groups_output:
                 print_info(f"  {groups_output.strip()}")
             
-            id_output = self.cmd_exec("id 2>/dev/null")
+            id_output = self.linux_execute("id 2>/dev/null")
             if id_output:
                 print_info(f"  {id_output.strip()}")
                 
@@ -219,7 +273,7 @@ class Module(Post, System):
             # Get last logins
             if self.command_exists('last'):
                 print_status("Recent Logins (last):")
-                last_output = self.cmd_exec("last -n 20 2>/dev/null")
+                last_output = self.linux_execute("last -n 20 2>/dev/null")
                 if last_output:
                     for line in last_output.strip().split('\n'):
                         if line.strip() and not line.strip().startswith('wtmp'):
@@ -228,7 +282,7 @@ class Module(Post, System):
             # Get lastlog
             if self.command_exists('lastlog'):
                 print_status("Last Login Times (lastlog):")
-                lastlog_output = self.cmd_exec("lastlog 2>/dev/null | head -30")
+                lastlog_output = self.linux_execute("lastlog 2>/dev/null | head -30")
                 if lastlog_output:
                     for line in lastlog_output.strip().split('\n'):
                         if line.strip() and not line.strip().startswith('Username'):
@@ -237,7 +291,7 @@ class Module(Post, System):
             
             # Get failed login attempts
             print_status("Failed Login Attempts:")
-            failed_logins = self.cmd_exec("grep -i 'failed\\|invalid\\|authentication failure' /var/log/auth.log /var/log/secure /var/log/messages 2>/dev/null | tail -20")
+            failed_logins = self.linux_execute("grep -i 'failed\\|invalid\\|authentication failure' /var/log/auth.log /var/log/secure /var/log/messages 2>/dev/null | tail -20")
             if failed_logins:
                 for line in failed_logins.strip().split('\n'):
                     if line.strip():
@@ -245,7 +299,7 @@ class Module(Post, System):
             
             # Get successful logins
             print_status("Successful Login Attempts:")
-            success_logins = self.cmd_exec("grep -i 'accepted\\|successful' /var/log/auth.log /var/log/secure 2>/dev/null | tail -20")
+            success_logins = self.linux_execute("grep -i 'accepted\\|successful' /var/log/auth.log /var/log/secure 2>/dev/null | tail -20")
             if success_logins:
                 for line in success_logins.strip().split('\n'):
                     if line.strip():
@@ -253,7 +307,7 @@ class Module(Post, System):
             
             # Check for .bash_history or .zsh_history in home directories
             print_status("Checking for shell history files...")
-            home_dirs = self.cmd_exec("ls -d /home/* 2>/dev/null")
+            home_dirs = self.linux_execute("ls -d /home/* 2>/dev/null")
             if home_dirs:
                 for home_dir in home_dirs.strip().split('\n'):
                     if home_dir.strip():
@@ -265,7 +319,7 @@ class Module(Post, System):
                         ]
                         for hist_file in history_files:
                             if self.file_exist(hist_file):
-                                size = self.cmd_exec(f"wc -c < {hist_file} 2>/dev/null").strip()
+                                size = self.linux_execute(f"wc -c < {hist_file} 2>/dev/null").strip()
                                 if size and size.isdigit():
                                     print_info(f"  {user}: {hist_file} ({size} bytes)")
                                 
@@ -294,13 +348,13 @@ class Module(Post, System):
                             print_info(f"  {line}")
             
             # Check sudoers.d directory
-            sudoers_d = self.cmd_exec("ls -la /etc/sudoers.d/ 2>/dev/null")
+            sudoers_d = self.linux_execute("ls -la /etc/sudoers.d/ 2>/dev/null")
             if sudoers_d:
                 print_status("Files in /etc/sudoers.d/:")
                 print_info(sudoers_d)
                 
                 # Read each file in sudoers.d
-                files = self.cmd_exec("ls /etc/sudoers.d/ 2>/dev/null")
+                files = self.linux_execute("ls /etc/sudoers.d/ 2>/dev/null")
                 if files:
                     for file in files.strip().split('\n'):
                         if file.strip() and file.strip() != '.' and file.strip() != '..':
@@ -316,14 +370,14 @@ class Module(Post, System):
             
             # Check current user's sudo permissions
             print_status("Current User Sudo Permissions:")
-            sudo_l_output = self.cmd_exec("sudo -l 2>/dev/null")
+            sudo_l_output = self.linux_execute("sudo -l 2>/dev/null")
             if sudo_l_output and "Permission denied" not in sudo_l_output:
                 print_info(sudo_l_output)
             else:
                 print_info("  Cannot check sudo permissions (may require password)")
             
             # Check if current user can sudo without password
-            sudo_test = self.cmd_exec("sudo -n true 2>&1")
+            sudo_test = self.linux_execute("sudo -n true 2>&1")
             if sudo_test and "password" not in sudo_test.lower():
                 print_warning("  Current user can execute sudo without password!")
             else:
@@ -340,7 +394,7 @@ class Module(Post, System):
         
         try:
             # Check for authorized_keys files in home directories
-            home_dirs = self.cmd_exec("ls -d /home/* 2>/dev/null")
+            home_dirs = self.linux_execute("ls -d /home/* 2>/dev/null")
             if home_dirs:
                 for home_dir in home_dirs.strip().split('\n'):
                     if home_dir.strip():
@@ -365,7 +419,7 @@ class Module(Post, System):
                                             print_info(f"    Type: {key_type}, Comment: {comment}")
                             
                             # Check permissions
-                            perms = self.cmd_exec(f"ls -l {auth_keys_file} 2>/dev/null")
+                            perms = self.linux_execute(f"ls -l {auth_keys_file} 2>/dev/null")
                             if perms:
                                 print_info(f"  Permissions: {perms.strip()}")
             
@@ -387,12 +441,12 @@ class Module(Post, System):
             
             # Check for SSH private keys
             print_status("SSH Private Keys:")
-            private_keys = self.cmd_exec("find /home /root -name 'id_rsa' -o -name 'id_dsa' -o -name 'id_ecdsa' -o -name 'id_ed25519' 2>/dev/null | head -20")
+            private_keys = self.linux_execute("find /home /root -name 'id_rsa' -o -name 'id_dsa' -o -name 'id_ecdsa' -o -name 'id_ed25519' 2>/dev/null | head -20")
             if private_keys:
                 for key_file in private_keys.strip().split('\n'):
                     if key_file.strip():
                         print_warning(f"  Found private key: {key_file}")
-                        perms = self.cmd_exec(f"ls -l {key_file} 2>/dev/null")
+                        perms = self.linux_execute(f"ls -l {key_file} 2>/dev/null")
                         if perms:
                             print_info(f"    Permissions: {perms.strip()}")
                             
@@ -408,9 +462,9 @@ class Module(Post, System):
         try:
             # Get current user's history
             print_status("Current User History:")
-            current_user = self.cmd_exec("whoami 2>/dev/null").strip()
+            current_user = self.linux_execute("whoami 2>/dev/null").strip()
             if current_user:
-                home_dir = self.cmd_exec(f"echo ~{current_user} 2>/dev/null || getent passwd {current_user} | cut -d: -f6").strip()
+                home_dir = self.linux_execute(f"echo ~{current_user} 2>/dev/null || getent passwd {current_user} | cut -d: -f6").strip()
                 
                 history_files = [
                     f"{home_dir}/.bash_history",
@@ -423,7 +477,7 @@ class Module(Post, System):
                     if self.file_exist(hist_file):
                         print_status(f"Found: {hist_file}")
                         # Get last 20 commands
-                        last_commands = self.cmd_exec(f"tail -20 {hist_file} 2>/dev/null")
+                        last_commands = self.linux_execute(f"tail -20 {hist_file} 2>/dev/null")
                         if last_commands:
                             print_info("Last 20 commands:")
                             for cmd in last_commands.strip().split('\n'):
@@ -432,17 +486,17 @@ class Module(Post, System):
             
             # Check all users' history files
             print_status("All Users' History Files:")
-            all_history = self.cmd_exec("find /home /root -name '.bash_history' -o -name '.zsh_history' -o -name '.history' 2>/dev/null | head -20")
+            all_history = self.linux_execute("find /home /root -name '.bash_history' -o -name '.zsh_history' -o -name '.history' 2>/dev/null | head -20")
             if all_history:
                 for hist_file in all_history.strip().split('\n'):
                     if hist_file.strip():
                         user = hist_file.split('/')[2] if len(hist_file.split('/')) > 2 else 'unknown'
-                        size = self.cmd_exec(f"wc -l < {hist_file} 2>/dev/null").strip()
+                        size = self.linux_execute(f"wc -l < {hist_file} 2>/dev/null").strip()
                         if size and size.isdigit():
                             print_info(f"  {user}: {hist_file} ({size} lines)")
                             
                             # Look for interesting commands
-                            interesting = self.cmd_exec(f"grep -iE 'password|passwd|ssh|key|secret|token|api' {hist_file} 2>/dev/null | tail -5")
+                            interesting = self.linux_execute(f"grep -iE 'password|passwd|ssh|key|secret|token|api' {hist_file} 2>/dev/null | tail -5")
                             if interesting:
                                 print_warning(f"    Interesting commands found:")
                                 for line in interesting.strip().split('\n'):
@@ -498,24 +552,24 @@ class Module(Post, System):
         
         try:
             # Get current user
-            current_user = self.cmd_exec("whoami 2>/dev/null").strip()
+            current_user = self.linux_execute("whoami 2>/dev/null").strip()
             if current_user:
                 print_info(f"Current user: {current_user}")
             
             # Get user ID
-            uid = self.cmd_exec("id -u 2>/dev/null").strip()
+            uid = self.linux_execute("id -u 2>/dev/null").strip()
             if uid:
                 print_info(f"UID: {uid}")
                 if uid == '0':
                     print_warning("  Running as ROOT!")
             
             # Get groups
-            groups = self.cmd_exec("id 2>/dev/null").strip()
+            groups = self.linux_execute("id 2>/dev/null").strip()
             if groups:
                 print_info(f"Groups: {groups}")
             
             # Get home directory
-            home = self.cmd_exec("echo $HOME 2>/dev/null").strip()
+            home = self.linux_execute("echo $HOME 2>/dev/null").strip()
             if home:
                 print_info(f"Home directory: {home}")
             
@@ -525,7 +579,7 @@ class Module(Post, System):
                 print_info(f"Current directory: {pwd}")
             
             # Check if user is in sudo group
-            sudo_check = self.cmd_exec("groups 2>/dev/null | grep -E 'sudo|admin|wheel'")
+            sudo_check = self.linux_execute("groups 2>/dev/null | grep -E 'sudo|admin|wheel'")
             if sudo_check:
                 print_warning(f"  User is in privileged group: {sudo_check.strip()}")
                 

@@ -726,6 +726,12 @@ Examples:
                 shell_type = "polling"
             elif session_type == "winrm":
                 shell_type = "winrm"
+            elif session_type == "smb":
+                shell_type = "smb"
+            elif session_type == "s7comm":
+                shell_type = "s7comm"
+            elif session_type == "modbus":
+                shell_type = "modbus"
             else:
                 shell_type = "classic"
             
@@ -745,8 +751,32 @@ Examples:
             
             # Set as active shell
             self.framework.shell_manager.set_active_shell(session_id)
+
+            if getattr(shell, "shell_name", "") == "classic" and hasattr(shell, "is_session_available"):
+                shell._refresh_connection()
+                shell._normalize_connection()
+                if not shell.is_session_available():
+                    print_error(
+                        "Session disconnected — wait for implant reconnect or kill this session."
+                    )
+                    return False
+                if hasattr(shell, "prepare_interactive_session"):
+                    shell.prepare_interactive_session()
             
-            # Start interactive session
+            # Classic reverse shells: PTY only when payload negotiated it (KSPTY1 / pty_mode).
+            if (
+                getattr(shell, "shell_name", "") == "classic"
+                and hasattr(shell, "start_interactive_shell_loop")
+                and hasattr(shell, "supports_pty_mode")
+                and shell.supports_pty_mode()
+            ):
+                print_info("Starting interactive session...")
+                print_info("Using persistent PTY mode for this interactive session (Ctrl+] to return).")
+                if shell.start_interactive_shell_loop():
+                    return True
+                print_info("PTY mode unavailable — falling back to line-by-line shell.")
+
+            # Start interactive session (line-by-line fallback)
             print_info("Starting interactive session...")
             print_info("Type 'exit', 'back' or 'background' to return to main shell (session remains active), 'help' for shell commands")
             print_info("-" * 50)

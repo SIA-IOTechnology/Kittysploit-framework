@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-HTTP chunked mimic obfuscator.
+HTTP chunked mimic transform.
 
 The first server-side encode prepends an HTTP/1.1 response header, the first
 client-side encode generated for payloads prepends an HTTP POST request header,
@@ -38,13 +38,13 @@ CLIENT_HEADER = (
 )
 
 
-class Module(Obfuscator):
-    """HTTP chunked transfer mimic obfuscator."""
+class Module(Transform):
+    """HTTP chunked transfer mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["python"]
 
     __info__ = {
-        "name": "HTTP Chunked Mimic Obfuscator",
+        "name": "HTTP Chunked Mimic Transform",
         "description": "Wraps C2 bytes in HTTP/1.1 chunked transfer frames with initial HTTP-like headers.",
         "author": "KittySploit Team",
         "version": "1.0.0",
@@ -126,33 +126,33 @@ class Module(Obfuscator):
             return None
         client_header = CLIENT_HEADER.hex()
         return (
-            "_obf_buf=bytearray()\n"
-            "_obf_first=[True]\n"
-            f"_obf_client_header=bytes.fromhex('{client_header}')\n"
-            "def _obf_encode(d):\n"
+            "_xf_buf=bytearray()\n"
+            "_xf_first=[True]\n"
+            f"_xf_client_header=bytes.fromhex('{client_header}')\n"
+            "def _xf_encode(d):\n"
             " if not d: return d\n"
             " out=[]\n"
-            " if _obf_first[0]: out.append(_obf_client_header); _obf_first[0]=False\n"
+            " if _xf_first[0]: out.append(_xf_client_header); _xf_first[0]=False\n"
             " i=0\n"
             " while i<len(d):\n"
             "  c=d[i:i+16384]; i+=16384\n"
             "  out.append(('%x'%len(c)).encode()+b'\\r\\n'+c+b'\\r\\n')\n"
             " return b''.join(out)\n"
-            "def _obf_decode(d):\n"
-            " _obf_buf.extend(d)\n"
+            "def _xf_decode(d):\n"
+            " _xf_buf.extend(d)\n"
             " out=[]\n"
-            " while _obf_buf:\n"
-            "  if _obf_buf.startswith((b'HTTP/',b'POST ',b'GET ',b'PUT ',b'PATCH ')):\n"
-            "   e=_obf_buf.find(b'\\r\\n\\r\\n')\n"
+            " while _xf_buf:\n"
+            "  if _xf_buf.startswith((b'HTTP/',b'POST ',b'GET ',b'PUT ',b'PATCH ')):\n"
+            "   e=_xf_buf.find(b'\\r\\n\\r\\n')\n"
             "   if e==-1: break\n"
-            "   del _obf_buf[:e+4]\n"
-            "  i=_obf_buf.find(b'\\r\\n')\n"
+            "   del _xf_buf[:e+4]\n"
+            "  i=_xf_buf.find(b'\\r\\n')\n"
             "  if i==-1: break\n"
-            "  try: ln=int(bytes(_obf_buf[:i]).split(b';',1)[0].strip(),16)\n"
-            "  except Exception: _obf_buf.pop(0); continue\n"
-            "  if ln>16384: _obf_buf.pop(0); continue\n"
+            "  try: ln=int(bytes(_xf_buf[:i]).split(b';',1)[0].strip(),16)\n"
+            "  except Exception: _xf_buf.pop(0); continue\n"
+            "  if ln>16384: _xf_buf.pop(0); continue\n"
             "  end=i+2+ln+2\n"
-            "  if len(_obf_buf)<end: break\n"
-            "  out.append(bytes(_obf_buf[i+2:i+2+ln])); del _obf_buf[:end]\n"
+            "  if len(_xf_buf)<end: break\n"
+            "  out.append(bytes(_xf_buf[i+2:i+2+ln])); del _xf_buf[:end]\n"
             " return b''.join(out)\n"
         )

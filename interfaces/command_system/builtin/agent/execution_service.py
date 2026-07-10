@@ -11,8 +11,8 @@ from core.framework.module_executor import ModuleExecutionRequest, ModuleExecuto
 from interfaces.command_system.builtin.agent.runtime_policy import (
     action_is_non_idempotent,
     assess_module_risk,
+    evaluate_module_catalog_policy,
     evaluate_module_policy,
-    module_policy_decision,
 )
 
 
@@ -54,11 +54,12 @@ class AgentModuleExecutionService:
                 }),
             }
         if policy is not None:
-            block = evaluate_module_policy(
+            block = evaluate_module_catalog_policy(
                 policy,
-                risk,
+                module_instance,
+                module_path,
                 phase=phase,
-                module_path=module_path,
+                knowledge_base=getattr(state, "knowledge_base", {}),
             )
             if block is not None:
                 metrics = getattr(state, "metrics", None)

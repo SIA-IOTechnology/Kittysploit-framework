@@ -24,7 +24,8 @@ from lib.relay.p2p_relay_core import RelayHub
 
 BANNER = """\
 KittyRelay — rendezvous hub (no framework required)
-Pair agents and operators with the same room token (KSRL:v1:ROLE:TOKEN).
+Pair agents and operators with the same room token (KSRL:v1|v2:ROLE:TOKEN).
+v2 peers may use E2E encryption (KSF1) after pairing — hub sees opaque bytes.
 Operator side: kittysploit → use listeners/multi/p2p_relay → set role operator
 """
 

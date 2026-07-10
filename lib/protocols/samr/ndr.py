@@ -21,15 +21,15 @@ SAMR_INTERFACE_UUID = pack_uuid("12345778-1234-ABCD-EF00-0123456789AC", 1)
 NDR_TRANSFER_SYNTAX = pack_uuid("8a885d04-1ceb-11c9-9fe8-08002b104860", 2)
 
 
-def pack_unique_wstring(value: Optional[str]) -> bytes:
+def pack_unique_wstring(value: Optional[str], referent: int = 1) -> bytes:
     """Pointeur unique vers une chaîne UTF-16LE conformante (ou NULL)."""
     if not value:
         return struct.pack("<I", 0)
     encoded = value.encode("utf-16le") + b"\x00\x00"
     char_count = len(encoded) // 2
-    body = struct.pack("<IIII", 1, char_count, 0, char_count) + encoded
+    body = struct.pack("<IIII", char_count, char_count, 0, char_count) + encoded
     pad = b"\x00" * ((align4(len(body)) - len(body)) % 4)
-    return struct.pack("<I", 1) + body + pad
+    return struct.pack("<I", referent & 0xFFFFFFFF) + body + pad
 
 
 def pack_ulong(value: int) -> bytes:

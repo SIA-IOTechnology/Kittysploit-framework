@@ -98,21 +98,19 @@ Note: This command only works when a module is selected.
                 except Exception:
                     discovered_modules = {}
 
-            module_file_path = None
-            if module_path in discovered_modules:
-                module_file_path = discovered_modules[module_path]
-            else:
-                # Convert Python format (dots) to file format (slashes)
+            module_file_path = module_loader.resolve_module_source_file(
+                module_path,
+                discovered_modules.get(module_path) if module_path in discovered_modules else None,
+            )
+            if not module_file_path and module_path:
                 file_format_path = module_path.replace('.', '/')
-                if file_format_path in discovered_modules:
-                    module_file_path = discovered_modules[file_format_path]
-                else:
-                    # Construct the file path manually
-                    module_file_path = f"modules/{file_format_path}.py"
-            
-            # Check if the file exists
-            if not os.path.exists(module_file_path):
-                print_error(f"Module file not found: {module_file_path}")
+                module_file_path = module_loader.resolve_module_source_file(
+                    file_format_path,
+                    discovered_modules.get(file_format_path) if file_format_path in discovered_modules else None,
+                )
+
+            if not module_file_path or not os.path.exists(module_file_path):
+                print_error(f"Module file not found: {module_file_path or module_path}")
                 return False
             
             # Try to import required dependencies
@@ -127,6 +125,16 @@ Note: This command only works when a module is selected.
                 print_info("Please install prompt_toolkit and pygments:")
                 print_info("pip install prompt_toolkit pygments")
                 return False
+
+            suffix = os.path.splitext(module_file_path)[1].lower()
+            if suffix in (".yaml", ".yml"):
+                from pygments.lexers.data import YamlLexer
+                editor_lexer = PygmentsLexer(YamlLexer)
+            elif suffix == ".json":
+                from pygments.lexers.data import JsonLexer
+                editor_lexer = PygmentsLexer(JsonLexer)
+            else:
+                editor_lexer = PygmentsLexer(PythonLexer)
             
             # Set up key bindings
             bindings = KeyBindings()
@@ -138,7 +146,7 @@ Note: This command only works when a module is selected.
 
             # Create prompt session with syntax highlighting
             session = PromptSession(
-                lexer=PygmentsLexer(PythonLexer), 
+                lexer=editor_lexer,
                 key_bindings=bindings
             )
 
@@ -151,6 +159,9 @@ Note: This command only works when a module is selected.
                 return False
 
             print_info(f"Editing module: {current_module.name}")
+            print_info(f"Source file: {module_file_path}")
+            if suffix in (".yaml", ".yml", ".json"):
+                print_info("Editing declarative workflow definition (changes apply after reload)")
             print_info("Press Ctrl+D when done editing")
             print_warning("Warning: Make sure you understand the module structure before making changes!")
 

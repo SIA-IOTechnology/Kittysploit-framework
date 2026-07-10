@@ -186,63 +186,93 @@ fn executeCommand(allocator: std.mem.Allocator, cmd: []const u8, cwd: []const u8
     if (command.len == 0) {
         return &[_]u8{};
     }
-    
-    var args_list = std.array_list.Managed([]const u8).init(allocator);
-    defer args_list.deinit();
-    
-    var it = mem.splitScalar(u8, command, ' ');
-    while (it.next()) |arg| {
-        if (arg.len > 0) {
-            try args_list.append(arg);
-        }
-    }
-    
-    if (args_list.items.len == 0) {
-        return try allocator.dupe(u8, "");
-    }
-    
-    var final_args: []const []const u8 = undefined;
-    var cmd_args_wrapper = std.array_list.Managed([]const u8).init(allocator);
-    defer cmd_args_wrapper.deinit();
-    
+
     if (builtin.target.os.tag == .windows) {
+        var args_list = std.array_list.Managed([]const u8).init(allocator);
+        defer args_list.deinit();
+
+        var it = mem.splitScalar(u8, command, ' ');
+        while (it.next()) |arg| {
+            if (arg.len > 0) {
+                try args_list.append(arg);
+            }
+        }
+
+        if (args_list.items.len == 0) {
+            return try allocator.dupe(u8, "");
+        }
+
+        var cmd_args_wrapper = std.array_list.Managed([]const u8).init(allocator);
+        defer cmd_args_wrapper.deinit();
         try cmd_args_wrapper.append("cmd.exe");
         try cmd_args_wrapper.append("/c");
         for (args_list.items) |arg| {
             try cmd_args_wrapper.append(arg);
         }
-        final_args = cmd_args_wrapper.items;
-    } else {
-        // Unix: use command directly
-        final_args = args_list.items;
+
+        var child = std.process.Child.init(cmd_args_wrapper.items, allocator);
+        child.cwd = cwd;
+        child.stdin_behavior = .Ignore;
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Pipe;
+
+        child.spawn() catch |err| {
+            const err_msg = try std.fmt.allocPrint(allocator, "Error: {s}\\n", .{@errorName(err)});
+            return err_msg;
+        };
+
+        var stdout_list = std.ArrayList(u8).empty;
+        defer stdout_list.deinit(allocator);
+        var stderr_list = std.ArrayList(u8).empty;
+        defer stderr_list.deinit(allocator);
+
+        child.collectOutput(allocator, &stdout_list, &stderr_list, 1024 * 1024) catch |err| {
+            const err_msg = try std.fmt.allocPrint(allocator, "Error collecting output: {s}\\n", .{@errorName(err)});
+            return err_msg;
+        };
+
+        _ = child.wait() catch |err| {
+            const err_msg = try std.fmt.allocPrint(allocator, "Error: {s}\\n", .{@errorName(err)});
+            return err_msg;
+        };
+
+        if (stderr_list.items.len == 0) {
+            return try allocator.dupe(u8, stdout_list.items);
+        }
+        var output = std.array_list.Managed(u8).init(allocator);
+        defer output.deinit();
+        try output.appendSlice(stdout_list.items);
+        try output.appendSlice(stderr_list.items);
+        return try output.toOwnedSlice();
     }
-    
-    var child = std.process.Child.init(final_args, allocator);
+
+    const sh_argv = [_][]const u8{ "/bin/sh", "-c", command };
+    var child = std.process.Child.init(&sh_argv, allocator);
     child.cwd = cwd;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
-    
+
     child.spawn() catch |err| {
         const err_msg = try std.fmt.allocPrint(allocator, "Error: {s}\\n", .{@errorName(err)});
         return err_msg;
     };
-    
+
     var stdout_list = std.ArrayList(u8).empty;
     defer stdout_list.deinit(allocator);
     var stderr_list = std.ArrayList(u8).empty;
     defer stderr_list.deinit(allocator);
-    
+
     child.collectOutput(allocator, &stdout_list, &stderr_list, 1024 * 1024) catch |err| {
         const err_msg = try std.fmt.allocPrint(allocator, "Error collecting output: {s}\\n", .{@errorName(err)});
         return err_msg;
     };
-    
+
     _ = child.wait() catch |err| {
         const err_msg = try std.fmt.allocPrint(allocator, "Error: {s}\\n", .{@errorName(err)});
         return err_msg;
     };
-    
+
     if (stderr_list.items.len == 0) {
         return try allocator.dupe(u8, stdout_list.items);
     }

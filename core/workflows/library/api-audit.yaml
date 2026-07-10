@@ -1,8 +1,9 @@
 id: api-audit
-version: "1"
+version: "2"
 name: API Security Audit
 description: >
-  API-focused audit — endpoint discovery, CORS, SSRF, injection, and debug leakage on API surfaces.
+  API-focused audit — discovery, OpenAPI abuse, BOLA/IDOR, CORS, JWT/OAuth, gRPC,
+  SSRF, injection, and debug leakage on API surfaces.
 tags: [api, owasp, audit]
 continue_on_failure: true
 variables:
@@ -11,6 +12,15 @@ variables:
     required: true
   port: "443"
   ssl: "true"
+  api_id_path:
+    description: Object endpoint with {id} placeholder for BOLA probe
+    default: "/api/users/{id}"
+  baseline_id:
+    description: Baseline object ID for BOLA/IDOR testing
+    default: "1"
+  grpc_port:
+    description: gRPC port when different from HTTPS
+    default: "50051"
 start_step: api_fuzz
 steps:
   api_fuzz:
@@ -20,6 +30,37 @@ steps:
       target: "${target}"
       port: "${port}"
       ssl: "${ssl}"
+    on_success: swagger_detect
+    on_failure: swagger_detect
+  swagger_detect:
+    module: scanner/http/swagger_detect
+    description: Detect exposed Swagger/OpenAPI documentation
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: openapi_abuse
+    on_failure: openapi_abuse
+  openapi_abuse:
+    module: auxiliary/scanner/http/openapi_schema_abuse
+    description: Probe documented API routes without authentication
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      max_endpoints: "20"
+    on_success: bola_idor
+    on_failure: bola_idor
+  bola_idor:
+    module: auxiliary/scanner/http/api_bola_idor_probe
+    description: Test alternate object IDs for BOLA/IDOR (OWASP API1)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      path_template: "${api_id_path}"
+      baseline_id: "${baseline_id}"
+      test_ids: "2,3,4,10,100"
     on_success: cors
     on_failure: cors
   cors:
@@ -29,6 +70,24 @@ steps:
       target: "${target}"
       port: "${port}"
       ssl: "${ssl}"
+    on_success: jwt_oauth
+    on_failure: jwt_oauth
+  jwt_oauth:
+    module: auxiliary/scanner/http/jwt_oauth_probe
+    description: JWT and OAuth/OIDC misconfiguration probes
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: grpc_reflection
+    on_failure: grpc_reflection
+  grpc_reflection:
+    module: scanner/http/grpc_reflection_detect
+    description: Detect gRPC server reflection on common RPC port
+    options:
+      target: "${target}"
+      port: "${grpc_port}"
+      ssl: "false"
     on_success: ssrf
     on_failure: ssrf
   ssrf:
@@ -41,8 +100,8 @@ steps:
     on_success: sql
     on_failure: sql
   sql:
-    module: auxiliary/scanner/http/sql_injection
-    description: SQL injection on API parameters
+    module: auxiliary/scanner/http/sqli_engine
+    description: Low-noise SQL injection on API parameters
     options:
       target: "${target}"
       port: "${port}"

@@ -16,6 +16,13 @@ class Module(Post, PostgreSQLClient):
 	    'reversible': False,
 	    'approval_required': True,
 	    'produces': ['risk_signals'],
+	    'chain': {
+	        'consumes_capabilities': ['db_access'],
+	        'suggested_followups': [
+	            'post/postgresql/gather/enum_roles',
+	            'post/postgresql/exploits/copy_program_exec',
+	        ],
+	    },
 	},
 	}
 

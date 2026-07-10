@@ -1,0 +1,77 @@
+SeDebugPrivilege:
+  analysis: "SeDebugPrivilege allows debugging and interacting with any process"
+  default_trustees:
+    - S-1-5-32-544
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeBackupPrivilege:
+  analysis: "SeBackupPrivilege allows access to sensitive files"
+  default_trustees:
+    - S-1-5-32-544
+    - S-1-5-32-551
+    - S-1-5-32-549
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/SeBackupPrivilege.html
+
+SeManageVolumePrivilege:
+  analysis: "SeManageVolumePrivilege allows volume or disk management tasks"
+  default_trustees:
+    - S-1-5-32-544
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeAssignPrimaryTokenPrivilege:
+  analysis: "SeAssignPrimaryTokenPrivilege allows token impersonation for SYSTEM escalation"
+  default_trustees:
+    - S-1-5-32-544
+    - S-1-5-20
+    - S-1-5-19
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeImpersonatePrivilege:
+  analysis: "SeImpersonatePrivilege allows creating a process under another user context"
+  default_trustees:
+    - S-1-5-32-544
+    - S-1-5-19
+    - S-1-5-20
+    - S-1-5-6
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeRestorePrivilege:
+  analysis: "SeRestorePrivilege bypasses object permissions during restore operations"
+  default_trustees:
+    - S-1-5-32-544
+    - S-1-5-32-551
+    - S-1-5-32-549
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeTakeOwnershipPrivilege:
+  analysis: "SeTakeOwnershipPrivilege allows taking ownership of protected objects"
+  default_trustees:
+    - S-1-5-32-544
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeTcbPrivilege:
+  analysis: "SeTcbPrivilege allows acting as part of the operating system"
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeCreateTokenPrivilege:
+  analysis: "SeCreateTokenPrivilege allows creating authentication tokens"
+  default_trustees:
+    - S-1-5-18
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/
+
+SeLoadDriverPrivilege:
+  analysis: "SeLoadDriverPrivilege allows loading and unloading device drivers"
+  default_trustees:
+    - S-1-5-32-544
+    - S-1-5-32-550
+  edge: CanPrivEsc
+  references: https://gtworek.github.io/Priv2Admin/

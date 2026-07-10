@@ -14,9 +14,10 @@ from __future__ import annotations
 import socket
 import threading
 from collections import deque
-from typing import Deque, Dict, Optional, Tuple
+from typing import Callable, Deque, Dict, Optional, Tuple
 
 PROTOCOL_VERSION = "v1"
+PROTOCOL_VERSION_V2 = "v2"
 MAGIC = "KSRL"
 ROLE_AGENT = "AGENT"
 ROLE_OPERATOR = "OPERATOR"
@@ -36,27 +37,33 @@ def read_line(sock: socket.socket, timeout: float = 30.0, max_size: int = 512) -
     return buffer.decode("utf-8", errors="replace").strip("\r")
 
 
-def build_handshake(role: str, token: str) -> bytes:
+def build_handshake(role: str, token: str, version: str = PROTOCOL_VERSION_V2) -> bytes:
     role = role.strip().upper()
     token = token.strip()
+    version = (version or PROTOCOL_VERSION_V2).strip()
+    if version not in (PROTOCOL_VERSION, PROTOCOL_VERSION_V2):
+        raise ValueError(f"Unsupported relay protocol version: {version}")
     if role not in (ROLE_AGENT, ROLE_OPERATOR):
         raise ValueError(f"Invalid relay role: {role}")
     if not token:
         raise ValueError("Relay token cannot be empty")
-    return f"{MAGIC}:{PROTOCOL_VERSION}:{role}:{token}\n".encode("utf-8")
+    return f"{MAGIC}:{version}:{role}:{token}\n".encode("utf-8")
 
 
-def parse_handshake(line: str) -> Tuple[str, str]:
+def parse_handshake(line: str) -> Tuple[str, str, str]:
     parts = line.strip().split(":")
-    if len(parts) < 4 or parts[0] != MAGIC or parts[1] != PROTOCOL_VERSION:
+    if len(parts) < 4 or parts[0] != MAGIC:
         raise ValueError(f"Invalid relay handshake: {line!r}")
+    version = parts[1]
+    if version not in (PROTOCOL_VERSION, PROTOCOL_VERSION_V2):
+        raise ValueError(f"Unsupported relay protocol version: {version}")
     role = parts[2].upper()
     token = ":".join(parts[3:])
     if role not in (ROLE_AGENT, ROLE_OPERATOR):
         raise ValueError(f"Invalid relay role: {role}")
     if not token:
         raise ValueError("Missing relay token")
-    return role, token
+    return role, token, version
 
 
 def send_ack(sock: socket.socket, ok: bool = True, message: str = "") -> None:
@@ -67,17 +74,39 @@ def send_ack(sock: socket.socket, ok: bool = True, message: str = "") -> None:
     sock.sendall(payload.encode("utf-8"))
 
 
-def perform_handshake(sock: socket.socket, role: str, token: str, timeout: float = 30.0) -> None:
-    """Client-side handshake; raises ValueError on failure."""
-    sock.sendall(build_handshake(role, token))
+def perform_handshake(
+    sock: socket.socket,
+    role: str,
+    token: str,
+    timeout: float = 30.0,
+    version: str = PROTOCOL_VERSION_V2,
+) -> str:
+    """Client-side handshake; raises ValueError on failure. Returns negotiated version."""
+    sock.sendall(build_handshake(role, token, version=version))
     line = read_line(sock, timeout=timeout)
     if not line.startswith(f"{MAGIC}:OK"):
         detail = line[len(f"{MAGIC}:ERR:") :] if line.startswith(f"{MAGIC}:ERR:") else line
         raise ValueError(detail or "relay handshake rejected")
+    return version
 
 
-def bridge_sockets(sock_a: socket.socket, sock_b: socket.socket) -> None:
+def _enable_tcp_keepalive(sock: socket.socket) -> None:
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        pass
+
+
+def bridge_sockets(
+    sock_a: socket.socket,
+    sock_b: socket.socket,
+    *,
+    on_close: Optional[Callable[[], None]] = None,
+) -> None:
     """Bidirectionally forward bytes between two connected sockets."""
+    _enable_tcp_keepalive(sock_a)
+    _enable_tcp_keepalive(sock_b)
+    closed = threading.Event()
 
     def forward(src: socket.socket, dst: socket.socket) -> None:
         try:
@@ -89,6 +118,7 @@ def bridge_sockets(sock_a: socket.socket, sock_b: socket.socket) -> None:
         except OSError:
             pass
         finally:
+            closed.set()
             try:
                 dst.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -104,6 +134,11 @@ def bridge_sockets(sock_a: socket.socket, sock_b: socket.socket) -> None:
         try:
             sock.close()
         except OSError:
+            pass
+    if on_close:
+        try:
+            on_close()
+        except Exception:
             pass
 
 
@@ -184,7 +219,7 @@ class RelayHub:
     def _handle_client(self, sock: socket.socket) -> None:
         try:
             line = read_line(sock, timeout=15.0)
-            role, token = parse_handshake(line)
+            role, token, _version = parse_handshake(line)
             send_ack(sock, ok=True)
             self._enqueue_or_pair(sock, role, token)
         except Exception:
@@ -255,13 +290,9 @@ def connect_operator(
     relay_port: int,
     token: str,
     timeout: float = 120.0,
-) -> socket.socket:
-    """Connect to relay as OPERATOR and wait until paired with an AGENT."""
-    sock = socket.create_connection((relay_host, int(relay_port)), timeout=timeout)
-    try:
-        perform_handshake(sock, ROLE_OPERATOR, token, timeout=timeout)
-    except Exception:
-        sock.close()
-        raise
-    sock.settimeout(None)
-    return sock
+    **kwargs,
+):
+    """Backward-compatible import path — delegates to lib.relay.client."""
+    from lib.relay.client import connect_operator as _connect_operator
+
+    return _connect_operator(relay_host, relay_port, token, timeout=timeout, **kwargs)

@@ -247,7 +247,7 @@ class AgentWorkflowCore:
         self.framework = framework
         self._catalog = ModuleCatalogService(framework)
         self._target_resolver = TargetResolver()
-        self._llm = LocalLLMService()
+        self._llm = LocalLLMService(api_key=os.environ.get("KITTYMCP_OLLAMA_API_KEY"))
         self._planner = PlanningService(self._llm)
         self._report = ReportService()
         self._http_intel = HttpRequestIntelligence(framework)

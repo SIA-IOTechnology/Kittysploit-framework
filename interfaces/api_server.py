@@ -16,6 +16,8 @@ import time
 import io
 import sys
 import os
+import signal
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, Dict, Optional
 
 # Ajouter le répertoire parent au PYTHONPATH pour les imports relatifs
@@ -81,6 +83,9 @@ class ApiServer:
         # Logger
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        self._executor = ThreadPoolExecutor(max_workers=20, thread_name_prefix="ks-api-")
+        self._interpreter_timeout = int(os.environ.get("KITTYSPLOIT_INTERPRETER_TIMEOUT", 30))
+        self._module_timeout = int(os.environ.get("KITTYSPLOIT_MODULE_TIMEOUT", 300))
         self._configure_cors()
         
         # Initialize registry service if available (mode serveur registry uniquement)
@@ -426,10 +431,8 @@ class ApiServer:
             # Configurer la redirection des sorties
             self.setup_output_redirection(client_id)
             
-            # Exécuter le module dans un thread séparé
-            thread = threading.Thread(target=self.run_module_thread, args=(module, client_id))
-            thread.daemon = True
-            thread.start()
+            # Exécuter le module dans un thread du pool (limité à max_workers)
+            self._executor.submit(self.run_module_thread, module, client_id)
             
             return jsonify({
                 'status': 'success',
@@ -579,8 +582,9 @@ class ApiServer:
                     sys.stderr = stderr
                     
                     try:
-                        # Exécuter le code directement avec runsource
-                        exec_result = interpreter.runsource(code)
+                        # Exécuter le code avec timeout via ThreadPoolExecutor
+                        future = self._executor.submit(interpreter.runsource, code)
+                        exec_result = future.result(timeout=self._interpreter_timeout)
                         
                         # Récupérer les sorties
                         output = stdout.getvalue()
@@ -593,7 +597,11 @@ class ApiServer:
                         }
                         
                         return jsonify(response)
-                        
+
+                    except FutureTimeoutError:
+                        return jsonify({
+                            'error': f'Interpreter execution exceeded {self._interpreter_timeout}s timeout'
+                        }), 504
                     finally:
                         # Restaurer stdout et stderr
                         sys.stdout = old_stdout

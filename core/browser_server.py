@@ -35,17 +35,14 @@ class BrowserSession:
         self.fingerprint = None  # Will be a dict with 'hash', 'properties', 'timestamp' when set
     
     def add_command(self, command: Dict[str, Any]):
-        """Add command to queue"""
         self.commands_queue.append(command)
         self.update_activity()
     
     def add_response(self, response: Dict[str, Any]):
-        """Add response from browser"""
         self.responses.append(response)
         self.update_activity()
     
     def update_activity(self):
-        """Update last activity timestamp"""
         self.last_activity = datetime.now()
         # Track polling timestamps for health checking
         self.polling_timestamps.append(datetime.now())
@@ -93,7 +90,6 @@ class BrowserSession:
         return False
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary"""
         return {
             'session_id': self.session_id,
             'ip_address': self.ip_address,
@@ -113,7 +109,6 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
-        """Handle GET requests"""
         try:
             parsed_path = urlparse(self.path)
             path = parsed_path.path
@@ -163,7 +158,6 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(500, "Internal Server Error")
     
     def do_POST(self):
-        """Handle POST requests"""
         try:
             parsed_path = urlparse(self.path)
             path = parsed_path.path
@@ -190,7 +184,6 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
             self.send_error(500, "Internal Server Error")
     
     def do_OPTIONS(self):
-        """Handle CORS preflight requests"""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -222,7 +215,6 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(script_content.encode('utf-8'))
     
     def serve_admin_interface(self):
-        """Serve the admin interface"""
         html_content = self.browser_server.get_admin_interface()
         
         self.send_response(200)
@@ -231,7 +223,6 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
         self.wfile.write(html_content.encode('utf-8'))
     
     def serve_test_page(self):
-        """Serve the test page"""
         html_content = self.browser_server.get_test_page()
         
         self.send_response(200)
@@ -325,7 +316,6 @@ self.addEventListener('fetch', (event) => {
             self.send_error(500, "Internal Server Error")
     
     def serve_sessions_api(self):
-        """Serve sessions API"""
         sessions_data = {}
         for session_id, session in self.browser_server.sessions.items():
             sessions_data[session_id] = session.to_dict()
@@ -337,7 +327,6 @@ self.addEventListener('fetch', (event) => {
         self.wfile.write(json.dumps(sessions_data).encode('utf-8'))
     
     def serve_status_api(self):
-        """Serve status API"""
         status_data = {
             'running': self.browser_server.is_running(),
             'uptime': self.browser_server.get_uptime(),
@@ -352,7 +341,6 @@ self.addEventListener('fetch', (event) => {
         self.wfile.write(json.dumps(status_data).encode('utf-8'))
     
     def serve_session_api(self, session_id: str):
-        """Serve session API"""
         session = self.browser_server.get_session(session_id)
         if session:
             # Update last activity when session info is requested
@@ -421,7 +409,6 @@ self.addEventListener('fetch', (event) => {
         self.wfile.write(json.dumps(response_data).encode('utf-8'))
     
     def handle_browser_registration(self):
-        """Handle browser registration"""
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
@@ -450,7 +437,6 @@ self.addEventListener('fetch', (event) => {
             self.send_error(400, "Bad Request")
     
     def handle_command_response(self):
-        """Handle command response from browser"""
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
@@ -474,7 +460,6 @@ self.addEventListener('fetch', (event) => {
             self.send_error(400, "Bad Request")
     
     def handle_session_command(self, session_id: str):
-        """Handle command for specific session"""
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
@@ -501,7 +486,6 @@ self.addEventListener('fetch', (event) => {
             self.send_error(400, "Bad Request")
     
     def handle_capture_data(self):
-        """Handle captured form data from browser"""
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
@@ -585,7 +569,6 @@ class BrowserServer:
         self.captured_data: List[Dict[str, Any]] = []
     
     def start(self):
-        """Start the browser server"""
         try:
             # Create custom handler with browser_server reference
             def handler(*args, **kwargs):
@@ -612,7 +595,6 @@ class BrowserServer:
             self.running = False
     
     def stop(self):
-        """Stop the browser server and cleanup all active sessions"""
         if self.server:
             # Count active sessions before cleanup
             active_sessions_count = len(self.sessions)
@@ -682,7 +664,6 @@ class BrowserServer:
                 # If last_activity is stale but we're still getting polls, update it
                 if time_since_activity > self.timeout:
                     # This shouldn't happen if update_activity() is called correctly,
-                    # but update it just in case
                     session.update_activity()
                 # Always keep sessions that are still polling
                 continue
@@ -710,7 +691,6 @@ class BrowserServer:
             print_debug(f"Cleaned up inactive session: {session_id[:8]}...")
     
     def _remove_session(self, session_id: str):
-        """Remove a session and notify framework"""
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             
@@ -734,7 +714,6 @@ class BrowserServer:
         return self.running and self.server is not None
     
     def get_uptime(self) -> str:
-        """Get server uptime"""
         if self.start_time:
             uptime = datetime.now() - self.start_time
             return str(uptime).split('.')[0]  # Remove microseconds
@@ -746,7 +725,6 @@ class BrowserServer:
         self._cleanup_inactive_sessions()
     
     def get_cleanup_stats(self) -> Dict[str, Any]:
-        """Get cleanup statistics"""
         return {
             'cleanup_interval': self.cleanup_interval,
             'timeout': self.timeout,
@@ -975,7 +953,6 @@ class BrowserServer:
 """
     
     def get_test_page(self) -> str:
-        """Get the test page HTML"""
         return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -995,7 +972,6 @@ class BrowserServer:
 """
     
     def get_admin_interface(self) -> str:
-        """Get the admin interface HTML"""
         return """
 <!DOCTYPE html>
 <html lang="en">
@@ -1700,22 +1676,18 @@ class BrowserServer:
             return False
     
     def get_session(self, session_id: str) -> Optional[BrowserSession]:
-        """Get session by ID"""
         return self.sessions.get(session_id)
     
     def get_sessions(self) -> Dict[str, BrowserSession]:
-        """Get all sessions"""
         return self.sessions
     
     def store_captured_data(self, data: Dict[str, Any]):
-        """Store captured form data"""
         self.captured_data.append(data)
         # Keep only last 1000 entries to avoid memory issues
         if len(self.captured_data) > 1000:
             self.captured_data = self.captured_data[-1000:]
     
     def get_captured_data(self) -> List[Dict[str, Any]]:
-        """Get all captured form data"""
         return self.captured_data
     
     def send_command_to_session(self, session_id: str, command: Dict[str, Any]) -> bool:
@@ -1760,7 +1732,6 @@ class BrowserServer:
             return False
     
     def handle_command_response(self, session_id: str, command_id: str, result: Any):
-        """Handle response from browser"""
         session = self.get_session(session_id)
         if session:
             session.update_activity()

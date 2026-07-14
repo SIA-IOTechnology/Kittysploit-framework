@@ -46,6 +46,7 @@ from interfaces.api_security import (
     parse_cors_origins,
     secrets_equal,
 )
+from interfaces.node_command_service import NodeCommandService, RelayRemoteClientError, RelayService
 
 class ApiServer:
     """
@@ -56,10 +57,11 @@ class ApiServer:
     et headless_service (pipelines, events, resources, workspaces).
     """
     
-    def __init__(self, framework, host='127.0.0.1', port=5000, api_key=None):
+    def __init__(self, framework, host='127.0.0.1', port=5000, api_key=None, ssl_context=None):
         self.host = host
         self.port = port
         self.api_key = (api_key or "").strip() or None
+        self.ssl_context = ssl_context
         self.started_at = time.time()
         self.app = Flask(__name__)
         self.framework = framework
@@ -118,6 +120,9 @@ class ApiServer:
             # Mode client : se connecte au registry distant
             self.logger.info("Registry client mode (connecting to remote registry)")
         
+        self.node_command_service = NodeCommandService(self.framework, enabled=True)
+        self.relay_service = RelayService()
+        
         self.setup_routes()
     
     def setup_routes(self):
@@ -127,6 +132,47 @@ class ApiServer:
         def enforce_rbac():
             return self.enforce_rbac()
         
+        @self.app.route('/api/node/status', methods=['GET'])
+        def node_status():
+            """Cluster-compatible node health (kittyCluster / kittyconsole --api)."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            return jsonify(self.node_command_service.status())
+
+        @self.app.route('/api/node/command', methods=['POST'])
+        def node_command():
+            """Cluster-compatible remote CLI dispatch (kittyCluster / kittyconsole --api)."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            data = request.json or {}
+            result = self.node_command_service.execute(str(data.get('command') or ''))
+            result['state'] = self.node_command_service.status()
+            return jsonify(result)
+
+        @self.app.route('/api/relay/status', methods=['POST'])
+        def relay_status():
+            """Forward a status request from this relay to an explicit target node."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            try:
+                return jsonify(self.relay_service.relay_status(request.json or {}))
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            except RelayRemoteClientError as exc:
+                return jsonify({"error": str(exc)}), 502
+
+        @self.app.route('/api/relay/command', methods=['POST'])
+        def relay_command():
+            """Forward a command request from this relay to an explicit target node."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            try:
+                return jsonify(self.relay_service.relay_command(request.json or {}))
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            except RelayRemoteClientError as exc:
+                return jsonify({"error": str(exc)}), 502
+
         # ===== Routes de base =====
         
         @self.app.route('/api/health', methods=['GET'])
@@ -977,6 +1023,10 @@ class ApiServer:
             "list_registry_extensions": "registry:read",
             "get_registry_extension": "registry:read",
             "download_registry_extension": "registry:read",
+            "node_status": "authenticated",
+            "node_command": "authenticated",
+            "relay_status": "authenticated",
+            "relay_command": "authenticated",
 
             # Mutating/high-risk operations.
             "generate_mock_data": "mock:generate",
@@ -1010,6 +1060,10 @@ class ApiServer:
             "register_publisher": "admin",
             "publish_extension": "admin",
             "revoke_extension": "admin",
+            "node_status": "read",
+            "node_command": "mutate",
+            "relay_status": "read",
+            "relay_command": "mutate",
         }
 
     def enforce_rbac(self):
@@ -1560,13 +1614,21 @@ class ApiServer:
             raise ValueError("ApiServer requires a non-empty api_key")
 
         def run_server():
-            self.app.run(host=self.host, port=self.port, debug=False, use_reloader=False, threaded=True)
+            self.app.run(
+                host=self.host,
+                port=self.port,
+                debug=False,
+                use_reloader=False,
+                threaded=True,
+                ssl_context=self.ssl_context,
+            )
         
         self.server_thread = threading.Thread(target=run_server, daemon=True)
         self.server_thread.start()
         self.running = True
         
-        self.logger.info(f"API server started on {self.host}:{self.port}")
+        scheme = "https" if self.ssl_context is not None else "http"
+        self.logger.info(f"API server started on {scheme}://{self.host}:{self.port}")
     
     def stop(self):
         """Arrête le serveur API"""

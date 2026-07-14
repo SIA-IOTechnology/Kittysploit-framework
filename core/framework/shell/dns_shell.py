@@ -36,7 +36,6 @@ class DNSShell(BaseShell):
         self._initialize_listener()
 
     def _initialize_listener(self):
-        """Get DNS listener from framework for this session."""
         try:
             if not self.framework or not hasattr(self.framework, 'session_manager'):
                 return

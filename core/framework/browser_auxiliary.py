@@ -36,7 +36,6 @@ class BrowserAuxiliary(BaseModule):
         raise NotImplementedError("BrowserAuxiliary modules must implement the run() method")
 
     def _reset_auto_return_flags(self):
-        """Reset auto-return flags - called by framework before each run()"""
         self._last_js_result = None
         self._execute_js_called = False
 
@@ -614,7 +613,6 @@ class BrowserAuxiliary(BaseModule):
             return javascript_code
     
     def _execute(self, command: dict):
-        """Execute a command on the target browser session"""
         # Check fingerprint match before executing
         if not self._check_fingerprint_match():
             return False
@@ -667,7 +665,6 @@ class BrowserAuxiliary(BaseModule):
         return True
 
     def send_js(self, javascript_code: str):
-        """Send JavaScript code to execute on the target browser session (fire and forget)"""
         # Encode JavaScript if encoder is specified
         encoded_code = self._encode_javascript(javascript_code)
         return self._execute({"type": "execute_js", "code": encoded_code})
@@ -749,7 +746,6 @@ class BrowserAuxiliary(BaseModule):
             print_error(f"Session {self.session_id[:8]}... not found")
             return None
         
-        # Clear any old responses for this command (shouldn't happen, but just in case)
         initial_response_count = len(session.responses)
         
         # Encode JavaScript if encoder is specified

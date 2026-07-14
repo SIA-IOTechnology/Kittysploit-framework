@@ -493,7 +493,6 @@ class MeterpreterShell(BaseShell):
     # Core Meterpreter Commands
     
     def _cmd_sysinfo(self, args: List[str]) -> Dict[str, Any]:
-        """Get system information"""
         if not self._sysinfo_cache:
             try:
                 uname = platform.uname()
@@ -518,30 +517,25 @@ class MeterpreterShell(BaseShell):
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_getuid(self, args: List[str]) -> Dict[str, Any]:
-        """Get current user ID"""
         uid = 0 if self.is_root else os.getuid() if hasattr(os, 'getuid') else 1000
         username = self.username or os.getenv('USER', 'user')
         output = f"Server username: {username} ({uid})\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_getpid(self, args: List[str]) -> Dict[str, Any]:
-        """Get current process ID"""
         pid = self.migrated_pid if self.migrated_pid else self.process_id
         output = f"Current pid: {pid}\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_getgid(self, args: List[str]) -> Dict[str, Any]:
-        """Get current group ID"""
         gid = 0 if self.is_root else os.getgid() if hasattr(os, 'getgid') else 1000
         output = f"Current gid: {gid}\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_pwd(self, args: List[str]) -> Dict[str, Any]:
-        """Print working directory"""
         return {'output': self.current_directory + '\n', 'status': 0, 'error': ''}
     
     def _cmd_cd(self, args: List[str]) -> Dict[str, Any]:
-        """Change directory"""
         if not args:
             target_dir = self.environment_vars.get('HOME', '/home/user')
         else:
@@ -560,7 +554,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'cd: {target_dir}: No such file or directory'}
     
     def _cmd_ls(self, args: List[str]) -> Dict[str, Any]:
-        """List directory contents"""
         try:
             if not args:
                 target_dir = self.current_directory
@@ -594,7 +587,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'ls error: {str(e)}'}
     
     def _cmd_cat(self, args: List[str]) -> Dict[str, Any]:
-        """Read file contents"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: cat <file>'}
         
@@ -613,7 +605,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'cat error: {str(e)}'}
     
     def _cmd_download(self, args: List[str]) -> Dict[str, Any]:
-        """Download file from remote system"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: download <remote_file> [local_file]'}
         
@@ -625,7 +616,6 @@ class MeterpreterShell(BaseShell):
         
         try:
             if os.path.exists(remote_file) and os.path.isfile(remote_file):
-                # In a real implementation, this would send the file over the network
                 # For now, we'll simulate it
                 size = os.path.getsize(remote_file)
                 self.downloaded_files.append({'remote': remote_file, 'local': local_file, 'size': size})
@@ -638,7 +628,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'download error: {str(e)}'}
     
     def _cmd_upload(self, args: List[str]) -> Dict[str, Any]:
-        """Upload file to remote system"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: upload <local_file> [remote_file]'}
         
@@ -650,7 +639,6 @@ class MeterpreterShell(BaseShell):
         
         try:
             if os.path.exists(local_file) and os.path.isfile(local_file):
-                # In a real implementation, this would send the file over the network
                 # For now, we'll simulate it
                 size = os.path.getsize(local_file)
                 self.uploaded_files.append({'local': local_file, 'remote': remote_file, 'size': size})
@@ -663,7 +651,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'upload error: {str(e)}'}
     
     def _cmd_rm(self, args: List[str]) -> Dict[str, Any]:
-        """Remove file"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: rm <file>'}
         
@@ -684,7 +671,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'rm error: {str(e)}'}
     
     def _cmd_mkdir(self, args: List[str]) -> Dict[str, Any]:
-        """Create directory"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: mkdir <directory>'}
         
@@ -699,7 +685,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'mkdir error: {str(e)}'}
     
     def _cmd_rmdir(self, args: List[str]) -> Dict[str, Any]:
-        """Remove directory"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: rmdir <directory>'}
         
@@ -717,7 +702,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'rmdir error: {str(e)}'}
     
     def _cmd_mv(self, args: List[str]) -> Dict[str, Any]:
-        """Move/rename file"""
         if len(args) < 2:
             return {'output': '', 'status': 1, 'error': 'Usage: mv <source> <destination>'}
         
@@ -739,7 +723,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'mv error: {str(e)}'}
     
     def _cmd_cp(self, args: List[str]) -> Dict[str, Any]:
-        """Copy file"""
         if len(args) < 2:
             return {'output': '', 'status': 1, 'error': 'Usage: cp <source> <destination>'}
         
@@ -764,7 +747,6 @@ class MeterpreterShell(BaseShell):
     # Process Commands
     
     def _cmd_ps(self, args: List[str]) -> Dict[str, Any]:
-        """List processes"""
         try:
             if platform.system() == 'Windows':
                 result = subprocess.run(['tasklist'], capture_output=True, text=False, timeout=5)
@@ -779,7 +761,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'ps error: {str(e)}'}
     
     def _cmd_migrate(self, args: List[str]) -> Dict[str, Any]:
-        """Migrate to another process"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: migrate <pid>'}
         
@@ -795,7 +776,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'migrate error: {str(e)}'}
     
     def _cmd_kill(self, args: List[str]) -> Dict[str, Any]:
-        """Kill process"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: kill <pid>'}
         
@@ -812,7 +792,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'kill error: {str(e)}'}
     
     def _cmd_execute(self, args: List[str]) -> Dict[str, Any]:
-        """Execute command"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: execute [options] <command>'}
         
@@ -861,7 +840,6 @@ class MeterpreterShell(BaseShell):
         }
     
     def _get_current_directory(self, in_powershell=False):
-        """Get current working directory from remote shell"""
         try:
             if in_powershell:
                 # PowerShell: use $PWD to get path as string (simpler than Get-Location)
@@ -937,7 +915,6 @@ class MeterpreterShell(BaseShell):
             return None
     
     def start_interactive_shell_loop(self):
-        """Start interactive shell loop - called by interactive interface"""
         if not self.connection:
             self._initialize_connection()
         
@@ -1091,7 +1068,6 @@ class MeterpreterShell(BaseShell):
     # Network Commands
     
     def _cmd_ifconfig(self, args: List[str]) -> Dict[str, Any]:
-        """List network interfaces"""
         try:
             if platform.system() == 'Windows':
                 result = subprocess.run(['ipconfig'], capture_output=True, text=False, timeout=5)
@@ -1106,7 +1082,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'ifconfig error: {str(e)}'}
     
     def _cmd_netstat(self, args: List[str]) -> Dict[str, Any]:
-        """List network connections"""
         try:
             result = subprocess.run(['netstat', '-an'], capture_output=True, text=False, timeout=5)
             stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
@@ -1116,7 +1091,6 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'netstat error: {str(e)}'}
     
     def _cmd_portfwd(self, args: List[str]) -> Dict[str, Any]:
-        """Port forwarding"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: portfwd add -l <local_port> -p <remote_port> -r <remote_host>'}
         
@@ -1126,17 +1100,14 @@ class MeterpreterShell(BaseShell):
     # System Commands
     
     def _cmd_idletime(self, args: List[str]) -> Dict[str, Any]:
-        """Get system idle time"""
         output = "User idle time: 0 seconds (simulated)\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_reboot(self, args: List[str]) -> Dict[str, Any]:
-        """Reboot system"""
         output = "[*] Reboot command (simulated - not executed for safety)\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_shutdown(self, args: List[str]) -> Dict[str, Any]:
-        """Shutdown system"""
         output = "[*] Shutdown command (simulated - not executed for safety)\n"
         return {'output': output, 'status': 0, 'error': ''}
     
@@ -1420,12 +1391,10 @@ class MeterpreterShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'Screenshot error: {str(e)}'}
     
     def _cmd_webcam_list(self, args: List[str]) -> Dict[str, Any]:
-        """List webcams"""
         output = "[*] Webcam list (simulated)\n"
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_webcam_snap(self, args: List[str]) -> Dict[str, Any]:
-        """Take webcam snapshot"""
         output = "[*] Webcam snapshot (simulated)\n"
         return {'output': output, 'status': 0, 'error': ''}
     
@@ -1460,7 +1429,6 @@ class MeterpreterShell(BaseShell):
         }
         
     def _get_getsystem_suggestions(self) -> str:
-        """Return safe post-module suggestions for privilege escalation workflows."""
         os_hint = self._remote_os_hint()
         session_arg = f"set session {self.session_id}"
 
@@ -1514,7 +1482,6 @@ class MeterpreterShell(BaseShell):
         return "unknown"
     
     def _cmd_getprivs(self, args: List[str]) -> Dict[str, Any]:
-        """Get current privileges"""
         privs = []
         if self.is_root:
             privs = ['SeDebugPrivilege', 'SeBackupPrivilege', 'SeRestorePrivilege']
@@ -1529,7 +1496,6 @@ class MeterpreterShell(BaseShell):
     # Utility Commands
     
     def _cmd_run(self, args: List[str]) -> Dict[str, Any]:
-        """Run a script or module"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: run <script> [args]'}
         
@@ -1539,7 +1505,6 @@ class MeterpreterShell(BaseShell):
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_load(self, args: List[str]) -> Dict[str, Any]:
-        """Load extension"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: load <extension>'}
         
@@ -1549,7 +1514,6 @@ class MeterpreterShell(BaseShell):
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_unload(self, args: List[str]) -> Dict[str, Any]:
-        """Unload extension"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: unload <extension>'}
         
@@ -1559,7 +1523,6 @@ class MeterpreterShell(BaseShell):
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_help(self, args: List[str]) -> Dict[str, Any]:
-        """Show help"""
         help_text = """Core Commands
 ==============
 
@@ -1639,11 +1602,9 @@ Priv: Elevate Commands
         return {'output': output, 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: List[str]) -> Dict[str, Any]:
-        """Clear screen"""
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: List[str]) -> Dict[str, Any]:
-        """Show command history"""
         limit = 50
         if args and args[0].isdigit():
             limit = int(args[0])

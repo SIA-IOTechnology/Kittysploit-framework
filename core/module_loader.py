@@ -112,7 +112,6 @@ class ModuleLoader:
         module_path: str,
         discovered_ref: Optional[str] = None,
     ) -> Optional[str]:
-        """Resolve a module path to an on-disk source file (including library YAML workflows)."""
         module_path = str(module_path or "").strip().strip("/")
         if not module_path:
             return None
@@ -152,7 +151,6 @@ class ModuleLoader:
         return self._discovered_paths_cache
 
     def invalidate_caches(self, module_path: Optional[str] = None) -> None:
-        """Clear discovery and loaded-module caches (after sync, install, or reload)."""
         self._discovered_modules_cache = None
         self._discovered_paths_cache = None
         if module_path:
@@ -259,7 +257,6 @@ class ModuleLoader:
         module_path: str,
         exc: BaseException,
     ) -> Tuple[str, str, Optional[str]]:
-        """Return (summary, detailed_cause, source_location)."""
         root = exc
         while True:
             cause = root.__cause__ or root.__context__
@@ -450,7 +447,6 @@ class ModuleLoader:
         self._report_failure(failure, silent=silent)
 
     def _validate_module_contract(self, module_path: str, module_file_path: str, silent: bool = False) -> bool:
-        """Validate KittySploit module metadata/options before importing code."""
         if not self.enable_contract_validation:
             return True
 
@@ -973,7 +969,6 @@ class ModuleLoader:
         return None
     
     def get_modules_by_type(self, module_type: str) -> Dict[str, Any]:
-        """Get all modules of a specific type (exploit, payload, listener, etc.)"""
         modules = {}
         
         # Discover modules only in the specific type directory

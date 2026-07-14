@@ -66,7 +66,6 @@ class ModuleValidator:
         return self._basic_validate(module_path, module_code)
     
     def _basic_validate(self, module_path: str, module_code: str) -> Dict[str, Any]:
-        """Validation basique (compatibilité)"""
         errors = []
         warnings = []
         

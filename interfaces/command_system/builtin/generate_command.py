@@ -260,8 +260,6 @@ Examples:
     def _apply_encoder(self, payload, encoder_name, iterations):
         """Apply encoder to payload"""
         try:
-            # This is a simplified implementation
-            # In a real framework, you would have encoder modules
             if encoder_name.lower() == 'xor':
                 # Simple XOR encoding
                 key = 0xAA

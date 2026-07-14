@@ -25,38 +25,23 @@ def remote(host: str, port: int, protocol: str = 'tcp', **kwargs):
     return RemoteConnection(host, port, protocol, **kwargs)
 
 def get_current_remote():
-    """
-    Get the current active remote connection
-    """
     ConnectionManager = get_connection_manager()
     return ConnectionManager.get_current_remote()
 
 def send_command(command: str):
-    """
-    Send a command to the current remote connection
-    """
     RemoteConnection = get_remote_connection()
     return RemoteConnection.send_command(command)
 
 def disassemble(data: bytes, start_address: int = 0):
-    """
-    Disassemble data
-    """
     from core.lib.disassembler import x86Disassembler
     return x86Disassembler.disassemble(data, start_address)
 
 def analyze_elf(path: str):
-    """
-    Analyze an ELF file
-    """
     from core.lib.elf_analyzer import ELFAnalyzer
     analyzer = ELFAnalyzer(path)
     return analyzer.get_binary_info()
 
 def analyze_pe(path: str):
-    """
-    Analyze a PE file
-    """
     from core.lib.pe_analyzer import PEAnalyzer
     return PEAnalyzer.analyze(path)
 

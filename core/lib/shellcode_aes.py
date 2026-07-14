@@ -97,7 +97,6 @@ def _gf_mul(a: int, b: int) -> int:
 
 
 def _aesimc(block: bytes) -> bytes:
-    """Apply InvMixColumns to a 16-byte AES round key block."""
     state = list(block)
     out = [0] * 16
     for col in range(4):
@@ -137,7 +136,6 @@ def aes128_decrypt_schedule(key: bytes) -> bytes:
 
 
 def aes128_encrypt_shellcode(shellcode: bytes, key: Optional[bytes] = None) -> tuple[bytes, bytes, bytes, int]:
-    """Return key, decrypt schedule, ciphertext, and original shellcode length."""
     if not shellcode:
         raise ValueError("shellcode must not be empty")
     key = key or os.urandom(BLOCK_SIZE)
@@ -157,7 +155,6 @@ def _emit_movdqu_xmm1_r14_disp(code: bytearray, disp: int) -> None:
 
 
 def build_x64_aesni_decoder(block_count: int) -> bytes:
-    """Build a PIC x64 AES-NI ECB decryptor for a fixed block count."""
     if block_count <= 0:
         raise ValueError("block_count must be positive")
 

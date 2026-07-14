@@ -33,7 +33,6 @@ class EmailShell(BaseShell):
         self._init_from_session()
 
     def _init_from_session(self):
-        """Initialize from listener's _session_connections."""
         try:
             if not self.framework or not hasattr(self.framework, "active_listeners"):
                 return
@@ -65,7 +64,6 @@ class EmailShell(BaseShell):
         )
 
     def _send_email(self, to_email: str, subject: str, body: str) -> bool:
-        """Send one email via SMTP using connection_data."""
         if not SMTP_AVAILABLE:
             return False
         d = self._connection_data
@@ -145,7 +143,6 @@ class EmailShell(BaseShell):
         return "\n".join(lines)
 
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Send command by email and wait for response. Internal commands (help, status) handled locally."""
         if not command.strip():
             return {"output": "", "status": 0, "error": ""}
         cmd_lower = command.strip().lower()

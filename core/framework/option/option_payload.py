@@ -250,7 +250,6 @@ class OptPayload(Option):
             raise OptionValidationError(f"Error generating payload: {e}")
     
     def __delete__(self, instance):
-        """Delete the value for this specific instance"""
         instance_id = id(instance)
         if instance_id in self._instance_values:
             del self._instance_values[instance_id]

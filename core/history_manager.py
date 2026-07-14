@@ -90,7 +90,6 @@ def _redact_token_value(token: str) -> str:
 
 
 def redact_history_args(args: List[str] = None) -> List[str]:
-    """Return a copy of command args with obvious secret values masked."""
     redacted: List[str] = []
     redact_next = False
     for raw_arg in _coerce_history_args(args):
@@ -130,11 +129,9 @@ class HistoryManager:
         self.framework = framework  # Reference to framework for get_db_session
     
     def set_user_id(self, user_id: str):
-        """Set the current user ID for history tracking"""
         self.user_id = user_id
 
     def refresh_workspace(self) -> Optional[int]:
-        """Refresh and return the current workspace id from the framework."""
         current_id = self._resolve_workspace_id()
         self.workspace_id = current_id
         return current_id
@@ -167,7 +164,6 @@ class HistoryManager:
         return self._sanitize_entry(entry)
 
     def sanitize_command_parts(self, command_name: str, args: List[str] = None) -> Dict[str, Any]:
-        """Build the redacted command string and args stored in history."""
         safe_args = redact_history_args(args or [])
         safe_command = str(command_name or "")
         if safe_args:
@@ -175,7 +171,6 @@ class HistoryManager:
         return {"command": redact_history_command(safe_command), "args": safe_args}
     
     def add_command(self, command: str, args: List[str] = None, success: bool = True, session_id: str = None) -> bool:
-        """Add a command to the encrypted history"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -209,7 +204,6 @@ class HistoryManager:
     
     def get_history(self, limit: int = 100, offset: int = 0, user_id: str = None,
                    success_only: bool = False, search_term: str = None, redact: bool = True) -> List[Dict[str, Any]]:
-        """Get command history with optional filtering"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -328,7 +322,6 @@ class HistoryManager:
             return 0
     
     def clear_history(self, user_id: str = None, older_than_days: int = None) -> int:
-        """Clear command history with optional filtering"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -373,7 +366,6 @@ class HistoryManager:
         success_only: bool = False,
         search_term: str = None,
     ) -> bool:
-        """Export command history to file"""
         try:
             export_format = (format or 'json').lower()
             if export_format not in {'json', 'csv'}:
@@ -424,7 +416,6 @@ class HistoryManager:
             return False
     
     def get_stats(self, user_id: str = None) -> Dict[str, Any]:
-        """Get history statistics"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()

@@ -22,7 +22,6 @@ class CCodeGenerator:
         self.indent_level = 0
         
     def _get_register_mapping(self) -> Dict[str, str]:
-        """Get register to C variable mapping"""
         if self.is_64bit:
             return {
                 "rax": "eax", "rbx": "ebx", "rcx": "ecx", "rdx": "edx",
@@ -37,7 +36,6 @@ class CCodeGenerator:
             }
     
     def convert_instruction(self, instruction: Instruction) -> str:
-        """Convert a single instruction to C pseudo-code"""
         mnemonic = instruction.mnemonic.lower()
         operands = instruction.operands
         
@@ -183,7 +181,6 @@ class CCodeGenerator:
             return f"// {mnemonic.upper()} instruction"
     
     def _get_condition(self, mnemonic: str) -> str:
-        """Get C condition for jump instruction"""
         conditions = {
             "je": "eax == 0", "jne": "eax != 0",
             "jz": "eax == 0", "jnz": "eax != 0",
@@ -195,7 +192,6 @@ class CCodeGenerator:
         return conditions.get(mnemonic, "condition")
     
     def convert_instructions(self, instructions: List[Instruction]) -> str:
-        """Convert a list of instructions to C pseudo-code"""
         c_code = []
         
         # Add function header
@@ -212,7 +208,6 @@ class CCodeGenerator:
         return "\n".join(c_code)
     
     def convert_gadget(self, gadget_info: Dict[str, Any]) -> str:
-        """Convert a ROP gadget to C pseudo-code"""
         instructions = gadget_info.get('instructions', [])
         address = gadget_info.get('address', 0)
         gadget_type = gadget_info.get('type', 'unknown')
@@ -251,7 +246,6 @@ class CCodeGenerator:
         return "\n".join(c_code)
     
     def convert_rop_chain(self, gadgets: List[Dict[str, Any]]) -> str:
-        """Convert a ROP chain to C pseudo-code"""
         c_code = []
         c_code.append("// ROP Chain Pseudo-code")
         c_code.append("void rop_chain() {")
@@ -342,16 +336,13 @@ class AssemblyAnalyzer:
         return "\n".join(c_code)
 
 def asm_to_c(bytecode: bytes, start_address: int = 0, is_64bit: bool = False) -> str:
-    """Convert assembly bytecode to C pseudo-code"""
     analyzer = AssemblyAnalyzer(is_64bit)
     return analyzer.analyze_bytecode(bytecode, start_address)
 
 def gadgets_to_c(bytecode: bytes, start_address: int = 0, is_64bit: bool = False) -> str:
-    """Convert ROP gadgets to C pseudo-code"""
     analyzer = AssemblyAnalyzer(is_64bit)
     return analyzer.analyze_gadgets(bytecode, start_address)
 
 def function_to_c(bytecode: bytes, start_address: int = 0, function_name: str = "function", is_64bit: bool = False) -> str:
-    """Convert a function to C pseudo-code"""
     analyzer = AssemblyAnalyzer(is_64bit)
     return analyzer.analyze_function(bytecode, start_address, function_name)

@@ -15,7 +15,6 @@ class BashShell(BaseShell):
         })
     
     def cmd_sudo(self, args: List[str]) -> Dict[str, Any]:
-        """Simulate sudo command"""
         if self.is_root:
             return {'output': "You are already root!", 'status': 1}
         
@@ -36,7 +35,6 @@ class BashShell(BaseShell):
         return result
     
     def cmd_su(self, args: List[str]) -> Dict[str, Any]:
-        """Simulate su command"""
         target_user = args[0] if args else "root"
         
         if target_user == "root" and not self.is_root:
@@ -49,11 +47,9 @@ class BashShell(BaseShell):
         return {'output': f"su: user {target_user} does not exist", 'status': 1}
     
     def cmd_bash(self, args: List[str]) -> Dict[str, Any]:
-        """Start a new bash shell"""
         return {'output': "Already in bash shell", 'status': 0}
     
     def cmd_history(self, args: List[str]) -> Dict[str, Any]:
-        """Show command history"""
         history_file = f"{self.env_vars['HOME']}/.bash_history"
         result = self.cmd_cat([history_file])
         if result['status'] == 0:
@@ -78,13 +74,11 @@ class PowerShellShell(BaseShell):
         })
     
     def get_prompt(self) -> str:
-        """Get PowerShell-style prompt"""
         if self.is_root:
             return f"PS {self.current_dir} [Administrator]> "
         return f"PS {self.current_dir}> "
     
     def cmd_dir(self, args: List[str]) -> Dict[str, Any]:
-        """PowerShell Get-ChildItem"""
         result = super().cmd_ls(args)
         # Convert to PowerShell format
         if result['status'] == 0:
@@ -100,7 +94,6 @@ class PowerShellShell(BaseShell):
         return result
     
     def cmd_type(self, args: List[str]) -> Dict[str, Any]:
-        """PowerShell Get-Content"""
         return super().cmd_cat(args)
 
 class CmdShell(BaseShell):
@@ -121,13 +114,11 @@ class CmdShell(BaseShell):
         })
     
     def get_prompt(self) -> str:
-        """Get CMD-style prompt"""
         drive = self.current_dir.split('/')[1] if len(self.current_dir.split('/')) > 1 else 'C'
         path = self.current_dir.replace('/', '\\')
         return f"{drive}:{path}>"
     
     def cmd_dir(self, args: List[str]) -> Dict[str, Any]:
-        """CMD dir command"""
         result = super().cmd_ls(args)
         if result['status'] == 0:
             lines = result['output'].split('\n')
@@ -145,11 +136,9 @@ class CmdShell(BaseShell):
         return result
     
     def cmd_type(self, args: List[str]) -> Dict[str, Any]:
-        """CMD type command"""
         return super().cmd_cat(args)
     
     def cmd_set(self, args: List[str]) -> Dict[str, Any]:
-        """CMD set command"""
         if not args:
             output = []
             for key, value in self.env_vars.items():

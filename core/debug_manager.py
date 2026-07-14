@@ -52,7 +52,6 @@ class DebugAction:
 
 
 class DebugManager:
-    """Manages debug mode functionality"""
     
     def __init__(self):
         self.is_active = False
@@ -67,7 +66,6 @@ class DebugManager:
         self._web_thread = None
         
     def start_debug_mode(self, level: str = "info", output: str = "console", output_file: str = None):
-        """Start debug mode"""
         with self._lock:
             if self.is_active:
                 print_warning("Debug mode is already active")
@@ -82,7 +80,6 @@ class DebugManager:
             print_success(f"Debug mode started (level: {level}, output: {output})")
     
     def stop_debug_mode(self):
-        """Stop debug mode"""
         with self._lock:
             if not self.is_active:
                 print_warning("Debug mode is not active")
@@ -93,7 +90,6 @@ class DebugManager:
             print_success("Debug mode stopped")
     
     def get_status(self) -> Dict:
-        """Get debug mode status"""
         with self._lock:
             return {
                 'active': self.is_active,
@@ -105,7 +101,6 @@ class DebugManager:
             }
     
     def add_action(self, action_type: str, description: str = "", data: Dict = None) -> str:
-        """Add a debug action"""
         with self._lock:
             if not self.is_active:
                 return None
@@ -119,7 +114,6 @@ class DebugManager:
             return action.id
     
     def list_actions(self, filter_type: str = None, limit: int = 50) -> List[Dict]:
-        """List debug actions"""
         with self._lock:
             actions = self.actions.copy()
             
@@ -133,7 +127,6 @@ class DebugManager:
             return [action.to_dict() for action in actions]
     
     def execute_action(self, action_id: str) -> Any:
-        """Execute a specific action"""
         with self._lock:
             action = self._find_action(action_id)
             if not action:
@@ -152,7 +145,6 @@ class DebugManager:
             return action.result
     
     def block_action(self, action_id: str) -> bool:
-        """Block a specific action"""
         with self._lock:
             action = self._find_action(action_id)
             if not action:
@@ -166,7 +158,6 @@ class DebugManager:
             return True
     
     def unblock_action(self, action_id: str) -> bool:
-        """Unblock a specific action"""
         with self._lock:
             action = self._find_action(action_id)
             if not action:
@@ -180,7 +171,6 @@ class DebugManager:
             return True
     
     def clear_actions(self) -> int:
-        """Clear all debug actions"""
         with self._lock:
             count = len(self.actions)
             self.actions.clear()
@@ -190,7 +180,6 @@ class DebugManager:
             return count
     
     def export_actions(self, file_path: str) -> int:
-        """Export actions to file"""
         with self._lock:
             try:
                 data = {
@@ -210,7 +199,6 @@ class DebugManager:
                 return 0
     
     def import_actions(self, file_path: str) -> int:
-        """Import actions from file"""
         with self._lock:
             try:
                 with open(file_path, 'r') as f:
@@ -242,7 +230,6 @@ class DebugManager:
                 return 0
     
     def launch_web_interface(self, host: str = "127.0.0.1", port: int = 8080) -> str:
-        """Launch web debug interface"""
         if not FLASK_AVAILABLE:
             print_error("Flask is not available. Install with: pip install flask")
             return None
@@ -272,7 +259,6 @@ class DebugManager:
             return None
     
     def _setup_web_routes(self):
-        """Setup Flask routes for the web interface"""
         
         # HTML template for the debug interface
         html_template = """
@@ -681,7 +667,6 @@ ${latest.result}</div>`;
                 return jsonify({'success': False, 'error': str(e)})
     
     def _run_web_server(self, host: str, port: int):
-        """Run the Flask web server"""
         try:
             import logging
             # Disable Flask logging
@@ -700,7 +685,6 @@ ${latest.result}</div>`;
             print_error(f"Web server error: {e}")
     
     def _stop_web_server(self):
-        """Stop the web server"""
         if self._web_server is not None:
             # Flask doesn't have a built-in way to stop the server
             # We'll just clear the reference
@@ -708,7 +692,6 @@ ${latest.result}</div>`;
             self._web_thread = None
     
     def _find_action(self, action_id: str) -> Optional[DebugAction]:
-        """Find action by ID"""
         for action in self.actions:
             if action.id == action_id:
                 return action
@@ -719,7 +702,6 @@ ${latest.result}</div>`;
         return action_id in self.blocked_actions
     
     def _log_action(self, message: str):
-        """Log debug action"""
         timestamp = datetime.utcnow().strftime("%H:%M:%S")
         log_message = f"[{timestamp}] {message}"
         

@@ -74,7 +74,6 @@ class MetricsCollector:
         return True
     
     def remove_exporter(self, exporter: Any) -> bool:
-        """Retire un exporteur"""
         with self.export_lock:
             if exporter in self.exporters:
                 exporter.close()
@@ -93,7 +92,6 @@ class MetricsCollector:
         self.metadata_context.clear()
     
     def _merge_correlation(self, metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Attach command/module/session correlation to exported metrics."""
         try:
             from core.observability.context import get_correlation
 
@@ -133,7 +131,6 @@ class MetricsCollector:
                 pass
     
     def increment(self, metric_name: str, value: int = 1, metadata: Optional[Dict[str, Any]] = None):
-        """Increment a counter"""
         self.counters[metric_name] += value
         
         # Export si activé
@@ -144,7 +141,6 @@ class MetricsCollector:
             self.clear_metadata_context()
     
     def record_timing(self, metric_name: str, duration: float, metadata: Optional[Dict[str, Any]] = None):
-        """Record a timing metric"""
         self.timers[metric_name].append(duration)
         
         # Export si activé
@@ -155,7 +151,6 @@ class MetricsCollector:
             self.clear_metadata_context()
     
     def record_value(self, metric_name: str, value: float, metadata: Optional[Dict[str, Any]] = None):
-        """Record a value"""
         self.metrics[metric_name].append(value)
         
         # Export si activé
@@ -166,7 +161,6 @@ class MetricsCollector:
             self.clear_metadata_context()
     
     def get_stats(self, metric_name: str) -> Dict[str, float]:
-        """Get statistics for a metric"""
         values = self.metrics[metric_name] + self.timers[metric_name]
         if not values:
             return {}
@@ -180,7 +174,6 @@ class MetricsCollector:
         }
     
     def get_all_metrics(self) -> Dict[str, Any]:
-        """Get all metrics"""
         return {
             "counters": dict(self.counters),
             "timings": {k: self.get_stats(k) for k in self.timers},
@@ -230,7 +223,6 @@ class MetricsCollector:
                     pass
     
     def close_exporters(self):
-        """Ferme tous les exporteurs"""
         with self.export_lock:
             for exporter in self.exporters:
                 try:

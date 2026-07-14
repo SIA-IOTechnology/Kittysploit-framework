@@ -34,7 +34,6 @@ class GlobalJobManager:
         self._initialized = True
     
     def add_job(self, name: str, description: str = "", target: str = None, module: Any = None) -> Optional[int]:
-        """Add a new job to the job list"""
         try:
             with self.jobs_lock:
                 self.job_counter += 1
@@ -61,7 +60,6 @@ class GlobalJobManager:
             return None
     
     def update_job_status(self, job_id: int, status: str, output: str = "", error: str = "") -> bool:
-        """Update job status and information"""
         try:
             with self.jobs_lock:
                 if job_id not in self.jobs:
@@ -87,17 +85,14 @@ class GlobalJobManager:
             return False
     
     def get_job(self, job_id: int) -> Optional[Dict[str, Any]]:
-        """Get job by ID"""
         with self.jobs_lock:
             return self.jobs.get(job_id)
     
     def get_all_jobs(self) -> Dict[int, Dict[str, Any]]:
-        """Get all jobs"""
         with self.jobs_lock:
             return self.jobs.copy()
     
     def kill_job(self, job_id: int) -> bool:
-        """Kill a job"""
         try:
             with self.jobs_lock:
                 if job_id not in self.jobs:
@@ -123,7 +118,6 @@ class GlobalJobManager:
             return False
     
     def clear_completed_jobs(self) -> int:
-        """Clear completed jobs from the list"""
         try:
             with self.jobs_lock:
                 completed_jobs = [job_id for job_id, job in self.jobs.items() 

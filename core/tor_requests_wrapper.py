@@ -25,7 +25,6 @@ _tor_manager = None
 
 
 def set_tor_manager(tor_manager):
-    """Set the Tor manager instance"""
     global _tor_manager
     _tor_manager = tor_manager
 
@@ -126,7 +125,6 @@ def install_tor_requests_wrapper(tor_manager):
 
 
 def uninstall_tor_requests_wrapper():
-    """Uninstall the Tor requests wrapper and restore original functions"""
     global _tor_manager
     _tor_manager = None
     
@@ -142,4 +140,3 @@ def uninstall_tor_requests_wrapper():
     
     # Restore Session.request
     # Note: We can't easily restore the original Session.request without storing it
-    # This is a limitation, but sessions created after uninstall will work correctly

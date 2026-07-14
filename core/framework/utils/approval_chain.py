@@ -243,7 +243,6 @@ class ApprovalChain:
         risk_score: float,
         signature_valid: bool
     ):
-        """Auto-approuve un module"""
         approval_key = f"{module_path}:{module_hash}"
         
         record = ApprovalRecord(
@@ -261,7 +260,6 @@ class ApprovalChain:
         self._persist_approvals()
     
     def _load_approvals(self):
-        """Charge les approbations depuis le disque"""
         if not os.path.exists(self.approvals_file):
             return
         

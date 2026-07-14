@@ -11,7 +11,6 @@ from .base_shell import BaseShell
 from core.output_handler import print_info, print_error, print_warning, print_success
 
 class FTPShell(BaseShell):
-    """FTP shell implementation for FTP sessions"""
     
     def __init__(self, session_id: str, session_type: str = "ftp", framework=None):
         super().__init__(session_id, session_type)
@@ -60,7 +59,6 @@ class FTPShell(BaseShell):
         self._initialize_ftp_connection()
     
     def _initialize_ftp_connection(self):
-        """Initialize FTP connection from session/listener"""
         try:
             if not self.framework:
                 return
@@ -133,7 +131,6 @@ class FTPShell(BaseShell):
         return f"ftp [{self.current_directory}]> "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         return self.prompt_template
     
     def _check_and_reconnect(self):
@@ -187,7 +184,6 @@ class FTPShell(BaseShell):
         return error_str
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the FTP shell"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -216,7 +212,6 @@ class FTPShell(BaseShell):
         return {'output': '', 'status': 1, 'error': f'Unknown command: {cmd}. Type "help" for available commands.'}
     
     def _cmd_help(self, args: str) -> Dict[str, Any]:
-        """Show help"""
         help_text = """
 FTP Shell Commands:
 ==================
@@ -263,7 +258,6 @@ Examples:
         return {'output': help_text, 'status': 0, 'error': ''}
     
     def _cmd_pwd(self, args: str) -> Dict[str, Any]:
-        """Print working directory"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -281,7 +275,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_cd(self, args: str) -> Dict[str, Any]:
-        """Change directory"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: cd <directory>'}
         
@@ -303,7 +296,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_ls(self, args: str) -> Dict[str, Any]:
-        """List files"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -322,7 +314,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_get(self, args: str) -> Dict[str, Any]:
-        """Download file"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: get <remote_file> [local_file]'}
         
@@ -346,7 +337,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_put(self, args: str) -> Dict[str, Any]:
-        """Upload file"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: put <local_file> [remote_file]'}
         
@@ -373,7 +363,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_mkdir(self, args: str) -> Dict[str, Any]:
-        """Create directory"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: mkdir <directory>'}
         
@@ -392,7 +381,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_rmdir(self, args: str) -> Dict[str, Any]:
-        """Remove directory"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: rmdir <directory>'}
         
@@ -411,7 +399,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_delete(self, args: str) -> Dict[str, Any]:
-        """Delete file"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: delete <file>'}
         
@@ -430,7 +417,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_rename(self, args: str) -> Dict[str, Any]:
-        """Rename file"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: rename <old> <new>'}
         
@@ -455,7 +441,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_size(self, args: str) -> Dict[str, Any]:
-        """Get file size"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: size <file>'}
         
@@ -474,7 +459,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_binary(self, args: str) -> Dict[str, Any]:
-        """Set binary mode"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -490,7 +474,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_ascii(self, args: str) -> Dict[str, Any]:
-        """Set ASCII mode"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -506,7 +489,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_passive(self, args: str) -> Dict[str, Any]:
-        """Set passive mode"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -522,7 +504,6 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_active(self, args: str) -> Dict[str, Any]:
-        """Set active mode"""
         if not self.ftp_client:
             return {'output': '', 'status': 1, 'error': 'FTP connection not available'}
         
@@ -538,20 +519,17 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {error_msg}'}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
-        """Clear screen"""
         import os
         os.system('clear' if os.name != 'nt' else 'cls')
         return {'output': '', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: str) -> Dict[str, Any]:
-        """Show command history"""
         history = self.get_history()
         if not history:
             return {'output': 'No commands in history', 'status': 0, 'error': ''}
         return {'output': '\n'.join(f"{i+1:4d}  {cmd}" for i, cmd in enumerate(history)), 'status': 0, 'error': ''}
     
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
-        """Exit FTP shell"""
         if self.ftp_client:
             try:
                 from ftplib import FTP
@@ -563,6 +541,5 @@ Examples:
         return {'output': 'Bye!', 'status': 0, 'error': ''}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
 

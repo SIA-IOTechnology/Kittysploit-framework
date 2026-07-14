@@ -14,7 +14,6 @@ from typing import Optional, Dict, Any, Union
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class RemoteConnection:
-    """Manager for remote connections to various services"""
     
     def __init__(self, host: str, port: int, protocol: str = 'tcp', 
                  username: str = None, password: str = None, 
@@ -129,7 +128,6 @@ class RemoteConnection:
             return False
     
     def _connect_ssh(self) -> bool:
-        """Connect via SSH"""
         try:
             if not self.username:
                 print_error("SSH requires username")
@@ -197,7 +195,6 @@ class RemoteConnection:
             return False
     
     def _connect_api(self) -> bool:
-        """Connect via API"""
         try:
             url = f"http://{self.host}:{self.port}/api"
             headers = {'User-Agent': 'KittySploit/1.0'}
@@ -219,7 +216,6 @@ class RemoteConnection:
             return False
     
     def send_command(self, command: str) -> Optional[str]:
-        """Send command to remote host"""
         if not self.connected:
             print_error("Not connected to remote host")
             return None
@@ -243,7 +239,6 @@ class RemoteConnection:
             return None
     
     def _send_ssh_command(self, command: str) -> str:
-        """Send command via SSH"""
         stdin, stdout, stderr = self.connection.exec_command(command)
         output = stdout.read().decode('utf-8')
         error = stderr.read().decode('utf-8')
@@ -299,7 +294,6 @@ class RemoteConnection:
             return f"HTTP request failed: {e}"
     
     def _send_rpc_request(self, command: str) -> str:
-        """Send RPC request"""
         try:
             # Parse command as JSON-RPC method
             try:
@@ -332,7 +326,6 @@ class RemoteConnection:
             return f"RPC request failed: {e}"
     
     def _send_api_request(self, command: str) -> str:
-        """Send API request"""
         try:
             # Parse command as API endpoint
             try:
@@ -362,7 +355,6 @@ class RemoteConnection:
             return f"API request failed: {e}"
     
     def _send_tcp_data(self, data: str) -> str:
-        """Send data via TCP"""
         try:
             self.connection.send(data.encode('utf-8'))
             response = self.connection.recv(4096)
@@ -371,7 +363,6 @@ class RemoteConnection:
             return f"TCP data send failed: {e}"
     
     def disconnect(self):
-        """Disconnect from remote host"""
         if self.connected:
             try:
                 if self.protocol == 'ssh' and self.connection:
@@ -384,7 +375,6 @@ class RemoteConnection:
                 print_warning(f"Error during disconnect: {e}")
     
     def get_info(self) -> Dict[str, Any]:
-        """Get connection information"""
         return {
             'host': self.host,
             'port': self.port,
@@ -395,7 +385,6 @@ class RemoteConnection:
         }
     
     def __enter__(self):
-        """Context manager entry"""
         self.connect()
         return self
     
@@ -477,7 +466,6 @@ class RemoteConnection:
         return True
     
     def _show_interactive_help(self):
-        """Show help for interactive commands"""
         help_text = """
 Interactive Commands:
   help, h, ?     - Show this help message
@@ -490,7 +478,6 @@ Regular commands will be sent to the remote host.
         print(help_text)
     
     def _show_connection_info(self):
-        """Show current connection information"""
         info = self.get_info()
         print(f"""
 Connection Information:
@@ -503,15 +490,12 @@ Connection Information:
 """)
     
     def _clear_screen(self):
-        """Clear the screen"""
         import os
         os.system('cls' if os.name == 'nt' else 'clear')
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit"""
         self.disconnect()
     
     def __repr__(self) -> str:
-        """String representation"""
         status = "connected" if self.connected else "disconnected"
         return f"RemoteConnection({self.host}:{self.port}, {self.protocol}, {status})"

@@ -87,6 +87,10 @@ modules/browser_exploits/multi/chrome_font_feature_uaf.py
 apps/*
 !apps/kittysploit-ai/
 !apps/kittysploit-ai/**
+!apps/kittyCluster/
+!apps/kittyCluster/**
+apps/kittyCluster/**/__pycache__/
+apps/kittyCluster/**/*.py[cod]
 artifacts/*
 TODO.md
 

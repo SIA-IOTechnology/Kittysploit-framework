@@ -95,7 +95,6 @@ class AndroidShell(BaseShell):
             return {"output": "", "status": 1, "error": f"ADB shell error: {e}"}
 
     def _initialize_adb_device(self) -> None:
-        """Find the ppadb device object from the listener/session mapping."""
         try:
             if not self.framework or not hasattr(self.framework, "session_manager"):
                 return

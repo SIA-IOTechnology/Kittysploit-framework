@@ -108,11 +108,9 @@ class PHPShell(BaseShell):
         return "php> "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         return self.prompt_template
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the PHP shell"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -221,12 +219,10 @@ class PHPShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'Request failed: {str(e)}'}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
     
     # Built-in command implementations
     def _cmd_help(self, args: str) -> Dict[str, Any]:
-        """Show help"""
         help_text = """PHP Shell Commands:
   help                    Show this help
   clear                   Clear screen
@@ -271,11 +267,9 @@ Usage Examples:
         return {'output': help_text + '\n', 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
-        """Clear screen"""
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: str) -> Dict[str, Any]:
-        """Show command history"""
         limit = 50
         if args and args.isdigit():
             limit = int(args)
@@ -288,14 +282,12 @@ Usage Examples:
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_eval(self, args: str) -> Dict[str, Any]:
-        """Evaluate PHP code"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'eval: code required'}
         
         return self._execute_php_code(args)
     
     def _cmd_exec(self, args: str) -> Dict[str, Any]:
-        """Execute system command"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'exec: command required'}
         
@@ -305,7 +297,6 @@ Usage Examples:
         return self._execute_php_code(php_code)
     
     def _cmd_system(self, args: str) -> Dict[str, Any]:
-        """Execute system command with output"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'system: command required'}
         
@@ -315,7 +306,6 @@ Usage Examples:
         return self._execute_php_code(php_code)
     
     def _cmd_shell_exec(self, args: str) -> Dict[str, Any]:
-        """Execute shell command"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'shell_exec: command required'}
         
@@ -325,7 +315,6 @@ Usage Examples:
         return self._execute_php_code(php_code)
     
     def _cmd_pwd(self, args: str) -> Dict[str, Any]:
-        """Print working directory"""
         php_code = "echo getcwd();"
         result = self._execute_php_code(php_code)
         if result['status'] == 0 and result['output']:
@@ -334,7 +323,6 @@ Usage Examples:
         return result
     
     def _cmd_cd(self, args: str) -> Dict[str, Any]:
-        """Change directory"""
         if not args:
             args = "~"
         
@@ -348,7 +336,6 @@ Usage Examples:
         return result
     
     def _cmd_ls(self, args: str) -> Dict[str, Any]:
-        """List directory contents (pure PHP, no system calls)"""
         dir_path = args if args else "."
         # Escape single quotes
         escaped_dir = dir_path.replace("'", "\\'")
@@ -376,7 +363,6 @@ foreach($files as $file) {{
         return self._execute_php_code(php_code)
     
     def _cmd_cat(self, args: str) -> Dict[str, Any]:
-        """Read and display file contents (pure PHP, no system calls)"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'cat: file path required'}
         
@@ -407,7 +393,6 @@ echo $content;
         return self._execute_php_code(php_code)
     
     def _cmd_whoami(self, args: str) -> Dict[str, Any]:
-        """Print current user"""
         php_code = "echo get_current_user();"
         result = self._execute_php_code(php_code)
         if result['status'] == 0 and result['output']:
@@ -415,7 +400,6 @@ echo $content;
         return result
     
     def _cmd_phpinfo(self, args: str) -> Dict[str, Any]:
-        """Show PHP configuration (formatted)"""
         # Use PHP to extract key information without HTML
         php_code = """
 $info = array();
@@ -466,7 +450,6 @@ foreach($info as $key => $value) {
         return result
     
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
-        """Exit shell"""
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}
 

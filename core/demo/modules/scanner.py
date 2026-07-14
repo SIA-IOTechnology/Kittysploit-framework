@@ -21,7 +21,6 @@ class ScannerDemo(Demo):
     }
     
     def run(self, options: dict) -> dict:
-        """Simulates a port scan"""
         # Update instance options with provided options
         self.options.update(options)
         

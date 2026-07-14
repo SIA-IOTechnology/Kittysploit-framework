@@ -556,7 +556,6 @@ class ScopeManager:
         return confirmed
 
     def preview_lines(self, module) -> List[tuple]:
-        """Return (level, line) tuples for run --preview."""
         lines: List[tuple] = []
         lines.append(("info", f"Enforcement: {'enabled' if self.enabled else 'disabled'}"))
         lines.append(("info", f"Allowlist IPs/CIDRs: {len(self.allowed_ips)}"))

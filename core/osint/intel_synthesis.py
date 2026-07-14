@@ -73,7 +73,6 @@ def synthesize_intel_graph(
     identities: Optional[Mapping[str, Sequence[str]]] = None,
     persona_seed: str = "",
 ) -> Dict[str, Any]:
-    """Build nodes, edges, and priority hints from OSINT module rows."""
     root = organization_root_domain(root_domain)
     identities = identities or {}
     nodes: Dict[str, Dict[str, Any]] = {}

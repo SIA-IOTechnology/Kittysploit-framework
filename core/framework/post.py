@@ -146,7 +146,6 @@ class Post(BaseModule):
         return True
 
     def stop_reverse_session_callback_handler(self) -> bool:
-        """Stop reverse callback handler started by spawn_reverse_session_callback()."""
         handler = getattr(self, "_post_reverse_handler", None)
         if not handler:
             return False

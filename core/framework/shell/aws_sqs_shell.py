@@ -45,7 +45,6 @@ class AWSSQSShell(BaseShell):
         self._init_from_session()
     
     def _init_from_session(self):
-        """Initialize shell from session data"""
         try:
             if not self.framework or not hasattr(self.framework, 'session_manager'):
                 return
@@ -107,7 +106,6 @@ class AWSSQSShell(BaseShell):
         return "aws-sqs@{hostname}:{directory}$ "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         return self.prompt_template.format(
             username=self.username,
             hostname=self.hostname or "aws-sqs",
@@ -115,7 +113,6 @@ class AWSSQSShell(BaseShell):
         )
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command via AWS SQS"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -285,7 +282,6 @@ class AWSSQSShell(BaseShell):
             }
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return [
             'help', 'exit', 'clear', 'history',
             'cd', 'pwd', 'ls', 'whoami', 'id',
@@ -293,13 +289,11 @@ class AWSSQSShell(BaseShell):
         ]
     
     def activate(self):
-        """Activate the shell"""
         super().activate()
         if not self.sqs_client:
             self._init_from_session()
     
     def deactivate(self):
-        """Deactivate the shell"""
         super().deactivate()
         # Clear response cache
         with self.response_lock:

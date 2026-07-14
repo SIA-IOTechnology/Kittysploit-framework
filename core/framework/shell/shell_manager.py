@@ -12,7 +12,6 @@ from core.output_handler import print_info, print_error, print_success
 
 
 def _lazy_import(module_path: str, class_name: str):
-    """Return a proxy that imports the real class on first access."""
     _cls = None
 
     class _Proxy:
@@ -71,7 +70,6 @@ GcpComputeSshShell = _lazy_import('.gcp_compute_ssh_shell', 'GcpComputeSshShell'
 GcpApiShell = _lazy_import('.gcp_api_shell', 'GcpApiShell')
 
 class ShellManager:
-    """Manager for different shell types"""
     
     def __init__(self):
         self.shells: Dict[str, BaseShell] = {}
@@ -166,11 +164,9 @@ class ShellManager:
             return None
     
     def get_shell(self, session_id: str) -> Optional[BaseShell]:
-        """Get shell by session ID"""
         return self.shells.get(session_id)
     
     def remove_shell(self, session_id: str) -> bool:
-        """Remove shell by session ID"""
         if session_id in self.shells:
             shell = self.shells.pop(session_id)
             shell.deactivate()
@@ -184,14 +180,12 @@ class ShellManager:
         return False
     
     def set_active_shell(self, session_id: str) -> bool:
-        """Set active shell"""
         if session_id in self.shells:
             self.active_shell = session_id
             return True
         return False
     
     def get_active_shell(self) -> Optional[BaseShell]:
-        """Get active shell"""
         if self.active_shell and self.active_shell in self.shells:
             return self.shells[self.active_shell]
         return None
@@ -295,21 +289,18 @@ class ShellManager:
             return {'output': '', 'status': 1, 'error': f'Command execution error: {str(e)}'}
     
     def execute_active_command(self, command: str) -> Dict[str, Any]:
-        """Execute command in active shell"""
         if not self.active_shell:
             return {'output': '', 'status': 1, 'error': 'No active shell'}
         
         return self.execute_command(self.active_shell, command)
     
     def get_shell_info(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get shell information"""
         shell = self.get_shell(session_id)
         if shell:
             return shell.get_shell_info()
         return None
     
     def list_shells(self) -> List[Dict[str, Any]]:
-        """List all shells"""
         shells_info = []
         for session_id, shell in self.shells.items():
             info = shell.get_shell_info()
@@ -318,11 +309,9 @@ class ShellManager:
         return shells_info
     
     def get_available_shell_types(self) -> List[str]:
-        """Get available shell types"""
         return list(self.shell_types.keys())
     
     def get_shell_type_info(self, shell_type: str) -> Optional[Dict[str, Any]]:
-        """Get information about a shell type"""
         if shell_type not in self.shell_types:
             return None
         
@@ -356,21 +345,18 @@ class ShellManager:
             return False
     
     def get_shell_prompt(self, session_id: str) -> str:
-        """Get shell prompt for session"""
         shell = self.get_shell(session_id)
         if shell:
             return shell.get_prompt()
         return "> "
     
     def get_active_shell_prompt(self) -> str:
-        """Get active shell prompt"""
         shell = self.get_active_shell()
         if shell:
             return shell.get_prompt()
         return "> "
     
     def cleanup_inactive_shells(self):
-        """Clean up inactive shells"""
         inactive_sessions = []
         for session_id, shell in self.shells.items():
             if not shell.is_active:
@@ -383,7 +369,6 @@ class ShellManager:
             print_info(f"Cleaned up {len(inactive_sessions)} inactive shells")
     
     def get_shell_statistics(self) -> Dict[str, Any]:
-        """Get shell statistics"""
         total_shells = len(self.shells)
         active_shells = sum(1 for shell in self.shells.values() if shell.is_active)
         

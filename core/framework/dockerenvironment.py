@@ -46,7 +46,6 @@ class DockerEnvironment(BaseModule):
         )
 
     def _print_linux_docker_help(self, permission_issue=False):
-        """Print Linux-specific Docker troubleshooting tips."""
         if permission_issue:
             print_error("Docker socket permission denied.")
             print_info("Add your user to the docker group and reconnect:")
@@ -204,7 +203,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def wait_for_service(self, host, port, timeout=60):
-        """Wait for the service to be available on the specified port"""
         print_status(f"Waiting for the service to be available on {host}:{port}...")
         start_time = time.time()
         
@@ -226,7 +224,6 @@ class DockerEnvironment(BaseModule):
         return False
     
     def start_container(self):
-        """Start the Docker container"""
         if not self.container_name:
             self.container_name = f"kittysploit_{self._type}_{int(time.time())}"
             
@@ -342,7 +339,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def stop_container(self):
-        """Stop the Docker container"""
         if not self.container:
             return True
             
@@ -363,7 +359,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def _resolve_container_image(self):
-        """Return the most useful identifier for the current container image"""
         if not self.container:
             return self.image_name
         try:
@@ -378,7 +373,6 @@ class DockerEnvironment(BaseModule):
             return self.image_name
 
     def _collect_port_bindings(self):
-        """Return normalized port bindings for the running container"""
         if not self.container:
             return {}
 
@@ -445,7 +439,6 @@ class DockerEnvironment(BaseModule):
         return fallback
 
     def _build_container_info_stub(self):
-        """Return a base info dict used by get_container_info"""
         return {
             "id": getattr(self.container, "id", None) if self.container else None,
             "name": getattr(self.container, "name", self.container_name) if self.container_name else None,
@@ -457,7 +450,6 @@ class DockerEnvironment(BaseModule):
         }
 
     def get_container_info(self):
-        """Get normalized container information for downstream modules"""
         info = self._build_container_info_stub()
 
         if not self.container:
@@ -487,7 +479,6 @@ class DockerEnvironment(BaseModule):
             return info
 
     def print_container_overview(self, container_info=None):
-        """Print a concise summary of the currently running container"""
         container_info = container_info or self.get_container_info()
         status = container_info.get("status")
 
@@ -535,7 +526,6 @@ class DockerEnvironment(BaseModule):
         return True
     
     def get_container_ip(self):
-        """Get the container IP address"""
         if not self.container:
             return None
             
@@ -570,7 +560,6 @@ class DockerEnvironment(BaseModule):
             self.exposed_ports = {"80/tcp": ('127.0.0.1', 80)}
 
     def run_docker(self):
-        """Execute the module - handles Docker connection, image pull, and container start"""
         # Vérifier Docker
         if not self.check_docker():
             print_error("Docker check failed")
@@ -628,7 +617,6 @@ class DockerEnvironment(BaseModule):
         return self.on_environment_ready()
 
     def _exploit(self):
-        """Execute the module and return the result"""
         try:
             return self.run()
         except Exception as e:

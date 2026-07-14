@@ -49,7 +49,6 @@ def build_industry_mou_request(
     identifiers: Optional[Mapping[str, Any]] = None,
     contact_reference: str = "",
 ) -> Dict[str, Any]:
-    """Generate MoU / LERS-style provider request template."""
     key = str(platform or "").strip().lower()
     catalog = MOU_PLATFORM_CATALOG.get(key, {})
     label = str(catalog.get("label") or platform or "Unknown Provider")

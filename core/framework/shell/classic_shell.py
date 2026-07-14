@@ -19,7 +19,6 @@ from .base_shell import BaseShell
 from core.output_handler import print_info, print_error
 
 class ClassicShell(BaseShell):
-    """Classic shell implementation for standard sessions"""
 
     _CMD_MARKER = "__KS_CMD_END__"
     
@@ -128,14 +127,12 @@ class ClassicShell(BaseShell):
     
     @property
     def prompt_template(self) -> str:
-        """Get prompt template based on detected OS"""
         if self.is_windows:
             return "PS {directory}> "
         else:
             return "{username}@{hostname}:{directory}$ " if not self.is_root else "{username}@{hostname}:{directory}# "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         if self.is_windows:
             dir_display = self._normalize_windows_path_for_prompt(self.current_directory)
             return self.prompt_template.format(directory=dir_display)
@@ -149,12 +146,10 @@ class ClassicShell(BaseShell):
             )
     
     def _get_windows_drive(self) -> str:
-        """Return current drive (default C:)."""
         m = re.match(r'^\s*([A-Za-z]:)\\', str(self.current_directory or ""))
         return (m.group(1) if m else "C:")
 
     def _strip_powershell_prompt_prefix(self, s: str) -> str:
-        """Remove leading 'PS ' repetitions."""
         if not s:
             return s
         out = s.strip()
@@ -215,7 +210,6 @@ class ClassicShell(BaseShell):
         return path
 
     def _set_current_directory(self, raw: str):
-        """Set current directory with proper normalization."""
         if self.is_windows:
             self.current_directory = self._normalize_windows_path(raw)
         else:
@@ -317,7 +311,6 @@ class ClassicShell(BaseShell):
         return False
 
     def _looks_like_wrapped_command_echo(self, line: str, command: str) -> bool:
-        """Filter interactive bash/sh echoes of the marker-wrapped command."""
         if not line:
             return False
         line_stripped = line.strip()
@@ -363,7 +356,6 @@ class ClassicShell(BaseShell):
             self._reset_socket_timeout()
 
     def _first_response_line(self, raw: Optional[str]) -> str:
-        """Return the first meaningful line from a framed remote response."""
         if not raw:
             return ""
         for line in raw.splitlines():
@@ -488,7 +480,6 @@ class ClassicShell(BaseShell):
         return False
     
     def _initialize_connection(self):
-        """Initialize connection from framework/listener"""
         if not self.framework:
             return
         
@@ -672,14 +663,12 @@ class ClassicShell(BaseShell):
         return not self.is_windows and not self._session_stager_line_mode()
 
     def _wrap_unix_command(self, command: str) -> str:
-        """Wrap command so the remote prints a known end marker (non-stager Unix shells)."""
         cmd = (command or "").strip()
         if not cmd:
             return cmd
         return f"({cmd}) 2>&1; printf '\\n{self._CMD_MARKER}\\n'"
 
     def _looks_like_stager_command_echo(self, line: str, command: str) -> bool:
-        """Filter echoed lines from dumb TCP shells (bash /dev/tcp, dup2+/bin/sh)."""
         if not line or not command:
             return False
         line_stripped = line.strip()
@@ -691,7 +680,6 @@ class ClassicShell(BaseShell):
         return False
 
     def _recv_until_idle(self, timeout: float, *, idle_seconds: float = 0.35) -> bytes:
-        """Read until the peer stops sending for idle_seconds or timeout elapses."""
         response = b""
         start_time = time.time()
         max_wait = max(0.2, float(timeout))
@@ -716,7 +704,6 @@ class ClassicShell(BaseShell):
         return response
 
     def _recv_until_framed(self, *, use_marker: bool, timeout: float) -> bytes:
-        """Read socket data until a marker arrives, idle timeout, or EOF."""
         response = b""
         marker_bytes = self._CMD_MARKER.encode("utf-8")
         start_time = time.time()
@@ -760,7 +747,6 @@ class ClassicShell(BaseShell):
         return self._disconnect_error()
 
     def _send_command_raw(self, command: str, timeout: float = 5.0) -> Optional[str]:
-        """Send a raw command via socket and receive response"""
         with self._transport_lock:
             self._refresh_connection()
             self._normalize_connection()
@@ -862,7 +848,6 @@ class ClassicShell(BaseShell):
                 return None
     
     def _filter_output(self, output: str) -> str:
-        """Filter output to remove unwanted lines like 'Répertoire' or 'Directory'"""
         if not output:
             return output
         
@@ -936,7 +921,6 @@ class ClassicShell(BaseShell):
         return '\n'.join(filtered_lines)
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the shell"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -1077,12 +1061,10 @@ class ClassicShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'Execution error: {str(e)}'}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
     
     # Built-in command implementations
     def _cmd_cd(self, args: List[str]) -> Dict[str, Any]:
-        """Change directory"""
         # If we have a connection, use remote execution
         if self.connection:
             if not args:
@@ -1135,7 +1117,6 @@ class ClassicShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'cd: {target_dir}: No such file or directory'}
     
     def _cmd_pwd(self, args: List[str]) -> Dict[str, Any]:
-        """Print working directory"""
         # If we have a connection, get actual directory from remote
         if self.connection:
             remote_path = self._fetch_remote_cwd()
@@ -1150,7 +1131,6 @@ class ClassicShell(BaseShell):
         return {'output': self.current_directory + '\n', 'status': 0, 'error': ''}
     
     def _cmd_ls(self, args: List[str]) -> Dict[str, Any]:
-        """List directory contents (Unix)"""
         if self.is_windows:
             # Redirect to dir command on Windows
             return self._cmd_dir(args)
@@ -1204,7 +1184,6 @@ class ClassicShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'ls error: {str(e)}'}
     
     def _cmd_dir(self, args: List[str]) -> Dict[str, Any]:
-        """List directory contents (Windows)"""
         # If we have a connection, use remote execution
         if self.connection:
             cmd = 'dir' + (' ' + ' '.join(args) if args else '')
@@ -1245,30 +1224,25 @@ class ClassicShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'dir error: {str(e)}'}
     
     def _cmd_whoami(self, args: List[str]) -> Dict[str, Any]:
-        """Print current user"""
         return {'output': self.username + '\n', 'status': 0, 'error': ''}
     
     def _cmd_id(self, args: List[str]) -> Dict[str, Any]:
-        """Print user and group IDs"""
         uid = 0 if self.is_root else 1000
         gid = 0 if self.is_root else 1000
         groups = "0" if self.is_root else "1000"
         return {'output': f'uid={uid}({self.username}) gid={gid}({self.username}) groups={groups}({self.username})\n', 'status': 0, 'error': ''}
     
     def _cmd_echo(self, args: List[str]) -> Dict[str, Any]:
-        """Echo arguments"""
         output = ' '.join(args) if args else ''
         return {'output': output + '\n', 'status': 0, 'error': ''}
     
     def _cmd_env(self, args: List[str]) -> Dict[str, Any]:
-        """Print environment variables"""
         env_output = []
         for key, value in self.environment_vars.items():
             env_output.append(f"{key}={value}")
         return {'output': '\n'.join(env_output) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_export(self, args: List[str]) -> Dict[str, Any]:
-        """Set environment variable"""
         if not args:
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -1284,13 +1258,11 @@ class ClassicShell(BaseShell):
         return {'output': '', 'status': 0, 'error': ''}
     
     def _cmd_unset(self, args: List[str]) -> Dict[str, Any]:
-        """Unset environment variable"""
         for arg in args:
             self.environment_vars.pop(arg, None)
         return {'output': '', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: List[str]) -> Dict[str, Any]:
-        """Show command history"""
         limit = 50
         if args and args[0].isdigit():
             limit = int(args[0])
@@ -1303,11 +1275,9 @@ class ClassicShell(BaseShell):
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: List[str]) -> Dict[str, Any]:
-        """Clear screen"""
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
     
     def _cmd_help(self, args: List[str]) -> Dict[str, Any]:
-        """Show help"""
         help_text = """Available commands:
   cd [dir]        Change directory
   pwd             Print working directory
@@ -1325,7 +1295,6 @@ class ClassicShell(BaseShell):
         return {'output': help_text + '\n', 'status': 0, 'error': ''}
     
     def _cmd_exit(self, args: List[str]) -> Dict[str, Any]:
-        """Exit shell"""
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}
 

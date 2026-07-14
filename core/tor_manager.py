@@ -13,7 +13,6 @@ from core.output_handler import print_info, print_success, print_error, print_wa
 
 
 class TorManager:
-    """Manages Tor network connectivity"""
     
     # Default Tor SOCKS proxy ports
     DEFAULT_SOCKS_PORT = 9050  # Standard Tor daemon
@@ -24,7 +23,6 @@ class TorManager:
     DEFAULT_CONTROL_PORT_TOR_BROWSER = 9151  # Tor Browser
     
     def __init__(self, framework=None):
-        """Initialize Tor Manager"""
         self.framework = framework
         self.enabled = False
         self.socks_host = '127.0.0.1'
@@ -211,7 +209,6 @@ class TorManager:
         return True
     
     def disable(self):
-        """Disable Tor network"""
         if not self.enabled:
             return
         

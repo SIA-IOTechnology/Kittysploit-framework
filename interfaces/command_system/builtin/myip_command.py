@@ -324,7 +324,6 @@ Note: Public IP detection requires internet connectivity.
                 print_warning("Could not determine gateway")
             print_info("")
         
-        # Network interfaces (if all) - simplified
         if options['all']:
             print_info("Network Interfaces:")
             # Show the local IPs we already found with interface names

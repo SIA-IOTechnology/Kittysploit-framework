@@ -60,7 +60,6 @@ class WorkspaceIntelStore:
         state: str = "open",
         source: str = "",
     ) -> bool:
-        """Attach an open port to a host in the current workspace."""
         if not host_address or not port:
             return False
         session = self._db_session()

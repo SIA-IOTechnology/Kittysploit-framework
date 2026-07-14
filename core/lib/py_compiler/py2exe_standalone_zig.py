@@ -207,7 +207,6 @@ def _find_embeddable(embed_path: Optional[str], python_version: tuple) -> Option
 
 
 def _get_python_dll_name() -> str:
-    """Retourne le nom de la DLL Python (python311.dll, etc.)."""
     v = sys.version_info
     return f"python{v.major}{v.minor}.dll"
 
@@ -224,7 +223,6 @@ class Py2ExeStandaloneCompiler:
         self._embeddable_path = embeddable_path
 
     def is_available(self) -> bool:
-        """Vérifie que Zig et le package embeddable sont disponibles."""
         if not self._zig_compiler.is_available():
             return False
         embed = _find_embeddable(self._embeddable_path, sys.version_info)

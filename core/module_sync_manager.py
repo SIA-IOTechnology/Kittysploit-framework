@@ -176,7 +176,6 @@ class ModuleSyncManager:
                 self.is_syncing = False
     
     def _get_filesystem_modules(self) -> Dict[str, Dict]:
-        """Build module list from disk via static __info__ parsing (no Python imports)."""
         modules = {}
         
         try:
@@ -290,7 +289,6 @@ class ModuleSyncManager:
         return modules
     
     def _calculate_sync_stats(self, fs_modules: Dict, db_modules: Dict) -> Dict[str, int]:
-        """Calculate synchronization statistics"""
         fs_paths = set(fs_modules.keys())
         db_paths = set(db_modules.keys())
         
@@ -337,7 +335,6 @@ class ModuleSyncManager:
         }
     
     def _perform_sync(self, fs_modules: Dict, db_modules: Dict, stats: Dict):
-        """Perform the actual synchronization"""
         try:
             with self.db_manager.session_scope(self.workspace) as session:
                 # Add new modules
@@ -610,7 +607,6 @@ class ModuleSyncManager:
             return None
     
     def get_module_stats(self) -> Dict[str, int]:
-        """Get module statistics"""
         try:
             with self.db_manager.session_scope(self.workspace) as session:
                 total = session.query(Module).filter(Module.is_active == True).count()
@@ -636,7 +632,6 @@ class ModuleSyncManager:
             return {}
     
     def get_sync_status(self) -> Dict:
-        """Get synchronization status"""
         return {
             'is_syncing': self.is_syncing,
             'last_sync': self.last_sync.isoformat() if self.last_sync else None,

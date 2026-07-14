@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Generic Joomla / JCE fingerprinting and JCE file-upload primitives."""
+"""Generic Joomla component fingerprinting and shared exploit primitives."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from lib.scanner.http.response_validation import is_html_response, is_xml_respon
 JCE_PATCHED_VERSION = "2.9.99.5"
 HELIX3_PATCHED_VERSION = "3.1.2"
 HELIX3_AJAX_PATH = "/index.php?option=com_ajax&plugin=helix3&format=json"
+BAFORMS_PATCHED_VERSION = "2.4.1"
+BAFORMS_OPTION = "com_baforms"
 
 
 class Joomla(BaseModule):
@@ -68,6 +70,12 @@ class Joomla(BaseModule):
 
     @classmethod
     def helix3_is_patched(cls, version: str, patched: str = HELIX3_PATCHED_VERSION) -> bool:
+        if not version:
+            return False
+        return not cls.version_less_than(version, patched)
+
+    @classmethod
+    def baforms_is_patched(cls, version: str, patched: str = BAFORMS_PATCHED_VERSION) -> bool:
         if not version:
             return False
         return not cls.version_less_than(version, patched)
@@ -281,6 +289,52 @@ class Joomla(BaseModule):
                 return {"found": True, "version": None}
 
         return {"found": False, "version": None}
+
+    def probe_baforms(self) -> Dict[str, Any]:
+        """Fingerprint Balbooa Forms (com_baforms) and extract version when possible."""
+        for manifest in (
+            "/administrator/components/com_baforms/baforms.xml",
+            "/components/com_baforms/baforms.xml",
+        ):
+            response = self.joomla_http_get(manifest, timeout=8)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            if "baforms" not in body.lower():
+                continue
+            match = self._XML_VERSION_RE.search(body)
+            version = match.group(1).strip() if match else None
+            return {"found": True, "version": version, "evidence": manifest}
+
+        for asset in (
+            "/components/com_baforms/baforms.php",
+            "/media/com_baforms/css/ba-form.css",
+            "/media/com_baforms/js/ba-form.js",
+        ):
+            response = self.joomla_http_get(asset, timeout=6)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            if looks_like_html(body) and "baforms" not in body.lower():
+                continue
+            if len(body) <= 20 and "baforms" not in body.lower():
+                continue
+            return {"found": True, "version": None, "evidence": asset}
+
+        option_resp = self.joomla_http_get(
+            f"/index.php?option={BAFORMS_OPTION}",
+            timeout=8,
+        )
+        if option_resp and option_resp.status_code == 200:
+            body = option_resp.text or ""
+            if "baforms" in body.lower() or BAFORMS_OPTION in body.lower():
+                return {
+                    "found": True,
+                    "version": None,
+                    "evidence": f"/index.php?option={BAFORMS_OPTION}",
+                }
+
+        return {"found": False, "version": None, "evidence": None}
 
     def fetch_csrf_token(self) -> Optional[str]:
         response = self.joomla_http_get("/")

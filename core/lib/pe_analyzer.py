@@ -15,7 +15,6 @@ class PEHeader:
     """PE Header parser"""
     
     def __init__(self, data: bytes):
-        """Parse PE header from binary data"""
         if len(data) < 64:  # Minimum PE header size
             raise ValueError("Invalid PE header size")
         
@@ -72,7 +71,6 @@ class PESection:
     """PE Section parser"""
     
     def __init__(self, data: bytes, offset: int):
-        """Parse PE section from binary data"""
         if offset + 40 > len(data):
             raise ValueError("Invalid section offset")
         

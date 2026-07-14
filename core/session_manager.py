@@ -127,7 +127,6 @@ class SessionManager:
         return None
 
     def _get_db_session(self):
-        """Return the SQLAlchemy session for the current workspace context."""
         if self.framework and hasattr(self.framework, 'get_db_session'):
             return self.framework.get_db_session()
         if self.db_manager:
@@ -135,7 +134,6 @@ class SessionManager:
         return None
 
     def reload_for_current_workspace(self) -> None:
-        """Clear in-memory sessions and reload those for the current workspace."""
         self.sessions.clear()
         self.browser_sessions.clear()
         self._session_metadata.clear()
@@ -394,7 +392,6 @@ class SessionManager:
         implant_id: str = "",
         client_id: str = "",
     ) -> Optional[str]:
-        """Return a disconnected session id matching a stable implant identity."""
         identity = str(implant_id or client_id or "").strip()
         if not identity:
             return None
@@ -498,7 +495,6 @@ class SessionManager:
         return True
     
     def handle_commands_sent(self, victim_id: str, commands: List[Dict[str, Any]]) -> None:
-        """Gère l'envoi de commandes à une session de navigateur"""
         if victim_id in self.browser_sessions:
             session = self.browser_sessions[victim_id]
             session['commands_sent'] += len(commands)
@@ -514,11 +510,9 @@ class SessionManager:
                     print_error(f"Error in commands_sent callback: {e}")
     
     def get_session(self, session_id: str) -> Optional[SessionData]:
-        """Get a session by its ID"""
         return self.sessions.get(session_id)
     
     def get_browser_session(self, session_id):
-        """Get a browser session by its ID"""
         
         if session_id in self.browser_sessions:
             return self.browser_sessions[session_id]
@@ -526,15 +520,12 @@ class SessionManager:
         return None
     
     def get_sessions(self) -> List[SessionData]:
-        """Get all standard sessions"""
         return list(self.sessions.values())
     
     def get_browser_sessions(self) -> List[Dict[str, Any]]:
-        """Get all browser sessions"""
         return list(self.browser_sessions.values())
     
     def get_all_sessions(self) -> Dict[str, Any]:
-        """Get all sessions (standard and browser)"""
         all_sessions = {
             'standard': self.get_sessions(),
             'browser': self.get_browser_sessions()
@@ -598,7 +589,6 @@ class SessionManager:
         return False
     
     def remove_session(self, session_id: str) -> bool:
-        """Remove a standard session"""
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             
@@ -619,7 +609,6 @@ class SessionManager:
         return False
     
     def remove_browser_session(self, victim_id: str) -> bool:
-        """Remove a browser session"""
         if victim_id in self.browser_sessions:
             session = self.browser_sessions.pop(victim_id)
             
@@ -639,10 +628,8 @@ class SessionManager:
         return False
     
     def add_callback(self, callback):
-        """Add a callback for session events"""
         self.callbacks.append(callback)
     
     def remove_callback(self, callback):
-        """Remove a callback"""
         if callback in self.callbacks:
             self.callbacks.remove(callback) 

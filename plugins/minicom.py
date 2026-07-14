@@ -472,7 +472,6 @@ class MinicomPlugin(Plugin):
                     self._send_data(data)
                     time.sleep(0.5)  # Wait for response
                 elif line.startswith('expect '):
-                    # Wait for expected pattern (simplified)
                     pattern = line.split(' ', 1)[1]
                     print_info(f"Waiting for pattern: {pattern}")
                     # This would need more sophisticated implementation

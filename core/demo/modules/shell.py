@@ -60,11 +60,9 @@ class ShellDemo(Demo):
         self.session_manager = None  # Will be set by DemoManager
     
     def set_session_manager(self, session_manager):
-        """Set the session manager to use"""
         self.session_manager = session_manager
     
     def run(self, options: Dict[str, Any]) -> Dict[str, Any]:
-        """Run the demo shell module"""
         if not self.session_manager:
             return {
                 'status': 'error',
@@ -186,7 +184,6 @@ class ShellDemo(Demo):
         return result
     
     def _list_sessions(self):
-        """Display active sessions"""
         sessions = self.session_manager.list_sessions()
         
         if not sessions:

@@ -2,7 +2,6 @@ from core.utils.module_static_metadata import SUPPORTED_MODULE_TYPES, normalize_
 
 
 def validate_hash_type(hash_type: str) -> bool:
-    """Validate hash type"""
     SUPPORTED_HASH_TYPES = ['md5', 'sha1', 'sha256', 'bcrypt']
     if hash_type and hash_type.lower() not in SUPPORTED_HASH_TYPES:
         return False
@@ -10,7 +9,6 @@ def validate_hash_type(hash_type: str) -> bool:
 
 
 def validate_module_type(module_type: str) -> bool:
-    """Validate module type (accepts canonical and legacy aliases)."""
     if not module_type:
         return True
     return normalize_module_type(module_type) in SUPPORTED_MODULE_TYPES

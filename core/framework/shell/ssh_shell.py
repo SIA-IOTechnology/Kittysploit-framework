@@ -13,7 +13,6 @@ from .base_shell import BaseShell
 from core.output_handler import print_info, print_error
 
 class SSHShell(BaseShell):
-    """SSH shell implementation for SSH sessions"""
     
     def __init__(self, session_id: str, session_type: str = "ssh", framework=None):
         super().__init__(session_id, session_type)
@@ -63,7 +62,6 @@ class SSHShell(BaseShell):
         return "{username}@{hostname}:{directory}$ " if not self.is_root else "{username}@{hostname}:{directory}# "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         # If not connected, show clear error indicator
         if not self.is_connected or not self.connection:
             return "[!] Not connected to SSH server > "
@@ -120,11 +118,9 @@ class SSHShell(BaseShell):
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server'}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
     
     def _initialize_ssh_connection(self):
-        """Initialize SSH connection from session/listener"""
         try:
             if not self.framework:
                 return
@@ -219,7 +215,6 @@ class SSHShell(BaseShell):
             print_error(f"Error initializing SSH connection: {str(e)}")
     
     def _setup_connection_from_session(self, session):
-        """Setup connection parameters from session data"""
         self.is_connected = True
         self.host = session.host
         self.port = session.port
@@ -277,7 +272,6 @@ class SSHShell(BaseShell):
             pass
 
     def connect(self, host: str, port: int = 22, username: str = "user", password: str = "", private_key: str = None) -> bool:
-        """Connect to SSH server"""
         try:
             import paramiko
             
@@ -308,7 +302,6 @@ class SSHShell(BaseShell):
             return False
     
     def disconnect(self):
-        """Disconnect from SSH server"""
         self.is_connected = False
         try:
             if self.channel:
@@ -319,7 +312,6 @@ class SSHShell(BaseShell):
         self.channel = None
 
     def _ensure_interactive_channel(self) -> bool:
-        """Create (or reuse) an SSH interactive PTY channel."""
         if not self.connection:
             return False
         try:
@@ -337,9 +329,6 @@ class SSHShell(BaseShell):
             return False
 
     def _drain_interactive_output(self, max_wait: float = 0.5, idle_grace: float = 0.15) -> str:
-        """
-        Read available data from interactive channel without blocking forever.
-        """
         if not self.channel:
             return ""
         chunks = []
@@ -485,7 +474,6 @@ class SSHShell(BaseShell):
     
     # Built-in command implementations
     def _cmd_help(self, args: str) -> Dict[str, Any]:
-        """Show help"""
         help_text = """SSH Shell Commands:
   help                    Show this help
   clear                   Clear screen
@@ -508,11 +496,9 @@ SSH Connection:
         return {'output': help_text + '\n', 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
-        """Clear screen"""
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: str) -> Dict[str, Any]:
-        """Show command history"""
         limit = 50
         if args and args.isdigit():
             limit = int(args)
@@ -525,14 +511,12 @@ SSH Connection:
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_env(self, args: str) -> Dict[str, Any]:
-        """Show environment variables"""
         env_output = []
         for key, value in self.environment_vars.items():
             env_output.append(f"{key}={value}")
         return {'output': '\n'.join(env_output) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_whoami(self, args: str) -> Dict[str, Any]:
-        """Print current user"""
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         result = self._execute_remote_command("whoami")
@@ -541,26 +525,22 @@ SSH Connection:
         return result
     
     def _cmd_id(self, args: str) -> Dict[str, Any]:
-        """Print user and group IDs"""
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         return self._execute_remote_command("id")
     
     def _cmd_pwd(self, args: str) -> Dict[str, Any]:
-        """Print working directory"""
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         return self._execute_remote_command("pwd")
     
     def _cmd_ls(self, args: str) -> Dict[str, Any]:
-        """List directory contents"""
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         command = f"ls {args}" if args else "ls"
         return self._execute_remote_command(command)
     
     def _cmd_cd(self, args: str) -> Dict[str, Any]:
-        """Change directory"""
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         if not args:
@@ -575,22 +555,18 @@ SSH Connection:
         return result
     
     def _cmd_echo(self, args: str) -> Dict[str, Any]:
-        """Echo text"""
         return {'output': f'{args}\n', 'status': 0, 'error': ''}
     
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
-        """Exit shell"""
         self.disconnect()
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}
     
     def _cmd_disconnect(self, args: str) -> Dict[str, Any]:
-        """Disconnect from SSH"""
         self.disconnect()
         return {'output': 'Disconnected from SSH server\n', 'status': 0, 'error': ''}
     
     def _cmd_reconnect(self, args: str) -> Dict[str, Any]:
-        """Reconnect to SSH"""
         if self.host and self.port:
             success = self.connect(self.host, self.port, self.username, self.password, self.private_key)
             if success:
@@ -601,7 +577,6 @@ SSH Connection:
             return {'output': '', 'status': 1, 'error': 'No previous connection to reconnect to'}
     
     def _cmd_status(self, args: str) -> Dict[str, Any]:
-        """Show connection status"""
         status = "Connected" if self.is_connected else "Disconnected"
         connection_info = f"SSH Status: {status}\n"
         if self.is_connected:

@@ -43,7 +43,6 @@ class MQTTShell(BaseShell):
         self._initialize_mqtt_connection()
 
     def _on_message(self, client, userdata, msg):
-        """Store incoming MQTT messages."""
         try:
             payload = msg.payload.decode('utf-8', errors='replace') if isinstance(msg.payload, bytes) else str(msg.payload)
             with self._messages_lock:
@@ -58,7 +57,6 @@ class MQTTShell(BaseShell):
             pass
 
     def _initialize_mqtt_connection(self):
-        """Initialize MQTT client from session/listener."""
         try:
             if not self.framework:
                 return

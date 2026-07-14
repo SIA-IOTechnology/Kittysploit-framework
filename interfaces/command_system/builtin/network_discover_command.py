@@ -637,7 +637,6 @@ Note: Some methods require elevated privileges (sudo/Administrator).
                 
                 response, addr = sock.recvfrom(1024)
                 if response:
-                    # Parse NetBIOS response (simplified)
                     if len(response) > 56:
                         name_length = response[56]
                         if name_length > 0 and name_length < 16:

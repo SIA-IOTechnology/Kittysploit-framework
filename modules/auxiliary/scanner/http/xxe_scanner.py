@@ -235,7 +235,6 @@ class Module(Auxiliary, Http_client):
             
             # Check for out-of-band indicators
             if 'attacker.com' in payload.lower() or 'malicious.com' in payload.lower():
-                # This would require external monitoring, simplified here
                 indicators.append('Out-of-band XXE payload (requires external monitoring)')
 
             return {

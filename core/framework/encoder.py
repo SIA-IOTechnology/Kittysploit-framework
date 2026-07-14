@@ -10,10 +10,8 @@ class Encoder(BaseModule):
         self.type = "encoder"
 
     def encode(self, payload):
-        """Encode the payload"""
         raise NotImplementedError("Encoder modules must implement the encode() method")
     
     def run(self):
-        """Run the encoder"""
         print_error("Encoder module cannot be run directly")
         return False

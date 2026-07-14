@@ -12,7 +12,6 @@ from typing import Dict, List, Any, Optional
 from core.module_loader import ModuleLoader
 
 class ModuleManager:
-    """Manager for accessing modules in library mode"""
     
     def __init__(self, modules_path: str = None):
         """
@@ -32,33 +31,26 @@ class ModuleManager:
         self._discovered_modules = None
     
     def discover_modules(self) -> Dict[str, str]:
-        """Discover all available modules"""
         if self._discovered_modules is None:
             self._discovered_modules = self.module_loader.discover_modules()
         return self._discovered_modules
     
     def get_modules_by_type(self, module_type: str) -> Dict[str, Any]:
-        """Get all modules of a specific type"""
         return self.module_loader.get_modules_by_type(module_type)
     
     def get_exploits(self) -> Dict[str, Any]:
-        """Get all exploit modules"""
         return self.get_modules_by_type("exploit")
     
     def get_auxiliary(self) -> Dict[str, Any]:
-        """Get all auxiliary modules"""
         return self.get_modules_by_type("auxiliary")
     
     def get_payloads(self) -> Dict[str, Any]:
-        """Get all payload modules"""
         return self.get_modules_by_type("payload")
     
     def get_listeners(self) -> Dict[str, Any]:
-        """Get all listener modules"""
         return self.get_modules_by_type("listener")
 
     def get_transforms(self) -> Dict[str, Any]:
-        """Get all C2 stream transform modules"""
         return self.get_modules_by_type("transform")
 
     def get_obfuscators(self) -> Dict[str, Any]:
@@ -66,19 +58,15 @@ class ModuleManager:
         return self.get_transforms()
     
     def get_environments(self) -> Dict[str, Any]:
-        """Get all environment modules"""
         return self.get_modules_by_type("environment")
     
     def get_browser_auxiliary(self) -> Dict[str, Any]:
-        """Get all browser auxiliary modules"""
         return self.get_modules_by_type("browser_auxiliary")
     
     def get_browser_exploits(self) -> Dict[str, Any]:
-        """Get all browser exploit modules"""
         return self.get_modules_by_type("browser_exploit")
     
     def load_module(self, module_path: str) -> Optional[Any]:
-        """Load a specific module by path"""
         if module_path not in self._modules_cache:
             module = self.module_loader.load_module(module_path, load_only=True)
             if module:
@@ -86,18 +74,15 @@ class ModuleManager:
         return self._modules_cache.get(module_path)
     
     def get_module_info(self, module_path: str) -> Optional[Dict[str, Any]]:
-        """Get information about a specific module"""
         return self.module_loader.get_module_info(module_path)
     
     def search_modules(self, query: str = "", module_type: str = "", 
                       author: str = "", cve: str = "", limit: int = 100) -> List[Dict]:
-        """Search for modules"""
         return self.module_loader.search_modules_db(
             query, module_type, author, cve, tags="", limit=limit
         )
     
     def get_all_modules(self) -> Dict[str, Any]:
-        """Get all available modules organized by type"""
         all_modules = {}
         
         # Get modules by type
@@ -114,7 +99,6 @@ class ModuleManager:
         return all_modules
     
     def get_module_stats(self) -> Dict[str, int]:
-        """Get statistics about available modules"""
         stats = {}
         all_modules = self.get_all_modules()
         
@@ -125,7 +109,6 @@ class ModuleManager:
         return stats
     
     def list_module_paths(self) -> List[str]:
-        """List all available module paths"""
         discovered = self.discover_modules()
         return list(discovered.keys())
     
@@ -135,7 +118,6 @@ class ModuleManager:
         return f"ModuleManager(modules={stats['total']}, types={list(stats.keys())})"
     
     def __str__(self) -> str:
-        """String representation for printing"""
         stats = self.get_module_stats()
         output = ["ModuleManager Statistics:"]
         for module_type, count in stats.items():

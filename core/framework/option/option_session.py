@@ -30,7 +30,6 @@ class OptSession(Option):
         self._instance = None
     
     def set_framework(self, framework):
-        """Set the framework instance to access session manager"""
         self._framework = framework
     
     def _get_framework(self):

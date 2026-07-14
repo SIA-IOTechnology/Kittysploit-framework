@@ -231,6 +231,7 @@ class RotatingTokenManager:
         issuer: str = "kittysploit",
         access_ttl_seconds: Optional[int] = None,
         refresh_ttl_seconds: Optional[int] = None,
+        bootstrap_expiry_seconds: Optional[int] = None,
     ) -> None:
         self.bootstrap_secret = (bootstrap_secret or "").strip() or None
         self.issuer = issuer
@@ -242,11 +243,17 @@ class RotatingTokenManager:
             refresh_ttl_seconds
             or os.environ.get("KITTYSPLOIT_REFRESH_TOKEN_TTL", DEFAULT_REFRESH_TTL_SECONDS)
         )
+        self._bootstrap_expiry_seconds = int(
+            bootstrap_expiry_seconds
+            or os.environ.get("KITTYSPLOIT_BOOTSTRAP_TTL", 3600)
+        )
         self._records: Dict[str, _TokenRecord] = {}
         self._lock = threading.RLock()
+        self._token_hmac_key: bytes = secrets.token_bytes(32)
+        self._bootstrap_enabled: bool = bool(self.bootstrap_secret)
 
     def bootstrap_context(self) -> Optional[AuthContext]:
-        if not self.bootstrap_secret:
+        if not self.bootstrap_secret or not self._bootstrap_enabled:
             return None
         return AuthContext(
             subject="bootstrap",
@@ -255,14 +262,22 @@ class RotatingTokenManager:
             source="api_key",
             token_kind="bootstrap",
             bootstrap=True,
+            expires_at=time.time() + self._bootstrap_expiry_seconds,
         )
+
+    def disable_bootstrap(self) -> None:
+        self._bootstrap_enabled = False
+
+    @property
+    def bootstrap_enabled(self) -> bool:
+        return self._bootstrap_enabled
 
     def authenticate(self, token: Optional[str], *, expected_kind: str = "access") -> Optional[AuthContext]:
         token = (token or "").strip()
         if not token:
             return None
 
-        if self.bootstrap_secret and secrets_equal(token, self.bootstrap_secret):
+        if self._bootstrap_enabled and self.bootstrap_secret and secrets_equal(token, self.bootstrap_secret):
             return self.bootstrap_context()
 
         parsed = self._parse_token(token)
@@ -279,6 +294,8 @@ class RotatingTokenManager:
                 return None
             if not hmac.compare_digest(record.secret_hash, self._hash_secret(secret)):
                 return None
+            if self._bootstrap_enabled:
+                self._bootstrap_enabled = False
             return AuthContext(
                 subject=record.subject,
                 roles=record.roles,
@@ -399,6 +416,7 @@ class RotatingTokenManager:
             revoked = sum(1 for r in self._records.values() if r.revoked)
         return {
             "bootstrap_configured": bool(self.bootstrap_secret),
+            "bootstrap_enabled": self._bootstrap_enabled,
             "rotation_enabled": True,
             "access_ttl_seconds": self.access_ttl_seconds,
             "refresh_ttl_seconds": self.refresh_ttl_seconds,
@@ -448,8 +466,7 @@ class RotatingTokenManager:
         return token_id, secret
 
     def _hash_secret(self, secret: str) -> str:
-        key = (self.bootstrap_secret or self.issuer).encode("utf-8")
-        return hmac.new(key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
+        return hmac.new(self._token_hmac_key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
 
     def _cleanup_expired_locked(self) -> None:
         now = time.time()

@@ -283,10 +283,13 @@ class ApiServer:
                     "message": "Only an admin token can revoke another token.",
                 }), 403
             if token and self.api_key and secrets_equal(token, self.api_key):
+                with self.token_manager._lock:
+                    if self.token_manager._bootstrap_enabled:
+                        self.token_manager._bootstrap_enabled = False
                 return jsonify({
-                    "error": "Forbidden",
-                    "message": "The bootstrap API key cannot be revoked through this endpoint.",
-                }), 403
+                    "success": True,
+                    "message": "Bootstrap API key has been disabled. Use rotating tokens for future access.",
+                })
             revoked = self.token_manager.revoke(token)
             return jsonify({"revoked": revoked, "token": mask_token(token)})
 

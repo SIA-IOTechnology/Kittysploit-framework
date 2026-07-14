@@ -153,39 +153,49 @@ class SessionManager:
 
             workspace_id = self._get_workspace_id()
                 
-            # Check if session already exists in DB
-            existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
-            
-            # Filter out non-serializable objects from session data
-            serializable_data = _make_json_serializable(session_data.data)
-            
-            if existing_db_session:
-                # Update existing session
-                existing_db_session.session_type = session_data.session_type
-                existing_db_session.target_host = session_data.host
-                existing_db_session.target_port = session_data.port
-                existing_db_session.session_data = json.dumps(serializable_data)
-                existing_db_session.last_seen = datetime.utcnow()
-                existing_db_session.is_active = True
-                if workspace_id is not None:
-                    existing_db_session.workspace_id = workspace_id
-            else:
-                # Create new session in DB
-                db_session_obj = DBSession(
-                    session_id=session_id,
-                    session_type=session_data.session_type,
-                    target_host=session_data.host,
-                    target_port=session_data.port,
-                    session_data=json.dumps(serializable_data),
-                    created_at=datetime.utcnow(),
-                    last_seen=datetime.utcnow(),
-                    is_active=True,
-                    workspace_id=workspace_id,
-                )
-                db_session.add(db_session_obj)
-            
-            db_session.commit()
-            return True
+            # Use a transaction with retry logic for atomicity
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
+                    
+                    # Filter out non-serializable objects from session data
+                    serializable_data = _make_json_serializable(session_data.data)
+                    
+                    if existing_db_session:
+                        # Update existing session
+                        existing_db_session.session_type = session_data.session_type
+                        existing_db_session.target_host = session_data.host
+                        existing_db_session.target_port = session_data.port
+                        existing_db_session.session_data = json.dumps(serializable_data)
+                        existing_db_session.last_seen = datetime.utcnow()
+                        existing_db_session.is_active = True
+                        if workspace_id is not None:
+                            existing_db_session.workspace_id = workspace_id
+                    else:
+                        # Create new session in DB
+                        db_session_obj = DBSession(
+                            session_id=session_id,
+                            session_type=session_data.session_type,
+                            target_host=session_data.host,
+                            target_port=session_data.port,
+                            session_data=json.dumps(serializable_data),
+                            created_at=datetime.utcnow(),
+                            last_seen=datetime.utcnow(),
+                            is_active=True,
+                            workspace_id=workspace_id,
+                        )
+                        db_session.add(db_session_obj)
+                    
+                    db_session.commit()
+                    return True
+                except Exception as inner_e:
+                    db_session.rollback()
+                    if attempt < max_retries - 1:
+                        import time as _time
+                        _time.sleep(0.1 * (attempt + 1))
+                        continue
+                    raise
         except Exception as e:
             print_error(f"Error syncing session {session_id} to database: {e}")
             return False
@@ -562,17 +572,12 @@ class SessionManager:
             if workspace_id is not None:
                 query = query.filter(DBSession.workspace_id == workspace_id)
 
-            # Mark old sessions as inactive
-            old_sessions = query.all()
-            
-            count = 0
-            for session in old_sessions:
-                session.is_active = False
-                count += 1
-            
+            # Mark old sessions as inactive using a bulk UPDATE
+            count = query.update({DBSession.is_active: False}, synchronize_session=False)
+
             if count > 0:
                 db_session.commit()
-            
+
             return count
         except Exception as e:
             print_error(f"Error cleaning up old sessions: {e}")

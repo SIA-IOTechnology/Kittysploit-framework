@@ -297,27 +297,17 @@ class HistoryManager:
             # Count total entries
             total_count = base_query.count()
             
-            # If we exceed the limit, delete the oldest entries
+            # If we exceed the limit, delete the oldest entries using an atomic subquery
             if total_count > max_entries:
-                # Get IDs of entries to keep (most recent ones)
-                entries_to_keep = base_query.order_by(
+                keep_subquery = base_query.order_by(
                     CommandHistory.timestamp.desc()
-                ).limit(max_entries).with_entities(CommandHistory.id).all()
+                ).limit(max_entries).with_entities(CommandHistory.id).subquery()
                 
-                keep_ids = [entry[0] for entry in entries_to_keep]
+                delete_query = session.query(CommandHistory).filter(
+                    ~CommandHistory.id.in_(keep_subquery)
+                )
                 
-                # Rebuild query for deletion (with same filters)
-                delete_query = session.query(CommandHistory)
-                if workspace_id:
-                    delete_query = delete_query.filter(CommandHistory.workspace_id == workspace_id)
-                if self.user_id:
-                    delete_query = delete_query.filter(CommandHistory.user_id == self.user_id)
-                
-                # Delete entries that are not in the keep list
-                deleted_count = delete_query.filter(
-                    ~CommandHistory.id.in_(keep_ids)
-                ).delete(synchronize_session=False)
-                
+                deleted_count = delete_query.delete(synchronize_session=False)
                 session.commit()
                 return deleted_count
             

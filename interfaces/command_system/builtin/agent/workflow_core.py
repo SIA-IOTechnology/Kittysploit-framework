@@ -4,6 +4,7 @@
 
 import ast
 import asyncio
+import ipaddress
 import json
 import os
 import random
@@ -1646,6 +1647,54 @@ class AgentWorkflowCore:
             str(result.get("details", "")),
         ]).lower()
         return any(marker in blob for marker in self._network_error_markers())
+
+    @staticmethod
+    def _hostname_is_osint_domain(hostname: str) -> bool:
+        """True when *hostname* looks like a DNS name (not a bare IP)."""
+        host = str(hostname or "").strip().lower().strip(".")
+        if host.startswith("www."):
+            host = host[4:]
+        if not host or "." not in host:
+            return False
+        try:
+            ipaddress.ip_address(host)
+            return False
+        except ValueError:
+            return True
+
+    _LIVE_TARGET_OSINT_MARKERS: Tuple[str, ...] = (
+        "domain_surface_mapper",
+        "web_surface_harvester",
+        "js_endpoint_extractor",
+        "js_sourcemap_analyzer",
+        "openapi_swagger_finder",
+        "favicon_http_fingerprint",
+        "url_headers",
+        "webhook_api_leak",
+        "hidden_metadata_hunter",
+        "secret_leak_access_validator",
+    )
+
+    def _unreachable_target_module_skip_reason(
+        self,
+        state: AgentState,
+        module_path: Any,
+    ) -> str:
+        if state.target_reachable is not False:
+            return ""
+        path = str(module_path or "").lower()
+        stop_reason = str(state.campaign_stop_reason or "")
+        if stop_reason == "target_unreachable_passive_only" and "/osint/" in path:
+            if any(token in path for token in self._LIVE_TARGET_OSINT_MARKERS):
+                return "target unreachable: skipping live HTTP OSINT module"
+            return ""
+        if "/scanner/" in path or "crawler" in path or "/auxiliary/scanner/" in path:
+            return "target unreachable: skipping active scan module"
+        if "/osint/" in path and not self._hostname_is_osint_domain(
+            str((state.target_info or {}).get("hostname", "") or "")
+        ):
+            return "target unreachable: OSINT requires a domain target"
+        return "target unreachable: skipping target-facing module"
 
     def _probe_target_reachability(self, state: AgentState) -> Tuple[bool, str]:
         target_info = state.target_info or {}
@@ -3534,6 +3583,8 @@ class AgentWorkflowCore:
         state.knowledge_base = kb
 
     def _run_ultra_fingerprint_pass(self, state: AgentState) -> None:
+        if state.target_reachable is False:
+            return
         target_info = state.target_info or {}
         kb = state.knowledge_base
         if not target_info or not isinstance(kb, dict):
@@ -3863,11 +3914,41 @@ class AgentWorkflowCore:
             kind="probe",
         )
         if not reachable:
-            if getattr(state, "expanded_surface", False):
+            hostname = str((state.target_info or {}).get("hostname", "") or "").strip()
+            passive_osint_ok = (
+                getattr(state, "expanded_surface", False)
+                and self._hostname_is_osint_domain(hostname)
+            )
+            if getattr(state, "expanded_surface", False) and not passive_osint_ok:
+                state.results = list(request_intel_results)
+                state.vulnerable_results = []
+                state.contextual_findings = []
+                state.sql_findings = []
+                state.potential_findings = []
+                state.execution_plan = {
+                    "next_actions": [],
+                    "max_requests_next_phase": 0,
+                    "stop_conditions": ["target_unreachable"],
+                    "reasoning_confidence": 1.0,
+                    "skip_exploitation": True,
+                }
+                state.llm_plan = {
+                    "selected_paths": [],
+                    "rationale": f"Target unreachable (IP or invalid domain): {reason}",
+                    "next_best_action": None,
+                }
+                state.campaign_stop_reason = "target_unreachable"
                 print_warning(
-                    f"Primary target unreachable ({reason}); continuing expanded-surface campaign "
-                    "(OSINT / cloud / passive modules may still run)."
+                    f"Primary target unreachable ({reason}); stopping campaign "
+                    "(OSINT requires a domain, not an IP)."
                 )
+                return state
+            if passive_osint_ok:
+                print_warning(
+                    f"Primary target unreachable ({reason}); skipping active HTTP scan "
+                    "(passive OSINT may continue)."
+                )
+                state.campaign_stop_reason = "target_unreachable_passive_only"
             elif self._has_proxy_request_intel(state):
                 state.results = list(request_intel_results)
                 state.vulnerable_results = []
@@ -4027,6 +4108,10 @@ class AgentWorkflowCore:
         5) follow-up chains
         6) targeted ranking (hint-weighted baseline, unchanged list composition)
         """
+        if state.target_reachable is False:
+            if bool(state.verbose):
+                print_info("Scan campaign skipped: target unreachable.")
+            return []
         verbose = bool(state.verbose)
         max_modules = int(state.max_modules)
         threads = int(state.threads)
@@ -6262,6 +6347,12 @@ class AgentWorkflowCore:
                 result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
                 results.append(result)
                 continue
+            unreachable_skip = self._unreachable_target_module_skip_reason(state, module_path)
+            if unreachable_skip:
+                result["status"] = "skipped"
+                result["message"] = unreachable_skip
+                results.append(result)
+                continue
             if not self._consume_network_units(state, 1):
                 results.append(self._budget_skip_result(module_info, "targeted"))
                 continue
@@ -6836,6 +6927,8 @@ class AgentWorkflowCore:
         all_modules: List[Dict[str, Any]],
         primary_results: List[Any],
     ) -> List[Any]:
+        if state.target_reachable is False:
+            return primary_results
         seed = str((state.target_info or {}).get("hostname", "") or "").strip()
         if not seed:
             return primary_results
@@ -7029,6 +7122,8 @@ class AgentWorkflowCore:
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         hostname = str((state.target_info or {}).get("hostname", "") or "").strip()
         if not hostname:
+            return []
+        if state.target_reachable is False and not self._hostname_is_osint_domain(hostname):
             return []
         root = organization_root_domain(hostname)
         persona_seed = str(kb.get("persona_name") or "").strip()
@@ -9124,6 +9219,12 @@ class AgentWorkflowCore:
                 result["status"] = "skipped"
                 result["message"] = block_reason
                 result["details"] = {"safety_profile": self._normalized_safety_profile(state)}
+                results.append(result)
+                continue
+            unreachable_skip = self._unreachable_target_module_skip_reason(state, module_path)
+            if unreachable_skip:
+                result["status"] = "skipped"
+                result["message"] = unreachable_skip
                 results.append(result)
                 continue
             announced_bruteforce = False

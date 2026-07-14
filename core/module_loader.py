@@ -365,6 +365,7 @@ class ModuleLoader:
             "flask_socketio": "flask-socketio",
             "bs4": "beautifulsoup4",
             "Crypto": "pycryptodome",
+            "dns": "dnspython",
         }
         return mapping.get(package_name, package_name.replace("_", "-"))
 
@@ -402,7 +403,7 @@ class ModuleLoader:
 
         if failure.contract_errors:
             for error in failure.contract_errors:
-                print_info(f"  - {error}")
+                print_error(f"  - {error}")
 
         if failure.kind == LoadFailureKind.MISSING_DEPENDENCY:
             package = failure.missing_package

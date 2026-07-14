@@ -36,6 +36,7 @@ dependencies = [
     "paho-mqtt>=1.6.0",
     "dnslib>=0.9.0",
     "prompt_toolkit>=3.0.0",
+    "langgraph>=1.0.0,<2.0; python_version >= '3.10'",
     "flask>=2.0.0",
     "waitress>=3.0.0",
     "flask-cors>=3.0.10",

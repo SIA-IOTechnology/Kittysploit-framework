@@ -131,28 +131,22 @@ class ModuleValidator:
                     if is_payload:
                         break
         
-        # Method 3: Check imports for Payload
+        # Method 3: explicit Payload import only (wildcard kittysploit import is not a payload)
         if not is_payload:
             for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    # Check for "from kittysploit import *" or "from core.framework.payload import Payload"
-                    if node.module and ("kittysploit" in node.module or "payload" in node.module.lower()):
-                        if node.names:
-                            for alias in node.names:
-                                if isinstance(alias, ast.alias):
-                                    if alias.name == "Payload" or alias.asname == "Payload":
-                                        is_payload = True
-                                        break
-                                    # Check for wildcard import
-                                    if alias.name == "*":
-                                        is_payload = True  # Assume Payload might be imported
-                                        break
-                        else:
-                            # Wildcard import from kittysploit
-                            is_payload = True
-                        if is_payload:
-                            break
-        
+                if not isinstance(node, ast.ImportFrom) or not node.module:
+                    continue
+                if "payload" not in node.module.lower() and node.module != "kittysploit":
+                    continue
+                for alias in node.names or []:
+                    if isinstance(alias, ast.alias) and (
+                        alias.name == "Payload" or alias.asname == "Payload"
+                    ):
+                        is_payload = True
+                        break
+                if is_payload:
+                    break
+
         # For payloads, check for generate() method instead of run()
         if is_payload:
             has_generate = False

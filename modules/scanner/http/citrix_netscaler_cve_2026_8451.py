@@ -62,7 +62,7 @@ class Module(Scanner, Http_client):
 <saml2:issuer>watchTowr</saml2:issuer>
 </samlp:AuthnRequest>
 Version="2.0"
-AssertionConsumerServiceURL=""'
+AssertionConsumerServiceURL=""'''
         )
 
     @staticmethod

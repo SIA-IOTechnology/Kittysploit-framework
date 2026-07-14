@@ -10,7 +10,7 @@
   [![Donate](https://img.shields.io/badge/Sponsor-Liberapay-yellow.svg?style=for-the-badge&logo=liberapay)](https://liberapay.com/KittySploit/donate)
   [![Stars](https://img.shields.io/github/stars/SIA-IOTechnology/Kittysploit-framework?style=for-the-badge&color=yellow)](https://github.com/SIA-IOTechnology/Kittysploit-framework/stargazers)
 
-  **[Website](https://kittysploit.com) • [Documentation](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Detailed Usage](USAGE.md) • [Marketplace](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Marketplace)**
+  **[Website](https://kittysploit.com) • [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Usage Guide](USAGE.md) • [Marketplace](USAGE.md)**
 
   *Modular • Extensible • AI-Powered*
 </div>

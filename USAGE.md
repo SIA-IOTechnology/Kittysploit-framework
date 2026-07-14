@@ -1,6 +1,8 @@
 # KittySploit — Detailed Usage
 
-This guide covers day-to-day usage of the KittySploit framework. For installation, see [README.md](README.md). For marketplace and broader documentation, see the [GitHub wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki).
+This guide covers day-to-day usage of the KittySploit framework. For installation, see [README.md](README.md). For the extension registry and catalog, see [kittysploit.com](https://kittysploit.com).
+
+**In this guide:** [Marketplace](#marketplace) · [Agent](#autonomous-agent) · [KittyProxy](#kittyproxy)
 
 ---
 
@@ -8,13 +10,13 @@ This guide covers day-to-day usage of the KittySploit framework. For installatio
 
 1. [Getting Started](#getting-started)
 2. [Console Basics](#console-basics)
-3. [Workspaces & Scope](#workspaces--scope)
+3. [Workspaces & Scope](#workspaces-scope)
 4. [Autonomous Agent](#autonomous-agent)
-5. [Scanner & Workflows](#scanner--workflows)
+5. [Scanner & Workflows](#scanner-workflows)
 6. [Manual Exploitation](#manual-exploitation)
 7. [KittyProxy](#kittyproxy)
 8. [Marketplace](#marketplace)
-9. [Collaboration & Automation](#collaboration--automation)
+9. [Collaboration & Automation](#collaboration-automation)
 10. [Environment Variables](#environment-variables)
 11. [Example Cookbooks](#example-cookbooks)
 
@@ -429,7 +431,14 @@ market uninstall example-web-ui    # removes extensions/<id>/ and the launcher
 market uninstall --all
 ```
 
-See the [Marketplace wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Marketplace) for publishing your own modules and extensions.
+### Publish your own modules & extensions
+
+To create and publish marketplace items, use the example templates in this repository:
+
+- [Example exploit module](examples/marketplace_modules/example_exploit/README.md) — manifest, stub layout, `use` / `run` workflow
+- [Example UI extension](examples/marketplace_modules/example_interface/README.md) — launcher, `extension.toml`, web UI structure
+
+Paid publishing and sales require a Pro account on [kittysploit.com](https://kittysploit.com).
 
 ---
 
@@ -561,8 +570,9 @@ show options && run
 ### F. Marketplace extension (UI)
 
 ```bash
-market install kittycosmic
-market launch kittycosmic
+market search "web ui"
+market install example-web-ui
+market launch example-web-ui
 # or: python launch_example_web_ui.py
 market launch --stop example-web-ui
 ```
@@ -574,7 +584,8 @@ market launch --stop example-web-ui
 | Resource | Content |
 |----------|---------|
 | [README.md](README.md) | Install, quick start, feature overview |
-| [GitHub wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) | Extended documentation |
-| [Marketplace wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki/Marketplace) | Install and publish modules |
+| [kittysploit.com](https://kittysploit.com) | Marketplace catalog, Pro publishing |
+| [Example exploit module](examples/marketplace_modules/example_exploit/README.md) | Marketplace module template |
+| [Example UI extension](examples/marketplace_modules/example_interface/README.md) | Marketplace extension template |
 | `help <command>` | In-console reference for every command |
 | `tuto <type>` | Step-by-step tutorials per module type |

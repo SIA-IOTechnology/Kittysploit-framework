@@ -24,6 +24,7 @@ fastapi
 python-multipart
 
 # Network and security
+requests-ntlm>=1.2.0
 paramiko>=2.9.0
 scapy>=2.4.5
 netaddr>=0.8.0

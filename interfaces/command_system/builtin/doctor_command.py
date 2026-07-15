@@ -114,7 +114,12 @@ Examples:
             rows.append([result.category, result.name, status, result.detail])
 
         print_info("KittySploit doctor")
-        print_table(["Category", "Check", "Status", "Detail"], rows, max_width=120)
+        print_table(
+            ["Category", "Check", "Status", "Description"],
+            rows,
+            column_min_widths={"Category": 12, "Check": 18, "Status": 6},
+            prefer_single_line=True,
+        )
 
         counts = report.counts
         summary = (

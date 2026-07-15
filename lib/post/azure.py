@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Any, Dict, List, Optional
+
+from lib.protocols.oauth.entra_token import EntraTokenMixin
 
 try:
     from azure.identity import DefaultAzureCredential
@@ -19,20 +19,7 @@ except Exception:
     AZURE_AVAILABLE = False
 
 
-def _decode_jwt_payload(token: str) -> Dict[str, Any]:
-    if not token or "." not in token:
-        return {}
-    try:
-        payload = token.split(".")[1]
-        padding = "=" * (-len(payload) % 4)
-        raw = base64.urlsafe_b64decode(payload + padding)
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-class AzurePostMixin:
+class AzurePostMixin(EntraTokenMixin):
     """Mixin providing Azure SDK helpers for azure_run_command sessions."""
 
     def _azure_require_sdk(self) -> None:
@@ -79,7 +66,7 @@ class AzurePostMixin:
         self._azure_require_sdk()
         credential = self._azure_credential()
         token = credential.get_token("https://management.azure.com/.default")
-        claims = _decode_jwt_payload(getattr(token, "token", "") or "")
+        claims = self.entra_decode_jwt_claims(getattr(token, "token", "") or "")
 
         identity = {
             "subscription_id": self._azure_subscription_id(),

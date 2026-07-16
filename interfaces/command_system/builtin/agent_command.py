@@ -41,6 +41,7 @@ from interfaces.command_system.builtin.sessions_command import SessionsCommand
 from core.output_handler import (
     print_error,
     print_info,
+    print_status,
     print_success,
     print_warning,
 )
@@ -54,6 +55,7 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     DISCREET_PROFILE_MAX_LLM_CALLS,
     SAFETY_PROFILE_NAMES,
 )
+from core.framework.module_context import capture_module_context, restore_module_context
 
 
 class AgentCommand(BaseCommand):
@@ -69,10 +71,10 @@ class AgentCommand(BaseCommand):
 
     @property
     def usage(self) -> str:
-        return "agent <target> [options] | agent <doctor|explain|replay|retest|profiles|metadata> ..."
+        return "agent <target> [options] | agent <doctor|explain|replay|retest|profiles|metadata|benchmark> ..."
 
     def get_subcommands(self):
-        return ["doctor", "explain", "replay", "retest", "profiles", "metadata"]
+        return ["doctor", "explain", "replay", "retest", "profiles", "metadata", "benchmark"]
 
     @property
     def help_text(self) -> str:
@@ -87,12 +89,35 @@ Usage:
     agent <target> [options]              Run scan → analyze → reason → exploit → report
     agent doctor [--json]                 Check agent prerequisites
     agent explain <run_id>                Explain a completed run
-    agent replay <run_id>                 Replay HTTP decisions from a run
+    agent replay <run_id> [options]        Replay decisions, shadow, specialists, or execution offline
     agent retest <finding_id|run_id>      Retest a finding or run
     agent profiles                        List mission profile presets
     agent metadata [--json]               Audit module agent metadata coverage
+    agent metadata families [--suite ID]  Audit benchmark/lab module families (declared vs chain)
     agent metadata annotate [--apply]     Inject inferred agent blocks (dry-run by default)
     agent metadata upgrade [--apply]      Enrich existing agent blocks with chain metadata
+    agent metadata contract [--strict]    Run static contract tests (priority families or suite)
+    agent benchmark list                  List benchmark suites
+    agent benchmark phase3-validate       Validate Phase 3 MCR exit criterion
+    agent benchmark phase4-validate       Validate Phase 4 campaign MCR exit criterion
+    agent benchmark phase5-validate       Validate Phase 5 learning memory exit criterion
+    agent benchmark phase6-validate       Validate Phase 6 generalization exit criterion
+    agent benchmark team008-validate      Validate TEAM-008 mono vs multi-agent A/B
+    agent benchmark multiagent-ab         Alias for team008-validate
+    agent benchmark release-gate          Block release on MCR/safety regressions
+    agent benchmark dashboard             Write regression dashboard JSON
+    agent benchmark [run] <suite> [options]  Run or score a benchmark suite
+
+Benchmark options:
+    --runs N                              Number of live runs (default: 1)
+    --seed S                              Deterministic seed base
+    --model M                             LLM model slug (heuristic if omitted)
+    --offline                             Score existing run artifacts only
+    --run-id RUN_ID                       Repeatable offline run id filter
+    --output PATH                         Write comparable JSON to PATH
+    --micro-seeds N                       Phase3/4/5/6 micro scenarios (default: 32)
+    --skip-integration                    Phase3/4/TEAM-008: micro benchmark only
+    --baseline PATH                       Release-gate baseline JSON (default: fixtures)
 
 Target & workflow:
     <target>                              Hostname, IP, or URL
@@ -175,6 +200,9 @@ Examples:
     agent doctor --json
     agent explain agent_20260618T120000_ab12cd34ef
     agent replay agent_20260618T120000_ab12cd34ef
+    agent replay agent_20260618T120000_ab12cd34ef --mode shadow
+    agent replay agent_20260618T120000_ab12cd34ef --mode specialists
+    agent replay agent_20260618T120000_ab12cd34ef --mode execution --lab metasploitable3-linux
     agent retest finding-xss-1
     agent metadata
     agent metadata --json
@@ -197,6 +225,12 @@ Examples:
         for session_id in session_ids or []:
             session = session_manager.get_session(str(session_id))
             if not session:
+                continue
+            try:
+                transport_state = str((getattr(session, "data", {}) or {}).get("transport_state") or "").lower()
+            except Exception:
+                transport_state = ""
+            if transport_state == "disconnected":
                 continue
             created_at = 0.0
             if isinstance(metadata.get(session.id), dict):
@@ -407,7 +441,13 @@ Examples:
                 return self._run_metadata_annotate(args[2:])
             if len(args) >= 2 and str(args[1]).lower() == "upgrade":
                 return self._run_metadata_upgrade(args[2:])
+            if len(args) >= 2 and str(args[1]).lower() == "families":
+                return self._run_metadata_families(args[2:])
+            if len(args) >= 2 and str(args[1]).lower() == "contract":
+                return self._run_metadata_contract(args[2:])
             return self._run_metadata(args[1:])
+        if sub == "benchmark":
+            return self._run_benchmark(args[1:])
         try:
             parsed = self.parser.parse_args(args)
         except SystemExit:
@@ -504,6 +544,67 @@ Examples:
             if parsed.restart_phase:
                 checkpoint_state["current_phase"] = parsed.restart_phase
 
+        lab_hint_kb = {}
+        # Bare `agent 127.0.0.1`: probe loopback ports and seed them into KB.
+        # Only rewrite when :80/:443 is closed (remapped lab) or operator asked
+        # for shell/SSH — never prefer :8080 over an open :80.
+        try:
+            from interfaces.command_system.builtin.agent.lab_target_hint import (
+                detect_loopback_lab_hint,
+            )
+
+            lab_hint = detect_loopback_lab_hint(
+                str(parsed.target or ""),
+                protocol=parsed.protocol,
+                goal=getattr(parsed, "goal", None),
+                resolver=self._agent.target_resolver,
+            )
+        except Exception:
+            lab_hint = None
+        if lab_hint is not None:
+            if lab_hint.message:
+                print_status(lab_hint.message)
+            if lab_hint.rewritten:
+                parsed.target = lab_hint.target
+                if not parsed.protocol and lab_hint.protocol:
+                    parsed.protocol = lab_hint.protocol
+                if not getattr(parsed, "goal", None) and lab_hint.goal:
+                    parsed.goal = lab_hint.goal
+                # Only arm shell-hunter when we actually rewrote to SSH.
+                if lab_hint.protocol == "ssh" and not parsed.shell_hunter:
+                    parsed.shell_hunter = True
+                # Approve credential spray for SSH obtain-shell without switching to
+                # an ``internal-lab`` profile (that would look like lab cheating).
+                if lab_hint.protocol == "ssh":
+                    for risk in ("intrusive", "active", "read"):
+                        if risk not in {
+                            str(v).strip().lower() for v in (parsed.approve_risk or [])
+                        }:
+                            parsed.approve_risk.append(risk)
+                    approved_risks = []
+                    for value in parsed.approve_risk or []:
+                        approved_risks.extend(
+                            part.strip() for part in str(value).split(",") if part.strip()
+                        )
+                    runtime_policy = AgentRuntimePolicy.from_options(
+                        safety_profile=parsed.safety_profile,
+                        approved_risks=approved_risks,
+                        approve_active_replay=parsed.approve_active_replay,
+                        approve_post_exploit=bool(parsed.approve_post_exploit),
+                        tls_verify=not parsed.tls_no_verify,
+                        tls_ca_bundle=parsed.tls_ca,
+                        dry_run=parsed.dry_run,
+                        plan_only=parsed.plan_only,
+                        session_policy="never" if parsed.no_interact else parsed.session_policy,
+                        mission_profile=str(parsed.profile or ""),
+                        deadline_seconds=parsed.deadline,
+                        policy_file=parsed.policy,
+                    )
+            # Port discovery only — never seed lab_manifest / ground-truth creds.
+            lab_hint_kb = dict(lab_hint.knowledge_base or {})
+            lab_hint_kb.pop("lab_manifest", None)
+            lab_hint_kb.pop("credentials", None)
+
         target_value = self._agent.target_resolver.normalize_target_input(
             parsed.target,
             parsed.protocol or ("http" if runtime_policy.dry_run else None),
@@ -512,6 +613,45 @@ Examples:
         if not target_info:
             print_error(f"Invalid target: {parsed.target}")
             return False
+
+        # Fail closed on public targets: internal-lab must never widen approvals there.
+        # Loopback without attestation is warned (oracle still fails-closed in helper).
+        mission = str(
+            profile_overrides.get("catalog_policy") or parsed.profile or ""
+        ).strip().lower()
+        if mission == "internal-lab":
+            from interfaces.command_system.builtin.agent.benchmark.internal_lab_gate import (
+                is_loopback_target,
+                is_synthetic_lab_target,
+                require_internal_lab_attestation,
+            )
+
+            prior_kb = {}
+            if isinstance(resumed_payload.get("state"), dict):
+                prior_kb = resumed_payload["state"].get("knowledge_base") or {}
+            target_token = str(parsed.target or target_value)
+            lab_allowed, lab_reason = require_internal_lab_attestation(
+                profile="internal-lab",
+                target=target_token,
+                knowledge_base=prior_kb if isinstance(prior_kb, dict) else {},
+                allow_synthetic_lab=True,
+            )
+            if not lab_allowed:
+                if is_synthetic_lab_target(target_token):
+                    pass
+                elif is_loopback_target(target_token):
+                    print_warning(
+                        f"internal-lab without attestation on loopback: {lab_reason}. "
+                        "Prefer `lab reset <id>` before benchmark/live runs."
+                    )
+                else:
+                    print_error(
+                        f"internal-lab profile blocked: {lab_reason}. "
+                        "Use a lab target with attestation (`lab reset <id>`) "
+                        "or a non-lab mission profile."
+                    )
+                    return False
+
         module_capability_catalog = self._agent.module_catalog.build_module_capability_catalog()
         delay_min = max(0.0, float(parsed.request_delay_min))
         delay_max = max(0.0, float(parsed.request_delay_max))
@@ -567,6 +707,23 @@ Examples:
             normalize_goal(raw_operator_goal) if str(raw_operator_goal).strip() else None
         )
         shell_goal = is_shell_operator_goal(normalized_operator_goal)
+        if shell_goal:
+            from interfaces.command_system.builtin.agent.runtime_policy import ModuleRisk
+
+            intrusive = ModuleRisk(
+                "intrusive",
+                ("active_exploitation",),
+                1,
+                False,
+                True,
+                True,
+            )
+            if not runtime_policy.risk_approved(intrusive):
+                print_warning(
+                    "Goal obtain-shell: intrusive exploits are blocked without "
+                    "--approve-risk intrusive (or --profile internal-lab). "
+                    "Without that flag the agent can recon/plan but will skip RCE/shell modules."
+                )
         replay_max = max(0, int(parsed.http_replay_max))
         if shell_goal and replay_max <= 3:
             replay_max = 8
@@ -634,6 +791,7 @@ Examples:
                 "active_auth_context": {},
                 "request_intel": {},
                 "module_capability_catalog": module_capability_catalog,
+                **(lab_hint_kb if isinstance(lab_hint_kb, dict) else {}),
             },
             sessions_before={
                 "standard": set(self.framework.session_manager.sessions.keys()),
@@ -656,6 +814,11 @@ Examples:
             cancellation_token=CancellationToken(),
             run_store=run_store,
         )
+        # Operator --protocol always wins over any lab-hint KB seed.
+        if parsed.protocol:
+            state.knowledge_base["protocol"] = str(parsed.protocol).strip().lower()
+        elif not state.knowledge_base.get("protocol") and state.protocol:
+            state.knowledge_base["protocol"] = str(state.protocol).strip().lower()
         state.network_budget = NetworkBudget(
             limit=request_budget,
             on_change=lambda used, skipped: (
@@ -698,35 +861,41 @@ Examples:
             state.run_store = run_store
             state.run_id = run_id
             state.workspace = workspace
+            if isinstance(state.knowledge_base, dict):
+                state.knowledge_base["_vault_run_id"] = run_id
             state.checkpoint_enabled = True
         self._agent.knowledge.bootstrap_knowledge_from_host_profile(state)
 
+        previous_module = capture_module_context(self.framework)
         try:
-            final_state = self._agent.run_agent_flow(state)
-        except KeyboardInterrupt:
-            state.cancellation_token.cancel("operator_cancelled")
-            state.campaign_stop_reason = "operator_cancelled"
-            print_warning("Agent cancelled; generating a partial report.")
-            final_state = self._agent.core._node_report(state)
-        if final_state.error:
-            print_error(final_state.error)
-            return False
+            try:
+                final_state = self._agent.run_agent_flow(state)
+            except KeyboardInterrupt:
+                state.cancellation_token.cancel("operator_cancelled")
+                state.campaign_stop_reason = "operator_cancelled"
+                print_warning("Agent cancelled; generating a partial report.")
+                final_state = self._agent.core._node_report(state)
+            if final_state.error:
+                print_error(final_state.error)
+                return False
 
-        report_path = final_state.report_path
+            report_path = final_state.report_path
 
-        if report_path:
-            print_success(f"Report generated: {report_path}")
-            if final_state.new_sessions and final_state.session_policy == "open-latest":
-                self._open_interactive_session(final_state)
-            elif final_state.new_sessions and final_state.session_policy == "ask":
-                try:
-                    answer = input("Open the newest agent session? [y/N] ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    answer = ""
-                if answer in {"y", "yes"}:
+            if report_path:
+                print_success(f"Report generated: {report_path}")
+                if final_state.new_sessions and final_state.session_policy == "open-latest":
                     self._open_interactive_session(final_state)
-            return True
-        return False
+                elif final_state.new_sessions and final_state.session_policy == "ask":
+                    try:
+                        answer = input("Open the newest agent session? [y/N] ").strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        answer = ""
+                    if answer in {"y", "yes"}:
+                        self._open_interactive_session(final_state)
+                return True
+            return False
+        finally:
+            restore_module_context(self.framework, previous_module, announce=False)
 
     def _run_doctor(self, args) -> bool:
         as_json = "--json" in [str(value) for value in args]
@@ -754,9 +923,46 @@ Examples:
         print_info(json.dumps(payload, indent=2, default=str))
         return True
 
-    def _run_replay(self, run_id: str) -> bool:
+    def _run_replay(self, args) -> bool:
+        tokens = [str(item) for item in (args or []) if str(item).strip()]
+        if not tokens:
+            print_error("Usage: agent replay <run_id> [--mode decision|shadow|specialists|chaos|adversarial|execution] [--lab LAB_ID]")
+            return False
+
+        run_id = tokens[0]
+        mode = "decision"
+        lab_id = None
+        allow_network = False
+        index = 1
+        while index < len(tokens):
+            token = tokens[index]
+            if token == "--mode" and index + 1 < len(tokens):
+                mode = str(tokens[index + 1]).strip().lower()
+                index += 2
+                continue
+            if token == "--lab" and index + 1 < len(tokens):
+                lab_id = str(tokens[index + 1]).strip()
+                index += 2
+                continue
+            if token == "--allow-network":
+                allow_network = True
+                index += 1
+                continue
+            index += 1
+
         service = AgentReplayService(self.framework)
-        payload = service.replay_offline(run_id, allow_network=False)
+        if mode == "execution":
+            payload = service.replay_execution(run_id, lab_id=lab_id, allow_network=allow_network)
+        elif mode == "shadow":
+            payload = service.replay_shadow(run_id, allow_network=allow_network)
+        elif mode == "specialists":
+            payload = service.replay_specialists(run_id, allow_network=allow_network)
+        elif mode == "chaos":
+            payload = service.replay_chaos(run_id, allow_network=allow_network)
+        elif mode == "adversarial":
+            payload = service.replay_adversarial(run_id, allow_network=allow_network)
+        else:
+            payload = service.replay_decision(run_id, allow_network=allow_network)
         if payload.get("error"):
             print_error(str(payload["error"]))
             return False
@@ -770,6 +976,384 @@ Examples:
             print_warning(str(payload["error"]))
         print_info(json.dumps(payload, indent=2, default=str))
         return "execution_plan" in payload
+
+    def _run_benchmark(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.service import AgentBenchmarkService
+        from interfaces.command_system.builtin.agent.benchmark.suites import list_benchmark_suites
+
+        tokens = [str(arg) for arg in (args or [])]
+        if tokens and tokens[0].lower() == "phase3-validate":
+            return self._run_phase3_validation(tokens[1:])
+        if tokens and tokens[0].lower() == "phase4-validate":
+            return self._run_phase4_validation(tokens[1:])
+        if tokens and tokens[0].lower() == "phase5-validate":
+            return self._run_phase5_validation(tokens[1:])
+        if tokens and tokens[0].lower() == "phase6-validate":
+            return self._run_phase6_validation(tokens[1:])
+        if tokens and tokens[0].lower() in {"team008-validate", "multiagent-ab"}:
+            return self._run_team008_validation(tokens[1:])
+        if tokens and tokens[0].lower() == "release-gate":
+            return self._run_release_gate(tokens[1:])
+        if tokens and tokens[0].lower() == "dashboard":
+            return self._run_benchmark_dashboard(tokens[1:])
+
+        if not tokens or tokens[0].lower() == "list":
+            for row in list_benchmark_suites():
+                status = f" [{row.status}]" if row.status != "active" else ""
+                print_info(f"{row.id}{status}: {row.description}")
+            return True
+
+        if tokens and tokens[0].lower() == "run":
+            tokens = tokens[1:]
+            if not tokens:
+                print_error("Usage: agent benchmark run <suite> [--runs N] [--seed S] [--model M]")
+                return False
+
+        suite_id = tokens[0]
+        runs = 1
+        seed = None
+        model = None
+        offline = "--offline" in tokens
+        reset_between_runs = None
+        if "--reset-between-runs" in tokens:
+            reset_between_runs = True
+        if "--no-reset-between-runs" in tokens:
+            reset_between_runs = False
+        output_path = None
+        run_ids: list[str] = []
+        if "--runs" in tokens:
+            idx = tokens.index("--runs")
+            if idx + 1 < len(tokens):
+                try:
+                    runs = max(1, int(tokens[idx + 1]))
+                except ValueError:
+                    runs = 1
+        if "--seed" in tokens:
+            idx = tokens.index("--seed")
+            if idx + 1 < len(tokens):
+                try:
+                    seed = int(tokens[idx + 1])
+                except ValueError:
+                    seed = None
+        if "--model" in tokens:
+            idx = tokens.index("--model")
+            if idx + 1 < len(tokens):
+                model = tokens[idx + 1]
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+        for index, token in enumerate(tokens):
+            if token == "--run-id" and index + 1 < len(tokens):
+                run_ids.append(tokens[index + 1])
+
+        service = AgentBenchmarkService(self.framework)
+        try:
+            result = service.run_suite(
+                suite_id,
+                runs=runs,
+                seed=seed,
+                model=model,
+                offline=offline,
+                run_ids=run_ids or None,
+                output_path=output_path,
+                reset_between_runs=reset_between_runs,
+            )
+        except (KeyError, RuntimeError, ValueError) as exc:
+            print_error(str(exc))
+            return False
+
+        payload = result.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        mcr = float(payload.get("north_star", {}).get("mission_completion_rate", 0.0) or 0.0)
+        mcr_meta = (payload.get("metadata") or {}).get("mcr") or {}
+        ci = mcr_meta.get("wilson_ci95") or []
+        ci_txt = f" IC95=[{ci[0]:.1%}, {ci[1]:.1%}]" if len(ci) == 2 else ""
+        print_success(
+            f"Benchmark {result.id}: mission completion rate={mcr:.0%} "
+            f"({sum(1 for row in result.runs if row.mission_completed)}/{len(result.runs)} runs)"
+            f"{ci_txt}"
+        )
+        if result.metadata.get("latest_path"):
+            print_info(f"Latest report: {result.metadata['latest_path']}")
+        return mcr >= 1.0 or (offline and bool(result.runs))
+
+    def _run_phase3_validation(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.phase3_validation import Phase3ValidationService
+
+        tokens = [str(arg) for arg in (args or [])]
+        micro_seeds = 32
+        integration_runs = 10
+        skip_integration = "--skip-integration" in tokens
+        output_path = None
+        if "--micro-seeds" in tokens:
+            idx = tokens.index("--micro-seeds")
+            if idx + 1 < len(tokens):
+                try:
+                    micro_seeds = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    micro_seeds = 32
+        if "--runs" in tokens:
+            idx = tokens.index("--runs")
+            if idx + 1 < len(tokens):
+                try:
+                    integration_runs = max(1, int(tokens[idx + 1]))
+                except ValueError:
+                    integration_runs = 10
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+
+        service = Phase3ValidationService(self.framework)
+        report = service.validate(
+            integration_runs=integration_runs,
+            micro_seeds=micro_seeds,
+            skip_integration=skip_integration,
+            output_path=output_path,
+        )
+        payload = report.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        if report.passed:
+            print_success(
+                f"Phase 3 validated: hierarchical MCR {report.hierarchical_mcr:.0%} "
+                f"vs heuristic {report.heuristic_mcr:.0%} "
+                f"(delta +{report.mcr_delta:.0%}, threshold +{report.mcr_delta_threshold:.0%})"
+            )
+        else:
+            print_warning(
+                f"Phase 3 not validated: delta {report.mcr_delta:.0%} "
+                f"(need +{report.mcr_delta_threshold:.0%})"
+            )
+        return report.passed
+
+    def _run_phase4_validation(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.phase4_validation import Phase4ValidationService
+
+        tokens = [str(arg) for arg in (args or [])]
+        micro_seeds = 32
+        integration_runs = 30
+        skip_integration = "--skip-integration" in tokens
+        output_path = None
+        if "--micro-seeds" in tokens:
+            idx = tokens.index("--micro-seeds")
+            if idx + 1 < len(tokens):
+                try:
+                    micro_seeds = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    micro_seeds = 32
+        if "--runs" in tokens:
+            idx = tokens.index("--runs")
+            if idx + 1 < len(tokens):
+                try:
+                    integration_runs = max(1, int(tokens[idx + 1]))
+                except ValueError:
+                    integration_runs = 30
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+
+        service = Phase4ValidationService(self.framework)
+        report = service.validate(
+            integration_runs=integration_runs,
+            micro_seeds=micro_seeds,
+            skip_integration=skip_integration,
+            output_path=output_path,
+        )
+        payload = report.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        if report.passed:
+            print_success(
+                f"Phase 4 validated: MCR {report.mcr:.0%} "
+                f"(threshold {report.mcr_threshold:.0%}, "
+                f"CI [{report.mcr_ci[0]:.0%}, {report.mcr_ci[1]:.0%}])"
+            )
+        else:
+            print_warning(
+                f"Phase 4 not validated: MCR {report.mcr:.0%} "
+                f"(need {report.mcr_threshold:.0%})"
+            )
+        return report.passed
+
+    def _run_phase5_validation(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.phase5_validation import Phase5ValidationService
+
+        tokens = [str(arg) for arg in (args or [])]
+        micro_seeds = 24
+        output_path = None
+        if "--micro-seeds" in tokens:
+            idx = tokens.index("--micro-seeds")
+            if idx + 1 < len(tokens):
+                try:
+                    micro_seeds = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    micro_seeds = 24
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+
+        service = Phase5ValidationService(self.framework)
+        report = service.validate(micro_seeds=micro_seeds, output_path=output_path)
+        payload = report.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        if report.passed:
+            print_success(
+                f"Phase 5 validated: MCR {report.mcr:.0%} "
+                f"(threshold {report.mcr_threshold:.0%}, "
+                f"CI [{report.mcr_ci[0]:.0%}, {report.mcr_ci[1]:.0%}])"
+            )
+        else:
+            print_warning(
+                f"Phase 5 not validated: MCR {report.mcr:.0%} "
+                f"(need {report.mcr_threshold:.0%})"
+            )
+        return report.passed
+
+    def _run_phase6_validation(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.phase6_validation import Phase6ValidationService
+
+        tokens = [str(arg) for arg in (args or [])]
+        micro_seeds = 24
+        output_path = None
+        if "--micro-seeds" in tokens:
+            idx = tokens.index("--micro-seeds")
+            if idx + 1 < len(tokens):
+                try:
+                    micro_seeds = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    micro_seeds = 24
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+
+        service = Phase6ValidationService(self.framework)
+        report = service.validate(micro_seeds=micro_seeds, output_path=output_path)
+        payload = report.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        if report.passed:
+            print_success(
+                f"Phase 6 validated: MCR {report.mcr:.0%} "
+                f"(threshold {report.mcr_threshold:.0%}, "
+                f"CI [{report.mcr_ci[0]:.0%}, {report.mcr_ci[1]:.0%}])"
+            )
+        else:
+            print_warning(
+                f"Phase 6 not validated: MCR {report.mcr:.0%} "
+                f"(need {report.mcr_threshold:.0%})"
+            )
+        return report.passed
+
+    def _run_team008_validation(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.team008_validation import (
+            Team008ValidationService,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        runs = 32
+        seed = 42
+        # Micro oracles are authoritative; live integration A/B is not wired yet.
+        skip_integration = True
+        output_path = None
+        if "--runs" in tokens:
+            idx = tokens.index("--runs")
+            if idx + 1 < len(tokens):
+                try:
+                    runs = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    runs = 32
+        if "--micro-seeds" in tokens:
+            idx = tokens.index("--micro-seeds")
+            if idx + 1 < len(tokens):
+                try:
+                    runs = max(4, int(tokens[idx + 1]))
+                except ValueError:
+                    runs = 32
+        if "--seed" in tokens:
+            idx = tokens.index("--seed")
+            if idx + 1 < len(tokens):
+                try:
+                    seed = int(tokens[idx + 1])
+                except ValueError:
+                    seed = 42
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = tokens[idx + 1]
+
+        service = Team008ValidationService(self.framework)
+        report = service.validate(
+            runs=runs,
+            seed=seed,
+            skip_integration=skip_integration,
+            output_path=output_path,
+        )
+        payload = report.to_dict()
+        print_info(json.dumps(payload, indent=2, default=str))
+        if report.passed:
+            print_success(
+                f"TEAM-008 validated: multi MCR {report.multi_mcr:.0%} "
+                f"vs mono {report.mono_mcr:.0%} "
+                f"(delta +{report.mcr_delta:.0%}, useless reduction {report.useless_reduction:.0%})"
+            )
+        else:
+            print_warning(
+                f"TEAM-008 not validated: MCR delta {report.mcr_delta:.0%} "
+                f"(need +{report.mcr_delta_threshold:.0%} or "
+                f"{report.useless_reduction_threshold:.0%} fewer useless actions)"
+            )
+        return report.passed
+
+    def _run_release_gate(self, args) -> bool:
+        from pathlib import Path
+
+        from interfaces.command_system.builtin.agent.benchmark.release_gate import (
+            evaluate_release_gate,
+            write_release_gate_report,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        baseline_path = None
+        output_path = None
+        if "--baseline" in tokens:
+            idx = tokens.index("--baseline")
+            if idx + 1 < len(tokens):
+                baseline_path = Path(tokens[idx + 1])
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = Path(tokens[idx + 1])
+
+        report = evaluate_release_gate(baseline_path=baseline_path)
+        write_release_gate_report(report, output_path=output_path)
+        print_info(json.dumps(report.to_dict(), indent=2, default=str))
+        if report.passed:
+            print_success("Release gate passed: no MCR/safety regressions.")
+        else:
+            print_warning(
+                f"Release gate blocked: {len(report.regressions)} regression(s)."
+            )
+        return report.passed
+
+    def _run_benchmark_dashboard(self, args) -> bool:
+        from pathlib import Path
+
+        from interfaces.command_system.builtin.agent.benchmark.release_gate import (
+            build_regression_dashboard,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        output_path = None
+        if "--output" in tokens:
+            idx = tokens.index("--output")
+            if idx + 1 < len(tokens):
+                output_path = Path(tokens[idx + 1])
+        dashboard = build_regression_dashboard(output_path=output_path)
+        print_info(json.dumps(dashboard, indent=2, default=str))
+        print_success("Benchmark dashboard written.")
+        return True
 
     def _run_metadata(self, args) -> bool:
         from interfaces.command_system.builtin.agent.metadata_linter import format_audit_table
@@ -792,9 +1376,80 @@ Examples:
             )
         return True
 
+    @staticmethod
+    def _metadata_suite_id(tokens: list[str], default: str = "metasploitable3-linux") -> str:
+        if "--suite" in tokens:
+            idx = tokens.index("--suite")
+            if idx + 1 < len(tokens):
+                return str(tokens[idx + 1]).strip().lower() or default
+        return default
+
+    def _run_metadata_families(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.benchmark.module_families import (
+            audit_family_compliance,
+            families_for_suite,
+            format_family_audit_report,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        as_json = "--json" in [token.lower() for token in tokens]
+        suite_id = self._metadata_suite_id(tokens)
+        discovered = self._agent.module_catalog._get_module_catalog()
+        audit = audit_family_compliance(
+            discovered,
+            extract_metadata=self._agent.module_catalog.extract_static_module_metadata,
+            families=families_for_suite(suite_id),
+        )
+        audit["suite_id"] = suite_id
+        if as_json:
+            print_info(json.dumps(audit, indent=2))
+        else:
+            print_info(f"Benchmark family audit for suite `{suite_id}`:")
+            print_info(format_family_audit_report(audit))
+        return bool(audit.get("overall_ok"))
+
+    def _run_metadata_contract(self, args) -> bool:
+        from interfaces.command_system.builtin.agent.golden_path_validation import validate_golden_path_catalog
+        from interfaces.command_system.builtin.agent.module_contract_tests import (
+            run_priority_contract_tests,
+            run_suite_contract_tests,
+        )
+
+        tokens = [str(arg) for arg in (args or [])]
+        as_json = "--json" in [token.lower() for token in tokens]
+        strict = "--strict" in [token.lower() for token in tokens]
+        discovered = self._agent.module_catalog._get_module_catalog()
+        extract = self._agent.module_catalog.extract_static_module_metadata
+        if "--golden-paths" in tokens:
+            payload = validate_golden_path_catalog(
+                discovered,
+                extract_metadata=extract,
+                os_name="linux",
+                strict=strict,
+            )
+        elif "--suite" in tokens:
+            payload = run_suite_contract_tests(
+                discovered,
+                self._metadata_suite_id(tokens),
+                extract_metadata=extract,
+                strict=strict,
+            )
+        else:
+            payload = run_priority_contract_tests(
+                discovered,
+                extract_metadata=extract,
+                strict=strict,
+            )
+        if as_json:
+            print_info(json.dumps(payload, indent=2))
+        else:
+            print_info(json.dumps(payload, indent=2))
+        return bool(payload.get("ok"))
+
     def _run_metadata_annotate(self, args) -> bool:
         from interfaces.command_system.builtin.agent.metadata_annotator import (
             DEFAULT_FAMILIES,
+            annotate_benchmark_suite,
             annotate_catalog,
         )
 
@@ -814,13 +1469,22 @@ Examples:
                 except ValueError:
                     limit = 0
         discovered = self._agent.module_catalog._get_module_catalog()
-        payload = annotate_catalog(
-            discovered,
-            self._agent.module_catalog.extract_static_module_metadata,
-            families=families,
-            dry_run=dry_run,
-            limit=limit,
-        )
+        if "--suite" in tokens:
+            payload = annotate_benchmark_suite(
+                discovered,
+                self._agent.module_catalog.extract_static_module_metadata,
+                self._metadata_suite_id(tokens),
+                dry_run=dry_run,
+                limit=limit,
+            )
+        else:
+            payload = annotate_catalog(
+                discovered,
+                self._agent.module_catalog.extract_static_module_metadata,
+                families=families,
+                dry_run=dry_run,
+                limit=limit,
+            )
         print_info(json.dumps(payload, indent=2))
         if dry_run:
             print_warning("Dry-run only. Re-run with --apply to write agent metadata blocks.")
@@ -832,6 +1496,7 @@ Examples:
     def _run_metadata_upgrade(self, args) -> bool:
         from interfaces.command_system.builtin.agent.metadata_annotator import (
             DEFAULT_FAMILIES,
+            upgrade_benchmark_suite,
             upgrade_catalog,
         )
 
@@ -851,13 +1516,22 @@ Examples:
                 except ValueError:
                     limit = 0
         discovered = self._agent.module_catalog._get_module_catalog()
-        payload = upgrade_catalog(
-            discovered,
-            self._agent.module_catalog.extract_static_module_metadata,
-            families=families,
-            dry_run=dry_run,
-            limit=limit,
-        )
+        if "--suite" in tokens:
+            payload = upgrade_benchmark_suite(
+                discovered,
+                self._agent.module_catalog.extract_static_module_metadata,
+                self._metadata_suite_id(tokens),
+                dry_run=dry_run,
+                limit=limit,
+            )
+        else:
+            payload = upgrade_catalog(
+                discovered,
+                self._agent.module_catalog.extract_static_module_metadata,
+                families=families,
+                dry_run=dry_run,
+                limit=limit,
+            )
         print_info(json.dumps(payload, indent=2))
         if dry_run:
             print_warning("Dry-run only. Re-run with --apply to write chain metadata blocks.")

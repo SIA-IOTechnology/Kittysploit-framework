@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_run_snapshot.schema.json",
+  "title": "KittySploit Agent Run Snapshot",
+  "description": "Comparable replay metadata: scheduling, proposals, config hashes, and lab attestation reference.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "run_id": {"type": "string", "minLength": 1},
+    "snapshot_hash": {"type": "string", "minLength": 8},
+    "created_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "config": {
+      "type": "object",
+      "properties": {
+        "model": {"type": ["string", "null"]},
+        "goal": {"type": ["string", "null"]},
+        "profile": {"type": ["string", "null"]},
+        "workspace": {"type": ["string", "null"]},
+        "prompt_hash": {"type": ["string", "null"]},
+        "catalog_hash": {"type": ["string", "null"]},
+        "random_seed": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "scheduling_order": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "proposals": {
+      "type": "object",
+      "properties": {
+        "accepted": {"type": "array", "items": {"type": "object"}},
+        "rejected": {"type": "array", "items": {"type": "object"}}
+      },
+      "additionalProperties": true
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "estimated_requests": {"type": "integer", "minimum": 0},
+        "actual_requests": {"type": "integer", "minimum": 0},
+        "duration_ms": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "cancellations": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "reset_attestation": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    }
+  },
+  "required": ["schema_version", "run_id", "snapshot_hash", "created_at"],
+  "additionalProperties": true
+}

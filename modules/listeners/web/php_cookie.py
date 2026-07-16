@@ -10,9 +10,12 @@ class Module(Listener, Http_client):
         'author': 'KittySploit Team',
 		'arch': Arch.PHP,
 		'handler': Handler.BIND,
-		'session_type': SessionType.PHP,
+		'session_type': SessionType.WEBSHELL,
 	}
 	
+	port = OptPort(80, "Target port", True)
+	path = OptString("/", "Base HTTP path (advanced; use uripath for the webshell file)", False, advanced=True)
+	ssl = OptBool(False, "SSL enabled: true/false", False, advanced=True)
 	cookie_name = OptString("kitty_shell", "cookie name for connect", True)
 	uripath = OptString("/", "HTTP path", True)
 	
@@ -33,7 +36,8 @@ class Module(Listener, Http_client):
 			# Return session, target, port, and additional data for PHP shell
 			additional_data = {
 				'uripath': self.uripath,
-				'cookie_name': self.cookie_name
+				'cookie_name': self.cookie_name,
+				'method': 'COOKIE'
 			}
 			return (self.session, self.target, int(self.port), additional_data)
 

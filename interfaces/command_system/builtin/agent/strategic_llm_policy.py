@@ -22,16 +22,16 @@ _PROFILE_LLM_BUDGETS: Dict[str, int] = {
 
 def resolve_llm_model(state: Any) -> str:
     explicit = str(getattr(state, "llm_model", "") or "").strip()
-    if explicit and explicit != FALLBACK_LLM_MODEL:
+    if explicit:
         return explicit
     if getattr(state, "llm_local", False):
         return DEFAULT_STRATEGIC_LLM_MODEL
-    return explicit or FALLBACK_LLM_MODEL
+    return FALLBACK_LLM_MODEL
 
 
 def resolve_effective_llm_budget(state: Any) -> int:
-    """Adaptive LLM call budget when ``llm_local`` is enabled."""
-    if not getattr(state, "llm_local", False):
+    """Adaptive LLM call budget when a local/connected LLM is enabled."""
+    if not getattr(state, "llm_local", False) and getattr(state, "local_llm", None) is None:
         return 0
     explicit = int(getattr(state, "llm_budget", 0) or 0)
     if explicit > 0:
@@ -42,6 +42,9 @@ def resolve_effective_llm_budget(state: Any) -> int:
         base = max(base, DISCREET_PROFILE_MAX_LLM_CALLS + 1)
     if getattr(state, "shell_hunter", False):
         base += 2
+    # Extra tactical room when LLM is connected for situational recon.
+    if getattr(state, "local_llm", None) is not None or getattr(state, "llm_local", False):
+        base += 1
     return base
 
 
@@ -85,6 +88,32 @@ def playbook_needs_guidance(kb: Mapping[str, Any], findings: Optional[Sequence[A
     return bool(steps)
 
 
+def api_surface_ambiguous(kb: Mapping[str, Any], state: Any = None) -> bool:
+    try:
+        from interfaces.command_system.builtin.agent.http_probe_actions import (
+            api_surface_ambiguous as _ambiguous,
+        )
+
+        return _ambiguous(kb, state)
+    except Exception:
+        return False
+
+
+def http_recon_needed(kb: Mapping[str, Any], state: Any = None) -> bool:
+    if api_surface_ambiguous(kb, state):
+        return True
+    try:
+        from interfaces.command_system.builtin.agent.http_probe_actions import http_surface_observed
+
+        if not http_surface_observed(kb, state):
+            return False
+    except Exception:
+        return False
+    endpoints = kb.get("discovered_endpoints") or []
+    llm_reqs = kb.get("llm_http_requests") or []
+    return len(endpoints) < 3 and len(llm_reqs) < 2
+
+
 def should_force_strategic_llm(
     state: Any,
     kb: Mapping[str, Any],
@@ -95,13 +124,15 @@ def should_force_strategic_llm(
     """
     Return True when the agent should invoke the LLM even for « simple » cases.
     """
-    if not getattr(state, "llm_local", False):
+    if not getattr(state, "llm_local", False) and getattr(state, "local_llm", None) is None:
         return False
     if waf_or_blocking_active(kb, state):
         return True
     if chain_is_blocked(kb):
         return True
     if playbook_needs_guidance(kb, findings):
+        return True
+    if api_surface_ambiguous(kb, state) or http_recon_needed(kb, state):
         return True
     if bool(complexity.get("is_complex")):
         return True
@@ -140,6 +171,10 @@ def strategic_llm_context(
         triggers.append("chain_blocked")
     if playbook_needs_guidance(kb, findings):
         triggers.append("playbook_reachable")
+    if api_surface_ambiguous(kb, state):
+        triggers.append("api_surface_ambiguous")
+    if http_recon_needed(kb, state):
+        triggers.append("http_recon_needed")
     if complexity.get("is_complex"):
         triggers.extend(list(complexity.get("reasons") or []))
 
@@ -194,6 +229,14 @@ def strategic_llm_context(
     except Exception:
         packed_kb = {}
 
+    api_candidates = []
+    try:
+        from interfaces.command_system.builtin.agent.goal_planner import SHELL_API_MODULE_LADDER
+
+        api_candidates = [path for path, _needle in SHELL_API_MODULE_LADDER]
+    except Exception:
+        api_candidates = []
+
     return {
         "strategic_triggers": triggers,
         "llm_budget_remaining": llm_budget_remaining(state),
@@ -208,6 +251,9 @@ def strategic_llm_context(
             "tokens_used": packed_kb.get("tokens_used", 0),
             "token_budget": packed_kb.get("token_budget", 0),
         },
+        "recent_http_probes": list(kb.get("llm_http_requests") or [])[-8:],
+        "api_module_candidates": api_candidates,
+        "discovered_endpoints": list(kb.get("discovered_endpoints") or [])[:24],
     }
 
 
@@ -243,6 +289,14 @@ def strategic_llm_instruction_extension(context: Mapping[str, Any]) -> str:
                 f"A reachable playbook [{hint.get('playbook_id')}] expects next modules: "
                 f"{', '.join(str(s) for s in steps[:4])}. Prefer these unless policy blocks them. "
             )
+    if "api_surface_ambiguous" in triggers or "http_recon_needed" in triggers:
+        parts.append(
+            "ENGINEER RECON MODE: act like a security engineer controlling the tool. "
+            "Form a hypothesis, issue up to a few bounded http_request probes (GET/HEAD/OPTIONS) "
+            "against candidate endpoints, read status/headers/body samples, then pick the best "
+            "run_followup from api_module_candidates (swagger_detect, graphql_detect, api_fuzzer, …). "
+            "Do not run a fixed script — adapt to what the last probes showed. "
+        )
     unlocked = context.get("unlocked_capabilities") or []
     if unlocked:
         parts.append(f"Unlocked capabilities: {', '.join(str(c) for c in unlocked[:12])}. ")

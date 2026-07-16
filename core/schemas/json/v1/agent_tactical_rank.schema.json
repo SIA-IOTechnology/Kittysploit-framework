@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_tactical_rank.schema.json",
+  "title": "KittySploit Agent Tactical Rank",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "action_id": {"type": "string", "minLength": 4},
+    "hypothesis": {"type": "string", "maxLength": 500},
+    "prerequisites": {"type": "array", "items": {"type": "string"}},
+    "expected_gain": {"type": "number", "minimum": 0},
+    "estimated_cost": {"type": "number", "minimum": 0},
+    "confidence": {"$ref": "common.schema.json#/$defs/confidence"},
+    "verification": {"type": "string", "maxLength": 500}
+  },
+  "required": [
+    "schema_version",
+    "action_id",
+    "hypothesis",
+    "expected_gain",
+    "estimated_cost",
+    "confidence",
+    "verification"
+  ],
+  "additionalProperties": false
+}

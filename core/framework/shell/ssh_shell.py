@@ -129,6 +129,26 @@ class SSHShell(BaseShell):
             session = self.framework.session_manager.get_session(self.session_id)
             if not session:
                 return
+
+            # Prefer live client / credentials stored by auxiliary/scanner/ssh/ssh_login
+            data = session.data if isinstance(getattr(session, "data", None), dict) else {}
+            live_client = data.get("client")
+            if live_client is not None:
+                try:
+                    transport = getattr(live_client, "get_transport", lambda: None)()
+                    if transport is not None and transport.is_active():
+                        self.connection = live_client
+                        self._setup_connection_from_session(session)
+                        return
+                except Exception:
+                    pass
+            username = str(data.get("username") or "").strip()
+            password = data.get("password")
+            if username and password is not None:
+                host = str(getattr(session, "host", "") or data.get("host") or "")
+                port = int(getattr(session, "port", 0) or data.get("port") or 22)
+                if host and self.connect(host, port=port, username=username, password=str(password)):
+                    return
             
             # Try to get connection from listener
             # Search in current module first

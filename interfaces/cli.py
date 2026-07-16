@@ -19,6 +19,54 @@ from interfaces.command_system.command_registry import CommandRegistry
 from interfaces.command_system.advanced_completer import AdvancedCompleter
 from interfaces.command_system.command_parser import split_command_line
 from core.config import Config
+from core.history_manager import MAX_HISTORY_ENTRIES
+
+
+class LimitedFileHistory(FileHistory):
+    """File-backed prompt history capped to the most recent entries."""
+
+    def __init__(self, filename: str, max_entries: int = MAX_HISTORY_ENTRIES):
+        self.max_entries = max(1, int(max_entries or MAX_HISTORY_ENTRIES))
+        super().__init__(filename)
+        self._trim_file()
+
+    def store_string(self, string: str) -> None:
+        super().store_string(string)
+        self._trim_file()
+
+    def _trim_file(self) -> None:
+        path = self.filename
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError:
+            return
+        if not raw:
+            return
+
+        # prompt_toolkit FileHistory stores entries as "# timestamp\\n+line\\n..."
+        blocks = []
+        current = []
+        for line in raw.splitlines(keepends=True):
+            if line.startswith(b"#") and current:
+                blocks.append(b"".join(current))
+                current = [line]
+            else:
+                current.append(line)
+        if current:
+            blocks.append(b"".join(current))
+
+        if len(blocks) <= self.max_entries:
+            return
+
+        trimmed = b"".join(blocks[-self.max_entries :])
+        try:
+            with open(path, "wb") as handle:
+                handle.write(trimmed)
+        except OSError:
+            return
 
 
 class CommandAutoSuggest(AutoSuggest):
@@ -61,7 +109,7 @@ class CLI:
         self.command_registry = CommandRegistry(self.framework, self.session, self.output_handler)
         self.advanced_completer = AdvancedCompleter(self.command_registry, self.framework)
         
-        # Prompt history file
+        # Prompt history file (capped; separate from DB command history)
         history_file = os.path.expanduser('~/.kittysploit_history')
         
         # Create custom key bindings
@@ -76,7 +124,7 @@ class CLI:
         
         # Create the prompt session with the key bindings
         self.prompt_session = PromptSession(
-            history=FileHistory(history_file),
+            history=LimitedFileHistory(history_file, max_entries=MAX_HISTORY_ENTRIES),
             auto_suggest=CommandAutoSuggest(self.advanced_completer),
             enable_history_search=True,
             key_bindings=kb

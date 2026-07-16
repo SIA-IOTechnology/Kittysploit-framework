@@ -45,6 +45,15 @@ def load_lab_scenario(path: str | Path) -> LabScenario:
         )
         for item in raw.get("objectives") or []
     ]
+    agent_objectives = [
+        LabObjective(
+            id=str(item.get("id") or ""),
+            title=str(item.get("title") or item.get("id") or ""),
+            points=int(item.get("points") or 0),
+            check=dict(item.get("check") or {}),
+        )
+        for item in raw.get("agent_objectives") or []
+    ]
     walkthrough = [
         LabWalkthroughStep(
             step=int(item.get("step") or index + 1),
@@ -65,8 +74,11 @@ def load_lab_scenario(path: str | Path) -> LabScenario:
         tags=[str(tag) for tag in raw.get("tags") or []],
         environment_options=dict(raw.get("environment_options") or {}),
         objectives=objectives,
+        agent_objectives=agent_objectives,
         walkthrough=walkthrough,
         reset=dict(raw.get("reset") or {}),
+        manifest=str(raw.get("manifest") or ""),
+        readiness_checks=[dict(item) for item in raw.get("readiness_checks") or []],
         source_path=str(file_path),
     )
 

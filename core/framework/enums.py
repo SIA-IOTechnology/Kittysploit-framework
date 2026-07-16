@@ -18,6 +18,7 @@ class SessionType(Enum):
     WINRM = "winrm"
     DISCORD = "discord"
     WEBSOCKET = "websocket"
+    WEBSHELL = "webshell"
     PHP = "php"
     PYTHON = "python"
     MYSQL = "mysql"

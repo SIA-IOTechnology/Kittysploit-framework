@@ -47,7 +47,7 @@ class Module(Auxiliary, FTPClientMixin):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [],
+        'chain':         {'produces_capabilities': [{'capability': 'service_identified', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

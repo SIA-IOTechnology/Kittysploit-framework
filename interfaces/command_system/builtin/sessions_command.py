@@ -125,7 +125,12 @@ Session Types:
                 print_info("-" * 80)
                 
                 for session in standard_sessions:
-                    status = "Active"
+                    transport_state = ""
+                    try:
+                        transport_state = str((getattr(session, "data", {}) or {}).get("transport_state") or "").lower()
+                    except Exception:
+                        transport_state = ""
+                    status = "Disconnected" if transport_state == "disconnected" else "Active"
                     print_info(f"{session.id:<36} {session.host:<20} {session.port:<8} {session.session_type:<15} {status}")
             
             # Display browser sessions
@@ -259,7 +264,7 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "android":
                 session_type = "android"
                 shell_type = "android"
-            elif session and session.session_type and session.session_type.lower() in ("php", "http", "https"):
+            elif session and session.session_type and session.session_type.lower() in ("php", "webshell", "http", "https"):
                 session_type = session.session_type.lower()
                 shell_type = "php"
             elif session and session.session_type and session.session_type.lower() == "mysql":

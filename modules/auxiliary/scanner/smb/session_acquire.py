@@ -24,7 +24,7 @@ from lib.protocols.smb.smb_scanner_client import Smb_scanner_client
 
 class Module(Auxiliary, Smb_scanner_client):
     DEFAULT_TIMEOUT = 10
-    LISTENER_PATH = "listeners/windows/smb_client"
+    LISTENER_PATH = "listeners/smb/client"
 
     __info__ = {
         "name": "SMB session acquire",
@@ -45,7 +45,7 @@ class Module(Auxiliary, Smb_scanner_client):
                 "consumes_capabilities": ["credentials"],
                 "produces_capabilities": ["authenticated_session"],
                 "suggested_followups": [
-                    "post/smb/manage/deploy_reverse_shell",
+                    "post/smb/windows/deploy_reverse_shell",
                     "post/winrm/gather/enum_system",
                 ],
             },

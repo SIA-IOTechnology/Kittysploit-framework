@@ -21,6 +21,8 @@ Entities:
   export metadata.
 - `AgentAction`, `AgentObservation`, `AgentDecision`, `AgentState`, `AgentRun`:
   versioned autonomous workflow, checkpoint, replay, and audit contracts.
+- `AgentBenchmarkResult`: comparable benchmark output with North Star metrics,
+  outcome verdicts, per-run detail, and failure attribution for CI.
 
 Python callers can use:
 

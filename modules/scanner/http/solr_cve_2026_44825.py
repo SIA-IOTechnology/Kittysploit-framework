@@ -27,6 +27,21 @@ class Module(Scanner, Http_client):
             "exploits/multi/http/solr_cve_2026_44825_rce",
         ],
         "tags": ["web", "scanner", "solr", "apache", "rce", "cve-2026-44825"],
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 2,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+        'cost': 'medium',
+        'noise': 'low',
+        'value': 'medium',
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
+    },
     }
 
     base_path = OptString("/solr", "Solr base URL path", required=False)

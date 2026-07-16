@@ -51,6 +51,39 @@ class Post(BaseModule):
         # Execute command using shell_manager
         if not hasattr(self.framework, 'shell_manager') or not self.framework.shell_manager:
             raise ProcedureError(FailureType.ConfigurationError, "Shell manager not available")
+
+        info = getattr(self, "__info__", {}) or {}
+        expected_type = info.get("session_type")
+        arch = info.get("arch")
+        expected_value = getattr(expected_type, "value", expected_type)
+        arch_value = getattr(arch, "value", arch)
+        expects_php = str(expected_value or "").lower() == "php" or str(arch_value or "").lower() == "php"
+        if expects_php and hasattr(self.framework, "session_manager"):
+            session = self.framework.session_manager.get_session(str(session_id_value))
+            actual_type = str(getattr(session, "session_type", "") or "").lower() if session else ""
+            if actual_type not in {"php", "webshell"}:
+                raise ProcedureError(
+                    FailureType.ConfigurationError,
+                    f"This PHP post module requires a PHP/webshell session, got {actual_type or 'unknown'} "
+                    f"for session {session_id_value}",
+                )
+        else:
+            session = None
+            actual_type = ""
+            if hasattr(self.framework, "session_manager"):
+                session = self.framework.session_manager.get_session(str(session_id_value))
+                actual_type = str(getattr(session, "session_type", "") or "").lower() if session else ""
+            expected_values = expected_type if isinstance(expected_type, (list, tuple, set)) else [expected_type]
+            expected_values = {
+                str(getattr(item, "value", item) or "").lower()
+                for item in expected_values
+            }
+            platform_value = str(getattr(info.get("platform"), "value", info.get("platform")) or "").lower()
+            shell_like = bool(expected_values.intersection({"shell", "ssh", "meterpreter"}))
+            if actual_type in {"php", "webshell"} and shell_like and platform_value == "linux":
+                stripped = command.lstrip().lower()
+                if not stripped.startswith(("system ", "exec ", "shell_exec ")):
+                    command = f"system {command}"
         
         # Pass framework to execute_command so it can auto-create shell if needed
         result = self.framework.shell_manager.execute_command(

@@ -109,6 +109,7 @@ CMS_HINT_TOKENS: Final[Tuple[str, ...]] = (
     "jenkins",
     "tomcat",
     "phpmyadmin",
+    "dvwa",
     "api",
     "swagger",
     "graphql",
@@ -128,6 +129,7 @@ CMS_SPECIALIZATION_BLOB_TOKENS: Final[Tuple[str, ...]] = (
     "jenkins",
     "tomcat",
     "phpmyadmin",
+    "dvwa",
     "api",
     "swagger",
 )
@@ -160,6 +162,14 @@ AUTH_PATH_MARKERS: Final[Tuple[str, ...]] = (
 DRUPAL_BLOB_MARKERS: Final[Tuple[str, ...]] = ("x-drupal-cache", "/sites/default/", "drupal.settings")
 
 JOOMLA_BLOB_MARKERS: Final[Tuple[str, ...]] = ("joomla!", "com_content", "option=com_")
+
+# Pre-auth DVWA fingerprints (Metasploitable2 index links, login page title, etc.)
+DVWA_BLOB_MARKERS: Final[Tuple[str, ...]] = (
+    "damn vulnerable web application",
+    "/dvwa/",
+    "dvwa/login.php",
+    "dvwa security",
+)
 
 # Non-redirect HTTP statuses recorded as coarse risk signals (fingerprint pass)
 HTTP_STATUS_RISK_SIGNALS: Final[Tuple[int, ...]] = (301, 302, 403, 429)
@@ -216,6 +226,8 @@ NEGATIVE_EVIDENCE_MARKERS: Final[Tuple[str, ...]] = (
 # LLM / heuristic execution plan: allowed next_actions.type values
 SAFE_FOLLOWUP_ACTION_TYPES: Final[FrozenSet[str]] = frozenset({
     "prioritize",
+    "http_request",
+    "surface_scan",
     "run_followup",
     "run_exploit",
     "run_post",
@@ -353,6 +365,7 @@ CLIENT_JS_INTEL_MODULES: Final[Tuple[str, ...]] = (
 
 # ``agent --all``: extra module trees (beyond ``scanner/http`` + ``auxiliary/scanner/http``).
 EXPANDED_SURFACE_MODULE_PREFIXES: Final[Tuple[str, ...]] = (
+    "exploits/",
     "auxiliary/osint/",
     "scanner/cloud/",
     "scanner/ssh/",
@@ -406,6 +419,8 @@ SHELL_HUNTER_MACRO_MAX_ROUNDS: Final[int] = 12
 
 # ``agent --all``: ordered passive intel before HTTP campaign (subdomains → identities).
 EXPANDED_SURFACE_SUBDOMAIN_MODULES: Final[Tuple[str, ...]] = (
+    "auxiliary/osint/domain_crtsh",
+    "auxiliary/osint/domain_dns",
     "auxiliary/osint/domain_surface_mapper",
 )
 

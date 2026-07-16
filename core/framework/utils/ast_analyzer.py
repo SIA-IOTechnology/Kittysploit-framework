@@ -193,7 +193,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
             self.has_module_class = True
             # Classes de base qui ont déjà une méthode run()
             base_classes_with_run = [
-                "DockerEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
+                "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
                 "Post", "Scanner", "Encoder", "Transform", "Backdoor",
                 "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
             ]

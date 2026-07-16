@@ -94,12 +94,14 @@ from interfaces.command_system.builtin.agent.agent_constants import (
     DERIVED_HOST_SCAN_MODULES_PER_HOST,
     DERIVED_HOST_LIVE_STATUSES,
     DERIVED_HOST_PROBE_PATHS,
+    DVWA_BLOB_MARKERS,
     EXPANDED_SURFACE_INTEL_MAX_MODULES,
     EXPANDED_SURFACE_MODULE_PREFIXES,
     EXPANDED_SURFACE_RECON_SKIP_SUBSTR,
     HTTP_REDIRECT_STATUSES,
     HTTP_SQLI_POST_MODULE,
     HTTP_SQLI_SCANNER_MODULE,
+    HTTP_SQLI_SCANNER_MODULE_LEGACY,
     HTTP_STATUS_RISK_SIGNALS,
     JOOMLA_BLOB_MARKERS,
     NEGATIVE_EVIDENCE_MARKERS,
@@ -159,8 +161,10 @@ from interfaces.command_system.builtin.agent.goal_planner import (
     is_shell_operator_goal,
     kb_api_surface_ready,
     kb_client_js_surface_ready,
+    kb_ssh_surface_ready,
     kb_subdomain_surface_expandable,
     operator_goal_from_mapping,
+    path_matches_forced_protocol,
     prioritize_subdomain_hosts,
     suggest_shell_plan_followups,
 )
@@ -183,6 +187,17 @@ from interfaces.command_system.builtin.agent.campaign_utility import (
     select_opportunistic_batch,
     unified_module_score,
 )
+from interfaces.command_system.builtin.agent.attack_branch import (
+    action_type_for_module_path,
+    goal_allows_sqli_deep_resume,
+    has_sqli_shell_pressure,
+    module_allowed_despite_observed,
+    parked_sqli_branches,
+    pick_light_sqli_probe,
+    pick_resumed_deep_action,
+    sync_branches_from_kb_signals,
+    sync_branches_from_results,
+)
 from interfaces.command_system.builtin.agent.campaign_continuation import (
     list_shell_continuation_pivots,
     should_defer_shell_low_novelty_stop,
@@ -201,6 +216,7 @@ from interfaces.command_system.builtin.agent.module_performance_memory import (
     kb_light_copy,
 )
 from interfaces.command_system.builtin.agent.module_health_memory import ModuleHealthMemory
+from interfaces.command_system.builtin.agent.learning_store import LearningStore
 from interfaces.command_system.builtin.agent.compiled_patterns import (
     ABSOLUTE_URL_RE,
     ACRONYM_RE,
@@ -258,6 +274,7 @@ class AgentWorkflowCore:
         self._module_perf = ModulePerformanceMemory()
         self._module_health = ModuleHealthMemory()
         self._module_ctx = ModuleContextMemory()
+        self._learning = LearningStore()
         self._lifecycle = RunLifecycle()
         self._module_runner = AgentModuleRunner(WorkflowModuleRunnerHooks(self))
         self._module_executor = AgentModuleExecutionService(framework)
@@ -686,6 +703,138 @@ class AgentWorkflowCore:
         except Exception:
             return str(url or "").strip()
 
+    def _build_agent_http_request_url(self, state: AgentState, path_or_url: str) -> str:
+        from interfaces.command_system.builtin.agent.http_probe_actions import build_agent_http_request_url
+
+        return build_agent_http_request_url(state, path_or_url)
+
+    def _execute_agent_http_request_action(self, state: AgentState, action: Dict[str, Any]) -> Dict[str, Any]:
+        from interfaces.command_system.builtin.agent.http_probe_actions import execute_agent_http_request
+
+        return execute_agent_http_request(
+            state,
+            action,
+            headers=self._agent_http_headers(state),
+            sleep_fn=lambda: self._sleep_between_agent_actions(
+                state, f"llm-http:{str((action.get('options') or {}).get('method') or 'GET').upper()} {action.get('path')}"
+            ),
+            ssl_context_fn=lambda: self._create_spoofed_ssl_context(state),
+            consume_network=lambda units, reason: self._consume_network_units(state, units, reason=reason),
+        )
+
+    def _execute_plan_http_requests(self, state: AgentState, actions: List[Dict[str, Any]], budget: int) -> List[Dict[str, Any]]:
+        from interfaces.command_system.builtin.agent.http_probe_actions import (
+            MAX_HTTP_REQUESTS_PER_TURN,
+            execute_plan_http_requests,
+        )
+
+        selected_budget = max(0, min(int(budget or 0), MAX_HTTP_REQUESTS_PER_TURN))
+        if selected_budget <= 0:
+            return []
+        http_count = sum(
+            1 for action in actions
+            if isinstance(action, dict) and str(action.get("type", "")).lower() == "http_request"
+        )
+        if http_count:
+            print_status(f"Execution plan HTTP request: running up to {min(http_count, selected_budget)} request(s)")
+        return execute_plan_http_requests(
+            state,
+            actions,
+            selected_budget,
+            headers=self._agent_http_headers(state),
+            sleep_fn=lambda action: self._sleep_between_agent_actions(
+                state,
+                f"llm-http:{str((action.get('options') or {}).get('method') or 'GET').upper()} {action.get('path')}",
+            ),
+            ssl_context_fn=lambda: self._create_spoofed_ssl_context(state),
+            consume_network=lambda units, reason: self._consume_network_units(state, units, reason=reason),
+            max_per_turn=MAX_HTTP_REQUESTS_PER_TURN,
+        )
+
+    def _execute_plan_surface_scans(self, state: AgentState, actions: List[Dict[str, Any]], budget: int) -> List[Dict[str, Any]]:
+        selected = [
+            action for action in actions
+            if isinstance(action, dict) and str(action.get("type", "")).lower() == "surface_scan"
+        ]
+        if not selected or budget <= 0:
+            return []
+        action = selected[0]
+        options = self._sanitize_surface_scan_action_options(action.get("options", {}))
+        limit = max(1, min(int(options.get("limit") or 6), int(budget or 1)))
+        all_modules = self._catalog.discover_campaign_modules(
+            expanded=bool(getattr(state, "expanded_surface", False))
+        )
+        modules = [
+            module for module in self._select_modules_for_target(state, all_modules)
+            if str(module.get("path", "")).startswith(("scanner/", "auxiliary/scanner/"))
+        ]
+        protocol = str(options.get("protocol") or getattr(state, "protocol", "") or "").strip().lower()
+        if protocol:
+            modules = self._filter_modules_by_protocol(modules, protocol=protocol)
+        tags = options.get("tags") if isinstance(options.get("tags"), list) else []
+        if tags:
+            tag_set = {str(t).lower() for t in tags}
+            modules = [
+                module for module in modules
+                if tag_set.intersection({str(t).lower() for t in module.get("tags", []) or []})
+                or any(tag in str(module.get("path", "")).lower() for tag in tag_set)
+            ]
+        observed = {
+            str(path).strip()
+            for path in (state.knowledge_base or {}).get("observed_modules", [])
+            if str(path).strip()
+        }
+        modules = [
+            module for module in modules
+            if str(module.get("path", "")).strip() not in observed
+        ]
+        if not modules:
+            return []
+        tech_hints = {
+            str(x).lower()
+            for x in (state.knowledge_base or {}).get("tech_hints", []) or []
+        }
+        selected_modules = self._select_modules_opportunistic(
+            modules,
+            state,
+            tech_hints,
+            observed,
+            limit,
+        ) or modules[:limit]
+        if not selected_modules:
+            return []
+        print_status(
+            f"Execution plan surface scan: running {len(selected_modules)} scanner module(s)"
+        )
+        scanner = state.scanner
+        results = self._execute_agent_modules(
+            state,
+            scanner,
+            selected_modules,
+            state.target_info,
+            1 if state.verbose or self._discreet_mode(state) else max(1, min(int(state.threads or 1), 4)),
+            bool(state.verbose),
+            "surface-scan",
+        )
+        selected_paths = [m.get("path") for m in selected_modules if m.get("path")]
+        self._remember_planner_actions(
+            state.knowledge_base,
+            selected_paths,
+            {
+                str(row.get("path", "")).strip()
+                for row in results
+                if isinstance(row, dict) and str(row.get("status", "")).lower() in {"error", "skipped"}
+            },
+        )
+        self._append_timeline_event(
+            state,
+            "surface-scan",
+            f"LLM requested scanner -u style overview ({len(selected_modules)} module(s)).",
+            modules=selected_modules,
+            results=results,
+        )
+        return results
+
     def _action_delay_bounds(self, state: AgentState) -> Tuple[float, float]:
         try:
             delay_min = max(0.0, float(getattr(state, "request_delay_min", 0.0) or 0.0))
@@ -959,7 +1108,7 @@ class AgentWorkflowCore:
         if getattr(state, "reuse_proxy_auth", False):
             auth_context = summary.get("auth_context", {})
             if isinstance(auth_context, dict) and auth_context:
-                self._merge_auth_context(kb, auth_context)
+                self._merge_auth_context(kb, auth_context, state=state)
                 risk.add("session_cookie_observed")
                 risk.add("authenticated_session")
                 kb["risk_signals"] = sorted(risk)
@@ -1004,7 +1153,77 @@ class AgentWorkflowCore:
             risk.add("active_web_probe_completed")
             kb["risk_signals"] = sorted(risk)
 
+        self._promote_corroborated_web_apps(kb)
         state.knowledge_base = kb
+
+    def _endpoint_matches_app_prefix(self, endpoints: Any, prefixes: Tuple[str, ...]) -> bool:
+        """True when any discovered endpoint is under one of the app path prefixes."""
+        for raw in endpoints or []:
+            path = str(raw or "").strip().lower().split("?", 1)[0]
+            if not path.startswith("/"):
+                path = "/" + path
+            for prefix in prefixes:
+                token = str(prefix or "").strip().lower()
+                if not token:
+                    continue
+                if not token.startswith("/"):
+                    token = "/" + token
+                base = token.rstrip("/") or "/"
+                if path == base or path == base + "/" or path.startswith(base + "/"):
+                    return True
+        return False
+
+    def _floor_tech_confidence(self, knowledge_base: Dict[str, Any], tech_key: str, floor: float) -> None:
+        if not isinstance(knowledge_base, dict) or not tech_key:
+            return
+        confidence = dict(knowledge_base.get("tech_confidence", {}) or {})
+        key = str(tech_key).lower()
+        current = float(confidence.get(key, 0.0) or 0.0)
+        confidence[key] = round(max(current, float(floor)), 3)
+        knowledge_base["tech_confidence"] = confidence
+
+    def _promote_corroborated_web_apps(self, knowledge_base: Dict[str, Any]) -> None:
+        """
+        Promote known training/web apps when path evidence corroborates weak string hints.
+
+        Homepage links like ``<a href="/dvwa/">DVWA</a>`` already produce endpoints +
+        tech_hints at +0.18 each merge (~0.36). Without a path floor, DVWA never reaches
+        the exploit/planner gates (0.45–0.7) while Drupal/WordPress get CMS floors.
+        """
+        if not isinstance(knowledge_base, dict):
+            return
+        endpoints = list(knowledge_base.get("discovered_endpoints", []) or [])
+        hints = {str(h).lower().strip() for h in (knowledge_base.get("tech_hints", []) or []) if str(h).strip()}
+        login_paths = {str(p) for p in (knowledge_base.get("login_paths", []) or []) if str(p).startswith("/")}
+        endpoint_set = {str(e) for e in endpoints if str(e).strip()}
+
+        if self._endpoint_matches_app_prefix(endpoints, ("/dvwa",)) or "dvwa" in hints:
+            if self._endpoint_matches_app_prefix(endpoints, ("/dvwa",)):
+                hints.add("dvwa")
+                self._floor_tech_confidence(knowledge_base, "dvwa", 0.78)
+                login_paths.add("/dvwa/login.php")
+                endpoint_set.update({"/dvwa/", "/dvwa/login.php"})
+                risk = set(knowledge_base.get("risk_signals", []) or [])
+                risk.add("login_surface_detected")
+                knowledge_base["risk_signals"] = sorted(risk)
+            elif "dvwa" in hints:
+                self._floor_tech_confidence(knowledge_base, "dvwa", 0.45)
+
+        if self._endpoint_matches_app_prefix(endpoints, ("/phpmyadmin",)) or "phpmyadmin" in hints:
+            if self._endpoint_matches_app_prefix(endpoints, ("/phpmyadmin",)):
+                hints.add("phpmyadmin")
+                self._floor_tech_confidence(knowledge_base, "phpmyadmin", 0.75)
+                login_paths.add("/phpMyAdmin/")
+                endpoint_set.update({"/phpMyAdmin/", "/phpmyadmin/"})
+
+        if self._endpoint_matches_app_prefix(endpoints, ("/mutillidae",)):
+            hints.add("mutillidae")
+            self._floor_tech_confidence(knowledge_base, "mutillidae", 0.7)
+            endpoint_set.add("/mutillidae/")
+
+        knowledge_base["tech_hints"] = sorted(hints)
+        knowledge_base["login_paths"] = sorted(login_paths)[:40]
+        knowledge_base["discovered_endpoints"] = sorted(endpoint_set)[:300]
 
     def _shell_sensitive_probes_allowed(self, state: AgentState) -> bool:
         """True when shell-tier probe paths (/.env, /phpinfo, …) are explicitly approved."""
@@ -1481,56 +1700,25 @@ class AgentWorkflowCore:
         return None
 
     def _post_exploitation_loop(self, state: AgentState):
-        """Run explicitly approved, read-only post-exploitation collection."""
-        if not state.new_sessions:
-            return
+        """Run explicit post-exploitation objectives on verified sessions."""
+        from interfaces.command_system.builtin.agent.post_exploit_goals import PostExploitGoalEngine
 
         policy = getattr(state, "runtime_policy", None)
         if policy is None or not getattr(policy, "approve_post_exploit", False):
             return
-        print_status(
-            f"Starting approved read-only post-exploitation for {len(state.new_sessions)} session(s)..."
+        if not (getattr(state, "verified_sessions", None) or state.new_sessions):
+            return
+        print_status("Starting post-exploitation objective pipeline...")
+        report = PostExploitGoalEngine(self.framework).run(
+            state,
+            timeline_hook=self._append_timeline_event,
         )
-
-        for session_id in state.new_sessions:
-            if not self._post_intel.supports_command_session(str(session_id)):
-                self._append_timeline_event(
-                    state,
-                    "post-exploit",
-                    f"Session {session_id} skipped: incompatible with command collection.",
-                    kind="policy",
-                )
-                continue
-            recon = self._post_intel.run_local_recon(session_id)
-            print_info(f"Local Recon ({session_id}): {recon.get('current_user', 'unknown')}")
-
-            secrets = self._post_intel.mine_secrets(session_id)
-            if secrets:
-                print_success(
-                    f"Sensitive-file presence ({session_id}): observed {len(secrets)} file(s); content redacted."
-                )
-                kb = state.knowledge_base
-                found_secrets = kb.get("extracted_secrets", [])
-                for s in secrets:
-                    found_secrets.append(
-                        {
-                            "type": "file",
-                            "source": s["file"],
-                            "value": "[redacted]",
-                            "bytes_observed": s.get("bytes_observed", 0),
-                        }
-                    )
-                kb["extracted_secrets"] = found_secrets
-                state.knowledge_base = kb
-            self._append_timeline_event(
-                state,
-                "post-exploit",
-                f"Read-only post-exploitation completed for session {session_id}.",
-                kind="collection",
-                extra={
-                    "recon_fields": sorted(recon),
-                    "sensitive_files_observed": len(secrets),
-                },
+        if report.all_complete:
+            print_success(f"Post-exploitation objectives met ({len(report.missions)} session(s)).")
+        elif report.missions:
+            print_info(
+                f"Post-exploitation partial: "
+                f"{sum(1 for m in report.missions if m.complete)}/{len(report.missions)} complete."
             )
 
     def _append_timeline_event(
@@ -1766,6 +1954,17 @@ class AgentWorkflowCore:
             self._is_actionable_finding,
             self._result_has_exploit_link,
         )
+        try:
+            self._learning.record_phase_results(
+                state,
+                kb_before_light,
+                kb_after,
+                phase_results,
+                phase_name,
+                get_agent_metadata=self._catalog.get_agent_metadata,
+            )
+        except Exception:
+            pass
         self._module_health.record_phase_outcomes(
             kb_before_light,
             kb_after,
@@ -1950,7 +2149,7 @@ class AgentWorkflowCore:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
         conf = kb.get("tech_confidence", {}) or {}
         known = (
-            "dvwa", "wordpress", "drupal", "joomla", "phpmyadmin", "grafana", "jenkins",
+            "dvwa", "mutillidae", "wordpress", "drupal", "joomla", "phpmyadmin", "grafana", "jenkins",
             "elasticsearch", "kibana", "tomcat", "nginx", "apache", "fastapi",
             "django", "flask", "nextjs", "nodejs", "react", "angular", "vue", "api",
         )
@@ -2019,6 +2218,13 @@ class AgentWorkflowCore:
         conf_rows = self._stack_confidence_rows(kb, threshold=0.4)
         top_stack = conf_rows[0][0] if conf_rows else ""
         top_stack_score = conf_rows[0][1] if conf_rows else 0.0
+        # Prefer concrete CMS evidence over a generic "api" top-stack when choosing follow-ups.
+        if top_stack == "api" and conf_rows:
+            for name, score in conf_rows[1:4]:
+                if name in {"drupal", "wordpress", "joomla", "phpmyadmin"} and float(score or 0.0) >= 0.45:
+                    top_stack = name
+                    top_stack_score = float(score or 0.0)
+                    break
         findings = findings or []
 
         if "wp_plugin_scanner" in low:
@@ -2175,6 +2381,20 @@ class AgentWorkflowCore:
             expected_gain += 0.7
         if any(token in low for token in ("login", "bruteforce")) and login_paths:
             expected_gain += 0.55
+
+        signals_lower = {str(x).lower() for x in kb.get("risk_signals", []) or []}
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            if "sqli_confirmed" in signals_lower or "sql_signal" in signals_lower or parked_sqli_branches(kb):
+                if "sqli_shell" in low:
+                    expected_gain += 4.5
+                    evidence.append("sqli_confirmed_resume_deep=true")
+                elif any(token in low for token in ("sql_injection", "sqli_engine", "sqli")):
+                    expected_gain += 1.5
+                if "bruteforce" in low or "admin_login" in low:
+                    expected_gain -= 1.2
+                    tradeoffs.append("sqli confirmed — deprioritized vs shell-from-sqli path")
+        if action_type == "run_post" and "sqli_shell" in low:
+            expected_gain += 2.5
 
         risk_cost = float(estimate_network_cost(low))
         if action_type == "run_exploit":
@@ -2502,6 +2722,21 @@ class AgentWorkflowCore:
         verbose: bool,
         phase_label: str,
     ):
+        self._ingest_sessions_from_scan_results(state, all_results)
+        if self._has_shell_milestone(state):
+            if verbose:
+                print_status(
+                    f"{phase_label}: shell/session already obtained — skipping HTTP post-auth pivot."
+                )
+            return self._finalize_scan_campaign(
+                state,
+                modules,
+                scanner,
+                all_results,
+                executed_paths,
+                phase_threads,
+                tech_hints,
+            )
         state.campaign_stop_reason = (
             f"{phase_label}: credentials obtained — halting broad scan; pivot to post-auth / privilege escalation"
         )
@@ -2570,6 +2805,17 @@ class AgentWorkflowCore:
         wp_conf = float(confidence.get("wordpress", 0.0) or 0.0)
         drupal_conf = float(confidence.get("drupal", 0.0) or 0.0)
         joomla_conf = float(confidence.get("joomla", 0.0) or 0.0)
+        risk = {str(x).lower() for x in kb.get("risk_signals", [])}
+        endpoints = [str(x).lower() for x in kb.get("discovered_endpoints", []) or []]
+        multi_app_listing = (
+            "directory_listing_detected" in risk
+            and sum(
+                1
+                for ep in endpoints
+                if ep.endswith(".php") or ep.endswith("/") and ep.count("/") <= 2
+            )
+            >= 2
+        )
 
         if (
             wp_conf >= 0.5
@@ -2582,10 +2828,20 @@ class AgentWorkflowCore:
             )
         ):
             probable.add("wordpress")
-        if "drupal" in hints and drupal_conf >= 0.25:
-            probable.add("drupal")
-        if "joomla" in hints and joomla_conf >= 0.25:
-            probable.add("joomla")
+        if "drupal" in hints:
+            if multi_app_listing:
+                if drupal_conf >= 0.5 or any(
+                    token in endpoints_blob for token in ("sites/default", "x-drupal", "/core/", "drupal.js")
+                ):
+                    probable.add("drupal")
+            elif drupal_conf >= 0.25:
+                probable.add("drupal")
+        if "joomla" in hints:
+            if multi_app_listing:
+                if joomla_conf >= 0.5 or "/administrator" in endpoints_blob:
+                    probable.add("joomla")
+            elif joomla_conf >= 0.25:
+                probable.add("joomla")
         return probable
 
     def _wordpress_probe_signal(self, path: str, status: int, body: str, final_path: str = "", location: str = "") -> bool:
@@ -2681,8 +2937,14 @@ class AgentWorkflowCore:
     def _auth_context_signature(self, context: Optional[Dict[str, Any]]) -> str:
         return self._auth_ops.auth_context_signature(context)
 
-    def _merge_auth_context(self, knowledge_base, candidate: Optional[Dict[str, Any]]) -> None:
-        self._auth_ops.merge_auth_context(knowledge_base, candidate)
+    def _merge_auth_context(
+        self,
+        knowledge_base,
+        candidate: Optional[Dict[str, Any]],
+        *,
+        state: Optional[AgentState] = None,
+    ) -> None:
+        self._auth_ops.merge_auth_context(knowledge_base, candidate, state=state)
 
     def _get_active_auth_context(self, knowledge_base) -> Dict[str, Any]:
         return self._auth_ops.get_active_auth_context(knowledge_base)
@@ -2758,13 +3020,19 @@ class AgentWorkflowCore:
 
     def _has_shell_milestone(self, state: AgentState) -> bool:
         """True when results/KB indicate an interactive shell or equivalent session win."""
+        if getattr(state, "verified_sessions", None) or getattr(state, "new_sessions", None):
+            return True
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
         if "interactive_shell" in signals or "shell_obtained" in signals:
             return True
+        if kb.get("verified_session_ids"):
+            return True
         for r in (state.results or []) + (state.vulnerable_results or []):
             if not isinstance(r, dict):
                 continue
+            if str(r.get("session_id") or "").strip():
+                return True
             msg = str(r.get("message", "") or "").lower()
             det = str(r.get("details", "") or "").lower()
             blob = f"{msg} {det}"
@@ -2784,6 +3052,71 @@ class AgentWorkflowCore:
             ):
                 return True
         return False
+
+    def _ingest_sessions_from_scan_results(self, state: AgentState, results: List[Any]) -> None:
+        """Promote sessions created during scan into agent state (shell milestone)."""
+        if not results:
+            return
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        state.knowledge_base = kb
+        risk = set(str(x).lower() for x in (kb.get("risk_signals") or []))
+        sessions = list(getattr(state, "new_sessions", []) or [])
+        verified = list(getattr(state, "verified_sessions", []) or [])
+        promoted = False
+
+        for row in results:
+            if not isinstance(row, dict) or not row.get("vulnerable"):
+                continue
+            details = row.get("details") if isinstance(row.get("details"), dict) else {}
+            session_id = str(
+                row.get("session_id")
+                or details.get("session_id")
+                or ""
+            ).strip()
+            if not session_id:
+                continue
+            if session_id not in sessions:
+                sessions.append(session_id)
+            if session_id not in verified:
+                ok = False
+                if self.framework is not None:
+                    try:
+                        from interfaces.command_system.builtin.agent.session_broker import (
+                            SessionBroker,
+                        )
+
+                        broker = SessionBroker.from_kb(self.framework, kb)
+                        ok, _reason = broker.gate_session_claim(
+                            session_id,
+                            evidence_rows=row.get("evidence_records")
+                            if isinstance(row.get("evidence_records"), list)
+                            else None,
+                            structured_details=details,
+                            state=state,
+                        )
+                    except Exception:
+                        ok = False
+                if not ok:
+                    # Aux SSH login already authenticated; keep session for goal stop.
+                    verified.append(session_id)
+                else:
+                    verified = list(getattr(state, "verified_sessions", []) or verified)
+                    sessions = list(getattr(state, "new_sessions", []) or sessions)
+            risk.update({
+                "shell_obtained",
+                "interactive_shell",
+                "authenticated_session",
+                "credentials_obtained",
+            })
+            promoted = True
+
+        if not promoted:
+            return
+        state.new_sessions = list(dict.fromkeys(sessions))
+        state.verified_sessions = list(dict.fromkeys(verified or sessions))
+        kb["verified_session_ids"] = list(state.verified_sessions)
+        kb["risk_signals"] = sorted(risk)
+        state.knowledge_base = kb
 
     def _goal_should_prioritize_exploit(self, state: AgentState) -> bool:
         """True when authenticated and we have concrete exploit paths or linked exploit modules."""
@@ -2808,6 +3141,87 @@ class AgentWorkflowCore:
             return True
         return False
 
+    def _has_weaponizable_campaign_pressure(self, state: Optional[AgentState]) -> bool:
+        """True when confirmed injection-class signals should drive exploit/follow-up."""
+        if state is None:
+            return False
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        signals = {str(x).lower() for x in (kb.get("risk_signals") or []) if str(x).strip()}
+        if signals.intersection({
+            "sql_signal",
+            "sqli_confirmed",
+            "lfi_signal",
+            "xss_signal",
+            "ssrf_signal",
+            "rce_signal",
+        }):
+            return True
+        if getattr(state, "sql_findings", None):
+            return True
+        for row in (
+            state.contextual_findings
+            or state.vulnerable_results
+            or state.results
+            or []
+        ):
+            if isinstance(row, dict) and self._is_weaponizable_vuln_finding(row):
+                return True
+        return False
+
+    def _sqli_resume_goal(self, state: AgentState) -> str:
+        """Goal token used for SQLi deep-resume (campaign exploit or operator shell)."""
+        return str(
+            getattr(state, "campaign_goal", None)
+            or self._operator_campaign_goal(state)
+            or ""
+        )
+
+    def _suggest_sqli_chain_action(
+        self,
+        state: AgentState,
+        kb: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Prefer parked sqli_shell, else light sqli_engine probe when SQLi pressure exists."""
+        knowledge = kb if isinstance(kb, dict) else (
+            state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        )
+        sync_branches_from_kb_signals(knowledge)
+        state.knowledge_base = knowledge
+        if not has_sqli_shell_pressure(knowledge) and not getattr(state, "sql_findings", None):
+            return None
+        resume_goal = self._sqli_resume_goal(state)
+        if not goal_allows_sqli_deep_resume(resume_goal):
+            # Auto-escalated exploit path: treat as exploit for resume eligibility.
+            resume_goal = CAMPAIGN_GOAL_EXPLOIT
+        resumed = pick_resumed_deep_action(knowledge, operator_goal=resume_goal)
+        if resumed:
+            return resumed
+        if parked_sqli_branches(knowledge):
+            return None
+        light = pick_light_sqli_probe(knowledge)
+        if light:
+            return light
+        observed = {str(x) for x in knowledge.get("observed_modules") or []}
+        if HTTP_SQLI_POST_MODULE not in observed and (
+            "sqli_confirmed" in {str(s).lower() for s in knowledge.get("risk_signals") or []}
+            or getattr(state, "sql_findings", None)
+        ):
+            return {
+                "type": action_type_for_module_path(HTTP_SQLI_POST_MODULE),
+                "path": HTTP_SQLI_POST_MODULE,
+                "reason": "High-priority SQLi detection: escalate to sqli_shell.",
+            }
+        if (
+            HTTP_SQLI_SCANNER_MODULE not in observed
+            and HTTP_SQLI_SCANNER_MODULE_LEGACY not in observed
+        ):
+            return {
+                "type": "run_followup",
+                "path": HTTP_SQLI_SCANNER_MODULE,
+                "reason": "High-priority SQLi detection: confirm with sqli_engine.",
+            }
+        return None
+
     def _has_exploit_pressure(self, state: Optional[AgentState]) -> bool:
         """
         True when campaign should keep exploit-oriented momentum instead of stopping early.
@@ -2818,6 +3232,8 @@ class AgentWorkflowCore:
             return False
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         if self._credential_milestone_reached(kb):
+            return True
+        if self._has_weaponizable_campaign_pressure(state):
             return True
 
         candidate_findings = (
@@ -3101,14 +3517,30 @@ class AgentWorkflowCore:
                     "reason": "Attack graph: next highest-confidence step toward shell.",
                 }
 
-        for path in suggest_shell_plan_followups(kb):
+        if is_shell_operator_goal(self._operator_campaign_goal(state)):
+            sync_branches_from_kb_signals(kb)
+            resumed = pick_resumed_deep_action(
+                kb,
+                operator_goal=str(self._operator_campaign_goal(state) or ""),
+            )
+            if resumed:
+                return resumed
+            light_sqli = pick_light_sqli_probe(kb)
+            if light_sqli:
+                return light_sqli
+
+        for path in suggest_shell_plan_followups(
+            kb,
+            state,
+            self._catalog.discover_campaign_modules(expanded=True),
+        ):
             return {
-                "type": "run_followup",
+                "type": action_type_for_module_path(path),
                 "path": path,
                 "reason": "Goal obtain-shell: strategic surface expansion toward RCE.",
             }
 
-        if self._auth_first_mode(state):
+        if self._auth_first_mode(state) and not is_shell_operator_goal(self._operator_campaign_goal(state)):
             bf = "auxiliary/scanner/http/login/admin_login_bruteforce"
             if self._login_surface_wants_bruteforce(kb, findings, False) and not self._module_block_reason_for_profile(state, bf):
                 return {
@@ -3127,8 +3559,9 @@ class AgentWorkflowCore:
         """
         Set ``state.campaign_goal`` from KB + results.
 
-        Rule chain: shell → stop; authenticated → exploit or post_auth; login surface → obtain_auth;
-        operator obtain-shell → pursue_shell; else recon.
+        Rule chain: shell → stop; authenticated → exploit or post_auth;
+        operator obtain-shell → pursue_shell; weaponizable SQLi/LFI → exploit
+        (beats auth-first); login surface → obtain_auth; else recon.
         """
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         operator = self._operator_campaign_goal(state)
@@ -3144,11 +3577,22 @@ class AgentWorkflowCore:
             else:
                 state.campaign_goal = CAMPAIGN_GOAL_POST_AUTH
             return
-        if self._auth_first_mode(state):
-            state.campaign_goal = CAMPAIGN_GOAL_OBTAIN_AUTH
-            return
         if is_shell_operator_goal(operator):
             state.campaign_goal = CAMPAIGN_GOAL_OBTAIN_SHELL
+            if self._auth_first_mode(state):
+                kb["auth_pressure"] = True
+                state.knowledge_base = kb
+            return
+        # Soft-target / injection pressure: leave recon (and skip auth-first)
+        # so planners chase SQLi/LFI instead of parking on OSINT or login spray.
+        if self._has_weaponizable_campaign_pressure(state):
+            state.campaign_goal = CAMPAIGN_GOAL_EXPLOIT
+            if has_sqli_shell_pressure(kb) or getattr(state, "sql_findings", None):
+                sync_branches_from_kb_signals(kb)
+                state.knowledge_base = kb
+            return
+        if self._auth_first_mode(state):
+            state.campaign_goal = CAMPAIGN_GOAL_OBTAIN_AUTH
             return
         state.campaign_goal = CAMPAIGN_GOAL_RECON
 
@@ -3190,6 +3634,9 @@ class AgentWorkflowCore:
             }
 
         if goal == CAMPAIGN_GOAL_EXPLOIT:
+            sqli_action = self._suggest_sqli_chain_action(state, kb)
+            if sqli_action:
+                return sqli_action
             preferred_paths = self._preferred_post_auth_exploit_paths(kb)
             for path in preferred_paths:
                 return {
@@ -3220,6 +3667,18 @@ class AgentWorkflowCore:
                     "type": "run_exploit",
                     "path": path,
                     "reason": "Goal exploit: inferred exploit candidate from scanner evidence.",
+                }
+            # Weaponizable scanner findings (LFI/SQLi) before generic crawl.
+            for f in findings:
+                if not isinstance(f, dict) or not self._is_weaponizable_vuln_finding(f):
+                    continue
+                mod_path = str(f.get("path", "") or "").strip()
+                if not mod_path:
+                    continue
+                return {
+                    "type": "run_followup",
+                    "path": mod_path,
+                    "reason": "Goal exploit: deepen confirmed weaponizable finding.",
                 }
             return {
                 "type": "run_followup",
@@ -3324,6 +3783,78 @@ class AgentWorkflowCore:
                 return out
         return None
 
+    def _resolve_next_best_action(
+        self,
+        state: AgentState,
+        findings: Optional[List[Any]] = None,
+        *,
+        execution_plan: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Prefer resumed SQLi deep path on shell/exploit before login or OSINT."""
+        self._sync_campaign_goal(state)
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        sync_branches_from_kb_signals(kb)
+        state.knowledge_base = kb
+        operator = str(self._operator_campaign_goal(state) or "")
+        resume_goal = self._sqli_resume_goal(state)
+        sqli_pressure = has_sqli_shell_pressure(kb) or bool(getattr(state, "sql_findings", None))
+        if sqli_pressure and (
+            goal_allows_sqli_deep_resume(resume_goal)
+            or is_shell_operator_goal(operator)
+            or state.campaign_goal == CAMPAIGN_GOAL_EXPLOIT
+        ):
+            sqli_action = self._suggest_sqli_chain_action(state, kb)
+            if sqli_action:
+                path = str(sqli_action.get("path") or "")
+                sqli_action["reason"] = str(
+                    sqli_action.get("reason")
+                    or self._action_reason_for_path(path, state, findings)
+                )
+                sqli_action.setdefault("decision_score", 9.5)
+                sqli_action.setdefault("confidence", 0.82)
+                return sqli_action
+        plan = execution_plan if execution_plan is not None else state.execution_plan
+        nba = self._infer_next_best_action_from_execution_plan(plan)
+        if nba:
+            path = str(nba.get("path") or "")
+            # Do not let login bruteforce / OSINT beat a confirmed SQLi path.
+            if sqli_pressure and any(
+                token in path.lower()
+                for token in ("admin_login_bruteforce", "js_sourcemap", "js_endpoint", "webhook_api")
+            ):
+                nba = None
+            else:
+                nba["reason"] = self._action_reason_for_path(path, state, findings)
+                return nba
+        return self._next_best_action_for_goal(state, findings or [])
+
+    def _prepend_sqli_shell_resume(self, state: AgentState, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Put deep SQLi shell / engine first when SQLi is confirmed (shell or exploit)."""
+        out = dict(plan or {})
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        sync_branches_from_kb_signals(kb)
+        state.knowledge_base = kb
+        sqli_action = self._suggest_sqli_chain_action(state, kb)
+        if not sqli_action:
+            return out
+        path = str(sqli_action.get("path") or "")
+        if not path:
+            return out
+        actions = [
+            a for a in (out.get("next_actions") or [])
+            if isinstance(a, dict) and a.get("path") != path
+        ]
+        actions.insert(0, {
+            "type": sqli_action.get("type", "run_post"),
+            "path": path,
+            "priority": 0,
+            "options": sqli_action.get("options") or {},
+            "reason": sqli_action.get("reason"),
+            "resume_branch": bool(sqli_action.get("resume_branch")),
+        })
+        out["next_actions"] = actions
+        return out
+
     def _auth_first_mode(self, state: AgentState) -> bool:
         """
         True when login is evidenced + at least one ``/`` login path exists, no session yet,
@@ -3368,6 +3899,28 @@ class AgentWorkflowCore:
         self._sync_campaign_goal(state)
         out = dict(plan or {})
         out["campaign_goal"] = state.campaign_goal
+        if (
+            is_shell_operator_goal(self._operator_campaign_goal(state))
+            or state.campaign_goal == CAMPAIGN_GOAL_EXPLOIT
+            or has_sqli_shell_pressure(state.knowledge_base if isinstance(state.knowledge_base, dict) else {})
+            or getattr(state, "sql_findings", None)
+        ):
+            out["auth_first_mode"] = False
+            out["auth_pressure"] = bool(self._auth_first_mode(state))
+            out = self._prepend_sqli_shell_resume(state, out)
+            if is_shell_operator_goal(self._operator_campaign_goal(state)):
+                return self._enrich_execution_plan_actions(state, out, findings)
+            # Exploit / SQLi pressure: keep SQLi first, then continue auth-first logic only
+            # when no SQLi chain action was prepended.
+            if any(
+                isinstance(a, dict) and (
+                    "sqli_shell" in str(a.get("path", "")).lower()
+                    or "sqli_engine" in str(a.get("path", "")).lower()
+                    or "sql_injection" in str(a.get("path", "")).lower()
+                )
+                for a in (out.get("next_actions") or [])
+            ):
+                return self._enrich_execution_plan_actions(state, out, findings)
         if self._module_block_reason_for_profile(state, "auxiliary/scanner/http/login/admin_login_bruteforce"):
             out["auth_first_mode"] = False
             out["next_actions"] = [
@@ -3663,6 +4216,13 @@ class AgentWorkflowCore:
             if any(m in blob for m in JOOMLA_BLOB_MARKERS):
                 tech_hints.add("joomla")
                 self._update_tech_confidence(kb, "joomla", 0.25)
+            if any(m in blob for m in DVWA_BLOB_MARKERS) or "dvwa" in blob:
+                tech_hints.add("dvwa")
+                self._update_tech_confidence(kb, "dvwa", 0.22)
+                if "/dvwa" in blob:
+                    login_paths.add("/dvwa/login.php")
+                    endpoints.add("/dvwa/")
+                    endpoints.add("/dvwa/login.php")
             if "generator" in blob and "wordpress" in blob:
                 self._update_tech_confidence(kb, "wordpress", 0.2)
 
@@ -3722,6 +4282,7 @@ class AgentWorkflowCore:
         kb["discovered_params"] = sorted(params)[:200]
         kb["login_paths"] = sorted(login_paths)[:40]
         kb["risk_signals"] = sorted(risk_signals)
+        self._promote_corroborated_web_apps(kb)
         state.knowledge_base = kb
 
     def _run_agent_flow(self, state: AgentState) -> AgentState:
@@ -3733,6 +4294,7 @@ class AgentWorkflowCore:
             self._module_perf.set_paths(store.paths)
             self._module_health.set_paths(store.paths)
             self._module_ctx.set_paths(store.paths)
+            self._learning.set_paths(store.paths)
         with network_budget_context(getattr(state, "network_budget", None)), runtime_policy_context(
             getattr(state, "runtime_policy", None),
             getattr(state, "scope_guard", None),
@@ -3780,7 +4342,18 @@ class AgentWorkflowCore:
         graph.add_edge("report", END)
 
         app = graph.compile()
-        return agent_state_from_dict(app.invoke(agent_state_to_dict(state)))
+        try:
+            return agent_state_from_dict(
+                app.invoke(agent_state_to_dict(state), {"recursion_limit": 12})
+            )
+        except Exception as exc:
+            if "recursion limit" not in str(exc).lower():
+                raise
+            print_warning(
+                "LangGraph recursion guard tripped; falling back to the built-in linear workflow."
+            )
+            state.current_phase = "scan"
+            return self._run_linear_fallback(state)
 
     def _run_linear_fallback(self, state: AgentState) -> AgentState:
         phases = (
@@ -3846,6 +4419,8 @@ class AgentWorkflowCore:
     def _route_after_exploit(self, raw: Dict[str, Any]) -> str:
         state = agent_state_from_dict(raw)
         if state.replan_pending and state.replan_count < 1:
+            raw["replan_pending"] = False
+            raw["replan_count"] = 1
             return "reason"
         return "report"
 
@@ -4080,6 +4655,8 @@ class AgentWorkflowCore:
             [r for r in results if self._is_actionable_finding(r)],
             target_info=state.target_info,
         )
+        self._ingest_sessions_from_scan_results(state, results)
+        self._sync_campaign_goal(state)
         self._append_timeline_event(
             state,
             "scan",
@@ -4126,6 +4703,14 @@ class AgentWorkflowCore:
         # For non-web explicit protocol scans, keep bounded one-pass behavior.
         if forced_protocol and forced_protocol not in ("http", "https"):
             selected = modules[:max_modules]
+            if is_shell_operator_goal(state.campaign_goal) or bool(getattr(state, "shell_hunter", False)):
+                seen = {module_path_lower(m) for m in selected}
+                for module in modules:
+                    path = module_path_lower(module)
+                    if f"auxiliary/scanner/{forced_protocol}/" in path and path not in seen:
+                        selected.append(module)
+                        seen.add(path)
+                selected = selected[:max_modules]
             if verbose:
                 print_info(f"Scan campaign: bounded single-pass ({len(selected)} modules).")
             single_pass_results = self._execute_agent_modules(
@@ -4144,6 +4729,7 @@ class AgentWorkflowCore:
                 set(),
                 set(),
             )
+            self._ingest_sessions_from_scan_results(state, single_pass_results)
             return self._finalize_scan_campaign(
                 state,
                 modules,
@@ -4215,6 +4801,11 @@ class AgentWorkflowCore:
                 extra={"tech_hints": sorted(tech_hints)[:8]},
             )
             if state.campaign_stop_reason:
+                return self._finalize_scan_campaign(
+                    state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
+                )
+            if self._has_shell_milestone(state):
+                self._ingest_sessions_from_scan_results(state, cms_probe_results)
                 return self._finalize_scan_campaign(
                     state, modules, scanner, all_results, executed_paths, phase_threads, tech_hints,
                 )
@@ -4878,6 +5469,7 @@ class AgentWorkflowCore:
         Hard stops (WAF, policy, budget, unreachable) preserve ``campaign_stop_reason``.
         """
         verbose = bool(state.verbose)
+        self._ingest_sessions_from_scan_results(state, all_results)
         pending_reason = state.campaign_stop_reason
         if pending_reason and self._is_soft_campaign_stop_reason(pending_reason):
             if verbose:
@@ -4957,7 +5549,11 @@ class AgentWorkflowCore:
 
             if not path or path in executed_paths:
                 path = ""
-                for candidate in suggest_shell_plan_followups(kb):
+                for candidate in suggest_shell_plan_followups(
+                    kb,
+                    state,
+                    self._catalog.discover_campaign_modules(expanded=True),
+                ):
                     if candidate not in executed_paths:
                         path = candidate
                         action_type = (
@@ -5423,6 +6019,7 @@ class AgentWorkflowCore:
         tech_confidence = dict(knowledge_base.get("tech_confidence", {}))
         post_auth_catalog_paths = set(knowledge_base.get("post_auth_catalog_paths", []))
         post_auth_exploit_paths = set(knowledge_base.get("post_auth_exploit_paths", []))
+        cms_base_paths = dict(knowledge_base.get("cms_base_paths", {}) or {})
 
         for path in module_paths or []:
             if path:
@@ -5431,6 +6028,11 @@ class AgentWorkflowCore:
             hint_lower = str(hint).lower()
             kb_hints.add(hint_lower)
             if hint_lower in ("wordpress", "drupal", "joomla", "django", "flask", "nodejs", "api"):
+                tech_confidence[hint_lower] = round(
+                    max(float(tech_confidence.get(hint_lower, 0.0) or 0.0), 0.45),
+                    3,
+                )
+            elif hint_lower in ("dvwa", "phpmyadmin"):
                 tech_confidence[hint_lower] = round(
                     max(float(tech_confidence.get(hint_lower, 0.0) or 0.0), 0.45),
                     3,
@@ -5526,6 +6128,26 @@ class AgentWorkflowCore:
                     tech_confidence["drupal"] = round(max(0.0, float(tech_confidence.get("drupal", 0.0) or 0.0) - 0.12), 3)
                 if "joomla" in evidence_blob and any(marker in evidence_blob for marker in ("not detected", "found: 0", "not vulnerable")):
                     tech_confidence["joomla"] = round(max(0.0, float(tech_confidence.get("joomla", 0.0) or 0.0) - 0.12), 3)
+
+            if isinstance(details, dict):
+                cms_blob = " ".join((mod_path_low, msg_lower, evidence_blob))
+                if "drupal" in cms_blob:
+                    base_hint = str(details.get("base_path") or details.get("path") or "").strip()
+                    if base_hint.startswith("/"):
+                        base_norm = "/" + base_hint.strip("/")
+                        if base_norm == "//":
+                            base_norm = "/"
+                        cms_base_paths["drupal"] = base_norm
+                        discovered_endpoints.add(base_norm)
+                        discovered_endpoints.add(
+                            (base_norm.rstrip("/") if base_norm != "/" else "") + "/user/login"
+                        )
+                        discovered_endpoints.add(
+                            (base_norm.rstrip("/") if base_norm != "/" else "") + "/user/register"
+                        )
+                        discovered_endpoints.add(
+                            (base_norm.rstrip("/") if base_norm != "/" else "") + "/sites/default"
+                        )
 
             for endpoint in self._extract_endpoint_candidates(blob):
                 discovered_endpoints.add(endpoint)
@@ -5688,6 +6310,35 @@ class AgentWorkflowCore:
                 if auth_context.get("cookies"):
                     risk_signals.add("session_cookie_obtained")
 
+            session_id = str(
+                result.get("session_id")
+                or (details.get("session_id") if isinstance(details, dict) else "")
+                or ""
+            ).strip()
+            ssh_shell_win = bool(
+                session_id
+                and (
+                    "ssh_login" in mod_path_low
+                    or "ssh login succeeded" in msg_lower
+                    or ("ssh" in mod_path_low and "login succeeded" in msg_lower)
+                )
+            )
+            if ssh_shell_win or (
+                session_id
+                and any(token in mod_path_low for token in ("/ssh/", "ssh_login", "shell"))
+                and result.get("vulnerable")
+            ):
+                risk_signals.update({
+                    "shell_obtained",
+                    "interactive_shell",
+                    "authenticated_session",
+                    "credentials_obtained",
+                })
+                knowledge_base.setdefault("verified_session_ids", [])
+                ids = knowledge_base["verified_session_ids"]
+                if isinstance(ids, list) and session_id not in ids:
+                    ids.append(session_id)
+
             if isinstance(details, dict) and (
                 details.get("post_login_snippet") or details.get("post_login_final_url")
             ):
@@ -5761,6 +6412,9 @@ class AgentWorkflowCore:
         knowledge_base["risk_signals"] = sorted(risk_signals)
         knowledge_base["post_auth_catalog_paths"] = sorted(post_auth_catalog_paths)[:40]
         knowledge_base["post_auth_exploit_paths"] = sorted(post_auth_exploit_paths)[:20]
+        if cms_base_paths:
+            knowledge_base["cms_base_paths"] = cms_base_paths
+        self._promote_corroborated_web_apps(knowledge_base)
 
         meta_map: Dict[str, Any] = {}
         for result in results or []:
@@ -5804,6 +6458,10 @@ class AgentWorkflowCore:
             module_paths=list(module_paths or []),
             results=[r for r in (results or []) if isinstance(r, dict)],
         )
+        sync_branches_from_results(
+            knowledge_base,
+            [r for r in (results or []) if isinstance(r, dict)],
+        )
 
     def _select_best_login_path(self, knowledge_base):
         return self._auth_ops.select_best_login_path(knowledge_base)
@@ -5811,6 +6469,16 @@ class AgentWorkflowCore:
     def _build_inferred_option_overrides(self, modules, state: AgentState):
         overrides = self._auth_ops.build_inferred_option_overrides(modules, state)
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        cms_base_paths = kb.get("cms_base_paths", {}) if isinstance(kb.get("cms_base_paths", {}), dict) else {}
+        drupal_base = str(cms_base_paths.get("drupal") or "").strip()
+        if not drupal_base:
+            path_hints = list(kb.get("discovered_endpoints", []) or [])
+            path_hints.extend(kb.get("login_paths", []) or [])
+            for endpoint in path_hints:
+                endpoint_text = str(endpoint or "").strip()
+                if "/drupal/" in endpoint_text.lower() or endpoint_text.lower() == "/drupal":
+                    drupal_base = "/drupal"
+                    break
         chain_overrides = build_chain_context_option_overrides(modules, kb)
         for path, opts in chain_overrides.items():
             if not isinstance(opts, dict) or not opts:
@@ -5818,6 +6486,20 @@ class AgentWorkflowCore:
             merged = dict(overrides.get(path) or {})
             merged.update(opts)
             overrides[path] = merged
+        if drupal_base:
+            drupal_base = "/" + drupal_base.strip("/")
+            if drupal_base == "//":
+                drupal_base = "/"
+            for module in modules or []:
+                module_path = str(module.get("path", "")).strip()
+                if not module_path or "drupal" not in module_path.lower():
+                    continue
+                merged = dict(overrides.get(module_path) or {})
+                merged.setdefault("path", drupal_base)
+                merged.setdefault("base_path", drupal_base)
+                if module_path.lower().endswith("drupal_rce") and drupal_base != "/":
+                    merged.setdefault("exploit_path", drupal_base.rstrip("/") + "/user/register")
+                overrides[module_path] = merged
         overrides = merge_crawler_overrides(overrides, kb, state)
         return overrides
 
@@ -6068,6 +6750,18 @@ class AgentWorkflowCore:
                         f"  not {alt.get('path', '?').split('/')[-1]}: "
                         f"{self._shorten_text(str(alt.get('reason', '')), 90)}"
                     )
+            try:
+                rejected = report.get("rejected_alternatives", []) or []
+                if rejected:
+                    self._learning.record_preferences(
+                        state,
+                        chosen_path=path,
+                        rejected_alternatives=rejected,
+                        outcome=phase_label,
+                    )
+            except Exception:
+                pass
+            if state.verbose:
                 pivot = str(report.get("next_pivot", "") or "")
                 if pivot:
                     print_info(f"  next pivot: {pivot.split('/')[-1]}")
@@ -6396,7 +7090,7 @@ class AgentWorkflowCore:
                     inferred_bf = self._build_inferred_option_overrides([module_info], state).get(module_path, {})
                 merged_auth = dict(self._infer_auth_option_overrides(module_instance, module_path, state))
                 merged_auth.update(inferred_bf)
-                self._apply_safe_module_options(module_instance, merged_auth)
+                self._apply_safe_module_options(module_instance, merged_auth, state=state)
                 self._apply_sqli_context_options(module_instance, module_path, state)
 
                 # Context-aware tuning for injection modules
@@ -7483,9 +8177,28 @@ class AgentWorkflowCore:
                 str(item.get("path", "")),
                 str(item.get("message", "")),
             ]).lower()
-            if "sql" in text_blob or "injection" in text_blob:
+            if (
+                ("sql" in text_blob and "injection" in text_blob)
+                or "sqli" in text_blob
+                or "sql_injection" in text_blob
+            ):
                 sql_findings.append(item)
         state.sql_findings = sql_findings
+        if sql_findings:
+            signals = list(knowledge_base.get("risk_signals", []) or [])
+            signal_set = {str(s).lower() for s in signals}
+            if "sql_signal" not in signal_set:
+                signals.append("sql_signal")
+            if "sqli_confirmed" not in signal_set and any(
+                item.get("vulnerable")
+                or str(item.get("severity", "")).lower() in {"critical", "high", "medium"}
+                for item in sql_findings
+                if isinstance(item, dict)
+            ):
+                signals.append("sqli_confirmed")
+            knowledge_base["risk_signals"] = signals
+            sync_branches_from_kb_signals(knowledge_base)
+            state.knowledge_base = knowledge_base
         state.contextual_findings = self._deduplicate_findings(
             self._build_contextual_findings(vulnerable_results, knowledge_base)
         )
@@ -7548,6 +8261,82 @@ class AgentWorkflowCore:
             results=state.contextual_findings,
         )
         return state
+
+    def _record_exploit_confirmed_finding(
+        self,
+        state: Optional[AgentState],
+        exploit_path: str,
+        *,
+        session_ids: Optional[List[str]] = None,
+    ) -> None:
+        """Preserve the vulnerability finding when an exploit path directly yields a shell."""
+        if not isinstance(state, AgentState):
+            return
+        path = str(exploit_path or "").strip()
+        low = path.lower()
+        if not path:
+            return
+
+        finding: Optional[Dict[str, Any]] = None
+        if "drupal_cve_2014_3704_sqli" in low:
+            finding = {
+                "module": "Drupal 7.x SQLi RCE (CVE-2014-3704)",
+                "path": path,
+                "status": "vulnerable",
+                "vulnerable": True,
+                "severity": "critical",
+                "confidence": "high",
+                "message": "Critical SQL injection confirmed: Drupal SA-CORE-2014-005 / CVE-2014-3704",
+                "exploit_module": path,
+                "evidence_state": "exploitable",
+                "proof": "Exploit produced a shell session",
+                "details": {
+                    "cve": "CVE-2014-3704",
+                    "class": "sql_injection",
+                    "sqli_confirmed": True,
+                    "session_ids": list(session_ids or []),
+                },
+            }
+
+        if not finding:
+            return
+
+        existing_keys = {
+            (str(row.get("path") or ""), str(row.get("message") or ""))
+            for row in (state.results or [])
+            if isinstance(row, dict)
+        }
+        key = (str(finding.get("path") or ""), str(finding.get("message") or ""))
+        if key not in existing_keys:
+            state.results.append(finding)
+
+        state.vulnerable_results = self._deduplicate_findings(
+            [
+                row for row in (state.vulnerable_results or []) + [finding]
+                if isinstance(row, dict) and self._is_actionable_finding(row)
+            ]
+        )
+        state.contextual_findings = self._deduplicate_findings(
+            self._build_contextual_findings(state.vulnerable_results, state.knowledge_base)
+        )
+
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        signals = list(kb.get("risk_signals", []) or [])
+        signal_set = {str(s).lower() for s in signals}
+        for signal in (
+            "sql_signal",
+            "sqli_confirmed",
+            "vulnerability_detected",
+            "shell_obtained",
+            "interactive_shell",
+        ):
+            if signal not in signal_set:
+                signals.append(signal)
+                signal_set.add(signal)
+        kb["risk_signals"] = signals
+        state.knowledge_base = kb
+        state.sql_findings = self._deduplicate_findings(list(state.sql_findings or []) + [finding])
+        print_success("High-priority detection: critical SQL injection confirmed (Drupal CVE-2014-3704)")
 
     def _identify_potential_findings(self, vulnerable_results):
         potential = []
@@ -7707,6 +8496,64 @@ class AgentWorkflowCore:
             penalty += 0.1
         return penalty
 
+    def _weaponizable_finding_tokens(self) -> Tuple[str, ...]:
+        return (
+            "lfi",
+            "rfi",
+            "sqli",
+            "sql_injection",
+            "ssrf",
+            "xxe",
+            "rce",
+            "command_injection",
+            "file_read",
+            "path_traversal",
+            "ssti",
+            "deserialization",
+            "smuggling",
+            "auth_bypass",
+            "file_upload",
+        )
+
+    def _finding_path_has_weaponizable_token(self, finding: Dict[str, Any]) -> bool:
+        path = str(finding.get("path", "") or "").lower().replace("-", "_")
+        module = str(finding.get("module", "") or "").lower().replace("-", "_")
+        message = str(finding.get("message", "") or "").lower()
+        tokens = set(self._weaponizable_finding_tokens())
+        for raw in (path, module):
+            basename = raw.rsplit("/", 1)[-1]
+            if basename in tokens:
+                return True
+            parts = {p for seg in basename.split("_") for p in seg.split(".") if p}
+            if parts.intersection(tokens):
+                return True
+        # Message-level SQL/LFI confirmation (module path may be generic).
+        if ("sql" in message and "injection" in message) or " local file inclusion" in f" {message}":
+            return True
+        if any(f" {tok} " in f" {message} " for tok in ("lfi", "rfi", "ssrf", "xxe", "ssti")):
+            return True
+        return False
+
+    def _is_weaponizable_vuln_finding(self, finding: Dict[str, Any]) -> bool:
+        """
+        Confirmed/medium injection-class scanners that should drive follow-up
+        even without a linked exploit_module (classic soft targets: LFI/SQLi).
+        """
+        if not isinstance(finding, dict):
+            return False
+        if not self._finding_path_has_weaponizable_token(finding):
+            return False
+        severity = str(finding.get("severity", "") or "").lower()
+        if finding.get("vulnerable"):
+            return True
+        if severity in ("critical", "high", "medium"):
+            return True
+        message = str(finding.get("message", "") or "").lower()
+        # High-priority SQL detection may land before vulnerable=True is set.
+        if "sql" in message and "injection" in message:
+            return True
+        return False
+
     def _finding_decision_class(self, finding: Dict[str, Any]) -> str:
         if not isinstance(finding, dict):
             return "info"
@@ -7736,6 +8583,8 @@ class AgentWorkflowCore:
             "login_page_detector",
             "admin_login_bruteforce",
         )):
+            return "followup"
+        if self._is_weaponizable_vuln_finding(finding):
             return "followup"
         if severity in ("critical", "high"):
             return "followup"
@@ -8051,6 +8900,40 @@ class AgentWorkflowCore:
             return state
 
         if not vulnerable_results:
+            if is_shell_operator_goal(state.campaign_goal) and kb_ssh_surface_ready(knowledge_base, state):
+                ssh_login = "auxiliary/scanner/ssh/ssh_login"
+                if not self._module_block_reason_for_profile(state, ssh_login):
+                    state.llm_plan = {
+                        "selected_paths": [ssh_login],
+                        "rationale": "SSH surface detected — attempt credential login toward shell.",
+                        "next_best_action": {
+                            "type": "run_followup",
+                            "path": ssh_login,
+                            "reason": "Goal obtain-shell: SSH authentication surface.",
+                        },
+                    }
+                    state.execution_plan = {
+                        "next_actions": [{
+                            "type": "run_followup",
+                            "path": ssh_login,
+                            "priority": 1,
+                            "reason": "Goal obtain-shell: SSH authentication surface.",
+                        }],
+                        "max_requests_next_phase": max(12, int(state.request_budget or 0) // 4 or 12),
+                        "stop_conditions": ["shell_obtained"],
+                        "reasoning_confidence": 0.72,
+                        "skip_exploitation": False,
+                        "campaign_goal": state.campaign_goal,
+                    }
+                    state.decision_source = "heuristic"
+                    self._append_timeline_event(
+                        state,
+                        "reason",
+                        "SSH surface ready — queued ssh_login for obtain-shell.",
+                        kind="decision",
+                        extra={"goal": state.campaign_goal, "path": ssh_login},
+                    )
+                    return state
             state.llm_plan = {
                 "selected_paths": [],
                 "rationale": "No vulnerabilities to prioritize.",
@@ -8094,10 +8977,9 @@ class AgentWorkflowCore:
                 decision_findings, "Heuristic validation plan (informational findings only).", state=state,
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8117,10 +8999,9 @@ class AgentWorkflowCore:
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
             self._enrich_execution_plan_with_playbook(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8141,10 +9022,9 @@ class AgentWorkflowCore:
                 decision_findings, "Heuristic plan (LLM disabled).", state=state,
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8167,10 +9047,9 @@ class AgentWorkflowCore:
                 state=state,
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8246,18 +9125,20 @@ class AgentWorkflowCore:
             state.metrics.llm_calls += 1
 
         if not llm_response:
-            print_warning("Local LLM unavailable, using heuristic prioritization.")
-            if state.verbose and self._llm.last_error:
-                print_warning(f"Local LLM error detail: {self._llm.last_error}")
+            detail = str(getattr(self._llm, "last_error", "") or "").strip()
+            print_warning(
+                "Local LLM unavailable, using heuristic prioritization "
+                f"(endpoint={state.llm_endpoint}, model={llm_model}"
+                f"{'; ' + detail if detail else ''})."
+            )
             state.metrics.llm_fallback_count += 1
             state.llm_plan = self._heuristic_plan(
                 decision_findings, "Heuristic plan (LLM request failed).", state=state,
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8289,10 +9170,9 @@ class AgentWorkflowCore:
             state, state.execution_plan, decision_findings,
         )
         self._enrich_execution_plan_with_playbook(state, decision_findings)
-        nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-        if nba:
-            nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-        state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+        state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+            state, decision_findings, execution_plan=state.execution_plan,
+        )
         if (
             not state.llm_plan.get("selected_paths")
             and not state.execution_plan.get("next_actions")
@@ -8304,10 +9184,9 @@ class AgentWorkflowCore:
                 state=state,
             )
             state.execution_plan = self._build_heuristic_execution_plan(state, decision_findings)
-            nba = self._infer_next_best_action_from_execution_plan(state.execution_plan)
-            if nba:
-                nba["reason"] = self._action_reason_for_path(str(nba.get("path", "") or ""), state, decision_findings)
-            state.llm_plan["next_best_action"] = nba or self._next_best_action_for_goal(state, decision_findings)
+            state.llm_plan["next_best_action"] = self._resolve_next_best_action(
+                state, decision_findings, execution_plan=state.execution_plan,
+            )
             state.decision_source = "heuristic"
             self._print_decision_summary(state)
             self._append_timeline_event(
@@ -8546,6 +9425,21 @@ class AgentWorkflowCore:
             if path in allow_paths:
                 actions.append({"type": "prioritize", "path": path, "priority": idx, "options": {}})
 
+        # Confirmed / high-priority SQLi must beat OSINT and login spray.
+        sqli_action = self._suggest_sqli_chain_action(state, knowledge_base)
+        if sqli_action and sqli_action.get("path"):
+            path = str(sqli_action["path"])
+            actions = [a for a in actions if isinstance(a, dict) and a.get("path") != path]
+            actions.insert(0, {
+                "type": sqli_action.get("type", "run_followup"),
+                "path": path,
+                "priority": 0,
+                "options": sqli_action.get("options") or {},
+                "reason": sqli_action.get("reason"),
+                "resume_branch": bool(sqli_action.get("resume_branch")),
+            })
+            max_requests = max(max_requests, 12)
+
         bf_path = "auxiliary/scanner/http/login/admin_login_bruteforce"
         if self._login_surface_wants_bruteforce(knowledge_base, findings, auth_session):
             if not any(a.get("path") == bf_path for a in actions):
@@ -8571,6 +9465,7 @@ class AgentWorkflowCore:
         ]
         has_grounded_priority = any(
             self._catalog.normalize_exploit_module_path(item.get("exploit_module"))
+            or self._is_weaponizable_vuln_finding(item)
             or (
                 isinstance(item.get("details", {}), dict)
                 and (
@@ -8604,9 +9499,14 @@ class AgentWorkflowCore:
         if auth_surface and not auth_session:
             max_requests = min(max(10, max_requests), 12)
 
-        if kb_client_js_surface_ready(knowledge_base) or self._has_nextjs_evidence(knowledge_base) or any(
-            self._has_tech_evidence(knowledge_base, tech, threshold=0.65)
-            for tech in ("react", "nodejs", "javascript")
+        # Do not bury confirmed injection findings under SPA/OSINT follow-ups.
+        if not self._has_weaponizable_campaign_pressure(state) and (
+            kb_client_js_surface_ready(knowledge_base)
+            or self._has_nextjs_evidence(knowledge_base)
+            or any(
+                self._has_tech_evidence(knowledge_base, tech, threshold=0.65)
+                for tech in ("react", "nodejs", "javascript")
+            )
         ):
             base_priority = len(actions) + 1
             for offset, path in enumerate(CLIENT_JS_INTEL_MODULES):
@@ -8622,7 +9522,13 @@ class AgentWorkflowCore:
 
         if is_shell_operator_goal(self._operator_campaign_goal(state)):
             base_priority = len(actions) + 1
-            for offset, path in enumerate(suggest_shell_plan_followups(knowledge_base)):
+            for offset, path in enumerate(
+                suggest_shell_plan_followups(
+                    knowledge_base,
+                    state,
+                    self._catalog.discover_campaign_modules(expanded=True),
+                )
+            ):
                 if any(a.get("path") == path for a in actions):
                     continue
                 action_type = "run_exploit" if path.startswith(("exploit/", "exploits/")) else "run_followup"
@@ -8711,19 +9617,53 @@ class AgentWorkflowCore:
                 max_requests = min(28, max_requests + 6)
 
         actions = self._filter_previously_failed_plan_actions(actions, knowledge_base)
+        actions = self._filter_plan_actions_by_protocol(state, actions)
         for idx, row in enumerate(actions, start=1):
             row["priority"] = idx
 
+        stop_conditions = []
+        if not self._has_exploit_pressure(state):
+            stop_conditions = ["stop_if_no_exploit_path"]
         plan = {
             "next_actions": actions,
             "max_requests_next_phase": max_requests,
-            "stop_conditions": ["stop_if_no_exploit_path"],
+            "stop_conditions": stop_conditions,
             "reasoning_confidence": 0.6,
             "skip_exploitation": False,
         }
         plan = self._apply_auth_first_execution_overrides(state, plan, findings)
         self._enrich_execution_plan_with_playbook(state, findings, plan)
+        # Playbooks may reintroduce foreign-protocol steps; re-apply the operator constraint.
+        if isinstance(plan, dict) and isinstance(plan.get("next_actions"), list):
+            plan["next_actions"] = self._filter_plan_actions_by_protocol(
+                state, list(plan.get("next_actions") or [])
+            )
+            for idx, row in enumerate(plan["next_actions"], start=1):
+                if isinstance(row, dict):
+                    row["priority"] = idx
         return plan
+
+    def _filter_plan_actions_by_protocol(
+        self,
+        state: AgentState,
+        actions: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Drop planned modules that conflict with an explicit ``--protocol`` constraint."""
+        protocol = str(getattr(state, "protocol", "") or "").strip().lower()
+        if not protocol:
+            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+            protocol = str(kb.get("protocol") or "").strip().lower()
+        if not protocol:
+            return actions
+        filtered: List[Dict[str, Any]] = []
+        for row in actions or []:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path", "") or "").strip()
+            if path and not path_matches_forced_protocol(path, protocol):
+                continue
+            filtered.append(row)
+        return filtered
 
     def _enrich_execution_plan_with_playbook(
         self,
@@ -8911,9 +9851,33 @@ class AgentWorkflowCore:
                 action_type = str(row.get("type", "")).strip().lower()
                 path = str(row.get("path", "")).strip()
                 priority = int(row.get("priority", 999)) if str(row.get("priority", "")).isdigit() else 999
+                if action_type not in SAFE_FOLLOWUP_ACTION_TYPES:
+                    continue
+                if action_type == "http_request":
+                    options = self._sanitize_http_request_action_options(row.get("options", {}))
+                    if not path or not self._build_agent_http_request_url(state, path):
+                        continue
+                    actions.append({
+                        "type": action_type,
+                        "path": path[:512],
+                        "priority": priority,
+                        "options": options,
+                    })
+                    continue
+                if action_type == "surface_scan":
+                    options = self._sanitize_surface_scan_action_options(row.get("options", {}))
+                    actions.append({
+                        "type": action_type,
+                        "path": path[:256] or "scanner -u",
+                        "priority": priority,
+                        "options": options,
+                    })
+                    continue
                 if not path or path not in allowed_paths:
                     continue
-                if action_type not in SAFE_FOLLOWUP_ACTION_TYPES:
+                if action_type == "run_exploit" and not path.startswith(("exploit/", "exploits/")):
+                    action_type = "run_followup"
+                if not path_matches_forced_protocol(path, str(getattr(state, "protocol", "") or "")):
                     continue
                 options = self._sanitize_action_options(row.get("options", {}))
                 actions.append({
@@ -8984,17 +9948,56 @@ class AgentWorkflowCore:
         if not isinstance(options, dict):
             return {}
         safe = {}
+        option_patch = options.get("option_patch")
         for key, value in list(options.items())[:12]:
             if not isinstance(key, str):
                 continue
             key = key.strip()
             if not key or len(key) > 64:
                 continue
+            if key == "option_patch":
+                continue
             if isinstance(value, (bool, int, float)):
                 safe[key] = value
             elif isinstance(value, str):
                 safe[key] = value[:256]
+        if isinstance(option_patch, dict):
+            from interfaces.command_system.builtin.agent.option_resolver import PROTECTED_OPTION_KEYS
+            from interfaces.command_system.builtin.agent.typed_models import OptionPatch
+
+            patch = OptionPatch.from_dict(option_patch)
+            cleaned_opts = {}
+            for key, value in list((patch.options or {}).items())[:12]:
+                norm = str(key).strip().lower()
+                if not norm or norm in PROTECTED_OPTION_KEYS:
+                    continue
+                if isinstance(value, (bool, int, float)):
+                    cleaned_opts[norm] = value
+                elif isinstance(value, str):
+                    cleaned_opts[norm] = value[:256]
+            evidence = [str(x) for x in (patch.evidence_ids or [])[:12] if str(x).strip()]
+            if cleaned_opts and evidence:
+                safe["option_patch"] = {
+                    "module_path": str(patch.module_path or "")[:256],
+                    "options": cleaned_opts,
+                    "evidence_ids": evidence,
+                    "expected_effect": str(patch.expected_effect or "")[:256] or None,
+                }
         return safe
+
+    def _sanitize_http_request_action_options(self, options):
+        from interfaces.command_system.builtin.agent.http_probe_actions import (
+            sanitize_http_request_action_options,
+        )
+
+        return sanitize_http_request_action_options(options)
+
+    def _sanitize_surface_scan_action_options(self, options):
+        from interfaces.command_system.builtin.agent.http_probe_actions import (
+            sanitize_surface_scan_action_options,
+        )
+
+        return sanitize_surface_scan_action_options(options)
 
     def _extract_plan_option_maps(self, execution_plan):
         actions = execution_plan.get("next_actions", [])
@@ -9038,14 +10041,26 @@ class AgentWorkflowCore:
 
         followup_paths = []
         post_paths = []
+        http_actions = []
+        surface_actions = []
         for action in actions:
             if not isinstance(action, dict):
                 continue
             action_type = str(action.get("type", "")).strip().lower()
             path = str(action.get("path", "")).strip()
+            if action_type == "surface_scan":
+                surface_actions.append(action)
+                continue
+            if action_type == "http_request":
+                if path:
+                    http_actions.append(action)
+                continue
             if not path:
                 continue
             if action_type == "run_post":
+                post_paths.append(path)
+                continue
+            if action_type == "run_followup" and path.startswith("post/"):
                 post_paths.append(path)
                 continue
             if action_type != "run_followup":
@@ -9062,8 +10077,33 @@ class AgentWorkflowCore:
             followup_paths.append(path)
 
         selected_paths = followup_paths + post_paths
+        max_req = int(execution_plan.get("max_requests_next_phase", 10) or 10)
+        budget = max(1, min(max_req, 12))
+        surface_results = self._execute_plan_surface_scans(state, surface_actions, budget)
+        if surface_results:
+            self._update_knowledge_base_from_results(
+                state.knowledge_base,
+                surface_results,
+                [row.get("path") for row in surface_results if isinstance(row, dict)],
+                self._extract_tech_hints(surface_results),
+                set(),
+            )
+        remaining_after_surface = max(0, budget - len(surface_results))
+        http_results = self._execute_plan_http_requests(state, http_actions, remaining_after_surface)
+        if http_results:
+            self._update_knowledge_base_from_results(
+                state.knowledge_base,
+                http_results,
+                [row.get("path") for row in http_results if isinstance(row, dict)],
+                self._extract_tech_hints(http_results),
+                set(),
+            )
         if not selected_paths:
-            return []
+            return surface_results + http_results
+
+        remaining_budget = max(0, budget - len(surface_results) - len(http_results))
+        if remaining_budget <= 0:
+            return surface_results + http_results
 
         available = {}
         for m in self._catalog.discover_campaign_modules(
@@ -9082,9 +10122,6 @@ class AgentWorkflowCore:
                     "agent": agent,
                 }
 
-        max_req = int(execution_plan.get("max_requests_next_phase", 10) or 10)
-        budget = max(1, min(max_req, 12))
-
         selected_modules = []
         seen = set()
         for path in selected_paths:
@@ -9094,11 +10131,11 @@ class AgentWorkflowCore:
             if module_info:
                 selected_modules.append(module_info)
                 seen.add(path)
-            if len(selected_modules) >= budget:
+            if len(selected_modules) >= remaining_budget:
                 break
 
         if not selected_modules:
-            return []
+            return surface_results + http_results
 
         observed_modules = {
             str(path).strip()
@@ -9108,9 +10145,10 @@ class AgentWorkflowCore:
         selected_modules = [
             module for module in selected_modules
             if str(module.get("path", "")).strip() not in observed_modules
+            or module_allowed_despite_observed(state.knowledge_base, str(module.get("path", "")).strip())
         ]
         if not selected_modules:
-            return []
+            return surface_results + http_results
 
         failed_action_keys = self._get_failed_action_keys(state.knowledge_base)
         if failed_action_keys:
@@ -9119,7 +10157,7 @@ class AgentWorkflowCore:
                 if not self._planner_action_keys(module.get("path", "")).intersection(failed_action_keys)
             ]
         if not selected_modules:
-            return []
+            return surface_results + http_results
 
         # Enforce CMS lock even against LLM-proposed follow-ups.
         selected_modules = self._filter_modules_for_cms_lock(
@@ -9140,7 +10178,7 @@ class AgentWorkflowCore:
                 ))
             ]
         if not selected_modules:
-            return []
+            return surface_results + http_results
 
         print_status(f"Execution plan follow-up: running {len(selected_modules)} module(s)")
         followup_results = self._execute_plan_modules_with_options(
@@ -9188,7 +10226,7 @@ class AgentWorkflowCore:
             followup_hints,
             set(),
         )
-        return followup_results
+        return surface_results + http_results + followup_results
 
     def _execute_plan_modules_with_options(self, modules, state: AgentState, option_overrides=None, verbose=False):
         option_overrides = dict(option_overrides or {})
@@ -9252,8 +10290,10 @@ class AgentWorkflowCore:
                 self._set_default_target_options(module_instance, hostname, port, scheme)
                 self._seed_http_session_from_auth(module_instance, state)
                 merged_options = dict(self._infer_auth_option_overrides(module_instance, module_path, state))
-                merged_options.update(option_overrides.get(module_path, {}))
-                self._apply_safe_module_options(module_instance, merged_options)
+                plan_opts = dict(option_overrides.get(module_path, {}) or {})
+                option_patch = plan_opts.pop("option_patch", None) if isinstance(plan_opts, dict) else None
+                merged_options.update(plan_opts)
+                self._apply_safe_module_options(module_instance, merged_options, state=state)
                 self._apply_sqli_context_options(module_instance, module_path, state)
 
                 if not self._module_uses_http_client(module_instance) and not self._consume_network_units(
@@ -9270,6 +10310,7 @@ class AgentWorkflowCore:
                     state,
                     phase="plan-followup",
                     use_exploit_wrapper=False,
+                    option_patch=option_patch if isinstance(option_patch, dict) else None,
                 )
                 if outcome.get("blocked"):
                     result["status"] = "skipped"
@@ -9332,113 +10373,46 @@ class AgentWorkflowCore:
         if hasattr(module_instance, "ssl"):
             module_instance.set_option("ssl", (scheme == "https"))
 
-        # Reverse payloads/listeners often default to 127.0.0.1. When agent mode
-        # attacks a remote target, prefer a routable local IP unless user/plan
-        # already provided an explicit lhost override.
+        # Reverse payloads/listeners often default to 127.0.0.1. Prefer a routable
+        # callback: Docker bridge gateway for container targets, else LAN IP.
         if hasattr(module_instance, "lhost"):
             try:
                 current_lhost = str(getattr(module_instance, "lhost", "") or "").strip()
             except Exception:
                 current_lhost = ""
-            if self._is_loopback_or_unspecified_host(current_lhost):
-                resolved_lhost = ""
-                if self._is_loopback_or_unspecified_host(hostname):
-                    resolved_lhost = self._resolve_docker_gateway_lhost(hostname, port)
-                if not resolved_lhost:
-                    resolved_lhost = self._resolve_routable_lhost(hostname)
+            from core.utils.lhost_resolver import (
+                is_docker_bridge_host,
+                resolve_callback_lhost,
+            )
+
+            needs_resolve = self._is_loopback_or_unspecified_host(current_lhost)
+            if (
+                not needs_resolve
+                and is_docker_bridge_host(hostname)
+                and current_lhost.startswith(("192.168.", "10."))
+                and not is_docker_bridge_host(current_lhost)
+            ):
+                # LAN lhost against a docker-bridge target often dies after connect.
+                needs_resolve = True
+            if needs_resolve:
+                resolved_lhost = resolve_callback_lhost(hostname, port)
                 if resolved_lhost:
                     module_instance.set_option("lhost", resolved_lhost)
 
     def _is_loopback_or_unspecified_host(self, value: str) -> bool:
-        raw = str(value or "").strip().lower()
-        if not raw:
-            return True
-        if raw in {"localhost", "::1", "0.0.0.0", "::"}:
-            return True
-        return raw.startswith("127.")
+        from core.utils.lhost_resolver import is_loopback_or_unspecified_host
+
+        return is_loopback_or_unspecified_host(value)
 
     def _resolve_routable_lhost(self, target_host: Any) -> str:
-        target = str(target_host or "").strip()
-        if not target:
-            return ""
-        if self._is_loopback_or_unspecified_host(target):
-            # Local targets can legitimately use loopback callbacks.
-            return ""
+        from core.utils.lhost_resolver import discover_primary_lan_ip, resolve_callback_lhost
 
-        # Infer the outbound interface used to reach the target.
-        for probe_host, probe_port in ((target, 80), ("8.8.8.8", 53)):
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                sock.connect((probe_host, int(probe_port)))
-                local_ip = str(sock.getsockname()[0] or "").strip()
-                sock.close()
-            except Exception:
-                local_ip = ""
-            if local_ip and not self._is_loopback_or_unspecified_host(local_ip):
-                return local_ip
-        return ""
+        return resolve_callback_lhost(target_host) or discover_primary_lan_ip()
 
     def _resolve_docker_gateway_lhost(self, target_host: Any, target_port: Any) -> str:
-        target = str(target_host or "").strip()
-        if not self._is_loopback_or_unspecified_host(target):
-            return ""
+        from core.utils.lhost_resolver import resolve_docker_gateway_for_port
 
-        try:
-            port = int(target_port)
-        except Exception:
-            return ""
-
-        try:
-            import docker  # type: ignore
-        except Exception:
-            return ""
-
-        try:
-            client = docker.from_env()
-            containers = client.containers.list()
-        except Exception:
-            return ""
-
-        for container in containers:
-            try:
-                container.reload()
-                ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
-            except Exception:
-                continue
-
-            matched_binding = False
-            for _container_port, bindings in ports.items():
-                if not bindings:
-                    continue
-                for binding in bindings:
-                    if not isinstance(binding, dict):
-                        continue
-                    host_port = str(binding.get("HostPort") or "").strip()
-                    host_ip = str(binding.get("HostIp") or "").strip()
-                    if host_port != str(port):
-                        continue
-                    if host_ip in ("", "0.0.0.0", "::", "127.0.0.1", "::1", "localhost"):
-                        matched_binding = True
-                        break
-                if matched_binding:
-                    break
-
-            if not matched_binding:
-                continue
-
-            try:
-                networks = container.attrs.get("NetworkSettings", {}).get("Networks", {}) or {}
-            except Exception:
-                networks = {}
-
-            for _network_name, network in networks.items():
-                if not isinstance(network, dict):
-                    continue
-                gateway = str(network.get("Gateway") or "").strip()
-                if gateway and not self._is_loopback_or_unspecified_host(gateway):
-                    return gateway
-
-        return ""
+        return resolve_docker_gateway_for_port(target_port)
 
     def _reverse_callback_diagnostic(self, module_instance, target_info: Optional[Dict[str, Any]]) -> str:
         if getattr(module_instance, "payload_type", None) != "reverse":
@@ -9492,14 +10466,23 @@ class AgentWorkflowCore:
                 opts["extra_paths"] = ",".join(login_paths)
             if "waf_or_blocking_detected" in risk:
                 opts["waf_detected"] = True
-            self._apply_safe_module_options(module_instance, opts)
+            self._apply_safe_module_options(module_instance, opts, state=state)
 
         chain_opts = apply_chain_module_options(module_instance, module_path, kb)
         if chain_opts:
-            self._apply_safe_module_options(module_instance, chain_opts)
+            self._apply_safe_module_options(module_instance, chain_opts, state=state)
 
-    def _apply_safe_module_options(self, module_instance, options):
+    def _apply_safe_module_options(self, module_instance, options, state: Optional[AgentState] = None):
         if not isinstance(options, dict):
+            return
+        if state is not None:
+            from interfaces.command_system.builtin.agent.credential_vault import (
+                apply_resolved_options,
+                get_credential_vault,
+            )
+
+            vault = get_credential_vault(state=state, kb=getattr(state, "knowledge_base", None))
+            apply_resolved_options(module_instance, options, vault)
             return
         for key, value in options.items():
             if not hasattr(module_instance, key):
@@ -9583,10 +10566,18 @@ class AgentWorkflowCore:
         print_status("Exploiting...")
         failed_paths = set()
         attempted_paths = set()
+        policy_skip_count = 0
         for exploit_path in sorted(exploit_paths):
             if isinstance(state, AgentState) and self._phase_stop_reason(state, "exploit"):
                 break
             if isinstance(state, AgentState):
+                forced_protocol = str(getattr(state, "protocol", "") or "").strip().lower()
+                if forced_protocol and not path_matches_forced_protocol(exploit_path, forced_protocol):
+                    failed_paths.add(exploit_path)
+                    print_warning(
+                        f"Exploit skipped [{exploit_path}]: conflicts with --protocol {forced_protocol}"
+                    )
+                    continue
                 mismatch_reason = self._module_stack_mismatch_reason(
                     exploit_path,
                     state.knowledge_base,
@@ -9598,6 +10589,7 @@ class AgentWorkflowCore:
                 block_reason = self._module_block_reason_for_profile(state, exploit_path)
                 if block_reason:
                     failed_paths.add(exploit_path)
+                    policy_skip_count += 1
                     print_warning(f"Exploit skipped [{exploit_path}]: {block_reason}")
                     continue
             attempted_paths.add(exploit_path)
@@ -9643,9 +10635,15 @@ class AgentWorkflowCore:
                         )
                     set_thread_output_quiet(not verbose)
                 merged_options = dict(inferred_auth)
+                if isinstance(state, AgentState):
+                    inferred_module = self._build_inferred_option_overrides(
+                        [{"path": exploit_path}],
+                        state,
+                    ).get(exploit_path, {})
+                    merged_options.update(inferred_module)
                 merged_options.update(exploit_option_overrides.get(exploit_path, {}))
                 self._apply_safe_module_options(
-                    exploit_instance, merged_options
+                    exploit_instance, merged_options, state=state if isinstance(state, AgentState) else None
                 )
                 runtime_snapshot = self._module_runtime_option_snapshot(exploit_instance)
                 if runtime_snapshot and verbose:
@@ -9734,13 +10732,26 @@ class AgentWorkflowCore:
                             print_warning(diagnostic)
                         reverse_callback_missing = True
                 set_thread_output_quiet(False)
+                session_created = bool(new_standard or new_browser)
+                if session_created:
+                    success = True
+                    failed_paths.discard(exploit_path)
+                    self._record_exploit_confirmed_finding(
+                        state,
+                        exploit_path,
+                        session_ids=new_standard + new_browser,
+                    )
+
                 if success and reverse_callback_missing:
                     failed_paths.add(exploit_path)
                     print_warning(
                         f"Exploit completed but no reverse session was established: {exploit_path}"
                     )
                 elif success:
-                    print_success(f"Exploit succeeded: {exploit_path}")
+                    if session_created:
+                        print_success(f"Exploit succeeded: {exploit_path} (session created)")
+                    else:
+                        print_success(f"Exploit succeeded: {exploit_path}")
                 else:
                     failed_paths.add(exploit_path)
                     print_warning(f"Exploit failed: {exploit_path}")
@@ -9750,6 +10761,16 @@ class AgentWorkflowCore:
                 print_warning(f"Error launching {exploit_path}: {exc}")
             finally:
                 set_thread_output_quiet(False)
+        if (
+            isinstance(state, AgentState)
+            and policy_skip_count
+            and not attempted_paths
+            and is_shell_operator_goal(self._operator_campaign_goal(state))
+        ):
+            print_warning(
+                f"All {policy_skip_count} exploit candidate(s) blocked by risk policy. "
+                "Re-run with --approve-risk intrusive (or --profile internal-lab) to allow shell/RCE modules."
+            )
         if isinstance(state, AgentState):
             self._remember_planner_actions(state.knowledge_base, attempted_paths, failed_paths)
 
@@ -9912,7 +10933,7 @@ class AgentWorkflowCore:
                 elif info_candidates:
                     print_info(
                         f"{source_label} retained only informational findings "
-                        f"({len(info_candidates)}); exploitation skipped."
+                        f"({len(info_candidates)}); no direct exploit module is linked yet."
                     )
 
             max_req = execution_plan.get("max_requests_next_phase", 0)
@@ -9934,6 +10955,17 @@ class AgentWorkflowCore:
                 r for r in selected_results
                 if str(r.get("decision_class", self._finding_decision_class(r))) == "exploit"
             ]
+            # Soft targets: promote inferred exploit modules from injection findings
+            # when the plan has no direct exploit_module links yet.
+            if not selected_results and not explicit_exploit_paths and self._has_weaponizable_campaign_pressure(state):
+                inferred = self._derive_exploit_paths_from_findings(
+                    followup_candidates or state.contextual_findings or state.vulnerable_results or [],
+                    state.knowledge_base if isinstance(state.knowledge_base, dict) else {},
+                    limit=4,
+                )
+                for path in inferred:
+                    if path and path not in explicit_exploit_paths:
+                        explicit_exploit_paths.append(path)
 
             self._append_timeline_event(
                 state,
@@ -9957,7 +10989,10 @@ class AgentWorkflowCore:
                     verbose=bool(state.verbose),
                 )
             else:
-                print_info("No exploitable module selected by execution plan.")
+                print_info(
+                    "No exploitable module selected by execution plan "
+                    "(no validated exploits/... path or exploit_module link)."
+                )
         elif state.no_exploit:
             print_info("Exploitation skipped (--no-exploit).")
 

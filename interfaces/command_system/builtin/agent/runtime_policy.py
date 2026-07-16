@@ -723,6 +723,9 @@ class CancellationToken:
     def cancelled(self) -> bool:
         return self._event.is_set()
 
+    def is_cancelled(self) -> bool:
+        return self.cancelled
+
 
 class StopConditionEvaluator:
     """Evaluate hard and plan-provided terminal conditions consistently."""
@@ -767,11 +770,71 @@ class StopConditionEvaluator:
                 return "no_vulnerabilities"
         if "stop_if_no_exploit_path" in conditions and phase == "exploit":
             actions = (getattr(state, "execution_plan", {}) or {}).get("next_actions", [])
-            if not any(
+            has_exploit = any(
                 isinstance(row, dict) and row.get("type") == "run_exploit"
                 for row in actions
+            )
+            if has_exploit:
+                return None
+            # Soft-target scanners (SQLi/LFI/RCE follow-ups) are an active path —
+            # do not abort before the operator has chased confirmed vulns.
+            # Match path segments only (avoid "rce" ⊆ "source", "lfi" ⊆ noise).
+            weaponizable_segments = {
+                "sqli",
+                "sqli_engine",
+                "sql_injection",
+                "lfi",
+                "lfi_fuzzer",
+                "rfi",
+                "ssrf",
+                "ssrf_scanner",
+                "xxe",
+                "rce",
+                "ssti",
+                "command_injection",
+                "file_read",
+                "path_traversal",
+                "deserialization",
+                "xss_scanner",
+            }
+            for row in actions:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("type") not in {"run_followup", "prioritize", "run_exploit"}:
+                    continue
+                path_low = str(row.get("path", "") or "").lower().replace("-", "_")
+                basename = path_low.rsplit("/", 1)[-1]
+                segments = {piece for piece in basename.split("_") if piece}
+                if basename in weaponizable_segments or segments.intersection(weaponizable_segments):
+                    return None
+            kb = getattr(state, "knowledge_base", {}) or {}
+            signals = {
+                str(value).lower()
+                for value in (kb.get("risk_signals", []) or [])
+                if str(value).strip()
+            }
+            if signals.intersection({
+                "sql_signal",
+                "sqli_confirmed",
+                "lfi_signal",
+                "xss_signal",
+                "ssrf_signal",
+                "rce_signal",
+            }):
+                return None
+            findings = (
+                getattr(state, "contextual_findings", None)
+                or getattr(state, "vulnerable_results", None)
+                or []
+            )
+            if any(
+                isinstance(row, dict)
+                and row.get("vulnerable")
+                and str(row.get("decision_class", "")).lower() in {"exploit", "followup"}
+                for row in findings
             ):
-                return "no_exploit_path"
+                return None
+            return "no_exploit_path"
         return None
 
 

@@ -160,7 +160,9 @@ class CommandRegistry:
             # Try to load recent history from database
             if hasattr(self, 'history_manager') and self.history_manager:
                 self._history_workspace_id = self.history_manager.refresh_workspace()
-                db_history = self.history_manager.get_history(limit=1000)
+                from core.history_manager import MAX_HISTORY_ENTRIES
+
+                db_history = self.history_manager.get_history(limit=MAX_HISTORY_ENTRIES)
                 if db_history:
                     # Convert database format to local format
                     self.command_history = []
@@ -472,9 +474,11 @@ class CommandRegistry:
             
             self.command_history.append(history_entry)
             
-            # Keep only last 100 entries in memory
-            if len(self.command_history) > 100:
-                self.command_history = self.command_history[-100:]
+            # Keep only last N entries in memory (matches DB retention)
+            from core.history_manager import MAX_HISTORY_ENTRIES
+
+            if len(self.command_history) > MAX_HISTORY_ENTRIES:
+                self.command_history = self.command_history[-MAX_HISTORY_ENTRIES:]
             
             # Try to add to database (but don't fail if it doesn't work)
             try:

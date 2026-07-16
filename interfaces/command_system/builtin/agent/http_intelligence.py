@@ -136,6 +136,11 @@ SAFE_PROBE_PATHS: Tuple[str, ...] = (
     "/health",
     "/docs",
     "/redoc",
+    # Common training / lab apps (Metasploitable2, DVWA docker, etc.)
+    "/dvwa/",
+    "/dvwa/login.php",
+    "/phpMyAdmin/",
+    "/mutillidae/",
 )
 
 # Config leak / admin / debug paths — only with obtain-shell or --shell-hunter
@@ -640,18 +645,28 @@ class HttpRequestIntelligence:
 
     def _endpoint_hints_from_body(self, response_body: str) -> List[str]:
         endpoints: set = set()
+        body = response_body or ""
         for marker in ("/api/", "/graphql", "/swagger", "/wp-json/", "/admin", "/login"):
-            if marker in (response_body or "").lower():
+            if marker in body.lower():
                 endpoints.add(marker.rstrip("/") or "/")
-        for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", response_body or "", flags=re.IGNORECASE):
+        for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", body, flags=re.IGNORECASE):
             endpoint = self._endpoint_from_url_or_path(src)
             if endpoint:
-                endpoints.add(endpoint)
-        for href in re.findall(r"""href=["']([^"'#]+)["']""", response_body or "", flags=re.IGNORECASE)[:80]:
+                endpoints.add(endpoint.split("?", 1)[0])
+        for href in re.findall(r"""href=["']([^"'#]+)["']""", body, flags=re.IGNORECASE)[:80]:
             endpoint = self._endpoint_from_url_or_path(href)
-            if endpoint and endpoint.startswith("/"):
+            if endpoint:
                 endpoints.add(endpoint.split("?", 1)[0])
         return sorted(endpoints)[:80]
+
+    @staticmethod
+    def _looks_like_directory_listing(response_body: str) -> bool:
+        body = (response_body or "")[:12000].lower()
+        return (
+            "index of /" in body
+            or "<title>index of /" in body
+            or "directory listing" in body
+        )
 
     def collect_from_proxy(
         self,
@@ -957,23 +972,36 @@ class HttpRequestIntelligence:
         for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", response_body, flags=re.IGNORECASE):
             endpoint = self._endpoint_from_url_or_path(src)
             if endpoint:
-                endpoints.add(endpoint)
+                endpoints.add(endpoint.split("?", 1)[0])
+        for href in re.findall(r"""href=["']([^"'#]+)["']""", response_body, flags=re.IGNORECASE)[:80]:
+            endpoint = self._endpoint_from_url_or_path(href)
+            if endpoint:
+                endpoints.add(endpoint.split("?", 1)[0])
         return sorted(endpoints)[:80]
 
     def _endpoint_from_url_or_path(self, value: Any) -> str:
         raw = str(value or "").strip()
         if not raw:
             return ""
+        low = raw.lower()
+        if low.startswith(("#", "javascript:", "mailto:", "data:", "tel:")):
+            return ""
         try:
             parsed = urlparse(raw)
             if parsed.scheme or parsed.netloc:
                 path = parsed.path or "/"
-                return (path + (f"?{parsed.query}" if parsed.query else ""))[:260]
+                query = f"?{parsed.query}" if parsed.query else ""
+                return (path + query)[:260]
         except Exception:
             pass
         if raw.startswith("/"):
-            return raw[:260]
-        return ""
+            path = raw
+        else:
+            # Apache "Index of /" and relative HTML links (e.g. payroll_app.php).
+            path = "/" + raw.lstrip("/")
+        if ".." in path.split("/"):
+            return ""
+        return path.split("#", 1)[0][:260]
 
     def _infer_tech_hints(
         self,
@@ -1123,6 +1151,9 @@ class HttpRequestIntelligence:
         if status_code >= 500:
             reasons.append(f"server error status {status_code}")
             signals.add("server_error_observed")
+        if self._looks_like_directory_listing(response_body):
+            reasons.append("directory listing")
+            signals.add("directory_listing_detected")
         if is_actionable_waf_signal(
             status_code=status_code,
             body=blob,

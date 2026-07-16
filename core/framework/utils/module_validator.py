@@ -161,7 +161,7 @@ class ModuleValidator:
             # Check if Module class inherits from a base class that already has run()
             inherits_from_base_with_run = False
             base_classes_with_run = [
-                "DockerEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
+                "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
                 "Post", "Scanner", "Encoder", "Transform", "Backdoor",
                 "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
             ]

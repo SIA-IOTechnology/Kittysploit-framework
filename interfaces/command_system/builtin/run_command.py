@@ -161,11 +161,43 @@ Examples:
                 print_info("Running module in background mode.")
 
             execution = ModuleExecutor.execute(self.framework, request)
+            if (
+                not parsed_args.background
+                and execution.success
+                and execution.session_id
+                and ModuleExecutor.get_module_type(module) == "exploit"
+            ):
+                print_success(
+                    f"Session {execution.session_id} created. Starting interactive shell..."
+                )
+                return self._start_interactive_session_for_listener(execution.session_id)
+
             return self._report_execution_result(
                 execution,
                 module,
                 background=parsed_args.background,
             )
+
+        except KeyboardInterrupt:
+            print_info("\n[!] Interrupted by user")
+            session_id = None
+            if hasattr(module, "_latest_listener_session_id"):
+                try:
+                    session_id = module._latest_listener_session_id()
+                except Exception:
+                    session_id = None
+            if (
+                not parsed_args.background
+                and session_id
+                and ModuleExecutor.get_module_type(module) == "exploit"
+            ):
+                print_success(
+                    f"Session {session_id} detected. Starting interactive shell..."
+                )
+                return self._start_interactive_session_for_listener(session_id)
+            if hasattr(module, "listener_running"):
+                module.listener_running = False
+            return True
 
         except Exception as e:
             print_error(f"Error executing module: {str(e)}")
@@ -687,7 +719,7 @@ Examples:
                 shell_type = "ssh"
             elif session_type == "meterpreter":
                 shell_type = "meterpreter"
-            elif session_type in ("php", "http", "https"):
+            elif session_type in ("php", "webshell", "http", "https"):
                 shell_type = "php"
             elif session_type == "mysql":
                 shell_type = "mysql"

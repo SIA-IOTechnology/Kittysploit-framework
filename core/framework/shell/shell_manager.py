@@ -78,6 +78,7 @@ class ShellManager:
             'javascript': JavaScriptShell,
             'ssh': SSHShell,
             'meterpreter': MeterpreterShell,
+            'webshell': PHPShell,
             'php': PHPShell,
             'mysql': MySQLShell,
             'postgresql': PostgreSQLShell,
@@ -214,7 +215,7 @@ class ShellManager:
                         shell_type = 'android'
                     elif session_type == 'email':
                         shell_type = 'email'
-                    elif session_type in ('php', 'http', 'https'):
+                    elif session_type in ('php', 'webshell', 'http', 'https'):
                         shell_type = 'php'
                     elif session_type == 'mysql':
                         shell_type = 'mysql'

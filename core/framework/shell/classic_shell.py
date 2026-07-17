@@ -16,6 +16,7 @@ import re
 import ntpath
 from typing import Dict, Any, List, Optional
 from .base_shell import BaseShell
+from .root_elevate import apply_root_elevate
 from core.output_handler import print_info, print_error
 
 class ClassicShell(BaseShell):
@@ -666,6 +667,8 @@ class ClassicShell(BaseShell):
         cmd = (command or "").strip()
         if not cmd:
             return cmd
+        if not self.is_windows:
+            cmd = apply_root_elevate(self.framework, self.session_id, cmd)
         return f"({cmd}) 2>&1; printf '\\n{self._CMD_MARKER}\\n'"
 
     def _looks_like_stager_command_echo(self, line: str, command: str) -> bool:

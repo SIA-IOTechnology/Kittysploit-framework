@@ -10,7 +10,8 @@ import threading
 import time
 from typing import Dict, Any, List, Optional
 from .base_shell import BaseShell
-from core.output_handler import print_info, print_error
+from .root_elevate import apply_root_elevate, get_root_elevate_config, interactive_elevate_plan, is_root_uid_output
+from core.output_handler import print_info, print_error, print_success, print_warning
 
 class SSHShell(BaseShell):
     
@@ -370,6 +371,45 @@ class SSHShell(BaseShell):
             time.sleep(0.03)
         return "".join(chunks)
 
+    def _try_interactive_root_elevate(self) -> None:
+        """If session has root_elevate, escalate the interactive PTY to a root shell."""
+        cfg = get_root_elevate_config(self.framework, self.session_id)
+        plan = interactive_elevate_plan(cfg)
+        if not plan or not self.channel:
+            return
+
+        print_info(f"Root elevate is ON — escalating interactive shell ({plan['method']})...")
+        try:
+            lines = list(plan["lines"])
+            password = lines[-1] if plan["method"] == "sudo_password" and len(lines) > 1 else ""
+            for idx, line in enumerate(lines):
+                self.channel.send(line + "\n")
+                time.sleep(0.35)
+                drained = self._drain_interactive_output(max_wait=1.0, idle_grace=0.25)
+                if not drained:
+                    continue
+                if password and password in drained:
+                    drained = drained.replace(password, "***")
+                print(drained, end="", flush=True)
+
+            verify = plan.get("verify") or "id -u"
+            self.channel.send(verify + "\n")
+            time.sleep(0.25)
+            out = self._drain_interactive_output(max_wait=1.2, idle_grace=0.3)
+            if out:
+                if password and password in out:
+                    out = out.replace(password, "***")
+                print(out, end="", flush=True)
+            if is_root_uid_output(out):
+                print_success("Interactive shell is now root.")
+            else:
+                print_warning(
+                    "Interactive elevate did not confirm uid=0 — "
+                    "you may still be the session user. Try: sudo -i"
+                )
+        except Exception as exc:
+            print_warning(f"Interactive root elevate failed: {exc}")
+
     def start_interactive_shell_loop(self) -> bool:
         """
         Start a true persistent SSH PTY interactive loop.
@@ -391,6 +431,8 @@ class SSHShell(BaseShell):
         banner = self._drain_interactive_output(max_wait=0.9, idle_grace=0.2)
         if banner:
             print(banner, end="", flush=True)
+
+        self._try_interactive_root_elevate()
 
         while True:
             try:
@@ -450,7 +492,9 @@ class SSHShell(BaseShell):
                     self.connection = None
                     return {'output': '', 'status': 1, 'error': 'SSH connection is closed'}
             
-            to_run = self._wrap_exec_in_tracked_cwd(command)
+            # Elevate the bare command first, then prefix cd (sudo keeps cwd).
+            to_run = apply_root_elevate(self.framework, self.session_id, command)
+            to_run = self._wrap_exec_in_tracked_cwd(to_run)
             stdin, stdout, stderr = self.connection.exec_command(to_run, get_pty=get_pty)
 
             # Read output
@@ -547,7 +591,8 @@ SSH Connection:
     def _cmd_id(self, args: str) -> Dict[str, Any]:
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
-        return self._execute_remote_command("id")
+        command = f"id {args}".strip() if args else "id"
+        return self._execute_remote_command(command)
     
     def _cmd_pwd(self, args: str) -> Dict[str, Any]:
         if not self.is_connected or not self.connection:

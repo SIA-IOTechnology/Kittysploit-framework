@@ -19,6 +19,7 @@ import socket
 import re
 from typing import Dict, Any, List, Optional
 from .base_shell import BaseShell
+from .root_elevate import apply_root_elevate
 from core.output_handler import print_info, print_error, print_success, print_warning, print_debug
 
 class MeterpreterShell(BaseShell):
@@ -432,7 +433,8 @@ class MeterpreterShell(BaseShell):
                 if platform.system() == 'Windows' and cmd.lower() == 'powershell' and not args:
                     # If just "powershell" without args, show help
                     return {'output': 'To use PowerShell, specify a command: powershell <command>\nExample: powershell Get-Process\n', 'status': 0, 'error': ''}
-                result = self._send_command('shell', [command])
+                to_send = apply_root_elevate(self.framework, self.session_id, command)
+                result = self._send_command('shell', [to_send])
                 return result
             else:
                 return {'output': '', 'status': 1, 'error': 'Not connected to remote Meterpreter client.'}
@@ -827,7 +829,9 @@ class MeterpreterShell(BaseShell):
         
         # If arguments provided, execute as shell command and return
         if args:
-            return self._send_command('shell', args)
+            joined = " ".join(shlex.quote(a) for a in args)
+            elevated = apply_root_elevate(self.framework, self.session_id, joined)
+            return self._send_command('shell', [elevated])
         
         # If no arguments, signal that interactive shell should start
         # The actual loop will be handled by the caller (sessions/interactive interface)
@@ -1448,6 +1452,7 @@ class MeterpreterShell(BaseShell):
                 ("modules/post/shell/linux/gather/enum_users", "enumerate users, groups and sudo-related hints"),
                 ("modules/post/shell/linux/gather/package_vuln_hint", "look for vulnerable package/kernel hints"),
                 ("modules/post/shell/linux/exploits/copy_fail_cve_2026_31431", "lab/CVE-specific local escalation module"),
+                ("modules/post/shell/linux/exploits/copy_fail_docker_escape_cve_2026_31431", "lab/CVE Copy Fail container escape via modprobe"),
                 ("modules/post/shell/linux/exploits/dirty_frag_lpe", "lab/CVE-specific local escalation module"),
                 ("modules/post/shell/linux/exploits/cve_2026_41651", "lab/CVE-specific local escalation module"),
             ]

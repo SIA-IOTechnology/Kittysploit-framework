@@ -30,6 +30,7 @@ class Module(Post, System, LinuxSessionMixin):
                 "produces_capabilities": [],
                 "suggested_followups": [
                     "post/shell/linux/gather/container_escape_check",
+                    "post/shell/linux/exploits/copy_fail_docker_escape_cve_2026_31431",
                     "post/shell/multi/gather/privesc_suggester",
                 ],
             },

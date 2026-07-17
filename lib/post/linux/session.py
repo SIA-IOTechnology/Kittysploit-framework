@@ -13,6 +13,7 @@ from typing import Optional
 
 from core.framework.enums import SessionType
 from core.output_handler import print_error, print_status, print_warning
+from core.framework.shell.root_elevate import is_root_uid_output
 
 KS_FILE_MARKER = "__KS_FILE__:"
 
@@ -81,7 +82,7 @@ class LinuxSessionMixin:
 
     def linux_is_root(self) -> bool:
         out = self.linux_execute("id -u 2>/dev/null")
-        return out.strip() == "0"
+        return is_root_uid_output(out)
 
     def linux_command_exists(self, cmd: str) -> bool:
         if hasattr(self, "command_exists"):

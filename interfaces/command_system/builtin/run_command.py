@@ -764,6 +764,8 @@ Examples:
                 shell_type = "s7comm"
             elif session_type == "modbus":
                 shell_type = "modbus"
+            elif session_type == "opcua":
+                shell_type = "opcua"
             else:
                 shell_type = "classic"
             

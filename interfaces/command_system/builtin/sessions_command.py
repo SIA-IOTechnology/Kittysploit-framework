@@ -311,6 +311,9 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "azure_run_command":
                 session_type = "azure_run_command"
                 shell_type = "azure_run_command"
+            elif session and session.session_type and session.session_type.lower() == "kubernetes":
+                session_type = "kubernetes"
+                shell_type = "kubernetes"
             elif session and session.session_type and session.session_type.lower() == "http_cmd":
                 session_type = "http_cmd"
                 shell_type = "http_cmd"
@@ -329,6 +332,9 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "modbus":
                 session_type = "modbus"
                 shell_type = "modbus"
+            elif session and session.session_type and session.session_type.lower() == "opcua":
+                session_type = "opcua"
+                shell_type = "opcua"
             elif session and session.session_type and session.session_type.lower() == "quic":
                 session_type = "quic"
                 shell_type = "quic"

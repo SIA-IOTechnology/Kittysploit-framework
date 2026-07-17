@@ -282,7 +282,19 @@ class BleGattClient:
         if not self._loop:
             raise RuntimeError("BLE event loop not running")
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result(timeout=timeout if timeout is not None else self.timeout + 5)
+        try:
+            return fut.result(timeout=timeout if timeout is not None else self.timeout + 5)
+        except KeyboardInterrupt:
+            fut.cancel()
+            try:
+                # Best-effort disconnect without blocking forever
+                if self._client is not None:
+                    disc = asyncio.run_coroutine_threadsafe(self._disconnect_async(), self._loop)
+                    disc.result(timeout=2)
+            except Exception:
+                pass
+            self._connected = False
+            raise
 
     async def _connect_async(self):
         from bleak import BleakClient

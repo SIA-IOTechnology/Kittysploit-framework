@@ -143,7 +143,8 @@ Examples:
                         )
                     return self._report_execution_result(execution, module)
                 except KeyboardInterrupt:
-                    print_info("\n[!] Interrupted by user")
+                    print_info("Interrupted by user")
+                    self.stop_flag.set()
                     if hasattr(module, "shutdown"):
                         try:
                             module.shutdown()
@@ -179,7 +180,7 @@ Examples:
             )
 
         except KeyboardInterrupt:
-            print_info("\n[!] Interrupted by user")
+            print_info("Interrupted by user")
             session_id = None
             if hasattr(module, "_latest_listener_session_id"):
                 try:
@@ -197,6 +198,16 @@ Examples:
                 return self._start_interactive_session_for_listener(session_id)
             if hasattr(module, "listener_running"):
                 module.listener_running = False
+            if hasattr(module, "stop_flag"):
+                try:
+                    module.stop_flag.set()
+                except Exception:
+                    pass
+            if hasattr(module, "shutdown"):
+                try:
+                    module.shutdown()
+                except Exception:
+                    pass
             return True
 
         except Exception as e:
@@ -766,6 +777,12 @@ Examples:
                 shell_type = "modbus"
             elif session_type == "opcua":
                 shell_type = "opcua"
+            elif session_type == "kubernetes":
+                shell_type = "kubernetes"
+            elif session_type == "ble":
+                shell_type = "ble"
+            elif session_type == "mqtt":
+                shell_type = "mqtt"
             else:
                 shell_type = "classic"
             

@@ -70,6 +70,7 @@ AzureRunCommandShell = _lazy_import('.azure_run_command_shell', 'AzureRunCommand
 GcpComputeSshShell = _lazy_import('.gcp_compute_ssh_shell', 'GcpComputeSshShell')
 GcpApiShell = _lazy_import('.gcp_api_shell', 'GcpApiShell')
 KubernetesShell = _lazy_import('.kubernetes_shell', 'KubernetesShell')
+BleShell = _lazy_import('.ble_shell', 'BleShell')
 
 class ShellManager:
     
@@ -99,6 +100,7 @@ class ShellManager:
             'gcp_compute_ssh': GcpComputeSshShell,
             'gcp_api': GcpApiShell,
             'kubernetes': KubernetesShell,
+            'ble': BleShell,
             'mqtt': MQTTShell,
             'dns': DNSShell,
             'ftp': FTPShell,
@@ -141,7 +143,7 @@ class ShellManager:
                     return None
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "smb", "s7comm", "modbus", "opcua", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "kubernetes", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "quic", "http_cmd", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "smb", "s7comm", "modbus", "opcua", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "kubernetes", "ble", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "quic", "http_cmd", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -255,6 +257,8 @@ class ShellManager:
                         shell_type = 'gcp_api'
                     elif session_type == 'kubernetes':
                         shell_type = 'kubernetes'
+                    elif session_type == 'ble':
+                        shell_type = 'ble'
                     elif session_type == 'mqtt':
                         shell_type = 'mqtt'
                     elif session_type == 'dns':

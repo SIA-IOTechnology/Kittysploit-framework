@@ -314,6 +314,9 @@ Session Types:
             elif session and session.session_type and session.session_type.lower() == "kubernetes":
                 session_type = "kubernetes"
                 shell_type = "kubernetes"
+            elif session and session.session_type and session.session_type.lower() == "ble":
+                session_type = "ble"
+                shell_type = "ble"
             elif session and session.session_type and session.session_type.lower() == "http_cmd":
                 session_type = "http_cmd"
                 shell_type = "http_cmd"

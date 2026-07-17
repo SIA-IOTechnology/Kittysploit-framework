@@ -256,8 +256,15 @@ class Listener(BaseModule):
             return True
                 
         except KeyboardInterrupt:
-            print_warning("\nInterrupted by user")
-            return True  # Return True to indicate graceful shutdown
+            # Do not swallow Ctrl+C as a successful run — re-raise so the CLI
+            # run_command handler can stop the listener and return to the prompt.
+            self.stop_flag.set()
+            if hasattr(self, "shutdown"):
+                try:
+                    self.shutdown()
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             print_error(f"Error in run_with_auto_session: {e}")
             return False

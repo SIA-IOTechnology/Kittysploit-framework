@@ -260,10 +260,18 @@ class CLI:
                     self.handle_command(user_input)
                     
             except KeyboardInterrupt:
-                # Ctrl+C - ignore and continue
+                # Ctrl+C at the prompt (or residual interrupt after a module) — stay in the CLI
+                try:
+                    print()
+                except Exception:
+                    pass
                 continue
             except EOFError:
                 # Ctrl+D - quit properly
+                print_info("Quitting KittySploit...")
+                break
+            except SystemExit:
+                # Do not let nested SystemExit tear down the framework silently
                 print_info("Quitting KittySploit...")
                 break
             except Exception as e:
@@ -290,5 +298,8 @@ class CLI:
             success = self.command_registry.execute_command(command_name, args, framework=self.framework)
             if not success:
                 print_error(f"Command '{command_name}' failed")
+        except KeyboardInterrupt:
+            # Ensure Ctrl+C during a command returns to the prompt instead of exiting
+            print_warning("Interrupted by user")
         except Exception as e:
             print_error(f"Error executing command '{command_name}': {str(e)}")

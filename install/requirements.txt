@@ -30,6 +30,7 @@ scapy>=2.4.5
 netaddr>=0.8.0
 xmltodict>=0.13.0
 websocket-client
+PySocks>=1.7.1
 
 # System utilities
 psutil>=5.8.0

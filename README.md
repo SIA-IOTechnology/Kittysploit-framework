@@ -8,9 +8,10 @@
   [![Zig](https://img.shields.io/badge/Payloads-Zig_0.16-orange.svg?style=for-the-badge&logo=zig)](https://ziglang.org/)
   [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
   [![Donate](https://img.shields.io/badge/Sponsor-Liberapay-yellow.svg?style=for-the-badge&logo=liberapay)](https://liberapay.com/KittySploit/donate)
+  [![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/RNskjwSW5W)
   [![Stars](https://img.shields.io/github/stars/SIA-IOTechnology/Kittysploit-framework?style=for-the-badge&color=yellow)](https://github.com/SIA-IOTechnology/Kittysploit-framework/stargazers)
 
-  **[Website](https://kittysploit.com) • [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Usage Guide](USAGE.md) • [Marketplace](USAGE.md)**
+  **[Website](https://kittysploit.com) • [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Usage Guide](USAGE.md) • [Marketplace](USAGE.md) • [Discord](https://discord.gg/RNskjwSW5W)**
 
   *Modular • Extensible • AI-Powered*
 </div>
@@ -151,7 +152,7 @@ More examples are available in [USAGE.md](USAGE.md).
   <h3>Ready to upgrade your arsenal?</h3>
   <p>If you find this project useful, please consider giving it a ⭐. It helps others discover the framework!</p>
   
-  [🌐 Official Website](https://kittysploit.com) • [📄 MIT License](LICENSE) • [💖 Donate](https://liberapay.com/KittySploit/donate)
+  [🌐 Official Website](https://kittysploit.com) • [💬 Discord](https://discord.gg/RNskjwSW5W) • [📄 MIT License](LICENSE) • [💖 Donate](https://liberapay.com/KittySploit/donate)
   
   [![Donate using Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/KittySploit/donate)
 </div>

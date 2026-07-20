@@ -9,7 +9,6 @@
   [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
   [![Donate](https://img.shields.io/badge/Sponsor-Liberapay-yellow.svg?style=for-the-badge&logo=liberapay)](https://liberapay.com/KittySploit/donate)
   [![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/RNskjwSW5W)
-  [![Stars](https://img.shields.io/github/stars/SIA-IOTechnology/Kittysploit-framework?style=for-the-badge&color=yellow)](https://github.com/SIA-IOTechnology/Kittysploit-framework/stargazers)
 
   **[Website](https://kittysploit.com) • [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Usage Guide](USAGE.md) • [Marketplace](USAGE.md) • [Discord](https://discord.gg/RNskjwSW5W)**
 

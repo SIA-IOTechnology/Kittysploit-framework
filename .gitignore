@@ -8,7 +8,6 @@ __pycache__/
 venv/*
 .venv/*
 docs/*
-!docs/ROADMAP-AGENT-100X.md
 artifacts/*
 
 # Python package files

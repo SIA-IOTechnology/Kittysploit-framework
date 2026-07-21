@@ -1,5 +1,11 @@
 """Backward-compatible helpers for the kittyproxy marketplace app."""
 
-from core.utils.marketplace_apps import ensure_app_path, install_hint as kittyproxy_install_hint
+from core.utils.marketplace_apps import ensure_app_path, install_hint
 
-ensure_kittyproxy_path = lambda: ensure_app_path("kittyproxy")
+
+def ensure_kittyproxy_path() -> bool:
+    return ensure_app_path("kittyproxy")
+
+
+def kittyproxy_install_hint() -> str:
+    return install_hint("kittyproxy")

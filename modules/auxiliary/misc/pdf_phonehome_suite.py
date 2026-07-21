@@ -19,7 +19,7 @@ class Module(Auxiliary, PdfPhonehomeMixin):
             "https://github.com/RUB-NDS/PDF101",
             "https://portswigger.net/research/portable-data-exfiltration",
         ],
-        "tags": ["pdf", "phone-home", "callback", "red-team", "upload-scanner"],
+        "tags": ["pdf", "phone-home", "callback", "red-team", "upload-scanner", "fileformat"],
     }
 
     PDF_GENERATORS = tuple(

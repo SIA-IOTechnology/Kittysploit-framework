@@ -10,6 +10,7 @@ from .sqli_engine import HttpParameterOracle, SqliEngine, SqliScanResult
 from .wing_ftp import WingFtp
 from .meig import Meig
 from .splunk import Splunk
+from .jenkins import Jenkins
 
 __all__ = [
     "Wordpress",
@@ -25,4 +26,5 @@ __all__ = [
     "WingFtp",
     "Meig",
     "Splunk",
+    "Jenkins",
 ]

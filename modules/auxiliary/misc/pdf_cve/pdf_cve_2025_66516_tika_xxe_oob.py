@@ -3,7 +3,7 @@
 
 from kittysploit import *
 from lib.pdf.mixins import PdfCveMixin
-from lib.pdf.generators.xxe import write_xfa_xxe_oob
+from lib.pdf.generators.xxe import write_tika_xfa_xxe_oob
 
 
 class Module(Auxiliary, PdfCveMixin):
@@ -17,7 +17,7 @@ class Module(Auxiliary, PdfCveMixin):
     }
 
     PDF_GENERATORS = (
-        write_xfa_xxe_oob,
+        write_tika_xfa_xxe_oob,
     )
 
     CVE_IDS = ['CVE-2025-66516']

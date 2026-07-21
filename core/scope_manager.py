@@ -83,6 +83,10 @@ class ScopeManager:
         self.rate_limit_max = 0
         self.rate_limit_window_sec = 60
         self.require_confirm_destructive = True
+        # RoE time window (local clock). None/None = any hour allowed.
+        self.allowed_hours_start: Optional[int] = None  # 0-23 inclusive
+        self.allowed_hours_end: Optional[int] = None    # 0-23 inclusive
+        self.block_destructive: bool = False  # hard-block destructive (no confirm)
 
         self._rate_buckets: Dict[str, List[float]] = {}
         self.last_decision: Optional[ScopeDecision] = None
@@ -116,6 +120,15 @@ class ScopeManager:
             self.rate_limit_max = int(data.get("rate_limit_max") or 0)
             self.rate_limit_window_sec = max(1, int(data.get("rate_limit_window_sec") or 60))
             self.require_confirm_destructive = bool(data.get("require_confirm_destructive", True))
+            self.block_destructive = bool(data.get("block_destructive", False))
+            start = data.get("allowed_hours_start", None)
+            end = data.get("allowed_hours_end", None)
+            self.allowed_hours_start = int(start) if start is not None and str(start) != "" else None
+            self.allowed_hours_end = int(end) if end is not None and str(end) != "" else None
+            if self.allowed_hours_start is not None:
+                self.allowed_hours_start = max(0, min(23, self.allowed_hours_start))
+            if self.allowed_hours_end is not None:
+                self.allowed_hours_end = max(0, min(23, self.allowed_hours_end))
         except Exception as exc:
             logger.warning("Could not load scope config for %s: %s", self.workspace, exc)
 
@@ -128,6 +141,9 @@ class ScopeManager:
             "rate_limit_max": self.rate_limit_max,
             "rate_limit_window_sec": self.rate_limit_window_sec,
             "require_confirm_destructive": self.require_confirm_destructive,
+            "block_destructive": self.block_destructive,
+            "allowed_hours_start": self.allowed_hours_start,
+            "allowed_hours_end": self.allowed_hours_end,
             "updated_at": self._now_iso(),
         }
         with open(self._config_path, "w", encoding="utf-8") as handle:
@@ -199,9 +215,42 @@ class ScopeManager:
             "rate_limit_max": self.rate_limit_max,
             "rate_limit_window_sec": self.rate_limit_window_sec,
             "require_confirm_destructive": self.require_confirm_destructive,
+            "block_destructive": self.block_destructive,
+            "allowed_hours_start": self.allowed_hours_start,
+            "allowed_hours_end": self.allowed_hours_end,
+            "within_hours": self.is_within_allowed_hours(),
             "config_path": str(self._config_path),
             "audit_path": str(self._audit_path),
         }
+
+    def set_allowed_hours(self, start: Optional[int], end: Optional[int]) -> None:
+        if start is None or end is None:
+            self.allowed_hours_start = None
+            self.allowed_hours_end = None
+        else:
+            self.allowed_hours_start = max(0, min(23, int(start)))
+            self.allowed_hours_end = max(0, min(23, int(end)))
+        self.save()
+        self.audit(
+            "hours_updated",
+            {"start": self.allowed_hours_start, "end": self.allowed_hours_end},
+        )
+
+    def set_block_destructive(self, enabled: bool) -> None:
+        self.block_destructive = bool(enabled)
+        self.save()
+        self.audit("block_destructive_updated", {"enabled": self.block_destructive})
+
+    def is_within_allowed_hours(self, when: Optional[datetime] = None) -> bool:
+        if self.allowed_hours_start is None or self.allowed_hours_end is None:
+            return True
+        now = when or datetime.now()
+        hour = now.hour
+        start, end = self.allowed_hours_start, self.allowed_hours_end
+        if start <= end:
+            return start <= hour <= end
+        # Overnight window e.g. 22 → 6
+        return hour >= start or hour <= end
 
     def audit(self, event: str, payload: Optional[Dict[str, Any]] = None) -> None:
         record = {
@@ -418,6 +467,16 @@ class ScopeManager:
         if not self.enabled:
             return ScopeDecision(True, "not_enforced", "Scope enforcement disabled")
 
+        if not self.is_within_allowed_hours():
+            return ScopeDecision(
+                False,
+                "deny",
+                f"Outside allowed engagement hours "
+                f"({self.allowed_hours_start:02d}:00–{self.allowed_hours_end:02d}:59 local)",
+                [],
+                ["Update hours in Scope / RoE Guard or disable time window"],
+            )
+
         targets = self.extract_targets_from_module(module)
         if not targets:
             return ScopeDecision(
@@ -441,13 +500,21 @@ class ScopeManager:
             rate_decision.targets = list(targets)
             return rate_decision
 
-        if self.require_confirm_destructive and self.is_destructive_module(module):
-            return ScopeDecision(
-                True,
-                "confirm_required",
-                "Destructive module requires operator confirmation",
-                list(targets),
-            )
+        if self.is_destructive_module(module):
+            if self.block_destructive:
+                return ScopeDecision(
+                    False,
+                    "deny",
+                    "Destructive modules are blocked by Rules of Engagement",
+                    list(targets),
+                )
+            if self.require_confirm_destructive:
+                return ScopeDecision(
+                    True,
+                    "confirm_required",
+                    "Destructive module requires operator confirmation",
+                    list(targets),
+                )
 
         return ScopeDecision(True, "allow", "All targets are in scope", list(targets))
 

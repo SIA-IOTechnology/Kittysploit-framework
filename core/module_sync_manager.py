@@ -17,7 +17,7 @@ from typing import List, Dict, Optional, Set
 from pathlib import Path
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, func
 
 from core.db_manager import DatabaseManager
 from core.models.models import Module
@@ -342,37 +342,59 @@ class ModuleSyncManager:
                     self._add_module_to_db(session, fs_modules[path])
                     stats['added'] += 1
                 
-                # Update existing modules
-                for path in set(fs_modules.keys()) & set(db_modules.keys()):
+                # Batch-fetch modules to update and delete to avoid N+1 queries
+                update_ids = []
+                update_map = {}
+                remove_ids = []
+
+                update_paths = set(fs_modules.keys()) & set(db_modules.keys())
+                for path in update_paths:
                     fs_module = fs_modules[path]
                     db_module = db_modules[path]
-                    
-                    # Compare file_mtime properly (both should be datetime objects)
+                    db_id = db_module['id']
+
                     fs_mtime = fs_module['file_mtime']
                     db_mtime = db_module.get('file_mtime')
-                    
-                    # Convert db_mtime to datetime if it's a string or other type
+
                     if db_mtime and not isinstance(db_mtime, datetime):
                         if isinstance(db_mtime, str):
                             try:
                                 db_mtime = datetime.fromisoformat(db_mtime.replace('Z', '+00:00'))
-                            except:
+                            except Exception:
                                 db_mtime = None
                         elif isinstance(db_mtime, (int, float)):
                             db_mtime = datetime.fromtimestamp(db_mtime)
-                    
+
                     if (fs_module['file_hash'] != db_module.get('file_hash') or
                         (fs_mtime and db_mtime and fs_mtime != db_mtime) or
                         (fs_mtime and not db_mtime) or
                         (not fs_mtime and db_mtime)):
-                        self._update_module_in_db(session, db_module['id'], fs_module)
-                        stats['updated'] += 1
-                
-                # Remove deleted modules
-                for path in set(db_modules.keys()) - set(fs_modules.keys()):
-                    self._remove_module_from_db(session, db_modules[path]['id'])
-                    stats['removed'] += 1
-                
+                        update_ids.append(db_id)
+                        update_map[db_id] = fs_module
+
+                remove_ids = [
+                    db_modules[path]['id']
+                    for path in set(db_modules.keys()) - set(fs_modules.keys())
+                ]
+
+                # Bulk-fetch modules to update
+                if update_ids:
+                    modules_to_update = session.query(Module).filter(
+                        Module.id.in_(update_ids)
+                    ).all()
+                    for module in modules_to_update:
+                        data = update_map.get(module.id)
+                        if data:
+                            session.add(self._apply_module_update(module, data))
+                            stats['updated'] += 1
+
+                # Bulk-delete modules
+                if remove_ids:
+                    deleted = session.query(Module).filter(
+                        Module.id.in_(remove_ids)
+                    ).delete(synchronize_session=False)
+                    stats['removed'] = deleted
+
                 session.commit()
                 
         except Exception as e:
@@ -404,6 +426,22 @@ class ModuleSyncManager:
             print_error(f"Error adding module {module_data['name']}: {e}")
             raise
     
+    @staticmethod
+    def _apply_module_update(module, module_data: Dict):
+        module.name = module_data['name']
+        module.description = module_data['description']
+        module.type = module_data['type']
+        module.author = module_data['author']
+        module.version = module_data['version']
+        module.cve = module_data['cve']
+        module.tags = module_data['tags']
+        module.references = module_data['references']
+        module.options = module_data['options']
+        module.file_hash = module_data['file_hash']
+        module.file_mtime = module_data['file_mtime']
+        module.updated_at = datetime.utcnow()
+        return module
+
     def _update_module_in_db(self, session: Session, module_id: int, module_data: Dict):
         """Update an existing module in the database"""
         try:
@@ -610,21 +648,20 @@ class ModuleSyncManager:
         try:
             with self.db_manager.session_scope(self.workspace) as session:
                 total = session.query(Module).filter(Module.is_active == True).count()
-                
+
                 stats = {'total': total}
-                
-                # Count by type (merge legacy obfuscator rows into transform)
+
+                rows = (
+                    session.query(Module.type, func.count(Module.id))
+                    .filter(Module.is_active == True)
+                    .group_by(Module.type)
+                    .all()
+                )
+                type_map = dict(rows)
                 for module_type in ['exploits', 'auxiliary', 'payloads', 'listeners', 'post', 'scanner', 'encoder', 'transform']:
-                    count = session.query(Module).filter(
-                        and_(Module.type == module_type, Module.is_active == True)
-                    ).count()
-                    stats[module_type] = count
-                legacy_obfuscator = session.query(Module).filter(
-                    and_(Module.type == 'obfuscator', Module.is_active == True)
-                ).count()
-                if legacy_obfuscator:
-                    stats['transform'] = stats.get('transform', 0) + legacy_obfuscator
-                
+                    stats[module_type] = type_map.get(module_type, 0)
+                stats['transform'] = stats.get('transform', 0) + type_map.get('obfuscator', 0)
+
                 return stats
                 
         except Exception as e:

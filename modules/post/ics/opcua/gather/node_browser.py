@@ -10,8 +10,9 @@ from lib.protocols.ics.opcua_client import browse_opcua_nodes, opcua_available
 class Module(Post, Ics_scanner_client):
     __info__ = {
         "name": "OPC UA node browser",
-        "description": "Browses top-level OPC UA nodes via anonymous access when available",
+        "description": "Browses top-level OPC UA nodes via an OPC UA session or direct target",
         "author": "KittySploit Team",
+        "session_type": SessionType.OPCUA,
         "tags": ["ics", "opcua", "gather", "browser"],
     'agent': {
         'risk': 'active',
@@ -51,19 +52,37 @@ class Module(Post, Ics_scanner_client):
     port = OptPort(ICS_PROTOCOL_PORTS["opcua"], "OPC UA TCP port", True)
     ssl = OptBool(False, "Use TLS endpoint", False)
     max_nodes = OptInteger(30, "Maximum nodes to list", False)
+    node_id = OptString("root", "NodeId to browse (root, objects, or ns=...;i=...)", False)
 
     def check(self):
+        if self._session_data():
+            return True
         return bool(self._host())
 
     def run(self):
-        host = self._host()
+        session_data = self._session_data()
+        host = session_data.get("host") if session_data else self._host()
+        port = int(session_data.get("port") or self._port()) if session_data else self._port()
+        endpoint = str(session_data.get("endpoint") or "") if session_data else ""
+        username = str(session_data.get("username") or "") if session_data else ""
+        password = str(session_data.get("password") or "") if session_data else ""
+        ssl = bool(session_data.get("ssl", bool(self.ssl))) if session_data else bool(self.ssl)
         if not host:
             print_error("Target is required")
             return False
         if not opcua_available():
             print_error("asyncua not installed — pip install asyncua")
             return False
-        result = browse_opcua_nodes(host, self._port(), bool(self.ssl), int(self.max_nodes or 30))
+        result = browse_opcua_nodes(
+            host,
+            port,
+            ssl,
+            int(self.max_nodes or 30),
+            username=username,
+            password=password,
+            endpoint=endpoint,
+            node_id=str(self.node_id or "root"),
+        )
         if not result.connected:
             print_error(result.error or "OPC UA connection failed")
             return False
@@ -73,3 +92,15 @@ class Module(Post, Ics_scanner_client):
         if not result.nodes:
             print_warning("Browse completed — no nodes returned")
         return True
+
+    def _session_data(self):
+        try:
+            sid = str(self.session_id or "").strip()
+            if not sid or not self.framework or not hasattr(self.framework, "session_manager"):
+                return {}
+            session = self.framework.session_manager.get_session(sid)
+            if not session or str(session.session_type).lower() != "opcua":
+                return {}
+            return session.data or {}
+        except Exception:
+            return {}

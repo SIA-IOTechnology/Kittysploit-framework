@@ -42,7 +42,6 @@ def export_osint_umf_message(
     classification: str = "LAW ENFORCEMENT SENSITIVE",
     artifact_paths: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Any]:
-    """Build UMF-inspired intelligence message from OSINT synthesis."""
     generated = utc_now_z()
     root = str(synthesis.get("root_domain") or case_id or "unknown")
     message_id = _msg_id(case_id or root)

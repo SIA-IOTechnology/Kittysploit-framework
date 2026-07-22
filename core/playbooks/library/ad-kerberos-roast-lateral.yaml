@@ -59,7 +59,7 @@ chain:
     description: Reuse cracked or sprayed creds for SMB session
   - id: lateral_shell
     capability: shell
-    module: post/smb/manage/deploy_reverse_shell
+    module: post/smb/windows/deploy_reverse_shell
     description: Remote execution over acquired SMB session
   - id: winrm_enum
     capability: authenticated_session

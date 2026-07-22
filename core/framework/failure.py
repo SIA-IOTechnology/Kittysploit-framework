@@ -86,7 +86,6 @@ class Fail:
         return False
 
     def _split_camel_case(self, name: str) -> list:
-        """Split camelCase or PascalCase into words"""
         import re
         return re.findall(r'[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)', name)
 

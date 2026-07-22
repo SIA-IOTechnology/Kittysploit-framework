@@ -142,11 +142,9 @@ pub fn main() !void {
 
 
 def get_template(template_name: str) -> Optional[str]:
-    """Get template by name"""
     return TEMPLATES.get(template_name)
 
 
 def list_templates() -> list:
-    """List all available templates"""
     return list(TEMPLATES.keys())
 

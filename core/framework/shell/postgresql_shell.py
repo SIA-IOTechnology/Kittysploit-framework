@@ -50,7 +50,6 @@ class PostgreSQLShell(BaseShell):
         self._initialize_postgresql_connection()
 
     def _initialize_postgresql_connection(self):
-        """Initialize PostgreSQL connection from session/listener"""
         try:
             if not self.framework:
                 return

@@ -410,18 +410,15 @@ class PolicyEngine:
         return max(0.0, min(100.0, score))
     
     def _get_manifest(self, module_path: str) -> Optional[ModuleManifest]:
-        """Récupère le manifeste d'un module"""
         if module_path in self.manifest_cache:
             return self.manifest_cache[module_path]
         return None
     
     def _save_manifest(self, manifest: ModuleManifest):
-        """Sauvegarde un manifeste"""
         self.manifest_cache[manifest.module_path] = manifest
         self._persist_manifests()
     
     def _load_manifests(self):
-        """Charge les manifestes depuis le disque"""
         if not os.path.exists(self.manifest_file):
             return
         
@@ -466,7 +463,6 @@ class PolicyEngine:
         return ModuleManifest(**data)
     
     def _initialize_components(self, policy_level: PolicyLevel):
-        """Initialise les composants du moteur de politique"""
         try:
             from core.framework.utils.ast_analyzer import ASTAnalyzer
             from core.framework.utils.sandbox_executor import SandboxExecutor

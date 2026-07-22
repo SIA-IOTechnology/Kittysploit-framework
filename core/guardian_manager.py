@@ -77,7 +77,6 @@ class GuardianManager:
     """Guardian behavioral analysis and anomaly detection manager"""
     
     def __init__(self):
-        """Initialize Guardian manager"""
         self.logger = logger
         self.enabled = False
         self.verbose = False
@@ -145,7 +144,6 @@ class GuardianManager:
         self.stop_monitoring = False
     
     def enable(self, verbose: bool = False, auto_action: bool = False):
-        """Enable Guardian monitoring"""
         self.enabled = True
         self.verbose = verbose
         self.auto_action = auto_action
@@ -160,7 +158,6 @@ class GuardianManager:
         print(f"[GUARDIAN] Enabled: {self.enabled}, Verbose: {self.verbose}, Auto Action: {self.auto_action}")
     
     def disable(self):
-        """Disable Guardian monitoring"""
         self.enabled = False
         self.stop_monitoring = True
         
@@ -170,7 +167,6 @@ class GuardianManager:
         self.logger.info("Guardian monitoring disabled")
     
     def _normalize_operation_data(self, operation_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Validate and normalize raw operation data"""
         if not isinstance(operation_data, dict):
             self.logger.debug("Guardian ignored operation: invalid payload type")
             return None
@@ -234,7 +230,6 @@ class GuardianManager:
         return normalized
     
     def _get_or_create_profile(self, target: str) -> HostProfile:
-        """Get host profile or create a new one"""
         if target not in self.host_profiles:
             self.host_profiles[target] = HostProfile(
                 host=target,
@@ -248,7 +243,6 @@ class GuardianManager:
         return self.host_profiles[target]
     
     def _update_profile_metrics(self, profile: HostProfile, operation: Dict[str, Any]) -> None:
-        """Update host profile statistics with new operation data"""
         profile.last_seen = operation['timestamp']
         profile.interaction_count += 1
         profile.response_times.append(operation['response_time'])
@@ -271,7 +265,6 @@ class GuardianManager:
             profile.suspicious_indicators = profile.suspicious_indicators[-20:]
     
     def _calculate_risk_components(self, profile: HostProfile, operation: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Calculate individual risk component scores"""
         components: List[Dict[str, Any]] = []
         baseline = profile.baseline_response or operation['response_time']
         ratio = operation['response_time'] / max(baseline, 1.0)
@@ -332,7 +325,6 @@ class GuardianManager:
         return components
     
     def _determine_severity(self, risk_score: float, profile: HostProfile) -> Optional[str]:
-        """Convert risk score into severity level"""
         if risk_score >= self.config['critical_threshold'] or profile.honeypot_score >= self.config['honeypot_threshold']:
             return "CRITICAL"
         if risk_score >= self.config['risk_threshold']:
@@ -340,7 +332,6 @@ class GuardianManager:
         return None
     
     def _build_issue_summary(self, components: List[Dict[str, Any]]) -> str:
-        """Build short issue summary from components"""
         if not components:
             return "Anomaly detected"
         primary = max(components, key=lambda comp: comp['score'])
@@ -485,7 +476,6 @@ class GuardianManager:
         min_score: Optional[float] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """Liste les identités AD suspectes triées par score."""
         threshold = min_score if min_score is not None else self.config['identity_suspicious_threshold']
         rows = [
             profile for profile in self.identity_profiles.values()
@@ -495,7 +485,6 @@ class GuardianManager:
         return [asdict(profile) for profile in rows[:limit]]
 
     def is_identity_blacklisted(self, sam_account: str, domain: str = "") -> Tuple[bool, Optional[Dict[str, Any]]]:
-        """Vérifie si une identité AD est blacklistée (probable honeytoken)."""
         key = self._identity_key(sam_account, domain)
         if key in self.identity_whitelist:
             return False, None
@@ -531,7 +520,6 @@ class GuardianManager:
         return True
     
     def get_status(self) -> Dict[str, Any]:
-        """Get Guardian status"""
         # Get recent threats (last 24 hours)
         recent_threats = []
         cutoff_time = datetime.now() - timedelta(hours=24)
@@ -620,7 +608,6 @@ class GuardianManager:
             self.learning_mode = False
     
     def add_to_blacklist(self, host: str, reason: str = ""):
-        """Add host to blacklist"""
         self.blacklist[host] = {
             'reason': reason,
             'timestamp': datetime.now().isoformat(),
@@ -629,22 +616,18 @@ class GuardianManager:
         self.logger.info(f"Host {host} added to blacklist: {reason}")
     
     def remove_from_blacklist(self, host: str):
-        """Remove host from blacklist"""
         if host in self.blacklist:
             del self.blacklist[host]
             self.logger.info(f"Host {host} removed from blacklist")
     
     def get_blacklist(self) -> Dict[str, Dict[str, Any]]:
-        """Get blacklisted hosts"""
         return self.blacklist.copy()
     
     def get_recent_alerts(self, count: int = 10) -> List[Dict[str, Any]]:
-        """Get recent alerts"""
         recent_alerts = sorted(self.alerts, key=lambda x: x.timestamp, reverse=True)[:count]
         return [asdict(alert) for alert in recent_alerts]
     
     def get_config(self) -> Dict[str, Any]:
-        """Get Guardian configuration"""
         return {
             'enabled': self.enabled,
             'verbose': self.verbose,
@@ -659,7 +642,6 @@ class GuardianManager:
         }
     
     def test_host(self, host: str, deep: bool = False) -> Dict[str, Any]:
-        """Test host for anomalies"""
         import socket
         import time
         
@@ -773,7 +755,6 @@ class GuardianManager:
             }
     
     def analyze_operation(self, operation_data: Dict[str, Any]) -> Optional[GuardianAlert]:
-        """Analyze operation for anomalies"""
         if not self.enabled:
             return None
 
@@ -840,7 +821,6 @@ class GuardianManager:
     def _create_alert(self, target: str, severity: str, issue: str, 
                      confidence: float, recommendations: List[str],
                      evidence: Optional[List[str]] = None) -> GuardianAlert:
-        """Create Guardian alert"""
         evidence = evidence or []
         alert = GuardianAlert(
             timestamp=datetime.now().isoformat(),
@@ -877,7 +857,6 @@ class GuardianManager:
         return alert
     
     def _calculate_honeypot_score(self, profile: HostProfile) -> float:
-        """Calculate honeypot probability score"""
         responses = profile.response_times[-20:]
         if not responses:
             return profile.honeypot_score
@@ -919,7 +898,6 @@ class GuardianManager:
         return float(min(100.0, max(0.0, smoothed)))
     
     def _monitoring_loop(self):
-        """Main monitoring loop"""
         while not self.stop_monitoring and self.enabled:
             try:
                 # Perform background monitoring tasks
@@ -933,7 +911,6 @@ class GuardianManager:
                 time.sleep(10)
     
     def _cleanup_old_data(self):
-        """Clean up old data"""
         # Clean old host profiles
         cutoff_time = datetime.now() - timedelta(days=7)
         old_hosts = [
@@ -945,7 +922,6 @@ class GuardianManager:
             del self.host_profiles[host]
     
     def _update_statistics(self):
-        """Update Guardian statistics"""
         # Update honeypot detection count
         self.stats['honeypots_detected'] = len([
             alert for alert in self.alerts 
@@ -953,7 +929,6 @@ class GuardianManager:
         ])
     
     def _test_port_scanning(self, host: str) -> List[int]:
-        """Test port scanning behavior"""
         import socket
         
         common_ports = [21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 993, 995, 1433, 3389, 5432, 5900, 8080]
@@ -973,7 +948,6 @@ class GuardianManager:
         return open_ports
     
     def _analyze_service_banners(self, host: str, ports: List[int]) -> Dict[int, str]:
-        """Analyze service banners"""
         import socket
         
         banners = {}
@@ -995,7 +969,6 @@ class GuardianManager:
         return banners
     
     def _detect_fake_banners(self, banners: Dict[int, str]) -> List[str]:
-        """Detect fake service banners"""
         fake_indicators = [
             'honeypot', 'fake', 'test', 'demo', 'mock', 'simulation',
             'research', 'lab', 'sandbox', 'trap', 'decoy'
@@ -1012,7 +985,6 @@ class GuardianManager:
         return fake_banners
     
     def _test_response_times(self, host: str) -> List[float]:
-        """Test response times"""
         import socket
         import time
         
@@ -1037,14 +1009,12 @@ class GuardianManager:
     
     def _test_credential_acceptance(self, host: str) -> Dict[str, Any]:
         """Test if services accept any credentials"""
-        # This is a simplified test - in reality, you'd test actual services
         # For now, we'll simulate based on common honeypot behavior
         
         # Simulate that most real hosts reject invalid credentials
         # Honeypots often accept any credentials to capture more data
         accepts_any = False
         
-        # In a real implementation, you would:
         # 1. Try SSH with invalid credentials
         # 2. Try FTP with invalid credentials  
         # 3. Try HTTP basic auth with invalid credentials
@@ -1057,7 +1027,6 @@ class GuardianManager:
         }
     
     def _analyze_network_behavior(self, host: str) -> Dict[str, Any]:
-        """Analyze network behavior patterns"""
         # This would analyze network traffic patterns, connections, etc.
         # For now, we'll simulate normal behavior
         
@@ -1068,7 +1037,6 @@ class GuardianManager:
         }
     
     def _get_reverse_dns(self, host: str) -> Optional[str]:
-        """Get reverse DNS for host"""
         import socket
         
         try:
@@ -1078,7 +1046,6 @@ class GuardianManager:
             return None
     
     def _analyze_interaction_patterns(self, host: str) -> Dict[str, Any]:
-        """Analyze service interaction patterns"""
         # This would analyze how services respond to different types of requests
         # For now, we'll simulate normal behavior
         

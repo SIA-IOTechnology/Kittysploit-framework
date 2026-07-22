@@ -32,10 +32,10 @@ class Module(Auxiliary, Http_crawler):
 		     'endpoint_pattern_any': [],
 		     'param_any': [],
 		     'api_surface_ready': False},
-		    'chain': 		    {'produces_capabilities': [],
+		    'chain': 		    {'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
 		     'consumes_capabilities': [],
 		     'option_bindings': {},
-		     'suggested_followups': []},
+		     'suggested_followups': ['auxiliary/scanner/http/security_headers']},
 		},
 		}
 

@@ -200,7 +200,6 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
                 self.tags = []
 
     def _check_module_dependencies(self):
-        """Check module dependencies"""
         if hasattr(self.__class__, '__info__'):
             deps = self.__class__.__info__.get('dependencies', [])
             optional_deps = self.__class__.__info__.get('optional_dependencies', [])
@@ -324,7 +323,6 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
         session_id: Optional[str] = None,
         data: Any = None,
     ) -> ModuleResult:
-        """Build a normalized module return value."""
         return ModuleResult(
             success=success,
             finding=finding,
@@ -489,7 +487,6 @@ class BaseModule(with_metaclass(ModuleOptionsAggregator, object)):
             return False
 
     def output_dir_path(self, file_path: str = "") -> str:
-        """Resolve a path under the module output directory."""
         output_dir = os.path.join(os.getcwd(), "output")
         rel = str(file_path or "").strip().replace("\\", "/").lstrip("/")
         if rel.startswith("output/"):

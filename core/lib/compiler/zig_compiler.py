@@ -187,7 +187,6 @@ class ZigCompiler:
                                windows_subsystem: Optional[str],
                                extra_args: Optional[List[str]],
                                compile_dir: str) -> List[str]:
-        """Build zig cc command for C sources (supports Intel inline asm on Windows)."""
         cmd = [
             self.zig_path,
             'cc',

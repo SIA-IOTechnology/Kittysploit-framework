@@ -22,8 +22,9 @@ class Module(Post):
 				"consumes_capabilities": ["authenticated_session"],
 				"produces_capabilities": ["shell"],
 				"suggested_followups": [
-					"post/shell/multi/gather/privesc_suggester",
-					"post/shell/multi/manage/spawn_reverse_shell",
+					"post/winrm/gather/enum_users",
+					"post/winrm/gather/enum_network",
+					"post/winrm/manage/spawn_reverse_shell",
 				],
 			},
 		},

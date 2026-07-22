@@ -85,9 +85,9 @@ launch_*.py
 modules/browser_exploits/multi/chrome_font_feature_uaf.py
 
 apps/*
-!apps/kittysploit-ai/
-!apps/kittysploit-ai/**
+
 artifacts/*
 TODO.md
 
 tests/*
+docs/ROADMAP-AGENT-100X.md

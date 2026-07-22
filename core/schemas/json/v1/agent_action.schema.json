@@ -8,7 +8,7 @@
     "id": {"$ref": "common.schema.json#/$defs/id"},
     "type": {
       "type": "string",
-      "enum": ["prioritize", "run_followup", "run_exploit", "skip", "collect", "report"]
+      "enum": ["prioritize", "run_followup", "run_exploit", "run_post", "skip", "collect", "report"]
     },
     "path": {"type": ["string", "null"]},
     "priority": {"type": "integer", "minimum": 0},

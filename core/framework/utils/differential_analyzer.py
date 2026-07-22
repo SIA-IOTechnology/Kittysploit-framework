@@ -15,7 +15,6 @@ class DifferentialAnalyzer:
     """Analyseur différentiel pour détecter les écarts entre déclarations et implémentation"""
     
     def __init__(self):
-        """Initialise l'analyseur différentiel"""
         self.ast_analyzer = ASTAnalyzer()
     
     def analyze(

@@ -131,7 +131,6 @@ def normalize_browser_session(
 
 
 def collect_browser_sessions(framework: Any) -> List[Dict[str, Any]]:
-    """Merge browser sessions from browser_server and session_manager."""
     merged: Dict[str, Dict[str, Any]] = {}
 
     server = getattr(framework, "browser_server", None)

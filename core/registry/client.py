@@ -294,7 +294,6 @@ class ExtensionClient:
             return {"extensions": [], "total": 0, "page": 1, "per_page": per_page}
     
     def get_extension(self, extension_id: str) -> Optional[Dict[str, Any]]:
-        """Get extension details"""
         try:
             response = requests.get(
                 f"{self.registry_url}/api/registry/extensions/{extension_id}",
@@ -581,7 +580,6 @@ class ExtensionClient:
             return False
     
     def update_extension(self, extension_id: str, version: Optional[str] = None) -> bool:
-        """Update an extension to a newer version"""
         # Uninstall old version
         old_dir = os.path.join(self.extensions_dir, extension_id)
         if os.path.exists(old_dir):
@@ -700,7 +698,6 @@ class ExtensionClient:
             return False
     
     def list_installed_extensions(self) -> List[Dict[str, Any]]:
-        """List locally installed extensions"""
         installed = []
         
         if not os.path.exists(self.extensions_dir):
@@ -797,7 +794,6 @@ class ExtensionClient:
         return launcher_path if launcher_path.is_file() else None
 
     def find_installed_extension(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Find an installed extension by manifest id, name, or directory id."""
         needle = (identifier or "").strip().lower()
         if not needle:
             return None
@@ -891,7 +887,6 @@ class ExtensionClient:
         }
     
     def purchase_extension(self, extension_id: str, user_id: str, version: Optional[str] = None) -> bool:
-        """Purchase a paid extension"""
         try:
             data = {}
             if version:

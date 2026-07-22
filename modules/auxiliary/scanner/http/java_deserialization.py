@@ -167,7 +167,7 @@ class Module(Auxiliary, Http_client):
         # This is a minimal serialized object for detection
         magic_bytes = self.JAVA_SERIALIZATION_MAGIC
         
-        # Basic serialized object structure (simplified)
+        # Basic serialized object structure
         # In real scenarios, you would use ysoserial or similar tools
         payload = magic_bytes + b'\x73\x72'  # TC_OBJECT, TC_CLASSDESC
         

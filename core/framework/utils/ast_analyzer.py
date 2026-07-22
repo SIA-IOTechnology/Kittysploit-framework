@@ -169,7 +169,6 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.inherits_from_base_with_run = False
     
     def visit_Import(self, node: ast.Import):
-        """Visite les imports"""
         for alias in node.names:
             self.imports.add(alias.name)
             if alias.asname:
@@ -177,7 +176,6 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.generic_visit(node)
     
     def visit_ImportFrom(self, node: ast.ImportFrom):
-        """Visite les imports from"""
         if node.module:
             for alias in node.names:
                 if alias.name == "*":
@@ -195,7 +193,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
             self.has_module_class = True
             # Classes de base qui ont déjà une méthode run()
             base_classes_with_run = [
-                "DockerEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
+                "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
                 "Post", "Scanner", "Encoder", "Transform", "Backdoor",
                 "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
             ]
@@ -264,7 +262,6 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.generic_visit(node)
     
     def visit_Assign(self, node: ast.Assign):
-        """Visite les assignations"""
         for target in node.targets:
             if isinstance(target, ast.Name):
                 # Détecter __info__
@@ -314,7 +311,6 @@ class SecurityASTVisitor(ast.NodeVisitor):
                             self.declared_restrictions.append(str(restriction))
     
     def _check_dangerous_calls(self, node: ast.FunctionDef):
-        """Vérifie les appels dangereux dans une fonction"""
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
                 if isinstance(child.func, ast.Name):

@@ -11,7 +11,6 @@ from core.output_handler import print_info
 
 
 def capture_module_context(framework) -> Optional[Any]:
-    """Return the module active before a workflow or batch operation."""
     if framework is None:
         return None
     return getattr(framework, "current_module", None)

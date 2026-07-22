@@ -108,6 +108,9 @@ class SMBShell(BaseShell):
                 return self.builtin_commands[cmd](args)
             except Exception as e:
                 return {"output": "", "status": 1, "error": str(e)}
+        share_lookup = {share.lower(): share for share in self._shares}
+        if cmd in share_lookup:
+            return self._cmd_use(share_lookup[cmd])
         return {"output": "", "status": 1, "error": f"Unknown command: {cmd}. Type help."}
 
     def _require_client(self) -> SMBClient:

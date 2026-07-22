@@ -154,6 +154,10 @@ class MetasploitPlugin(Plugin):
 
     DEFAULT_CONFIG = ("metasploit", "rpc_config.json")
 
+    @staticmethod
+    def _sanitize_console_value(value: str) -> str:
+        return value.replace("\n", "").replace("\r", "").replace("\x00", "")
+
     def __init__(self, framework=None):
         super().__init__(framework)
         self.client: Optional[MetasploitRpcClient] = None
@@ -697,9 +701,9 @@ class MetasploitPlugin(Plugin):
         datastore = self._build_msf_datastore_from_exploit(exploit, payload_ref)
         msfvenom = self._find_msfvenom()
         out_format = str(getattr(exploit, "msf_format", "raw") or "raw")
-        command = [msfvenom, "-p", payload_name]
+        command = [msfvenom, "-p", self._sanitize_console_value(payload_name)]
         for key, value in datastore.items():
-            command.append(f"{key}={value}")
+            command.append(f"{self._sanitize_console_value(key)}={self._sanitize_console_value(value)}")
         command.extend(["-f", out_format])
 
         result = subprocess.run(command, capture_output=True, check=False)
@@ -727,9 +731,9 @@ class MetasploitPlugin(Plugin):
             self._start_console_process(self.msfconsole_path or "msfconsole")
 
         self._exec_console_command("use exploit/multi/handler", read_duration=0.4)
-        self._exec_console_command(f"set payload {payload_name}", read_duration=0.4)
+        self._exec_console_command(f"set payload {self._sanitize_console_value(payload_name)}", read_duration=0.4)
         for key, value in datastore.items():
-            self._exec_console_command(f"set {key} {value}", read_duration=0.3)
+            self._exec_console_command(f"set {self._sanitize_console_value(key)} {self._sanitize_console_value(value)}", read_duration=0.3)
         self._exec_console_command("set ExitOnSession false", read_duration=0.3)
         output = self._exec_console_command("run -j", read_duration=1.2)
         match = re.search(r"background job\s+(\d+)", output, re.IGNORECASE)
@@ -742,13 +746,13 @@ class MetasploitPlugin(Plugin):
             return True
         if not self._console_alive():
             return True
-        self._exec_console_command(f"jobs -k {job_id}", read_duration=0.6)
+        self._exec_console_command(f"jobs -k {self._sanitize_console_value(str(job_id))}", read_duration=0.6)
         return True
 
     def msf_use(self, module_name: str) -> bool:
         if not self.integrated_mode:
             raise RuntimeError("Metasploit integrated mode is not active")
-        self._exec_console_command(f"use {module_name}")
+        self._exec_console_command(f"use {self._sanitize_console_value(module_name)}")
         self.current_msf_module = module_name
         print_success(f"Using Metasploit module: {module_name}")
         return True
@@ -763,14 +767,14 @@ class MetasploitPlugin(Plugin):
     def msf_set(self, name: str, value: str) -> bool:
         if not self.integrated_mode:
             raise RuntimeError("Metasploit integrated mode is not active")
-        self._exec_console_command(f"set {name} {value}")
+        self._exec_console_command(f"set {self._sanitize_console_value(name)} {self._sanitize_console_value(value)}")
         return True
 
     def msf_run(self, extra_args: Optional[List[str]] = None) -> bool:
         if not self.integrated_mode:
             raise RuntimeError("Metasploit integrated mode is not active")
         suffix = " " + " ".join(extra_args) if extra_args else ""
-        self._exec_console_command(f"run{suffix}", read_duration=1.0)
+        self._exec_console_command(f"run{self._sanitize_console_value(suffix)}", read_duration=1.0)
         return True
 
     def msf_back(self) -> bool:
@@ -784,7 +788,7 @@ class MetasploitPlugin(Plugin):
     def msf_search(self, query: str) -> str:
         if not self.integrated_mode:
             raise RuntimeError("Metasploit integrated mode is not active")
-        return self._exec_console_command(f"search {query}", read_duration=1.2, display=False)
+        return self._exec_console_command(f"search {self._sanitize_console_value(query)}", read_duration=1.2, display=False)
 
     def list_msf_sessions(self) -> str:
         if not self._console_alive():
@@ -794,12 +798,12 @@ class MetasploitPlugin(Plugin):
     def access_msf_session(self, session_id: str) -> str:
         if not self._console_alive():
             return ""
-        return self._exec_console_command(f"sessions -i {session_id}", read_duration=1.0)
+        return self._exec_console_command(f"sessions -i {self._sanitize_console_value(session_id)}", read_duration=1.0)
 
     def kill_msf_session(self, session_id: str) -> bool:
         if not self._console_alive():
             return False
-        self._exec_console_command(f"sessions -k {session_id}", read_duration=0.8)
+        self._exec_console_command(f"sessions -k {self._sanitize_console_value(session_id)}", read_duration=0.8)
         return True
 
     def _extract_module_paths_from_output(self, output: str, module_type: Optional[str] = None) -> List[str]:
@@ -852,7 +856,7 @@ class MetasploitPlugin(Plugin):
         matched = [item for item in sorted(set(candidates)) if lowered in item.lower()]
         if matched:
             return matched[:200]
-        output = self._exec_console_command(f"search {partial}", read_duration=1.0, display=False)
+        output = self._exec_console_command(f"search {self._sanitize_console_value(partial)}", read_duration=1.0, display=False)
         return self._extract_module_paths_from_output(output, module_type=module_type)
 
     def complete_msf_payloads(self, partial: str) -> List[str]:
@@ -866,7 +870,7 @@ class MetasploitPlugin(Plugin):
         else:
             filtered = list(payloads)
         if not filtered and query:
-            output = self._exec_console_command(f"search {query}", read_duration=1.0, display=False)
+            output = self._exec_console_command(f"search {self._sanitize_console_value(query)}", read_duration=1.0, display=False)
             filtered = self._extract_module_paths_from_output(output, module_type="payload")
         payloads = filtered[:200]
         return [f"msf/{payload}" for payload in payloads]
@@ -875,7 +879,7 @@ class MetasploitPlugin(Plugin):
         if not self.integrated_mode:
             raise RuntimeError("Metasploit integrated mode is not active")
         if module_name:
-            return self._exec_console_command(f"info {module_name}", read_duration=1.0)
+            return self._exec_console_command(f"info {self._sanitize_console_value(module_name)}", read_duration=1.0)
         return self._exec_console_command("info", read_duration=1.0)
 
     def get_cached_msf_modules(self, module_type: Optional[str] = None) -> List[Dict[str, str]]:

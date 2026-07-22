@@ -98,7 +98,6 @@ class StdoutExporter(MetricsExporter):
             return False
     
     def flush(self) -> bool:
-        """Flush stdout"""
         try:
             sys.stdout.flush()
             return True
@@ -106,7 +105,6 @@ class StdoutExporter(MetricsExporter):
             return False
     
     def close(self) -> bool:
-        """Fermeture (stdout reste ouvert)"""
         self.enabled = False
         return True
 
@@ -140,7 +138,6 @@ class JSONLFileExporter(MetricsExporter):
     
     def export(self, metric_type: str, metric_name: str, value: Any,
                metadata: Optional[Dict[str, Any]] = None) -> bool:
-        """Exporte vers fichier JSONL"""
         if not self.file_handle:
             return False
         
@@ -179,7 +176,6 @@ class JSONLFileExporter(MetricsExporter):
             return False
     
     def close(self) -> bool:
-        """Ferme le fichier"""
         if self.file_handle:
             try:
                 with self.lock:
@@ -213,7 +209,6 @@ class SocketExporter(MetricsExporter):
         self._connect()
     
     def _connect(self):
-        """Établit la connexion socket"""
         try:
             if self.protocol == 'tcp':
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -230,7 +225,6 @@ class SocketExporter(MetricsExporter):
     
     def export(self, metric_type: str, metric_name: str, value: Any,
                metadata: Optional[Dict[str, Any]] = None) -> bool:
-        """Exporte vers socket"""
         if not self.connected or not self.socket:
             if self.reconnect:
                 self._connect()
@@ -268,11 +262,9 @@ class SocketExporter(MetricsExporter):
             return False
     
     def flush(self) -> bool:
-        """Flush socket (NOP pour UDP, peut être utile pour TCP)"""
         return self.connected
     
     def close(self) -> bool:
-        """Ferme la connexion socket"""
         if self.socket:
             try:
                 with self.lock:
@@ -293,7 +285,6 @@ class MetricsAggregator:
         self.lock = threading.Lock()
     
     def update(self, metric_name: str, value: float, metadata: Optional[Dict[str, Any]] = None):
-        """Met à jour les agrégations pour une métrique"""
         with self.lock:
             if metric_name not in self.aggregations:
                 self.aggregations[metric_name] = {
@@ -329,7 +320,6 @@ class MetricsAggregator:
                         agg["metadata"][key] = agg["metadata"][key][-100:]
     
     def get_stats(self, metric_name: str) -> Optional[Dict[str, Any]]:
-        """Récupère les statistiques agrégées pour une métrique"""
         with self.lock:
             if metric_name not in self.aggregations:
                 return None
@@ -362,7 +352,6 @@ class MetricsAggregator:
             return stats
     
     def get_module_stats(self, module_name: str) -> Dict[str, Any]:
-        """Récupère les statistiques pour un module spécifique"""
         with self.lock:
             module_metrics = {}
             for metric_name, agg in self.aggregations.items():
@@ -378,7 +367,6 @@ class MetricsAggregator:
             return module_metrics
     
     def get_all_stats(self) -> Dict[str, Dict[str, Any]]:
-        """Récupère toutes les statistiques agrégées"""
         with self.lock:
             return {
                 name: self.get_stats(name)
@@ -386,7 +374,6 @@ class MetricsAggregator:
             }
     
     def reset(self, metric_name: Optional[str] = None):
-        """Réinitialise les agrégations"""
         with self.lock:
             if metric_name:
                 if metric_name in self.aggregations:

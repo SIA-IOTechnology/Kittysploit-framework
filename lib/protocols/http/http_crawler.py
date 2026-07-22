@@ -120,6 +120,33 @@ class Crawler_core:
         self._queue: List[tuple] = []
         self._seq = 0
         self.ssl_warning_shown = False
+        self._host_unreachable = False
+        self._connection_error_logged = False
+
+    _CONNECTION_ERROR_MARKERS = (
+        "connection refused",
+        "failed to establish a new connection",
+        "max retries exceeded",
+        "no route to host",
+        "network is unreachable",
+        "name or service not known",
+        "nodename nor servname provided",
+        "connection timeout",
+        "connect timeout",
+        "timed out",
+    )
+
+    def _is_connection_error(self, exc: BaseException) -> bool:
+        blob = str(exc).lower()
+        return any(marker in blob for marker in self._CONNECTION_ERROR_MARKERS)
+
+    def _mark_connection_failure(self, exc: BaseException) -> None:
+        if not self._is_connection_error(exc):
+            return
+        self._host_unreachable = True
+        if not self._connection_error_logged:
+            print_error(f"Target unreachable, aborting crawl: {exc}")
+            self._connection_error_logged = True
 
     def start_crawl(self, url):
         if self.intelligent:
@@ -143,6 +170,8 @@ class Crawler_core:
         heapq.heappush(self._queue, (priority, self._seq, url))
 
     def _fetch(self, url: str):
+        if self._host_unreachable:
+            raise requests.RequestException("Target host unreachable (circuit open)")
         return requests.get(
             url,
             timeout=self.request_timeout,
@@ -154,12 +183,17 @@ class Crawler_core:
         self.crawlerstart()
         origin = self._origin(url)
         for path in self.seed_paths:
+            if self._host_unreachable:
+                break
             if path.startswith("/"):
                 self._enqueue(urljoin(origin, path), self.PRIORITY_HIGH)
-        self._enqueue(url, self.PRIORITY_HIGH)
-        self._bootstrap_robots_sitemap(origin)
+        if not self._host_unreachable:
+            self._enqueue(url, self.PRIORITY_HIGH)
+            self._bootstrap_robots_sitemap(origin)
 
         while self._queue and (self.cpt < self.max_crawl or self.max_crawl == 0):
+            if self._host_unreachable:
+                break
             _prio, _seq, current_url = heapq.heappop(self._queue)
             if current_url in self.crawled:
                 continue
@@ -170,10 +204,13 @@ class Crawler_core:
 
     def _bootstrap_robots_sitemap(self, origin: str) -> None:
         for path in ("/robots.txt", "/sitemap.xml", "/sitemap_index.xml"):
+            if self._host_unreachable:
+                break
             try:
                 resp = self._fetch(origin + path)
-            except requests.RequestException:
-                continue
+            except requests.RequestException as exc:
+                self._mark_connection_failure(exc)
+                break
             if resp.status_code != 200:
                 continue
             text = resp.text or ""
@@ -196,6 +233,8 @@ class Crawler_core:
     def _crawl_intelligent(self, url: str) -> None:
         if self.max_crawl and self.cpt >= self.max_crawl:
             return
+        if self._host_unreachable:
+            return
         try:
             response = self._fetch(url)
         except requests.exceptions.SSLError:
@@ -204,7 +243,7 @@ class Crawler_core:
                 self.ssl_warning_shown = True
             return
         except requests.RequestException as exc:
-            print_error(f"Failed to crawl {url}: {exc}")
+            self._mark_connection_failure(exc)
             return
 
         if response.status_code not in (200, 301, 302, 401, 403):

@@ -15,7 +15,6 @@ class DependencyManager:
         self._check_installed_packages()
     
     def _check_installed_packages(self):
-        """Check installed packages"""
         try:
             # Try to use importlib.metadata (Python 3.8+) first
             try:
@@ -84,7 +83,6 @@ class DependencyManager:
             return package_name.lower() in self.installed_packages
     
     def install_dependency(self, dependency: str) -> bool:
-        """Install a dependency"""
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", dependency])
             return True

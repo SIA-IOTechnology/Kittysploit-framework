@@ -25,7 +25,6 @@ except ImportError:
     Fernet = None
 
 class EncryptionManager:
-    """Manager for encrypting and decrypting sensitive data"""
     
     def __init__(self, config_dir: str = None):
         """

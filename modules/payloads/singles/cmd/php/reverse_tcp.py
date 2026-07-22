@@ -22,9 +22,9 @@ class Module(Payload):
 	def generate(self):
 		xf = self._get_transform_instance()
 		xf_code = None
-		if  and self._is_transform_compatible(obf) and hasattr(obf, "generate_client_code"):
+		if xf and self._is_transform_compatible(xf) and hasattr(xf, "generate_client_code"):
 			xf_code = xf.generate_client_code(self._get_client_language())
-		if  and not self._is_transform_compatible(obf):
+		if xf and not self._is_transform_compatible(xf):
 			supported = getattr(xf, "get_supported_client_languages", lambda: [])()
 			print_warning(f"Transform does not support client language 'php' (supported: {supported}). Generating without stream transform.")
 		if not xf_code:

@@ -212,7 +212,6 @@ def compile_python_to_exe(
 
 
 def main():
-    """CLI entry point."""
     print("=" * 70)
     print("  Python to EXE Compiler (Zig)")
     print("=" * 70)

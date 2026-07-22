@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_benchmark_result.schema.json",
+  "title": "KittySploit Agent Benchmark Result",
+  "description": "Comparable benchmark output for agent mission suites (North Star metrics, per-run detail, failure attribution).",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "suite": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Benchmark suite identifier (e.g. synthetic-http-lab, metasploitable3-linux)."
+    },
+    "suite_version": {
+      "type": "string",
+      "minLength": 1,
+      "default": "1.0"
+    },
+    "started_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "completed_at": {
+      "oneOf": [{"$ref": "common.schema.json#/$defs/timestamp"}, {"type": "null"}]
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "runs": {"type": "integer", "minimum": 1},
+        "seed": {"type": ["integer", "null"]},
+        "model": {"type": ["string", "null"]},
+        "target": {"type": ["string", "null"]},
+        "goal": {"type": ["string", "null"]},
+        "profile": {"type": ["string", "null"]},
+        "dry_run": {"type": "boolean", "default": false},
+        "offline": {"type": "boolean", "default": false}
+      },
+      "required": ["runs"],
+      "additionalProperties": true
+    },
+    "north_star": {
+      "type": "object",
+      "description": "Primary Mission Completion Rate and secondary SLO metrics from the agent roadmap.",
+      "properties": {
+        "mission_completion_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of runs that met all suite success criteria with verified evidence."
+        },
+        "human_interventions_median": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Median operator prompts or approvals per run."
+        },
+        "repeated_actions_without_new_info_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of actions repeated without new observations."
+        },
+        "false_success_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of runs with unverified session or capability claims."
+        },
+        "recovery_after_module_error_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of module errors followed by a distinct successful pivot."
+        },
+        "out_of_scope_actions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total scope or policy violations across all runs."
+        },
+        "reproducibility_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of runs with identical mission outcome under the same seed."
+        }
+      },
+      "required": ["mission_completion_rate"],
+      "additionalProperties": false
+    },
+    "outcome_verdicts": {
+      "type": "object",
+      "description": "Aggregated action/module outcome categories across all runs.",
+      "properties": {
+        "module_error": {"type": "integer", "minimum": 0},
+        "no_signal": {"type": "integer", "minimum": 0},
+        "refuted": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0},
+        "policy_denied": {"type": "integer", "minimum": 0},
+        "confirmed": {"type": "integer", "minimum": 0}
+      },
+      "required": [
+        "module_error",
+        "no_signal",
+        "refuted",
+        "blocked",
+        "policy_denied",
+        "confirmed"
+      ],
+      "additionalProperties": false
+    },
+    "runs": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/benchmark_run"}
+    },
+    "failure_causes": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/failure_cause"},
+      "description": "Ranked failure attribution for CI dashboards."
+    },
+    "comparable_hash": {
+      "type": ["string", "null"],
+      "description": "Stable hash over config + per-run outcomes for regression diffing."
+    },
+    "metadata": {"$ref": "common.schema.json#/$defs/metadata"}
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "suite",
+    "started_at",
+    "config",
+    "north_star",
+    "outcome_verdicts",
+    "runs"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "outcome_verdict_counts": {
+      "type": "object",
+      "properties": {
+        "module_error": {"type": "integer", "minimum": 0},
+        "no_signal": {"type": "integer", "minimum": 0},
+        "refuted": {"type": "integer", "minimum": 0},
+        "blocked": {"type": "integer", "minimum": 0},
+        "policy_denied": {"type": "integer", "minimum": 0},
+        "confirmed": {"type": "integer", "minimum": 0}
+      },
+      "required": [
+        "module_error",
+        "no_signal",
+        "refuted",
+        "blocked",
+        "policy_denied",
+        "confirmed"
+      ],
+      "additionalProperties": false
+    },
+    "benchmark_run": {
+      "type": "object",
+      "properties": {
+        "run_index": {"type": "integer", "minimum": 0},
+        "seed": {"type": ["integer", "null"]},
+        "run_id": {"type": "string", "minLength": 1},
+        "mission_completed": {"type": "boolean"},
+        "human_interventions": {"type": "integer", "minimum": 0},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "stop_reason": {"type": ["string", "null"]},
+        "report_path": {"type": ["string", "null"]},
+        "outcome_verdicts": {"$ref": "#/$defs/outcome_verdict_counts"},
+        "repeated_actions_without_new_info": {"type": "integer", "minimum": 0},
+        "false_successes": {"type": "integer", "minimum": 0},
+        "scope_violations": {"type": "integer", "minimum": 0},
+        "module_errors_recovered": {"type": "integer", "minimum": 0},
+        "module_errors_total": {"type": "integer", "minimum": 0},
+        "evidence_confirmed": {"type": "boolean"},
+        "session_obtained": {"type": "boolean"},
+        "failure_transition": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]}
+      },
+      "required": [
+        "run_index",
+        "run_id",
+        "mission_completed",
+        "outcome_verdicts"
+      ],
+      "additionalProperties": true
+    },
+    "failure_cause": {
+      "type": "object",
+      "properties": {
+        "cause": {"type": "string", "minLength": 1},
+        "count": {"type": "integer", "minimum": 1},
+        "example_run_id": {"type": ["string", "null"]},
+        "example_transition": {"type": ["string", "null"]}
+      },
+      "required": ["cause", "count"],
+      "additionalProperties": false
+    }
+  }
+}

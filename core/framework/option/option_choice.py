@@ -36,7 +36,6 @@ class OptChoice(Option):
         return super().__get__(instance, owner)
     
     def __set__(self, instance, value):
-        """Set the value with validation"""
         # Validate the value before storing it (only if choices are defined)
         if self.choices and value not in self.choices:
             raise OptionValidationError(f"Invalid choice '{value}'. Valid choices: {', '.join(self.choices)}")
@@ -55,11 +54,9 @@ class OptChoice(Option):
         self._default_display_value = display_value
     
     def validate(self, value):
-        """Validate the choice value"""
         if self.choices and value not in self.choices:
             raise OptionValidationError(f"Invalid choice '{value}'. Valid choices: {', '.join(self.choices)}")
         return value
     
     def display_value(self):
-        """Return the display value"""
         return str(self.value)

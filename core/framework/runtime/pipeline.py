@@ -23,7 +23,6 @@ class PipelineStepType(Enum):
 
 @dataclass
 class PipelineStep:
-    """Étape d'un pipeline"""
     step_id: str
     step_type: PipelineStepType
     name: str
@@ -45,7 +44,6 @@ class PipelineStep:
 
 @dataclass
 class PipelineContext:
-    """Contexte d'exécution d'un pipeline"""
     pipeline_id: str
     start_time: float = field(default_factory=time.time)
     data: Dict[str, Any] = field(default_factory=dict)
@@ -89,7 +87,6 @@ class Pipeline:
         timeout: Optional[float] = None,
         retry_count: int = 0
     ) -> PipelineStep:
-        """Ajoute une étape au pipeline"""
         step = PipelineStep(
             step_id=step_id,
             step_type=step_type,
@@ -111,7 +108,6 @@ class Pipeline:
         return step
     
     def add_middleware(self, middleware: MiddlewareExtension):
-        """Ajoute un middleware au pipeline"""
         self.middlewares.append(middleware)
         # Trier par ordre
         self.middlewares.sort(key=lambda m: m.order)
@@ -298,7 +294,6 @@ class Pipeline:
         module_loader: Optional[Callable],
         workflow_loader: Optional[Callable]
     ) -> Any:
-        """Exécute une étape du pipeline"""
         if step.step_type == PipelineStepType.MODULE:
             return self._execute_module_step(step, context, module_loader)
         elif step.step_type == PipelineStepType.WORKFLOW:
@@ -316,7 +311,6 @@ class Pipeline:
         context: PipelineContext,
         module_loader: Optional[Callable]
     ) -> Any:
-        """Exécute une étape de module"""
         if not module_loader:
             raise ValueError("Module loader not provided")
         
@@ -349,7 +343,6 @@ class Pipeline:
         context: PipelineContext,
         workflow_loader: Optional[Callable]
     ) -> Any:
-        """Exécute une étape de workflow"""
         if not workflow_loader:
             raise ValueError("Workflow loader not provided")
         
@@ -370,7 +363,6 @@ class Pipeline:
         step: PipelineStep,
         context: PipelineContext
     ) -> bool:
-        """Exécute une étape de condition"""
         condition_func = step.config.get("condition_func")
         if not condition_func or not callable(condition_func):
             raise ValueError("condition_func not specified or not callable")
@@ -382,7 +374,6 @@ class Pipeline:
         step: PipelineStep,
         context: PipelineContext
     ) -> Any:
-        """Exécute une étape de transformation"""
         transform_func = step.config.get("transform_func")
         if not transform_func or not callable(transform_func):
             raise ValueError("transform_func not specified or not callable")

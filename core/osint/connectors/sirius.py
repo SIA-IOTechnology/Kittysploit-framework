@@ -41,7 +41,6 @@ def build_sirius_request_template(
     urgency: str = "standard",
     preservation: bool = True,
 ) -> Dict[str, Any]:
-    """Build a SIRIUS-style cross-border data request template (JSON)."""
     categories = [str(c) for c in (data_categories or SIRIUS_DATA_CATEGORIES[:4]) if c]
     identifiers = dict(subject_identifiers or {})
     return {

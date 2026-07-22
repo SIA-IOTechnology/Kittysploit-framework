@@ -96,11 +96,9 @@ class Host(Base):
         }
     
     def get_services_count(self):
-        """Get the number of services for this host"""
         return len(self.services) if self.services else 0
     
     def get_vulnerabilities_count(self):
-        """Get the number of vulnerabilities for this host"""
         return len(self.vulnerabilities) if self.vulnerabilities else 0
     
     # Relationships
@@ -158,7 +156,6 @@ class Service(Base):
         }
     
     def get_service_string(self):
-        """Get service string in format: name:port/protocol"""
         return f"{self.name or 'unknown'}:{self.port}/{self.protocol}"
     
     # Relationships
@@ -190,14 +187,12 @@ class Vulnerability(Base):
     
     @validates('cve')
     def validate_cve(self, key, cve):
-        """Validate CVE format"""
         if cve and not re.match(r'^CVE-\d{4}-\d{4,}$', cve):
             raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN)")
         return cve
     
     @validates('cvss_score')
     def validate_cvss_score(self, key, score):
-        """Validate CVSS score format"""
         if score and not re.match(r'^\d+\.\d+$', score):
             raise ValueError("Invalid CVSS score format (expected: X.X)")
         return score
@@ -206,7 +201,6 @@ class Vulnerability(Base):
         return f"<Vulnerability {self.name} ({self.risk_level})>"
     
     def to_dict(self):
-        """Convert vulnerability to dictionary"""
         return {
             'id': self.id,
             'name': self.name,
@@ -222,7 +216,6 @@ class Vulnerability(Base):
         }
     
     def get_risk_score(self):
-        """Get numeric risk score based on risk level"""
         risk_scores = {
             'critical': 5,
             'high': 4,
@@ -260,7 +253,6 @@ class Credential(Base, EncryptedFieldMixin):
     
     @validates('hash_type')
     def validate_hash_type(self, key, hash_type):
-        """Validate hash type"""
         if hash_type and not validate_hash_type(hash_type.lower()):
             raise ValueError("Invalid hash type. Must be one of: md5, sha1, sha256, bcrypt")
         return hash_type.lower() if hash_type else None
@@ -269,7 +261,6 @@ class Credential(Base, EncryptedFieldMixin):
         return f"<Credential {self.username or 'hash'}@{self.host_id}>"
     
     def to_dict(self):
-        """Convert credential to dictionary (excluding sensitive data)"""
         return {
             'id': self.id,
             'username': self.username,
@@ -284,7 +275,6 @@ class Credential(Base, EncryptedFieldMixin):
         }
     
     def get_credential_type(self):
-        """Get the type of credential (password, hash, or both)"""
         if self.password and self.password_hash:
             return 'both'
         elif self.password:
@@ -321,7 +311,6 @@ class Note(Base):
         return f"<Note {self.title} ({self.category})>"
     
     def to_dict(self):
-        """Convert note to dictionary"""
         return {
             'id': self.id,
             'title': self.title,
@@ -333,7 +322,6 @@ class Note(Base):
         }
     
     def get_content_preview(self, max_length=100):
-        """Get a preview of the content"""
         if not self.content:
             return ""
         return self.content[:max_length] + "..." if len(self.content) > max_length else self.content
@@ -367,7 +355,6 @@ class Loot(Base, EncryptedFieldMixin):
         return f"<Loot {self.name} ({self.loot_type})>"
     
     def to_dict(self):
-        """Convert loot to dictionary"""
         return {
             'id': self.id,
             'name': self.name,
@@ -379,7 +366,6 @@ class Loot(Base, EncryptedFieldMixin):
         }
     
     def get_file_size_human(self):
-        """Get human-readable file size"""
         if not self.file_size:
             return "Unknown"
         
@@ -420,7 +406,6 @@ class Task(Base):
         return f"<Task {self.title} ({self.status})>"
     
     def to_dict(self):
-        """Convert task to dictionary"""
         return {
             'id': self.id,
             'title': self.title,
@@ -438,7 +423,6 @@ class Task(Base):
         return self.status == 'completed'
     
     def mark_completed(self):
-        """Mark task as completed"""
         self.status = 'completed'
         self.completed_at = datetime.utcnow()
     
@@ -478,7 +462,6 @@ class Module(Base):
     
     @validates('cve')
     def validate_cve(self, key, cve):
-        """Validate CVE format"""
         if cve and not re.match(r'^CVE-\d{4}-\d{4,}$', cve):
             raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN)")
         return cve
@@ -487,7 +470,6 @@ class Module(Base):
         return f"<Module {self.name} ({self.type})>"
     
     def to_dict(self):
-        """Convert module to dictionary"""
         return {
             'id': self.id,
             'name': self.name,
@@ -506,7 +488,6 @@ class Module(Base):
         }
     
     def get_module_info(self):
-        """Get formatted module information"""
         info = f"Module: {self.name}\n"
         info += f"Type: {self.type}\n"
         if self.description:
@@ -587,7 +568,6 @@ class Session(Base, EncryptedFieldMixin):
         return f"<Session(id={self.id}, session_id='{self.session_id}', type='{self.session_type}', active={self.is_active})>"
     
     def to_dict(self):
-        """Convert session to dictionary for JSON serialization"""
         return {
             'id': self.id,
             'session_id': self.session_id,
@@ -668,7 +648,6 @@ class ProxyFlow(Base, EncryptedFieldMixin):
         return f"<ProxyFlow(id={self.id}, flow_id='{self.flow_id}', url='{self.url[:50]}...', workspace_id={self.workspace_id})>"
     
     def to_dict(self):
-        """Convert flow to dictionary for JSON serialization"""
         import json
         return {
             'id': self.flow_id,
@@ -771,7 +750,6 @@ class Workflow(Base):
         return f"<Workflow {self.name} ({'template' if self.is_template else 'workflow'})>"
     
     def to_dict(self):
-        """Convert workflow to dictionary"""
         import json
         return {
             'id': self.id,
@@ -820,7 +798,6 @@ class WorkflowExecution(Base):
         return f"<WorkflowExecution(id={self.id}, workflow_id={self.workflow_id}, status='{self.status}')>"
     
     def to_dict(self):
-        """Convert execution to dictionary"""
         import json
         return {
             'id': self.id,

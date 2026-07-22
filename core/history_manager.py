@@ -19,6 +19,8 @@ from core.output_handler import print_info, print_success, print_error, print_wa
 
 logger = logging.getLogger(__name__)
 
+MAX_HISTORY_ENTRIES = 50
+
 REDACTED_VALUE = "[REDACTED]"
 SENSITIVE_KEYS = {
     "api_key",
@@ -90,7 +92,6 @@ def _redact_token_value(token: str) -> str:
 
 
 def redact_history_args(args: List[str] = None) -> List[str]:
-    """Return a copy of command args with obvious secret values masked."""
     redacted: List[str] = []
     redact_next = False
     for raw_arg in _coerce_history_args(args):
@@ -128,15 +129,24 @@ class HistoryManager:
         self.workspace_id = workspace_id
         self.user_id = None  # Will be set when user authenticates
         self.framework = framework  # Reference to framework for get_db_session
+        # Trim any backlog left from older unlimited / higher-cap versions.
+        try:
+            self._limit_history(max_entries=MAX_HISTORY_ENTRIES)
+        except Exception:
+            logger.debug("Initial command-history prune failed", exc_info=True)
     
     def set_user_id(self, user_id: str):
-        """Set the current user ID for history tracking"""
         self.user_id = user_id
 
     def refresh_workspace(self) -> Optional[int]:
-        """Refresh and return the current workspace id from the framework."""
         current_id = self._resolve_workspace_id()
+        previous_id = self.workspace_id
         self.workspace_id = current_id
+        if current_id != previous_id:
+            try:
+                self._limit_history(max_entries=MAX_HISTORY_ENTRIES)
+            except Exception:
+                logger.debug("Workspace switch command-history prune failed", exc_info=True)
         return current_id
 
     def _resolve_workspace_id(self) -> Optional[int]:
@@ -167,7 +177,6 @@ class HistoryManager:
         return self._sanitize_entry(entry)
 
     def sanitize_command_parts(self, command_name: str, args: List[str] = None) -> Dict[str, Any]:
-        """Build the redacted command string and args stored in history."""
         safe_args = redact_history_args(args or [])
         safe_command = str(command_name or "")
         if safe_args:
@@ -175,7 +184,6 @@ class HistoryManager:
         return {"command": redact_history_command(safe_command), "args": safe_args}
     
     def add_command(self, command: str, args: List[str] = None, success: bool = True, session_id: str = None) -> bool:
-        """Add a command to the encrypted history"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -198,8 +206,8 @@ class HistoryManager:
             session.add(history_entry)
             session.commit()
             
-            # Limit history to 100 entries to avoid database overload
-            self._limit_history(max_entries=100)
+            # Keep only the most recent entries in the database
+            self._limit_history(max_entries=MAX_HISTORY_ENTRIES)
             
             return True
                 
@@ -207,9 +215,8 @@ class HistoryManager:
             print_error(f"Error adding command to history: {e}")
             return False
     
-    def get_history(self, limit: int = 100, offset: int = 0, user_id: str = None,
+    def get_history(self, limit: int = MAX_HISTORY_ENTRIES, offset: int = 0, user_id: str = None,
                    success_only: bool = False, search_term: str = None, redact: bool = True) -> List[Dict[str, Any]]:
-        """Get command history with optional filtering"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -277,48 +284,69 @@ class HistoryManager:
             print_error(f"Error retrieving history: {e}")
             return []
     
-    def _limit_history(self, max_entries: int = 100) -> int:
-        """Limit the history to a maximum number of entries, keeping the most recent ones"""
+    def _limit_history(self, max_entries: int = MAX_HISTORY_ENTRIES) -> int:
+        """Limit the history to a maximum number of entries, keeping the most recent ones."""
         try:
+            max_entries = max(1, int(max_entries or MAX_HISTORY_ENTRIES))
             session = self._get_session()
-            workspace_id = self.refresh_workspace()
-            
-            # Build base query with same filters as add_command
+            workspace_id = self._resolve_workspace_id()
+            self.workspace_id = workspace_id
+
             base_query = session.query(CommandHistory)
-            
-            # Filter by workspace
-            if workspace_id:
+
+            if workspace_id is not None:
                 base_query = base_query.filter(CommandHistory.workspace_id == workspace_id)
-            
-            # Filter by user
+            else:
+                base_query = base_query.filter(CommandHistory.workspace_id.is_(None))
+
             if self.user_id:
                 base_query = base_query.filter(CommandHistory.user_id == self.user_id)
-            
-            # Count total entries
+            else:
+                base_query = base_query.filter(CommandHistory.user_id.is_(None))
+
             total_count = base_query.count()
-            
-            # If we exceed the limit, delete the oldest entries using an atomic subquery
-            if total_count > max_entries:
-                keep_subquery = base_query.order_by(
-                    CommandHistory.timestamp.desc()
-                ).limit(max_entries).with_entities(CommandHistory.id).subquery()
-                
-                delete_query = session.query(CommandHistory).filter(
-                    ~CommandHistory.id.in_(keep_subquery)
-                )
-                
-                deleted_count = delete_query.delete(synchronize_session=False)
-                session.commit()
-                return deleted_count
-            
-            return 0
-                
+            if total_count <= max_entries:
+                return 0
+
+            # Keep only the most recent max_entries rows for this workspace/user.
+            # Selecting their ids as a scoped subquery lets the delete resolve the
+            # keep-set and remove the rest in a single atomic statement, so there
+            # is no SELECT-then-DELETE window where a freshly inserted entry could
+            # be wrongly removed.
+            keep_ids_query = (
+                base_query.order_by(CommandHistory.timestamp.desc())
+                .limit(max_entries)
+                .with_entities(CommandHistory.id)
+            )
+
+            # Re-apply the same workspace/user scope on the delete so history
+            # belonging to other workspaces or users is never touched.
+            delete_query = session.query(CommandHistory)
+            if workspace_id is not None:
+                delete_query = delete_query.filter(CommandHistory.workspace_id == workspace_id)
+            else:
+                delete_query = delete_query.filter(CommandHistory.workspace_id.is_(None))
+            if self.user_id:
+                delete_query = delete_query.filter(CommandHistory.user_id == self.user_id)
+            else:
+                delete_query = delete_query.filter(CommandHistory.user_id.is_(None))
+
+            deleted_count = delete_query.filter(
+                ~CommandHistory.id.in_(keep_ids_query)
+            ).delete(synchronize_session=False)
+            session.commit()
+            return int(deleted_count or 0)
+
         except Exception as e:
             print_error(f"Error limiting history: {e}")
+            try:
+                session = self._get_session()
+                session.rollback()
+            except Exception:
+                logger.debug("History limit rollback failed", exc_info=True)
             return 0
     
     def clear_history(self, user_id: str = None, older_than_days: int = None) -> int:
-        """Clear command history with optional filtering"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()
@@ -358,12 +386,11 @@ class HistoryManager:
         output_file: str,
         user_id: str = None,
         format: str = 'json',
-        limit: int = 1000,
+        limit: int = MAX_HISTORY_ENTRIES,
         force: bool = False,
         success_only: bool = False,
         search_term: str = None,
     ) -> bool:
-        """Export command history to file"""
         try:
             export_format = (format or 'json').lower()
             if export_format not in {'json', 'csv'}:
@@ -371,9 +398,9 @@ class HistoryManager:
                 return False
 
             try:
-                limit = max(1, min(int(limit), 10000))
+                limit = max(1, min(int(limit), MAX_HISTORY_ENTRIES))
             except (TypeError, ValueError):
-                limit = 1000
+                limit = MAX_HISTORY_ENTRIES
 
             output_path = os.path.abspath(os.path.expanduser(str(output_file or "")))
             if not output_file or os.path.isdir(output_path):
@@ -414,7 +441,6 @@ class HistoryManager:
             return False
     
     def get_stats(self, user_id: str = None) -> Dict[str, Any]:
-        """Get history statistics"""
         try:
             session = self._get_session()
             workspace_id = self.refresh_workspace()

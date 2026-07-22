@@ -7,7 +7,6 @@ from typing import Dict, Any, Optional
 from core.output_handler import print_info, print_warning, print_error, print_success, print_status
 
 class CharterManager:
-    """Manager for the acceptance of the usage charter"""
     
     def __init__(self, config_dir: str = None):
         """
@@ -143,9 +142,6 @@ class CharterManager:
         return datetime.now().isoformat()
     
     def display_charter(self) -> None:
-        """
-        Display the charter to the user
-        """
         charter_content = self.get_charter_content()
         print(charter_content)
     

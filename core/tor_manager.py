@@ -13,7 +13,6 @@ from core.output_handler import print_info, print_success, print_error, print_wa
 
 
 class TorManager:
-    """Manages Tor network connectivity"""
     
     # Default Tor SOCKS proxy ports
     DEFAULT_SOCKS_PORT = 9050  # Standard Tor daemon
@@ -24,7 +23,6 @@ class TorManager:
     DEFAULT_CONTROL_PORT_TOR_BROWSER = 9151  # Tor Browser
     
     def __init__(self, framework=None):
-        """Initialize Tor Manager"""
         self.framework = framework
         self.enabled = False
         self.socks_host = '127.0.0.1'
@@ -51,11 +49,18 @@ class TorManager:
         ports_to_try = [check_port]
         if check_port == self.DEFAULT_SOCKS_PORT:
             ports_to_try.append(self.DEFAULT_SOCKS_PORT_TOR_BROWSER)
+
+        # Must use a direct (non-proxied) socket. After `tor enable`, socket.socket
+        # is monkey-patched through SOCKS — connecting to the local Tor port via
+        # Tor itself fails and falsely reports "unavailable".
+        try:
+            from lib.pivot.socket_wrapper import _original_socket as direct_socket
+        except Exception:
+            direct_socket = socket.socket
         
         for test_port in ports_to_try:
             try:
-                # Try to connect to SOCKS proxy
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock = direct_socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(2)
                 result = sock.connect_ex((check_host, test_port))
                 sock.close()
@@ -74,6 +79,41 @@ class TorManager:
         self._last_check_result = False
         return False
     
+    @staticmethod
+    def _ensure_requests_socks() -> bool:
+        """
+        Make sure PySocks is importable and that requests.adapters can use it.
+
+        requests binds SOCKSProxyManager at import time. If the console started
+        before PySocks was installed, adapters keeps a stub that always raises
+        \"Missing dependencies for SOCKS support.\" until we rebind it.
+        """
+        try:
+            from lib.pivot.socket_wrapper import _ensure_pysocks
+            if not _ensure_pysocks():
+                return False
+        except Exception:
+            try:
+                import socks  # noqa: F401
+            except ImportError:
+                return False
+
+        try:
+            import importlib
+            import requests.adapters as adapters
+
+            socks_mod = importlib.import_module("urllib3.contrib.socks")
+            # Force a fresh load if urllib3 previously failed the socks import.
+            if getattr(socks_mod, "SOCKSProxyManager", None) is None:
+                socks_mod = importlib.reload(socks_mod)
+            manager = getattr(socks_mod, "SOCKSProxyManager", None)
+            if manager is None:
+                return False
+            adapters.SOCKSProxyManager = manager
+            return True
+        except Exception:
+            return False
+
     def test_tor_connection(self, test_url: str = "https://check.torproject.org/api/ip") -> bool:
         """
         Test Tor connection by making a request through Tor
@@ -85,6 +125,13 @@ class TorManager:
             True if request goes through Tor, False otherwise
         """
         if not self.enabled:
+            return False
+
+        if not self._ensure_requests_socks():
+            print_warning(
+                "Tor connection test skipped: PySocks unavailable for requests. "
+                "Install with: ./venv/bin/python -m pip install PySocks"
+            )
             return False
         
         try:
@@ -102,15 +149,17 @@ class TorManager:
                     data = response.json()
                     # Tor Project API returns "IsTor": true if using Tor
                     if data.get('IsTor', False):
+                        print_success(
+                            f"Tor connection verified (exit IP: {data.get('IP', '?')})"
+                        )
                         return True
-                except:
+                except Exception:
                     # If not JSON, just check if request succeeded
                     return True
             
             return False
         except Exception as e:
-            if self.framework and hasattr(self.framework, 'output_handler'):
-                self.framework.output_handler.print_warning(f"Tor connection test failed: {e}")
+            print_warning(f"Tor connection test failed: {e}")
             return False
     
     def get_tor_proxy_url(self) -> Optional[str]:
@@ -211,7 +260,6 @@ class TorManager:
         return True
     
     def disable(self):
-        """Disable Tor network"""
         if not self.enabled:
             return
         

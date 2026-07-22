@@ -14,7 +14,6 @@ class ELFHeader:
     """ELF Header parser"""
     
     def __init__(self, data: bytes):
-        """Parse ELF header from binary data"""
         if len(data) < 52:  # Minimum ELF header size
             raise ValueError("Invalid ELF header size")
         
@@ -51,7 +50,6 @@ class ELFHeader:
             self.e_shstrndx = struct.unpack('<H', data[62:64])[0]
     
     def get_architecture(self) -> str:
-        """Get architecture string"""
         arch_map = {
             0x03: "x86",
             0x3E: "x64",
@@ -73,7 +71,6 @@ class ProgramHeader:
     """Program Header parser"""
     
     def __init__(self, data: bytes, is_64bit: bool = False):
-        """Parse program header"""
         if is_64bit:
             if len(data) < 56:
                 raise ValueError("Invalid 64-bit program header size")
@@ -113,7 +110,6 @@ class SectionHeader:
     """Section Header parser"""
     
     def __init__(self, data: bytes, is_64bit: bool = False):
-        """Parse section header"""
         if is_64bit:
             if len(data) < 64:
                 raise ValueError("Invalid 64-bit section header size")
@@ -153,7 +149,6 @@ class ELFAnalyzer:
     """Complete ELF binary analyzer"""
     
     def __init__(self, binary_path: str):
-        """Initialize ELF analyzer"""
         self.binary_path = binary_path
         self.data = b""
         self.elf_header = None
@@ -168,7 +163,6 @@ class ELFAnalyzer:
         self._parse_elf()
     
     def _load_binary(self):
-        """Load binary file into memory"""
         try:
             with open(self.binary_path, 'rb') as f:
                 self.data = f.read()
@@ -178,7 +172,6 @@ class ELFAnalyzer:
             raise
     
     def _parse_elf(self):
-        """Parse ELF structure"""
         if len(self.data) < 52:
             raise ValueError("File too small to be a valid ELF")
         
@@ -202,7 +195,6 @@ class ELFAnalyzer:
         self._parse_symbols()
     
     def _parse_program_headers(self):
-        """Parse program headers"""
         if self.elf_header.e_phnum == 0:
             return
         
@@ -225,7 +217,6 @@ class ELFAnalyzer:
         print_success(f"Parsed {len(self.program_headers)} program headers")
     
     def _parse_section_headers(self):
-        """Parse section headers"""
         if self.elf_header.e_shnum == 0:
             return
         
@@ -251,7 +242,6 @@ class ELFAnalyzer:
         print_success(f"Parsed {len(self.section_headers)} section headers")
     
     def _parse_string_table(self):
-        """Parse string table"""
         if self.elf_header.e_shstrndx >= len(self.section_headers):
             return
         
@@ -263,7 +253,6 @@ class ELFAnalyzer:
             self.string_table = self.data[start:end]
     
     def _parse_symbols(self):
-        """Parse symbol table"""
         # Find symbol table sections
         symtab_sh = None
         strtab_sh = None
@@ -295,7 +284,6 @@ class ELFAnalyzer:
         print_success(f"Parsed {len(self.symbols)} symbols")
     
     def _parse_symbol(self, data: bytes, strtab_sh: SectionHeader) -> Optional[Dict[str, Any]]:
-        """Parse a single symbol"""
         try:
             if self.elf_header.is_64bit:
                 st_name = struct.unpack('<I', data[0:4])[0]
@@ -333,30 +321,24 @@ class ELFAnalyzer:
             return None
     
     def get_executable_sections(self) -> List[SectionHeader]:
-        """Get all executable sections"""
         return [sh for sh in self.section_headers if sh.is_executable()]
     
     def get_writable_sections(self) -> List[SectionHeader]:
-        """Get all writable sections"""
         return [sh for sh in self.section_headers if sh.is_writable()]
     
     def get_executable_segments(self) -> List[ProgramHeader]:
-        """Get all executable segments"""
         return [ph for ph in self.program_headers if ph.is_loadable() and ph.is_executable()]
     
     def get_writable_segments(self) -> List[ProgramHeader]:
-        """Get all writable segments"""
         return [ph for ph in self.program_headers if ph.is_loadable() and ph.is_writable()]
     
     def get_section_by_name(self, name: str) -> Optional[SectionHeader]:
-        """Get section by name"""
         for sh in self.section_headers:
             if self.get_section_name(sh) == name:
                 return sh
         return None
     
     def get_section_name(self, sh: SectionHeader) -> str:
-        """Get section name from string table"""
         if sh.sh_name >= len(self.string_table):
             return ""
         
@@ -368,14 +350,12 @@ class ELFAnalyzer:
         return self.string_table[name_start:name_end].decode('utf-8', errors='ignore')
     
     def get_symbol_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get symbol by name"""
         for symbol in self.symbols:
             if symbol['name'] == name:
                 return symbol
         return None
     
     def get_imported_functions(self) -> List[Dict[str, Any]]:
-        """Get imported functions"""
         imports = []
         for symbol in self.symbols:
             if symbol['shndx'] == 0:  # Undefined symbol
@@ -383,7 +363,6 @@ class ELFAnalyzer:
         return imports
     
     def get_exported_functions(self) -> List[Dict[str, Any]]:
-        """Get exported functions"""
         exports = []
         for symbol in self.symbols:
             if symbol['value'] > 0 and symbol['shndx'] > 0:
@@ -391,7 +370,6 @@ class ELFAnalyzer:
         return exports
     
     def get_binary_info(self) -> Dict[str, Any]:
-        """Get comprehensive binary information"""
         return {
             'path': self.binary_path,
             'size': len(self.data),

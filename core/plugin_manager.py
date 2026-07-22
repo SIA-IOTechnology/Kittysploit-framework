@@ -14,7 +14,6 @@ from core.framework.plugin import Plugin
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class PluginManager:
-    """Manager for loading and executing plugins"""
     
     def __init__(self, framework=None):
         self.framework = framework
@@ -30,7 +29,6 @@ class PluginManager:
         # Don't load plugins automatically - wait for authentication
     
     def load_plugins(self):
-        """Load all plugins from the plugins directory"""
         if self.plugins_loaded:
             return
             
@@ -48,7 +46,6 @@ class PluginManager:
         self.plugins_loaded = True
     
     def load_plugin(self, plugin_name: str) -> bool:
-        """Load a specific plugin"""
         try:
             # Add plugins directory to Python path
             if self.plugins_dir not in sys.path:
@@ -90,7 +87,6 @@ class PluginManager:
             return False
     
     def unload_plugin(self, plugin_name: str) -> bool:
-        """Unload a plugin"""
         if plugin_name in self.plugins:
             del self.plugins[plugin_name]
             if plugin_name in self.plugin_classes:
@@ -102,13 +98,11 @@ class PluginManager:
             return False
     
     def reload_plugin(self, plugin_name: str) -> bool:
-        """Reload a plugin"""
         if plugin_name in self.plugins:
             self.unload_plugin(plugin_name)
         return self.load_plugin(plugin_name)
     
     def get_plugin(self, plugin_name: str) -> Optional[Plugin]:
-        """Get a plugin instance"""
         return self.plugins.get(plugin_name)
     
     def list_plugins(self) -> List[str]:
@@ -170,7 +164,6 @@ class PluginManager:
         return matching_plugins
     
     def create_plugin_template(self, plugin_name: str, description: str = "") -> bool:
-        """Create a plugin template file"""
         try:
             plugin_file = os.path.join(self.plugins_dir, f"{plugin_name}.py")
             

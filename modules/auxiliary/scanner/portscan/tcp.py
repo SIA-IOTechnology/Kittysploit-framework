@@ -89,6 +89,7 @@ class Module(Auxiliary):
     show_closed = OptBool(False, "Include closed/filtered ports in output", required=False)
 
     def run(self):
+        self._hostname_map = {}
         targets = self._parse_targets(str(self.rhosts or "").strip())
         if not targets:
             print_error("No valid targets in rhosts")
@@ -104,6 +105,9 @@ class Module(Auxiliary):
         show_closed = bool(self.show_closed)
 
         print_info(f"TCP port scan: {len(targets)} host(s), {len(port_list)} port(s), {threads} thread(s)")
+        if self._hostname_map:
+            for ip, name in self._hostname_map.items():
+                print_info(f"DNS: {name} → {ip}")
         print_info("=" * 72)
 
         results: Dict[str, Dict[int, str]] = {}
@@ -132,10 +136,12 @@ class Module(Auxiliary):
             if not open_ports and not show_closed:
                 continue
             open_total += len(open_ports)
+            dns = self._hostname_map.get(host)
+            label = f"{dns} ({host})" if dns else host
             if open_ports:
-                print_success(f"{host}: {len(open_ports)} open — {', '.join(str(p) for p in open_ports)}")
+                print_success(f"{label}: {len(open_ports)} open — {', '.join(str(p) for p in open_ports)}")
             elif show_closed:
-                print_info(f"{host}: no open ports in selected range")
+                print_info(f"{label}: no open ports in selected range")
 
         print_info("=" * 72)
         hosts_with_open = sum(1 for h in results if any(s == "open" for s in results[h].values()))
@@ -158,6 +164,7 @@ class Module(Auxiliary):
             return WorkspaceIntelStore(self.framework).record_port_scan(
                 results,
                 source="auxiliary/scanner/portscan/tcp",
+                hostnames=getattr(self, "_hostname_map", None) or {},
             )
         except Exception as exc:
             print_warning(f"Could not update workspace: {exc}")
@@ -180,6 +187,8 @@ class Module(Auxiliary):
     def _parse_targets(self, raw: str) -> List[str]:
         if not raw:
             return []
+        if not hasattr(self, "_hostname_map") or self._hostname_map is None:
+            self._hostname_map = {}
         hosts: Set[str] = set()
         for chunk in raw.split(","):
             value = chunk.strip()
@@ -199,6 +208,8 @@ class Module(Auxiliary):
                 try:
                     resolved = socket.gethostbyname(value)
                     hosts.add(resolved)
+                    self._hostname_map[resolved] = value
+                    print_info(f"Resolved {value} → {resolved}")
                 except Exception:
                     print_warning(f"Skipping invalid target: {value}")
         return sorted(hosts, key=self._sort_ip)

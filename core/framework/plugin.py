@@ -23,7 +23,6 @@ class ModuleArgumentParser:
         self.add_argument('-h', '--help', dest='help', action='store_true', help='Show this help message')
     
     def add_argument(self, *args, **kwargs):
-        """Add an argument to the parser"""
         # Standardize help options
         if '--help' in args or '-h' in args:
             # Ensure help is always available as -h, --help
@@ -39,7 +38,6 @@ class ModuleArgumentParser:
         self.arguments.append(arg_info)
     
     def add_standard_options(self):
-        """Add standard options that are commonly used"""
         # Verbose option
         self.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
         
@@ -53,7 +51,6 @@ class ModuleArgumentParser:
         self.add_argument('-y', '--yes', action='store_true', help='Answer yes to all prompts')
     
     def parse_args(self, args_list):
-        """Parse arguments from a list"""
         # Simple argument parsing
         parsed = {}
         i = 0
@@ -103,7 +100,6 @@ class ModuleArgumentParser:
         return ParsedArgs(self.arguments, **parsed)
     
     def print_help(self):
-        """Print help information"""
         print_info(f"Usage: {self.prog} [options]")
         if self.description:
             print_info(f"Description: {self.description}")
@@ -164,7 +160,6 @@ class Plugin(ABC):
         return True
     
     def get_info(self):
-        """Get plugin information"""
         return {
             'name': self.name,
             'description': self.description,
@@ -174,7 +169,6 @@ class Plugin(ABC):
         }
     
     def help(self):
-        """Show plugin help"""
         print_info(f"Plugin: {self.name}")
         print_info(f"Description: {self.description}")
         print_info(f"Version: {self.version}")

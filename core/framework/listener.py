@@ -113,7 +113,6 @@ class Listener(BaseModule):
         }
 
     def _get_transform_path(self) -> str:
-        """Return current transform option value (module path)."""
         from core.framework.transform import get_transform_path_from_instance
         return get_transform_path_from_instance(self)
 
@@ -185,7 +184,6 @@ class Listener(BaseModule):
         raise NotImplementedError("Listener modules must implement the run() method")
     
     def run_with_auto_session(self):
-        """Run the listener with automatic session management - calls run() and handles session creation"""
         try:
             # For listeners that run continuously, loop until we get a connection or error
             # This allows listeners to return None when waiting for connections
@@ -258,8 +256,15 @@ class Listener(BaseModule):
             return True
                 
         except KeyboardInterrupt:
-            print_warning("\nInterrupted by user")
-            return True  # Return True to indicate graceful shutdown
+            # Do not swallow Ctrl+C as a successful run — re-raise so the CLI
+            # run_command handler can stop the listener and return to the prompt.
+            self.stop_flag.set()
+            if hasattr(self, "shutdown"):
+                try:
+                    self.shutdown()
+                except Exception:
+                    pass
+            raise
         except Exception as e:
             print_error(f"Error in run_with_auto_session: {e}")
             return False
@@ -513,7 +518,6 @@ class Listener(BaseModule):
         return session_id
 
     def remove_session_connection(self, session_id: str, *, close_socket: bool = True) -> None:
-        """Remove a session transport from listener maps."""
         with self._connections_lock:
             connection = self._session_connections.pop(session_id, None)
             if connection is None:
@@ -655,7 +659,6 @@ class Listener(BaseModule):
             return False
 
     def stop(self):
-        """Stop the listener without dropping established sessions."""
         try:
             if not self.running:
                 print_warning("Listener is not running")
@@ -728,7 +731,6 @@ class Listener(BaseModule):
             self.running = False
     
     def _handle_listener_result(self, result):
-        """Handle the result from listener implementation"""
         try:
             if isinstance(result, tuple) and len(result) >= 3:
                 # Supported tuple formats:
@@ -781,7 +783,6 @@ class Listener(BaseModule):
             print_error(f"Error handling listener result: {e}")
 
     def _create_session(self, handler: str, target: str, port: int, session_data: Dict[str, Any] = None):
-        """Create a new session from listener connection"""
         try:
             if not session_data:
                 session_data = {}
@@ -800,7 +801,6 @@ class Listener(BaseModule):
                 # It's an enum, get its value
                 session_type_str = session_type_str.value
             elif isinstance(session_type_str, SessionType):
-                # Legacy check (shouldn't happen but just in case)
                 if hasattr(session_type_str, 'value'):
                     session_type_str = session_type_str.value
                 elif hasattr(session_type_str, 'name'):
@@ -843,7 +843,6 @@ class Listener(BaseModule):
             return None
 
     def _close_all_connections(self, close_session_connections: bool = True):
-        """Close tracked connections, optionally preserving session sockets."""
         try:
             if close_session_connections:
                 for conn_id, connection in self.connections.items():
@@ -888,7 +887,6 @@ class Listener(BaseModule):
             print_error(f"Error closing connections: {e}")
 
     def get_status(self):
-        """Get current listener status"""
         uptime = 0
         if self.start_time:
             uptime = time.time() - self.start_time
@@ -904,11 +902,9 @@ class Listener(BaseModule):
         }
 
     def get_stats(self):
-        """Get listener statistics"""
         return self.stats.copy()
 
     def reset_stats(self):
-        """Reset listener statistics"""
         self.stats = {
             'connections_received': 0,
             'sessions_created': 0,
@@ -922,7 +918,6 @@ class Listener(BaseModule):
         return self.running
 
     def wait_for_connection(self, timeout=60):
-        """Wait for a connection to the listener"""
         start_time = time.time()
         while time.time() - start_time < timeout:
             if not self.running:
@@ -933,7 +928,6 @@ class Listener(BaseModule):
         return False
 
     def shutdown(self):
-        """Shutdown the listener gracefully"""
         return self.stop()
 
     def create_session_from_connection(self, connection, address, additional_data=None):
@@ -1195,7 +1189,6 @@ class Listener(BaseModule):
             return False
     
     def _handle_connection(self, client_socket, address, session_id):
-        """Handle individual client connection - can be overridden by derived classes"""
         try:
             print_info(f"Handling connection from {address[0]}:{address[1]} (Session: {session_id})")
             
@@ -1421,7 +1414,6 @@ class Listener(BaseModule):
         return self.session_type == "https" or self.session_type == SessionType.HTTPS
 
     def default_options(self):
-        """Return default options for the listener"""
         return {
             'lhost': self.lhost,
             'lport': self.lport,

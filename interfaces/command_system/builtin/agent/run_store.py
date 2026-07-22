@@ -121,6 +121,42 @@ class AgentRunStore:
     def events_path(self) -> Path:
         return self.paths.run_dir(self.run_id) / "events.jsonl"
 
+    @property
+    def actions_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "actions.jsonl"
+
+    @property
+    def snapshot_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "snapshot.json"
+
+    @property
+    def shadow_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "shadow.jsonl"
+
+    @property
+    def shadow_report_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "shadow_report.json"
+
+    @property
+    def specialists_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "specialists.jsonl"
+
+    @property
+    def specialist_report_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "specialist_report.json"
+
+    @property
+    def adversarial_report_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "adversarial_report.json"
+
+    @property
+    def specialist_chaos_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "specialist_chaos.json"
+
+    @property
+    def specialist_resilience_path(self) -> Path:
+        return self.paths.run_dir(self.run_id) / "specialist_resilience.jsonl"
+
     def save_checkpoint(self, phase: str, state_payload: Dict[str, Any]) -> Path:
         payload = {
             "checkpoint_version": self.CHECKPOINT_VERSION,
@@ -157,6 +193,104 @@ class AgentRunStore:
         with file_lock(lock):
             with self.events_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def append_action_trace(self, trace: Dict[str, Any]) -> None:
+        record = sanitize_nested({
+            "schema_version": "1.0",
+            "run_id": self.run_id,
+            **trace,
+        })
+        lock = self.actions_path.with_suffix(".lock")
+        with file_lock(lock):
+            with self.actions_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def save_snapshot(self, snapshot: Dict[str, Any]) -> Path:
+        lock = self.snapshot_path.with_suffix(".lock")
+        with file_lock(lock):
+            atomic_write_json(self.snapshot_path, sanitize_nested(snapshot))
+        return self.snapshot_path
+
+    def load_snapshot(self) -> Dict[str, Any]:
+        if not self.snapshot_path.is_file():
+            return {}
+        with file_lock(self.snapshot_path.with_suffix(".lock")):
+            with self.snapshot_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+
+    def append_shadow_comparison(self, comparison: Dict[str, Any]) -> None:
+        record = sanitize_nested({
+            "schema_version": "1.0",
+            "run_id": self.run_id,
+            **comparison,
+        })
+        lock = self.shadow_path.with_suffix(".lock")
+        with file_lock(lock):
+            with self.shadow_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def save_shadow_report(self, payload: Dict[str, Any]) -> Path:
+        lock = self.shadow_report_path.with_suffix(".lock")
+        with file_lock(lock):
+            atomic_write_json(self.shadow_report_path, sanitize_nested(payload))
+        return self.shadow_report_path
+
+    def load_shadow_report(self) -> Dict[str, Any]:
+        if not self.shadow_report_path.is_file():
+            return {}
+        with file_lock(self.shadow_report_path.with_suffix(".lock")):
+            with self.shadow_report_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+
+    def append_specialist_run(self, record: Dict[str, Any]) -> None:
+        payload = sanitize_nested({
+            "schema_version": "1.0",
+            "run_id": self.run_id,
+            **record,
+        })
+        lock = self.specialists_path.with_suffix(".lock")
+        with file_lock(lock):
+            with self.specialists_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+    def save_specialist_report(self, payload: Dict[str, Any]) -> Path:
+        lock = self.specialist_report_path.with_suffix(".lock")
+        with file_lock(lock):
+            atomic_write_json(self.specialist_report_path, sanitize_nested(payload))
+        return self.specialist_report_path
+
+    def load_specialist_report(self) -> Dict[str, Any]:
+        if not self.specialist_report_path.is_file():
+            return {}
+        with file_lock(self.specialist_report_path.with_suffix(".lock")):
+            with self.specialist_report_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        return payload if isinstance(payload, dict) else {}
+
+    def append_specialist_resilience(self, record: Dict[str, Any]) -> None:
+        payload = sanitize_nested({
+            "schema_version": "1.0",
+            "run_id": self.run_id,
+            **record,
+        })
+        lock = self.specialist_resilience_path.with_suffix(".lock")
+        with file_lock(lock):
+            with self.specialist_resilience_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+    def save_specialist_chaos_report(self, payload: Dict[str, Any]) -> Path:
+        lock = self.specialist_chaos_path.with_suffix(".lock")
+        with file_lock(lock):
+            atomic_write_json(self.specialist_chaos_path, sanitize_nested(payload))
+        return self.specialist_chaos_path
+
+    def save_adversarial_report(self, payload: Dict[str, Any]) -> Path:
+        lock = self.adversarial_report_path.with_suffix(".lock")
+        with file_lock(lock):
+            atomic_write_json(self.adversarial_report_path, sanitize_nested(payload))
+        return self.adversarial_report_path
 
     def list_runs(self) -> List[str]:
         if not self.paths.runs_dir.is_dir():

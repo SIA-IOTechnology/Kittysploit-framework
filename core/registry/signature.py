@@ -54,7 +54,6 @@ class RegistrySignatureManager:
         self.algorithm = self.DEFAULT_ALGORITHM
     
     def _load_trust_store(self) -> Dict[str, Dict[str, str]]:
-        """Load trust store from JSON file"""
         if not os.path.exists(self.trust_store_path):
             return {}
         
@@ -66,7 +65,6 @@ class RegistrySignatureManager:
             return {}
     
     def _save_trust_store(self):
-        """Save trust store to JSON file"""
         try:
             with open(self.trust_store_path, 'w', encoding='utf-8') as f:
                 json.dump(self.trust_store, f, indent=2, ensure_ascii=False)
@@ -144,7 +142,6 @@ class RegistrySignatureManager:
         return publisher_name in self.trust_store
     
     def get_trusted_public_key(self, publisher_name: str) -> Optional[str]:
-        """Get public key of a trusted publisher"""
         if publisher_name in self.trust_store:
             return self.trust_store[publisher_name].get("public_key")
         return None

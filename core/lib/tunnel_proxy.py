@@ -30,7 +30,6 @@ class Tunnel:
         self.thread = None
     
     def start(self) -> bool:
-        """Start the tunnel"""
         try:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -49,7 +48,6 @@ class Tunnel:
             return False
     
     def stop(self) -> bool:
-        """Stop the tunnel"""
         try:
             self.running = False
             
@@ -74,7 +72,6 @@ class Tunnel:
             return False
     
     def _tunnel_loop(self):
-        """Main tunnel loop"""
         while self.running:
             try:
                 client_socket, addr = self.server_socket.accept()
@@ -94,7 +91,6 @@ class Tunnel:
                 break
     
     def _handle_connection(self, client_socket, addr):
-        """Handle individual connection"""
         try:
             if self.via_connection and self.via_connection.connected:
                 # Tunnel through remote connection (SSH tunnel)
@@ -112,7 +108,6 @@ class Tunnel:
                 pass
     
     def _handle_direct_tunnel(self, client_socket):
-        """Handle direct tunnel (no SSH)"""
         try:
             # Connect to remote host
             remote_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -133,7 +128,6 @@ class Tunnel:
                 pass
     
     def _handle_ssh_tunnel(self, client_socket):
-        """Handle SSH tunnel"""
         try:
             # Use SSH connection to create tunnel
             tunnel_cmd = f"ssh -L {self.local_port}:{self.remote_host}:{self.remote_port} -N"
@@ -184,7 +178,6 @@ class Tunnel:
             remote_to_client.join()
     
     def get_status(self) -> Dict[str, Any]:
-        """Get tunnel status"""
         return {
             'running': self.running,
             'local_endpoint': f"{self.local_host}:{self.local_port}",
@@ -237,7 +230,6 @@ class Proxy:
             return False
     
     def stop(self) -> bool:
-        """Stop the proxy server"""
         try:
             self.running = False
             
@@ -253,7 +245,6 @@ class Proxy:
             return False
     
     def _proxy_loop(self):
-        """Main proxy loop"""
         while self.running:
             try:
                 client_socket, addr = self.server_socket.accept()
@@ -273,7 +264,6 @@ class Proxy:
                 break
     
     def _handle_proxy_connection(self, client_socket, addr):
-        """Handle proxy connection"""
         try:
             # Read HTTP request
             request = client_socket.recv(4096).decode('utf-8')
@@ -340,7 +330,6 @@ class Proxy:
             client_socket.send(error_response.encode('utf-8'))
     
     def get_status(self) -> Dict[str, Any]:
-        """Get proxy status"""
         return {
             'running': self.running,
             'proxy_endpoint': f"{self.host}:{self.port}",
@@ -348,7 +337,6 @@ class Proxy:
         }
 
 class TunnelProxyManager:
-    """Manager for tunnels and proxies"""
     
     def __init__(self):
         self.tunnels: Dict[str, Tunnel] = {}
@@ -357,21 +345,18 @@ class TunnelProxyManager:
     def create_tunnel(self, name: str, local_host: str, local_port: int, 
                      remote_host: str, remote_port: int, 
                      via_connection: Optional[RemoteConnection] = None) -> Tunnel:
-        """Create a new tunnel"""
         tunnel = Tunnel(local_host, local_port, remote_host, remote_port, via_connection)
         self.tunnels[name] = tunnel
         print_info(f"Tunnel '{name}' created")
         return tunnel
     
     def create_proxy(self, name: str, host: str = 'localhost', port: int = 8080) -> Proxy:
-        """Create a new proxy"""
         proxy = Proxy(host, port)
         self.proxies[name] = proxy
         print_info(f"Proxy '{name}' created")
         return proxy
     
     def start_tunnel(self, name: str) -> bool:
-        """Start a tunnel"""
         if name not in self.tunnels:
             print_error(f"Tunnel '{name}' not found")
             return False
@@ -379,7 +364,6 @@ class TunnelProxyManager:
         return self.tunnels[name].start()
     
     def stop_tunnel(self, name: str) -> bool:
-        """Stop a tunnel"""
         if name not in self.tunnels:
             print_error(f"Tunnel '{name}' not found")
             return False
@@ -387,7 +371,6 @@ class TunnelProxyManager:
         return self.tunnels[name].stop()
     
     def start_proxy(self, name: str, target_host: str, target_port: int = 80, protocol: str = 'http') -> bool:
-        """Start a proxy"""
         if name not in self.proxies:
             print_error(f"Proxy '{name}' not found")
             return False
@@ -395,7 +378,6 @@ class TunnelProxyManager:
         return self.proxies[name].start(target_host, target_port, protocol)
     
     def stop_proxy(self, name: str) -> bool:
-        """Stop a proxy"""
         if name not in self.proxies:
             print_error(f"Proxy '{name}' not found")
             return False
@@ -403,15 +385,12 @@ class TunnelProxyManager:
         return self.proxies[name].stop()
     
     def list_tunnels(self) -> Dict[str, Dict[str, Any]]:
-        """List all tunnels"""
         return {name: tunnel.get_status() for name, tunnel in self.tunnels.items()}
     
     def list_proxies(self) -> Dict[str, Dict[str, Any]]:
-        """List all proxies"""
         return {name: proxy.get_status() for name, proxy in self.proxies.items()}
     
     def remove_tunnel(self, name: str) -> bool:
-        """Remove a tunnel"""
         if name not in self.tunnels:
             print_error(f"Tunnel '{name}' not found")
             return False
@@ -422,7 +401,6 @@ class TunnelProxyManager:
         return True
     
     def remove_proxy(self, name: str) -> bool:
-        """Remove a proxy"""
         if name not in self.proxies:
             print_error(f"Proxy '{name}' not found")
             return False

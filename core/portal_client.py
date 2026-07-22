@@ -30,7 +30,6 @@ class PortalClient:
         self.user_info = None
     
     def test_connection(self) -> bool:
-        """Test connection to Portal"""
         try:
             response = self.session.get(f"{self.server_url}/api/v1/status", timeout=10)
             
@@ -46,7 +45,6 @@ class PortalClient:
             return False
     
     def get_status(self) -> Dict:
-        """Get connection status"""
         return {
             'connected': self.connected,
             'server': self.server_url,
@@ -55,7 +53,6 @@ class PortalClient:
         }
     
     def get_user_info(self) -> Dict:
-        """Get user information"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -74,7 +71,6 @@ class PortalClient:
             return {}
     
     def get_projects(self) -> List[Dict]:
-        """Get available projects"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -125,7 +121,6 @@ class PortalClient:
             return None
     
     def sync_workspace_up(self, workspace_name: str) -> bool:
-        """Sync workspace data up to Portal"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -164,7 +159,6 @@ class PortalClient:
             return False
     
     def sync_workspace_down(self, workspace_name: str) -> bool:
-        """Sync workspace data down from Portal"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -195,7 +189,6 @@ class PortalClient:
             return False
     
     def _get_workspace_data(self, workspace_name: str) -> Dict:
-        """Get workspace data from framework"""
         try:
             # This would integrate with the framework to get workspace data
             # For now, return mock data
@@ -217,7 +210,6 @@ class PortalClient:
             return {}
     
     def _apply_workspace_data(self, workspace_name: str, workspace_data: Dict) -> bool:
-        """Apply workspace data to local framework"""
         try:
             # This would integrate with the framework to apply workspace data
             # For now, just return success
@@ -229,7 +221,6 @@ class PortalClient:
             return False
     
     def get_findings(self, project_id: str = None, limit: int = 100) -> List[Dict]:
-        """Get findings from Portal"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -255,7 +246,6 @@ class PortalClient:
             return []
     
     def create_project(self, project_data: Dict) -> Optional[Dict]:
-        """Create a new project in Portal"""
         try:
             if not self.connected:
                 self.test_connection()
@@ -277,7 +267,6 @@ class PortalClient:
             return None
     
     def get_collaborative_findings(self, project_id: str = None) -> List[Dict]:
-        """Get collaborative findings from other users"""
         try:
             if not self.connected:
                 self.test_connection()

@@ -80,7 +80,6 @@ def pick_active_playbook(
     *,
     min_relevance: float = 0.35,
 ) -> Optional[Dict[str, Any]]:
-    """Return the best REACHABLE (or high-relevance PARTIAL) playbook assessment."""
     report = assess_playbook_coverage(kb, findings, min_relevance=min_relevance, limit=6)
     rows = report.get("playbooks") or []
     for row in rows:
@@ -100,7 +99,6 @@ def next_playbook_steps(
     *,
     max_steps: int = 3,
 ) -> List[Dict[str, Any]]:
-    """Return up to ``max_steps`` executable playbook chain steps."""
     if not isinstance(playbook_row, Mapping):
         return []
     observed = _observed_modules(kb)

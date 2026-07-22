@@ -20,7 +20,7 @@ chain:
     description: Establish SMB session with available credentials
   - id: deploy_shell
     capability: shell
-    module: post/smb/manage/deploy_reverse_shell
+    module: post/smb/windows/deploy_reverse_shell
     description: Deploy reverse shell over SMB
 blockers:
   - SMB signing required

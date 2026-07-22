@@ -117,6 +117,10 @@ def lint_agent_block_strict(agent_raw: Any) -> List[str]:
     for field in RECOMMENDED_FIELDS:
         if field not in agent_raw and field not in normalized:
             issues.append(f"missing recommended field: {field}")
+    from interfaces.command_system.builtin.agent.metadata_contract_inference import missing_extended_contract_fields
+
+    for field in missing_extended_contract_fields(normalized):
+        issues.append(f"missing phase-2 contract field: {field}")
     return issues
 
 

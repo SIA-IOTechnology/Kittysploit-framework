@@ -39,7 +39,6 @@ class LDAPShell(BaseShell):
         self._initialize_ldap_connection()
 
     def _initialize_ldap_connection(self):
-        """Initialize LDAP connection from session/listener"""
         try:
             if not self.framework:
                 return

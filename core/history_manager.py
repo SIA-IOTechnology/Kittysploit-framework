@@ -308,16 +308,19 @@ class HistoryManager:
             if total_count <= max_entries:
                 return 0
 
-            keep_ids = [
-                entry[0]
-                for entry in base_query.order_by(CommandHistory.timestamp.desc())
+            # Keep only the most recent max_entries rows for this workspace/user.
+            # Selecting their ids as a scoped subquery lets the delete resolve the
+            # keep-set and remove the rest in a single atomic statement, so there
+            # is no SELECT-then-DELETE window where a freshly inserted entry could
+            # be wrongly removed.
+            keep_ids_query = (
+                base_query.order_by(CommandHistory.timestamp.desc())
                 .limit(max_entries)
                 .with_entities(CommandHistory.id)
-                .all()
-            ]
-            if not keep_ids:
-                return 0
+            )
 
+            # Re-apply the same workspace/user scope on the delete so history
+            # belonging to other workspaces or users is never touched.
             delete_query = session.query(CommandHistory)
             if workspace_id is not None:
                 delete_query = delete_query.filter(CommandHistory.workspace_id == workspace_id)
@@ -329,7 +332,7 @@ class HistoryManager:
                 delete_query = delete_query.filter(CommandHistory.user_id.is_(None))
 
             deleted_count = delete_query.filter(
-                ~CommandHistory.id.in_(keep_ids)
+                ~CommandHistory.id.in_(keep_ids_query)
             ).delete(synchronize_session=False)
             session.commit()
             return int(deleted_count or 0)

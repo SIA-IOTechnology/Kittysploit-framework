@@ -1516,8 +1516,11 @@ class ApiServer:
         self.clients[client_id] = {
             'active': True,
             'outputs': [],
-            'result': None
+            'result': None,
+            'created_at': time.time(),
         }
+        
+        self._cleanup_stale_clients()
         
         # Configurer les callbacks
         def stdout_callback(text):
@@ -1573,19 +1576,33 @@ class ApiServer:
                 })
         finally:
             # Nettoyer les ressources
-            if client_id in self.clients:
-                # Supprimer les callbacks
-                callbacks = self.clients[client_id]['callbacks']
-                self.framework.output_handler.remove_stdout_callback(callbacks['stdout'])
-                self.framework.output_handler.remove_stderr_callback(callbacks['stderr'])
-                
-                # Marquer le client comme inactif
-                self.clients[client_id]['active'] = False
-                
-                # Arrêter la redirection si plus aucun client n'est actif
-                active_clients = [c for c in self.clients.values() if c['active']]
-                if not active_clients:
-                    self.framework.output_handler.stop_redirection()
+                if client_id in self.clients:
+                    # Supprimer les callbacks
+                    callbacks = self.clients[client_id]['callbacks']
+                    self.framework.output_handler.remove_stdout_callback(callbacks['stdout'])
+                    self.framework.output_handler.remove_stderr_callback(callbacks['stderr'])
+                    
+                    # Marquer le client comme inactif avec timestamp de cleanup
+                    self.clients[client_id]['active'] = False
+                    self.clients[client_id]['cleaned_up_at'] = time.time()
+                    
+                    # Arrêter la redirection si plus aucun client n'est actif
+                    active_clients = [c for c in self.clients.values() if c['active']]
+                    if not active_clients:
+                        self.framework.output_handler.stop_redirection()
+                    
+                self._cleanup_stale_clients()
+    
+    def _cleanup_stale_clients(self, ttl_seconds: int = 3600):
+        stale_ids = []
+        now = time.time()
+        for cid, info in list(self.clients.items()):
+            if not info.get('active', True):
+                cleaned_at = info.get('cleaned_up_at', info.get('created_at', 0))
+                if now - cleaned_at > ttl_seconds:
+                    stale_ids.append(cid)
+        for cid in stale_ids:
+            self.clients.pop(cid, None)
     
     def run_interpreter_thread(self, interpreter, code, client_id):
         """Exécute du code dans l'interpréteur"""

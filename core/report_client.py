@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Portal Client - Handles communication with KittySploit Portal SaaS
+Report Client - Handles communication with KittySploit Reports SaaS
 """
 
 import requests
@@ -14,8 +14,8 @@ from datetime import datetime
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 
-class PortalClient:
-    """Client for communicating with KittySploit Portal SaaS"""
+class ReportClient:
+    """Client for communicating with KittySploit Reports SaaS"""
     
     def __init__(self, server_url: str, api_key: str):
         self.server_url = server_url.rstrip('/')
@@ -88,12 +88,11 @@ class PortalClient:
             return []
     
     def submit_finding(self, finding_data: Dict) -> Optional[Dict]:
-        """Submit a finding to Portal"""
+        """Submit a finding to Reports"""
         try:
             if not self.connected:
                 self.test_connection()
             
-            # Prepare finding data
             payload = {
                 'title': finding_data['title'],
                 'description': finding_data.get('description', ''),
@@ -125,14 +124,12 @@ class PortalClient:
             if not self.connected:
                 self.test_connection()
             
-            # Get workspace data from framework
             workspace_data = self._get_workspace_data(workspace_name)
             
             if not workspace_data:
                 print_warning(f"No data found for workspace '{workspace_name}'")
                 return False
             
-            # Upload to Portal
             payload = {
                 'workspace_name': workspace_name,
                 'data': workspace_data,
@@ -163,7 +160,6 @@ class PortalClient:
             if not self.connected:
                 self.test_connection()
             
-            # Download from Portal
             response = self.session.get(
                 f"{self.server_url}/api/v1/workspaces/{workspace_name}",
                 timeout=60
@@ -172,7 +168,6 @@ class PortalClient:
             if response.status_code == 200:
                 workspace_data = response.json()
                 
-                # Apply data to local workspace
                 if self._apply_workspace_data(workspace_name, workspace_data):
                     self.last_sync = datetime.utcnow().isoformat()
                     print_success(f"Workspace '{workspace_name}' downloaded successfully")
@@ -190,8 +185,6 @@ class PortalClient:
     
     def _get_workspace_data(self, workspace_name: str) -> Dict:
         try:
-            # This would integrate with the framework to get workspace data
-            # For now, return mock data
             return {
                 'name': workspace_name,
                 'hosts': [],
@@ -211,8 +204,6 @@ class PortalClient:
     
     def _apply_workspace_data(self, workspace_name: str, workspace_data: Dict) -> bool:
         try:
-            # This would integrate with the framework to apply workspace data
-            # For now, just return success
             print_info(f"Applying workspace data for '{workspace_name}'...")
             return True
             

@@ -50,7 +50,6 @@ _LOG_EXTRA_RENAMES = {
 
 
 def sanitize_log_extra(extra: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Return a copy of *extra* safe for logging.LogRecord."""
     if not extra:
         return {}
     safe: Dict[str, Any] = {}
@@ -167,7 +166,6 @@ class JSONLLogHandler(logging.Handler):
 
 
 def _detach_jsonl_handlers(root: logging.Logger, log_path: Optional[Path] = None) -> None:
-    """Remove and close existing JSONL handlers to avoid duplicate or stale writers."""
     for handler in list(root.handlers):
         if not isinstance(handler, JSONLLogHandler):
             continue

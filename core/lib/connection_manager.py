@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Any, Callable
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class ConnectionManager:
-    """Manager for multiple remote connections"""
     
     def __init__(self):
         # Import here to avoid circular import
@@ -103,19 +102,16 @@ class ConnectionManager:
             return True
     
     def get_current(self):
-        """Get the current active connection"""
         with self.lock:
             if self.current_connection and self.current_connection in self.connections:
                 return self.connections[self.current_connection]
             return None
     
     def get(self, name: str):
-        """Get a specific connection by name"""
         with self.lock:
             return self.connections.get(name)
     
     def list_connections(self) -> Dict[str, Dict[str, Any]]:
-        """List all connections with their status"""
         with self.lock:
             result = {}
             for name, conn in self.connections.items():
@@ -182,7 +178,6 @@ class ConnectionManager:
         return conn.send_command(command)
     
     def connect_all(self) -> Dict[str, bool]:
-        """Connect all connections"""
         results = {}
         
         with self.lock:
@@ -195,7 +190,6 @@ class ConnectionManager:
         return results
     
     def disconnect_all(self) -> Dict[str, bool]:
-        """Disconnect all connections"""
         results = {}
         
         with self.lock:
@@ -280,12 +274,10 @@ class ConnectionManager:
         print_info("Connection monitoring started")
     
     def enable_auto_reconnect(self, enabled: bool = True) -> None:
-        """Enable or disable auto-reconnect"""
         self.auto_reconnect_enabled = enabled
         print_info(f"Auto-reconnect {'enabled' if enabled else 'disabled'}")
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get connection statistics"""
         with self.lock:
             total = len(self.connections)
             connected = sum(1 for conn in self.connections.values() if conn.connected)
@@ -299,6 +291,5 @@ class ConnectionManager:
             }
     
     def __repr__(self) -> str:
-        """String representation"""
         stats = self.get_stats()
         return f"ConnectionManager(connections={stats['total_connections']}, connected={stats['connected_connections']})"

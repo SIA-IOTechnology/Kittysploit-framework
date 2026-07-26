@@ -47,7 +47,6 @@ class DetectionPackGenerator:
         force: bool = False,
         formats: Optional[Iterable[str]] = None,
     ) -> GeneratedPack:
-        """Write the selected detection pack files to disk."""
 
         selected_formats = set(formats or ["sigma", "yara", "suricata", "zeek", "docs", "tests"])
         root = Path(output_dir or self.DEFAULT_OUTPUT_DIR) / self.slug
@@ -84,7 +83,6 @@ class DetectionPackGenerator:
         return GeneratedPack(output_dir=root, files=generated, manifest=manifest)
 
     def preview(self) -> str:
-        """Return a short human-readable summary without writing files."""
 
         cves = ", ".join(self._as_list(self.info.get("cve"))) or "none"
         tags = ", ".join(self._as_list(self.info.get("tags"))) or "none"

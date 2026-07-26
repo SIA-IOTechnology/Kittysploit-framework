@@ -179,6 +179,7 @@ def install_requests_budget_hook() -> None:
         def _agent_send(session, request, **kwargs):
             budget = active_network_budget()
             if budget is not None:
+                from interfaces.command_system.builtin.agent.egress_gateway import assert_egress_allowed
                 from interfaces.command_system.builtin.agent.runtime_policy import (
                     ScopeViolationError,
                     active_runtime_policy,
@@ -187,6 +188,7 @@ def install_requests_budget_hook() -> None:
 
                 method = str(getattr(request, "method", "REQUEST") or "REQUEST").upper()
                 url = str(getattr(request, "url", "") or "")
+                assert_egress_allowed(url=url, method=method)
                 guard = active_scope_guard()
                 if guard is not None:
                     allowed, reason = guard.validate_url(url)
@@ -233,14 +235,15 @@ def install_aiohttp_budget_hook() -> None:
         async def _agent_request(self, method, url, **kwargs):
             budget = active_network_budget()
             if budget is not None:
+                from interfaces.command_system.builtin.agent.egress_gateway import assert_egress_allowed
                 from interfaces.command_system.builtin.agent.runtime_policy import (
                     ScopeViolationError,
-                    active_runtime_policy,
                     active_scope_guard,
                 )
 
                 guard = active_scope_guard()
                 url_str = str(url or "")
+                assert_egress_allowed(url=url_str, method=str(method or "GET"))
                 if guard is not None:
                     allowed, reason = guard.validate_url(url_str)
                     if not allowed:

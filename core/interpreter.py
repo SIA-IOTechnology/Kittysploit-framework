@@ -96,7 +96,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         }
         
     def _get_style(self) -> Style:
-        """Get the prompt style configuration"""
         return Style.from_dict({
             'prompt': 'ansired bold',
             'completion-menu.completion': 'bg:#008800 #ffffff',
@@ -104,7 +103,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         })
         
     def _create_completer(self) -> WordCompleter:
-        """Create command completer with framework-specific commands"""
         commands = [
             # Basic commands
             'modules', 'sessions', 'help', 'debug',
@@ -123,7 +121,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         return WordCompleter(commands)
         
     def get_prompt(self) -> str:
-        """Get the customized prompt string"""
         context = ""
         module = self.framework.get_current_module()
         if module:
@@ -131,7 +128,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         return f'kittypy({context})> '
         
     def runsource(self, source: str, filename: str = "<input>", symbol: str = "single") -> bool:
-        """Execute source code with error handling"""
         try:
             # Add to history (only if not empty)
             if source.strip():
@@ -146,12 +142,10 @@ class KittyInterpreter(code.InteractiveInterpreter):
             return False
             
     def showsyntaxerror(self, filename: Optional[str] = None, **kwargs) -> None:
-        """Display syntax errors with custom formatting"""
         type, value, tb = sys.exc_info()
         sys.stderr.write(f'\033[91mSyntax Error: {str(value)}\033[0m\n')
         
     def showtraceback(self) -> None:
-        """Display tracebacks with custom formatting and callbacks"""
         type, value, tb = sys.exc_info()
         error_msg = f'\033[91mError: {str(value)}\033[0m\n'
         for callback in self.output_callbacks['stderr']:
@@ -159,7 +153,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         sys.stderr.write(error_msg)
         
     def run(self) -> None:
-        """Start the interactive interpreter"""
         banner = """
 ╔═══════════════════════════════════════════╗
 ║ KittyPy Interactive Interpreter           ║
@@ -239,7 +232,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         
     # Helper Methods
     def generate_payload(self, payload_type: str, options: Optional[Dict] = None) -> bytes:
-        """Generate a payload with the given options"""
         payload = self.framework.payloads.create(payload_type)
         if options:
             payload.set_options(options)
@@ -250,7 +242,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         return self.framework.encoders.encode(string, encoder)
         
     def debug(self, obj: Any) -> None:
-        """Print detailed object information"""
         print(f"\033[94mObject: {obj.__class__.__name__}\033[0m")
         print("\033[94mAttributes:\033[0m")
         for name, value in inspect.getmembers(obj):
@@ -258,17 +249,14 @@ class KittyInterpreter(code.InteractiveInterpreter):
                 print(f"  \033[92m{name}\033[0m: {value}")
                 
     def _print_info(self, message):
-        """Print info message"""
         from core.output_handler import print_info
         print_info(message)
     
     def _print_success(self, message):
-        """Print success message"""
         from core.output_handler import print_success
         print_success(message)
     
     def _print_error(self, message):
-        """Print error message"""
         from core.output_handler import print_error
         print_error(message)
     
@@ -278,7 +266,6 @@ class KittyInterpreter(code.InteractiveInterpreter):
         print_warning(message)
 
     def kitty_help(self) -> None:
-        """Display KittyPy specific help"""
         help_text = """
 KittyPy Help
 ===========
@@ -310,12 +297,10 @@ Example Usage:
         print(help_text)
 
     def add_output_callback(self, output_type: str, callback):
-        """Add output callback for a specific type"""
         if output_type in self.output_callbacks:
             self.output_callbacks[output_type].append(callback)
             
     def remove_output_callback(self, output_type: str, callback):
-        """Remove output callback"""
         if output_type in self.output_callbacks:
             self.output_callbacks[output_type].remove(callback)
             
@@ -327,6 +312,5 @@ Example Usage:
 
 # Utility functions
 def start_interpreter(framework) -> None:
-    """Start a new interpreter instance"""
     interpreter = KittyInterpreter(framework)
     interpreter.run() 

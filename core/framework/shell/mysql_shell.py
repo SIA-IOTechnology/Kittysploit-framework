@@ -50,7 +50,6 @@ class MySQLShell(BaseShell):
         self._initialize_mysql_connection()
     
     def _initialize_mysql_connection(self):
-        """Initialize MySQL connection from session/listener"""
         try:
             if not self.framework:
                 return
@@ -114,11 +113,9 @@ class MySQLShell(BaseShell):
         return f"mysql [{db_name}]> "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         return self.prompt_template
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the MySQL shell"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -144,7 +141,6 @@ class MySQLShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'SQL execution error: {str(e)}'}
     
     def _execute_sql(self, sql: str) -> Dict[str, Any]:
-        """Execute SQL query"""
         if not self.connection:
             return {'output': '', 'status': 1, 'error': 'MySQL connection not available'}
         
@@ -190,7 +186,6 @@ class MySQLShell(BaseShell):
                 cursor.close()
     
     def _cmd_help(self, args: str) -> Dict[str, Any]:
-        """Show help"""
         help_text = """
 MySQL Shell Commands:
 =====================
@@ -265,7 +260,6 @@ Examples:
         return self._execute_sql("SHOW DATABASES")
     
     def _cmd_tables(self, args: str) -> Dict[str, Any]:
-        """List tables"""
         if args.startswith("from "):
             db = args[5:].strip()
             return self._execute_sql(f"SHOW TABLES FROM `{db}`")
@@ -275,7 +269,6 @@ Examples:
             return self._execute_sql("SHOW TABLES")
     
     def _cmd_describe(self, args: str) -> Dict[str, Any]:
-        """Describe table structure"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: describe <table>'}
         return self._execute_sql(f"DESCRIBE `{args}`")
@@ -327,26 +320,22 @@ Examples:
             return {'output': '', 'status': 1, 'error': f'Error: {str(e)}'}
     
     def _cmd_select(self, args: str) -> Dict[str, Any]:
-        """Execute SELECT query"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'Usage: select ...'}
         return self._execute_sql(f"SELECT {args}")
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
-        """Clear screen"""
         import os
         os.system('clear' if os.name != 'nt' else 'cls')
         return {'output': '', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: str) -> Dict[str, Any]:
-        """Show command history"""
         history = self.get_history()
         if not history:
             return {'output': 'No commands in history', 'status': 0, 'error': ''}
         return {'output': '\n'.join(f"{i+1:4d}  {cmd}" for i, cmd in enumerate(history)), 'status': 0, 'error': ''}
     
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
-        """Exit MySQL shell"""
         if self.connection:
             try:
                 self.connection.close()
@@ -356,6 +345,5 @@ Examples:
         return {'output': 'Bye!', 'status': 0, 'error': ''}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
 

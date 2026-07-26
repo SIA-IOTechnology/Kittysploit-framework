@@ -35,7 +35,6 @@ class ModuleAnalyzer:
     """Dynamic module analyzer for preview generation"""
     
     def __init__(self):
-        """Initialize module analyzer"""
         self.logger = logger
         
         # Keywords for module type detection
@@ -248,7 +247,6 @@ class ModuleAnalyzer:
         return payload
     
     def _generate_execution_steps(self, module, module_type: str, name: str) -> List[Dict[str, Any]]:
-        """Generate execution steps based on module analysis"""
         steps = []
         
         if module_type == 'exploit':
@@ -265,7 +263,6 @@ class ModuleAnalyzer:
         return steps
     
     def _generate_exploit_steps(self, module, name: str) -> List[Dict[str, Any]]:
-        """Generate steps for exploit modules"""
         steps = [
             {'description': 'Verify target reachability', 'completed': True},
             {'description': 'Check service version and vulnerabilities', 'completed': False}
@@ -305,7 +302,6 @@ class ModuleAnalyzer:
         return steps
     
     def _generate_auxiliary_steps(self, module, name: str) -> List[Dict[str, Any]]:
-        """Generate steps for auxiliary modules"""
         steps = [
             {'description': 'Initialize auxiliary module', 'completed': True}
         ]
@@ -350,7 +346,6 @@ class ModuleAnalyzer:
         return steps
     
     def _generate_listener_steps(self, module, name: str) -> List[Dict[str, Any]]:
-        """Generate steps for listener modules"""
         return [
             {'description': 'Initialize listener', 'completed': True},
             {'description': 'Bind to specified port', 'completed': False},
@@ -361,7 +356,6 @@ class ModuleAnalyzer:
         ]
     
     def _generate_payload_steps(self, module, name: str) -> List[Dict[str, Any]]:
-        """Generate steps for payload modules"""
         return [
             {'description': 'Initialize payload', 'completed': True},
             {'description': 'Configure payload parameters', 'completed': False},
@@ -371,7 +365,6 @@ class ModuleAnalyzer:
         ]
     
     def _generate_generic_steps(self, module, name: str) -> List[Dict[str, Any]]:
-        """Generate generic steps for unknown module types"""
         return [
             {'description': 'Initialize module', 'completed': True},
             {'description': 'Configure module parameters', 'completed': False},
@@ -381,7 +374,6 @@ class ModuleAnalyzer:
         ]
     
     def _generate_network_connections(self, module, module_type: str, name: str) -> List[Dict[str, str]]:
-        """Generate network connection patterns"""
         connections = []
         
         if module_type == 'exploit':
@@ -556,7 +548,6 @@ class ModuleAnalyzer:
         return impacts
     
     def _extract_module_characteristics(self, module) -> Dict[str, Any]:
-        """Extract additional module characteristics"""
         characteristics = {
             'has_options': hasattr(module, 'options') and len(module.options) > 0,
             'option_count': len(module.options) if hasattr(module, 'options') else 0,

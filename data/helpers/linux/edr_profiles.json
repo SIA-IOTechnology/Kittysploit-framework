@@ -1,0 +1,150 @@
+[
+  {
+    "vendor": "CrowdStrike Falcon",
+    "procs": ["falcon-sensor", "falcond", "cs-agent"],
+    "modules": ["falcon_lsm_sensor", "falcon_nf_netcontain", "falcon_kal"],
+    "files": [
+      "/opt/CrowdStrike/falcond",
+      "/opt/CrowdStrike/falcon-sensor",
+      "/var/run/falcon-agent.socket",
+      "/opt/CrowdStrike/"
+    ],
+    "devs": ["falcon-query0", "csagent"],
+    "bpf_pats": ["falcon", "crowdstrike", "cs_"]
+  },
+  {
+    "vendor": "Palo Alto Cortex XDR (Traps)",
+    "procs": ["traps_pmd", "traps", "cytool", "cyserver"],
+    "modules": ["traps"],
+    "files": [
+      "/opt/traps/bin/cytool",
+      "/opt/traps/bin/traps_pmd",
+      "/opt/traps/running_mode",
+      "/opt/traps/"
+    ],
+    "devs": ["traps"],
+    "bpf_pats": ["traps", "cortex"]
+  },
+  {
+    "vendor": "Trend Micro (DS Agent / Apex One)",
+    "procs": ["ds_agent", "dsa_query", "cgtool", "ds_am"],
+    "modules": ["tmhook", "bmhook", "dsa_filter", "dsa_filter_hook"],
+    "files": [
+      "/opt/ds_agent/ds_agent",
+      "/opt/ds_agent/",
+      "/opt/TrendMicro/SProtectLinux/"
+    ],
+    "devs": [],
+    "bpf_pats": ["tmhook", "bmhook", "trendmicro"]
+  },
+  {
+    "vendor": "SentinelOne",
+    "procs": ["sentinelctl", "sentinel-agent", "s1agent", "sentineld"],
+    "modules": ["s1_sensor", "sentinel"],
+    "files": [
+      "/opt/sentinelone/bin/sentinelctl",
+      "/opt/sentinelone/bin/sentineld",
+      "/opt/sentinelone/"
+    ],
+    "devs": ["s1_sensor"],
+    "bpf_pats": ["s1_", "sentinel"]
+  },
+  {
+    "vendor": "VMware Carbon Black",
+    "procs": ["cbsensor", "cbdaemon", "cbagentd", "cbosxsensor"],
+    "modules": ["cbr_sensord", "carbonblack"],
+    "files": [
+      "/usr/share/cb/cbdaemon",
+      "/var/lib/cb/",
+      "/opt/carbonblack/"
+    ],
+    "devs": [],
+    "bpf_pats": ["carbonblack", "cbr_"]
+  },
+  {
+    "vendor": "Microsoft Defender (MDATP)",
+    "procs": ["mdatp", "wdavdaemon", "mdatp_audisp_plugin"],
+    "modules": [],
+    "files": [
+      "/opt/microsoft/mdatp/sbin/wdavdaemon",
+      "/var/opt/microsoft/mdatp/",
+      "/opt/microsoft/mdatp/"
+    ],
+    "devs": [],
+    "bpf_pats": ["mdatp", "defender", "microsoft"]
+  },
+  {
+    "vendor": "Sophos",
+    "procs": ["sophoslinuxsensor", "sophos-spl", "ssm-service"],
+    "modules": [],
+    "files": [
+      "/opt/sophos-spl/bin/",
+      "/opt/SophosLinux/",
+      "/opt/sophos-spl/"
+    ],
+    "devs": [],
+    "bpf_pats": ["sophos"]
+  },
+  {
+    "vendor": "Elastic Endpoint",
+    "procs": ["elastic-endpoint", "elastic-agent", "fleet-server"],
+    "modules": [],
+    "files": [
+      "/opt/Elastic/Endpoint/elastic-endpoint",
+      "/opt/Elastic/Agent/elastic-agent",
+      "/opt/Elastic/"
+    ],
+    "devs": [],
+    "bpf_pats": ["elastic", "endgame"]
+  },
+  {
+    "vendor": "Kaspersky (KESL)",
+    "procs": ["kesl", "kavstart", "klnagent", "kav"],
+    "modules": ["gsch", "klhk", "klrg", "klif"],
+    "files": [
+      "/opt/kaspersky/kesl/bin/kesl",
+      "/var/opt/kaspersky/",
+      "/opt/kaspersky/"
+    ],
+    "devs": ["klbg", "kl_vtd", "kl_protect"],
+    "bpf_pats": ["kaspersky", "kesl"]
+  },
+  {
+    "vendor": "Wazuh / OSSEC",
+    "procs": [
+      "wazuh-agent",
+      "wazuh-modulesd",
+      "wazuh-syscheckd",
+      "wazuh-logcollectord",
+      "ossec-agentd"
+    ],
+    "modules": [],
+    "files": [
+      "/var/ossec/bin/wazuh-agent",
+      "/etc/wazuh-agent/",
+      "/var/ossec/"
+    ],
+    "devs": [],
+    "bpf_pats": ["wazuh", "ossec"]
+  },
+  {
+    "vendor": "Falco",
+    "procs": ["falco", "falco-bpf"],
+    "modules": ["scap", "falco_kmod"],
+    "files": ["/usr/bin/falco", "/etc/falco/falco.yaml", "/etc/falco/"],
+    "devs": ["scap0", "falco"],
+    "bpf_pats": ["falco", "scap", "sysdig"]
+  },
+  {
+    "vendor": "Tetragon / Cilium",
+    "procs": ["tetragon", "tetra", "cilium-agent"],
+    "modules": [],
+    "files": [
+      "/usr/local/bin/tetragon",
+      "/etc/tetragon/",
+      "/usr/local/bin/tetra"
+    ],
+    "devs": [],
+    "bpf_pats": ["tg_", "tetragon", "cilium"]
+  }
+]

@@ -16,6 +16,10 @@ from interfaces.command_system.builtin.agent.metadata_chain_inference import (
     infer_chain_metadata,
     infer_requires_metadata,
 )
+from interfaces.command_system.builtin.agent.metadata_contract_inference import (
+    apply_extended_contract_fields,
+    missing_extended_contract_fields,
+)
 
 DEFAULT_FAMILIES: Sequence[str] = (
     "scanner",
@@ -84,7 +88,7 @@ def infer_agent_metadata(module_path: str, info: Optional[Dict[str, Any]] = None
         agent["chain"] = chain
     if requires:
         agent["requires"] = requires
-    return agent
+    return apply_extended_contract_fields(module_path, agent, info)
 
 
 def _format_agent_block(agent: Dict[str, Any], indent: str = "        ") -> str:
@@ -101,8 +105,22 @@ def _format_agent_block(agent: Dict[str, Any], indent: str = "        ") -> str:
     for optional in ("cost", "noise", "value"):
         if optional in agent:
             lines.append(f"{inner}'{optional}': {agent[optional]!r},")
+    if agent.get("idempotent") is not None:
+        lines.append(f"{inner}'idempotent': {str(bool(agent['idempotent']))},")
+    if agent.get("isolation"):
+        lines.append(f"{inner}'isolation': {agent['isolation']!r},")
+    for list_field in (
+        "network_destinations",
+        "privileges_required",
+        "side_effects",
+        "success_validators",
+    ):
+        if agent.get(list_field):
+            lines.append(f"{inner}'{list_field}': {agent[list_field]!r},")
     if agent.get("requires"):
         lines.append(f"{inner}'requires': {_repr_dict(agent['requires'], inner)},")
+    if agent.get("incompatible_when"):
+        lines.append(f"{inner}'incompatible_when': {_repr_dict(agent['incompatible_when'], inner)},")
     if agent.get("chain"):
         lines.append(f"{inner}'chain': {_repr_dict(agent['chain'], inner)},")
     lines.append(f"{indent}}},")
@@ -247,14 +265,18 @@ def upgrade_agent_in_source(source: str, module_path: str) -> Optional[str]:
     if not isinstance(info, dict):
         return None
     existing = info.get("agent") if isinstance(info.get("agent"), dict) else {}
-    enriched = enrich_agent_metadata(module_path, existing, info)
+    enriched = apply_extended_contract_fields(module_path, enrich_agent_metadata(module_path, existing, info), info)
     from interfaces.command_system.builtin.agent.agent_module_meta import normalize_agent_block
 
     normalized_existing = normalize_agent_block(existing) or {}
     normalized_enriched = normalize_agent_block(enriched) or {}
-    if not chain_is_empty(normalized_existing.get("chain")):
-        return None
-    if chain_is_empty(normalized_enriched.get("chain")) and not normalized_enriched.get("requires"):
+    needs_chain = chain_is_empty(normalized_existing.get("chain")) and not chain_is_empty(
+        normalized_enriched.get("chain")
+    )
+    needs_contract = bool(missing_extended_contract_fields(normalized_existing)) and not bool(
+        missing_extended_contract_fields(normalized_enriched)
+    )
+    if not needs_chain and not needs_contract and normalized_existing == normalized_enriched:
         return None
     return _replace_agent_block(source, module_path, enriched, info)
 
@@ -332,24 +354,65 @@ def annotate_module_file(file_path: Path, module_path: str, *, dry_run: bool = T
     return True, "updated" if not dry_run else "would_update"
 
 
+def module_matches_families(module_path: str, families: Iterable[str]) -> bool:
+    path = str(module_path or "")
+    for family in families:
+        token = str(family or "").strip()
+        if not token:
+            continue
+        if token.endswith("/"):
+            if path.startswith(token):
+                return True
+        elif path.startswith(f"{token}/") or path == token:
+            return True
+    return False
+
+
+def module_matches_prefixes(module_path: str, prefixes: Iterable[str]) -> bool:
+    path = str(module_path or "").lower()
+    return any(path.startswith(str(prefix or "").lower()) for prefix in prefixes if str(prefix or "").strip())
+
+
+def _filter_discovered(
+    discovered: Dict[str, str],
+    *,
+    families: Iterable[str] = (),
+    prefixes: Iterable[str] = (),
+) -> Dict[str, str]:
+    prefix_list = tuple(prefixes)
+    family_list = tuple(families)
+    if prefix_list:
+        return {
+            path: file_path
+            for path, file_path in discovered.items()
+            if module_matches_prefixes(path, prefix_list)
+        }
+    if family_list:
+        return {
+            path: file_path
+            for path, file_path in discovered.items()
+            if module_matches_families(path, family_list)
+        }
+    return dict(discovered)
+
+
 def upgrade_catalog(
     discovered: Dict[str, str],
     extract_info: Any,
     *,
     families: Iterable[str] = DEFAULT_FAMILIES,
+    prefixes: Iterable[str] = (),
     dry_run: bool = True,
     limit: int = 0,
 ) -> Dict[str, Any]:
-    families = tuple(families)
+    filtered = _filter_discovered(discovered, families=families, prefixes=prefixes)
+    prefix_list = tuple(prefixes)
+    family_list = tuple(families)
     updated = skipped = errors = 0
     rows: List[Dict[str, str]] = []
     count = 0
-    for module_path in sorted(discovered):
-        if families and not any(
-            module_path.startswith(f"{family}/") or module_path == family for family in families
-        ):
-            continue
-        file_path = Path(discovered[module_path])
+    for module_path in sorted(filtered):
+        file_path = Path(filtered[module_path])
         if not file_path.is_file():
             skipped += 1
             continue
@@ -370,7 +433,8 @@ def upgrade_catalog(
     return {
         "dry_run": dry_run,
         "mode": "upgrade",
-        "families": list(families),
+        "families": list(family_list),
+        "prefixes": list(prefix_list),
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
@@ -383,19 +447,18 @@ def annotate_catalog(
     extract_info: Any,
     *,
     families: Iterable[str] = DEFAULT_FAMILIES,
+    prefixes: Iterable[str] = (),
     dry_run: bool = True,
     limit: int = 0,
 ) -> Dict[str, Any]:
-    families = tuple(families)
+    filtered = _filter_discovered(discovered, families=families, prefixes=prefixes)
+    prefix_list = tuple(prefixes)
+    family_list = tuple(families)
     updated = skipped = errors = 0
     rows: List[Dict[str, str]] = []
     count = 0
-    for module_path in sorted(discovered):
-        if families and not any(
-            module_path.startswith(f"{family}/") or module_path == family for family in families
-        ):
-            continue
-        file_path = Path(discovered[module_path])
+    for module_path in sorted(filtered):
+        file_path = Path(filtered[module_path])
         if not file_path.is_file():
             skipped += 1
             continue
@@ -415,9 +478,53 @@ def annotate_catalog(
             skipped += 1
     return {
         "dry_run": dry_run,
-        "families": list(families),
+        "mode": "annotate",
+        "families": list(family_list),
+        "prefixes": list(prefix_list),
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
         "sample": rows[:20],
     }
+
+
+def annotate_benchmark_suite(
+    discovered: Dict[str, str],
+    extract_info: Any,
+    suite_id: str,
+    *,
+    dry_run: bool = True,
+    limit: int = 0,
+) -> Dict[str, Any]:
+    from interfaces.command_system.builtin.agent.benchmark.module_families import (
+        family_path_prefixes_for_suite,
+    )
+
+    return annotate_catalog(
+        discovered,
+        extract_info,
+        prefixes=family_path_prefixes_for_suite(suite_id),
+        dry_run=dry_run,
+        limit=limit,
+    )
+
+
+def upgrade_benchmark_suite(
+    discovered: Dict[str, str],
+    extract_info: Any,
+    suite_id: str,
+    *,
+    dry_run: bool = True,
+    limit: int = 0,
+) -> Dict[str, Any]:
+    from interfaces.command_system.builtin.agent.benchmark.module_families import (
+        family_path_prefixes_for_suite,
+    )
+
+    return upgrade_catalog(
+        discovered,
+        extract_info,
+        prefixes=family_path_prefixes_for_suite(suite_id),
+        dry_run=dry_run,
+        limit=limit,
+    )

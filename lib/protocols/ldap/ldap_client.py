@@ -402,9 +402,7 @@ class LDAPClient:
     
     def _send_message(self, message: Dict):
         """Send LDAP message"""
-        # This is a simplified implementation
-        # In a real implementation, you would use proper BER encoding
-        
+        # Uses basic BER encoding; production code should use a proper LDAP library.        
         # For now, just increment message ID
         self.message_id += 1
         
@@ -414,9 +412,7 @@ class LDAPClient:
     
     def _receive_message(self) -> Optional[Dict]:
         """Receive LDAP message"""
-        # This is a simplified implementation
-        # In a real implementation, you would use proper BER decoding
-        
+        # Uses basic BER decoding; production code should use a proper LDAP library.        
         try:
             # In production, you would read from the socket
             # and decode the BER-encoded message

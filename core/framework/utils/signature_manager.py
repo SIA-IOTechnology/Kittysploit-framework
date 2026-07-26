@@ -24,7 +24,6 @@ from core.output_handler import print_error, print_warning
 
 
 class SignatureManager:
-    """Gestionnaire de signatures cryptographiques pour les modules"""
     
     def __init__(self, encryption_manager: Optional[EncryptionManager] = None):
         """
@@ -183,7 +182,6 @@ class SignatureManager:
             return False
     
     def _load_private_key(self, signer: str):
-        """Charge la clé privée d'un signataire"""
         private_key_path = os.path.join(self.keys_dir, f"{signer}_private.pem")
         if not os.path.exists(private_key_path):
             return None
@@ -216,7 +214,6 @@ class SignatureManager:
             return None
     
     def _load_public_key(self, signer: str):
-        """Charge la clé publique d'un signataire"""
         public_key_path = os.path.join(self.keys_dir, f"{signer}_public.pem")
         if not os.path.exists(public_key_path):
             return None

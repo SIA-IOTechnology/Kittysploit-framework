@@ -89,7 +89,6 @@ def service_hint_from_port(port: int) -> str:
 
 
 def parse_service_entry(entry: Any) -> Optional[Dict[str, Any]]:
-    """Parse ``tcp/80`` style entries into structured service dicts."""
     if isinstance(entry, dict):
         return entry
     if not isinstance(entry, str):
@@ -197,7 +196,6 @@ def suggest_modules(
     *,
     limit: int = 6,
 ) -> List[str]:
-    """Return KittySploit module paths suggested for a fingerprinted service."""
     name = (service.get("name") or "").lower()
     banner_blob = " ".join(
         str(service.get(key) or "")

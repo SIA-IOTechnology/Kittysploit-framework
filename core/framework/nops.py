@@ -10,7 +10,6 @@ import random
 import struct
 
 class NopManager:
-    """Manager for NOP sleds and padding"""
     
     def __init__(self):
         self.nops = {
@@ -48,7 +47,6 @@ class NopManager:
         return self.nops[arch][nop_type](size)
     
     def _x86_opty2(self, size):
-        """Generate x86 opty2 NOP sled"""
         nops = [
             b'\x81\xc4\x54\xf2\xff\xff',  # add esp, -3500
             b'\x8d\x64\x24\x14',          # lea esp, [esp+0x14]
@@ -65,11 +63,9 @@ class NopManager:
         return result[:size]
     
     def _x86_single_byte(self, size):
-        """Generate x86 single byte NOP sled"""
         return b'\x90' * size
     
     def _x86_random(self, size):
-        """Generate x86 random NOP sled"""
         nops = [
             b'\x90',                      # nop
             b'\x40',                      # inc eax
@@ -89,7 +85,6 @@ class NopManager:
         return result[:size]
     
     def _x86_alpha(self, size):
-        """Generate x86 alphanumeric NOP sled"""
         # Alphanumeric instructions that don't affect execution
         alpha_nops = [
             b'PPYA',  # push eax; push eax; push eax; push eax
@@ -105,7 +100,6 @@ class NopManager:
         return result[:size]
     
     def _x64_opty2(self, size):
-        """Generate x64 opty2 NOP sled"""
         nops = [
             b'\x48\x81\xc4\x54\xf2\xff\xff',  # add rsp, -3500
             b'\x48\x8d\x64\x24\x14',          # lea rsp, [rsp+0x14]
@@ -122,11 +116,9 @@ class NopManager:
         return result[:size]
     
     def _x64_single_byte(self, size):
-        """Generate x64 single byte NOP sled"""
         return b'\x90' * size
     
     def _x64_random(self, size):
-        """Generate x64 random NOP sled"""
         nops = [
             b'\x90',                      # nop
             b'\x48\x40',                  # rex.w inc rax
@@ -146,14 +138,12 @@ class NopManager:
         return result[:size]
     
     def list_available(self):
-        """List all available NOP types"""
         result = {}
         for arch, types in self.nops.items():
             result[arch] = list(types.keys())
         return result
     
     def get_info(self, arch, nop_type):
-        """Get information about a specific NOP type"""
         info = {
             'x86': {
                 'opty2': 'Optimized x86 NOP sled with various instructions',

@@ -225,7 +225,6 @@ class Module(Auxiliary, Http_client):
                     indicators.append(f'Time-based delay: {elapsed_time:.2f}s')
 
             # Check for boolean-based differences
-            # This would require comparing with a baseline, simplified here
             if 'or 1=1' in payload.lower() or "or '1'='1'" in payload.lower():
                 # Check if response is different (longer/shorter)
                 if len(response.text) > 1000:  # Arbitrary threshold

@@ -50,7 +50,6 @@ class SimpleCollaborationClient:
         self._receive_thread = None
     
     def connect(self) -> bool:
-        """Connect to the collaboration server"""
         try:
             # Create socket
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -136,7 +135,6 @@ class SimpleCollaborationClient:
             return False
     
     def disconnect(self):
-        """Disconnect from the collaboration server"""
         self.is_connected = False
         
         # Signal display thread to stop
@@ -154,7 +152,6 @@ class SimpleCollaborationClient:
             print_info("Disconnected from collaboration server")
     
     def _display_message_loop(self):
-        """Display messages from queue in a non-intrusive way"""
         while self.is_connected:
             try:
                 # Wait for message with timeout
@@ -265,7 +262,6 @@ class SimpleCollaborationClient:
                 pass
     
     def send_chat_message(self, content: str, message_type: str = "text") -> bool:
-        """Send a chat message"""
         if not self.is_connected:
             print_error("Not connected to collaboration server")
             return False
@@ -289,14 +285,12 @@ class SimpleCollaborationClient:
             return False
     
     def send_command_result(self, command: str, result: str, success: bool = True) -> bool:
-        """Send command execution result"""
         message_type = "result" if success else "error"
         content = f"Command: {command}\nResult: {result}"
         
         return self.send_chat_message(content, message_type)
     
     def sync_workspace(self, workspace_data: Dict) -> bool:
-        """Sync workspace data with server"""
         if not self.is_connected:
             return False
         
@@ -322,7 +316,6 @@ class SimpleCollaborationClient:
             return False
     
     def _receive_loop(self):
-        """Receive messages from server"""
         while self.is_connected and self.socket:
             try:
                 data = self.socket.recv(4096).decode('utf-8')
@@ -341,7 +334,6 @@ class SimpleCollaborationClient:
         self.is_connected = False
     
     def _handle_server_message(self, message: Dict):
-        """Handle message from server"""
         message_type = message.get('type', 'unknown')
         
         if message_type == 'client_joined':
@@ -471,12 +463,10 @@ class SimpleCollaborationClient:
                 print_info(f"Received chat history: {len(messages)} messages")
     
     def get_chat_history(self) -> List[Dict]:
-        """Get chat message history"""
         with self._lock:
             return self.chat_messages.copy()
     
     def get_connected_clients(self) -> List[Dict]:
-        """Get list of connected clients"""
         with self._lock:
             return self.connected_clients.copy()
     
@@ -485,12 +475,10 @@ class SimpleCollaborationClient:
         return self.is_connected and self.socket is not None
     
     def get_workspace_data(self) -> Dict:
-        """Get current workspace data"""
         with self._lock:
             return self.workspace_data.copy()
     
     def get_shared_module(self) -> Optional[Dict]:
-        """Get the most recently shared module from workspace data"""
         with self._lock:
             return self.workspace_data.get('shared_module')
     
@@ -517,7 +505,6 @@ class SimpleCollaborationClient:
             return False
     
     def _send_json(self, payload: Dict) -> None:
-        """Send a JSON message terminated with a newline."""
         if not self.socket:
             raise ConnectionError("Not connected to collaboration server")
         
@@ -525,7 +512,6 @@ class SimpleCollaborationClient:
         self.socket.sendall(data)
     
     def _recv_json_blocking(self, sock: socket.socket, timeout: float = 5.0) -> Optional[Dict]:
-        """Receive a single JSON object, blocking until a newline delimiter is found."""
         if sock is None:
             return None
         

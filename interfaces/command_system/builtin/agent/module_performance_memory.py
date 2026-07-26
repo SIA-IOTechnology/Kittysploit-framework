@@ -388,8 +388,10 @@ class ModulePerformanceMemory:
         if c < 1.0:
             return 1.0
         avg = float(ent.get("sum_reward", 0) or 0) / c
-        # Typical avg in [-1, 4]; map to multiplier band
-        return max(0.72, min(1.28, 1.0 + max(-0.35, min(0.35, avg * 0.11))))
+        # Few samples stay near neutral; large samples trust contextual history more.
+        sample_weight = min(1.0, c / 12.0)
+        adjusted = 1.0 + (max(-0.35, min(0.35, avg * 0.11)) * sample_weight)
+        return max(0.72, min(1.28, adjusted))
 
     def _mult_for_key_path(self, module_path: str) -> float:
         ent = self._agg_path_only.get(module_path)

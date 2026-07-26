@@ -15,14 +15,12 @@ class Demo:
                 self.options[opt_name] = opt_info['default']
     
     def validate_options(self) -> bool:
-        """Validate that all required options are set"""
         for opt_name, opt_info in self.OPTIONS.items():
             if opt_info.get('required', False) and opt_name not in self.options:
                 return False
         return True
     
     def set_option(self, option: str, value: Any) -> bool:
-        """Set an option value"""
         if option not in self.OPTIONS:
             return False
             
@@ -43,11 +41,9 @@ class Demo:
         return True
     
     def get_options(self) -> Dict[str, Any]:
-        """Get current option values"""
         return self.options
     
     def get_info(self) -> Dict[str, Any]:
-        """Get module information"""
         return {
             'name': self.NAME,
             'description': self.DESCRIPTION,

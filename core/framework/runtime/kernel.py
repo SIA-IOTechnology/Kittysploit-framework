@@ -41,7 +41,6 @@ from core.framework.utils.sandbox_executor import SandboxExecutor
 
 
 class ResourceType(Enum):
-    """Types de ressources supervisées"""
     CPU = "cpu"
     MEMORY = "memory"
     NETWORK = "network"
@@ -66,7 +65,6 @@ class ResourceUsage:
 
 @dataclass
 class ModuleExecutionContext:
-    """Contexte d'exécution d'un module"""
     module_id: str
     module_path: str
     module_instance: BaseModule
@@ -80,7 +78,6 @@ class ModuleExecutionContext:
 
 
 class ResourceSupervisor:
-    """Superviseur de ressources pour les modules"""
     
     def __init__(self):
         self.monitored_modules: Dict[str, ResourceUsage] = {}
@@ -90,7 +87,6 @@ class ResourceSupervisor:
         self.lock = threading.Lock()
     
     def start_monitoring(self, interval: float = 1.0):
-        """Démarre le monitoring des ressources"""
         if self.monitoring_active:
             return
         
@@ -108,13 +104,11 @@ class ResourceSupervisor:
         self.monitoring_thread.start()
     
     def stop_monitoring(self):
-        """Arrête le monitoring des ressources"""
         self.monitoring_active = False
         if self.monitoring_thread:
             self.monitoring_thread.join(timeout=2.0)
     
     def register_module(self, module_id: str) -> ResourceUsage:
-        """Enregistre un module pour le monitoring"""
         with self.lock:
             if module_id not in self.monitored_modules:
                 self.monitored_modules[module_id] = ResourceUsage(module_id=module_id)
@@ -126,12 +120,10 @@ class ResourceSupervisor:
             self.monitored_modules.pop(module_id, None)
     
     def get_resource_usage(self, module_id: str) -> Optional[ResourceUsage]:
-        """Récupère l'utilisation des ressources d'un module"""
         with self.lock:
             return self.monitored_modules.get(module_id)
     
     def _update_resources(self):
-        """Met à jour les statistiques de ressources"""
         with self.lock:
             # Pour l'instant, on surveille le processus global
             # Dans une implémentation avancée, on pourrait surveiller chaque thread/module
@@ -149,7 +141,6 @@ class ResourceSupervisor:
                 pass
     
     def check_limits(self, module_id: str, limits: Dict[str, Any]) -> Dict[str, bool]:
-        """Vérifie si les limites de ressources sont respectées"""
         usage = self.get_resource_usage(module_id)
         if not usage:
             return {}
@@ -182,14 +173,12 @@ class ModuleSandbox:
         self.blocked_functions: Set[str] = set()
     
     def configure(self, config: Dict[str, Any]):
-        """Configure le sandbox"""
         self.allowed_imports = set(config.get("allowed_imports", []))
         self.blocked_imports = set(config.get("blocked_imports", []))
         self.allowed_functions = set(config.get("allowed_functions", []))
         self.blocked_functions = set(config.get("blocked_functions", []))
     
     def is_import_allowed(self, module_name: str) -> bool:
-        """Vérifie si un import est autorisé"""
         if module_name in self.blocked_imports:
             return False
         if self.allowed_imports and module_name not in self.allowed_imports:
@@ -197,7 +186,6 @@ class ModuleSandbox:
         return True
     
     def is_function_allowed(self, function_name: str) -> bool:
-        """Vérifie si une fonction est autorisée"""
         if function_name in self.blocked_functions:
             return False
         if self.allowed_functions and function_name not in self.allowed_functions:
@@ -337,12 +325,10 @@ class RuntimeKernel:
         return context
     
     def get_module_status(self, module_id: str) -> Optional[ModuleExecutionContext]:
-        """Récupère le statut d'un module"""
         with self.lock:
             return self.active_modules.get(module_id)
     
     def kill_module(self, module_id: str) -> bool:
-        """Arrête l'exécution d'un module"""
         with self.lock:
             context = self.active_modules.get(module_id)
             if not context:
@@ -358,7 +344,6 @@ class RuntimeKernel:
             return True
     
     def get_resource_usage(self, module_id: str) -> Optional[ResourceUsage]:
-        """Récupère l'utilisation des ressources d'un module"""
         return self.resource_supervisor.get_resource_usage(module_id)
     
     def reload_module(self, module_path: str) -> bool:
@@ -393,7 +378,6 @@ class RuntimeKernel:
             return False
     
     def cleanup(self):
-        """Nettoie les ressources du kernel"""
         self.resource_supervisor.stop_monitoring()
         with self.lock:
             # Tuer tous les modules actifs

@@ -155,7 +155,9 @@ Note: Stored and exported history redacts obvious secrets such as passwords, API
         # Try to get from database first
         if hasattr(command_registry, 'history_manager'):
             try:
-                db_history = command_registry.history_manager.get_history(limit=1000)
+                from core.history_manager import MAX_HISTORY_ENTRIES
+
+                db_history = command_registry.history_manager.get_history(limit=MAX_HISTORY_ENTRIES)
                 if db_history:
                     # Convert database format to standard format
                     for entry in db_history:
@@ -224,10 +226,12 @@ Note: Stored and exported history redacts obvious secrets such as passwords, API
     def _save_history(self, command_registry):
         """Save redacted history to the legacy default file."""
         if hasattr(command_registry, 'history_manager'):
+            from core.history_manager import MAX_HISTORY_ENTRIES
+
             return command_registry.history_manager.export_history(
                 self.history_file,
                 format='json',
-                limit=1000,
+                limit=MAX_HISTORY_ENTRIES,
                 force=True,
             )
         try:
@@ -242,13 +246,15 @@ Note: Stored and exported history redacts obvious secrets such as passwords, API
 
     def _export_history(self, command_registry, options):
         """Export redacted history through HistoryManager controls."""
+        from core.history_manager import MAX_HISTORY_ENTRIES
+
         if not hasattr(command_registry, 'history_manager') or not command_registry.history_manager:
             print_error("History manager not available")
             return False
         return command_registry.history_manager.export_history(
             options['export'],
             format=options.get('format') or 'json',
-            limit=options.get('limit') or 1000,
+            limit=options.get('limit') or MAX_HISTORY_ENTRIES,
             force=options.get('force', False),
             search_term=options.get('search'),
         )

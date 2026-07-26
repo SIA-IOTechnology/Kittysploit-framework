@@ -91,7 +91,6 @@ def _safe_stream_write(stream, data) -> None:
             pass
 
 def is_interactive_terminal():
-    """Vérifie si le script s'exécute dans un terminal interactif"""
     return _stream_isatty(sys.stdout) and not os.environ.get('KITTYSPLOIT_NO_COLOR')
 
 def set_debug_manager(debug_manager):
@@ -139,7 +138,6 @@ def print_info(message="", **kwargs):
     print(message, **kwargs)
 
 def print_status(message="", **kwargs):
-    """Print an information message"""
     if is_thread_output_quiet():
         return
     if USE_COLORS and is_interactive_terminal():
@@ -148,14 +146,12 @@ def print_status(message="", **kwargs):
         print(f"[*] {message}", **kwargs)
 
 def print_error(message="", **kwargs):
-    """Print an error message"""
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.RED}!{Style.RESET_ALL}] {message}", **kwargs)
     else:
         print(f"[!] {message}", **kwargs)
 
 def print_success(message="", **kwargs):
-    """Print a success message"""
     if is_thread_output_quiet():
         return
     if USE_COLORS and is_interactive_terminal():
@@ -164,7 +160,6 @@ def print_success(message="", **kwargs):
         print(f"[+] {message}", **kwargs)
 
 def print_warning(message="", **kwargs):
-    """Affiche un message d'avertissement"""
     if is_thread_output_quiet():
         return
     if USE_COLORS and is_interactive_terminal():
@@ -173,7 +168,6 @@ def print_warning(message="", **kwargs):
         print(f"[~] {message}", **kwargs)
 
 def _wrap_cell_text(cell_value: str, col_width: int) -> list:
-    """Wrap cell text to col_width; long tokens are hard-split (no ellipsis)."""
     if col_width <= 0:
         return [cell_value]
     wrapped_lines = []
@@ -215,7 +209,6 @@ def _resolve_table_max_width(max_width, expand_to_terminal):
 
 
 def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
-    """Return column widths and metadata for table rendering."""
     prefer_single_line = bool(kwargs.get("prefer_single_line", False))
     max_width = _resolve_table_max_width(max_width, expand_to_terminal)
 
@@ -427,7 +420,6 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
 
 
 def table_render_width(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
-    """Return the rendered line width for a table (for framing separators)."""
     if not headers or not rows:
         return max_width
     layout = _compute_table_layout(headers, rows, max_width, expand_to_terminal, **kwargs)
@@ -546,7 +538,6 @@ def print_debug(message="", force=False, **kwargs):
         print_info(f"[DEBUG] {message}", **kwargs)
 
 def set_use_colors(value=True):
-    """Enable or disable the use of colors"""
     global USE_COLORS
     USE_COLORS = bool(value)
 
@@ -573,7 +564,6 @@ class OutputHandler:
         self._broadcast_unscoped_to_sessions = False
 
     def set_broadcast_unscoped_to_sessions(self, enabled: bool):
-        """Enable/disable broadcasting unscoped output to all sessions."""
         self._broadcast_unscoped_to_sessions = bool(enabled)
 
     def set_thread_context(self, session_id: str):
@@ -600,7 +590,6 @@ class OutputHandler:
         return self._get_thread_context()
 
     def start_redirection(self):
-        """Start redirecting stdout and stderr"""
         if self.redirecting:
             return
 
@@ -614,7 +603,6 @@ class OutputHandler:
         logging.debug("Output redirection started")
 
     def stop_redirection(self):
-        """Stop redirecting stdout and stderr"""
         if not self.redirecting:
             return
 
@@ -630,13 +618,11 @@ class OutputHandler:
         logging.debug("Output redirection stopped")
 
     def create_session(self):
-        """Create a unique session and return its identifier"""
         session_id = str(uuid.uuid4())
         self.sessions[session_id] = {"stdout": [], "stderr": []}
         return session_id
 
     def add_callback(self, session_id, callback, is_stderr=False):
-        """Add a callback for a specific session"""
         # Auto-create session buckets for external session IDs (e.g. web terminals)
         if session_id not in self.sessions:
             self.sessions[session_id] = {"stdout": [], "stderr": []}
@@ -645,34 +631,28 @@ class OutputHandler:
             self.sessions[session_id][key].append(callback)
 
     def remove_callback(self, session_id, callback, is_stderr=False):
-        """Remove a callback from a specific session"""
         if session_id in self.sessions:
             key = "stderr" if is_stderr else "stdout"
             if callback in self.sessions[session_id][key]:
                 self.sessions[session_id][key].remove(callback)
 
     def add_stdout_callback(self, callback):
-        """Add a callback for stdout"""
         if callback not in self.stdout_callbacks:
             self.stdout_callbacks.append(callback)
 
     def add_stderr_callback(self, callback):
-        """Add a callback for stderr"""
         if callback not in self.stderr_callbacks:
             self.stderr_callbacks.append(callback)
 
     def remove_stdout_callback(self, callback):
-        """Remove a callback for stdout"""
         if callback in self.stdout_callbacks:
             self.stdout_callbacks.remove(callback)
 
     def remove_stderr_callback(self, callback):
-        """Remove a callback for stderr"""
         if callback in self.stderr_callbacks:
             self.stderr_callbacks.remove(callback)
 
     def handle_output(self, text, is_stderr=False):
-        """Handle output data"""
         # Some libraries may write bytes; normalize here.
         text = _coerce_text(text)
         ctx_session_id = self._get_thread_context()
@@ -698,7 +678,6 @@ class OutputHandler:
         self.output_queue.put(("stderr" if is_stderr else "stdout", text, ctx_session_id))
 
     def _process_output_queue(self):
-        """Send data to the appropriate sessions"""
         while True:
             item = self.output_queue.get()
             if item is None:
@@ -733,15 +712,12 @@ class OutputHandler:
             self.output_queue.task_done()
     
     def print_info(self, message="", **kwargs):
-        """Print an information message"""
         print_info(message, **kwargs)
     
     def print_error(self, message="", **kwargs):
-        """Print an error message"""
         print_error(message, **kwargs)
     
     def print_success(self, message="", **kwargs):
-        """Print a success message"""
         print_success(message, **kwargs)
     
     def print_warning(self, message="", **kwargs):
@@ -749,11 +725,9 @@ class OutputHandler:
         print_warning(message, **kwargs)
     
     def print_status(self, message="", **kwargs):
-        """Print a status message"""
         print_status(message, **kwargs)
     
     def print_debug(self, message="", **kwargs):
-        """Print a debug message"""
         print_debug(message, **kwargs)
 
 class StdoutRedirector:

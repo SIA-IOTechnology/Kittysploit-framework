@@ -14,13 +14,11 @@ OFFICIAL_APP_PACKAGES: Dict[str, str] = {
     "kittyproxy": "kittyproxy",
     "kittyosint": "kittyosint",
     "kittyprotocol": "kittyprotocol",
-    "kittyreport": "kittyreport",
-    "kittysupply": "kittysupply",
+    "kittycluster": "kittycluster",
 }
 
 
 def discover_app_src(root: Path, package_name: str) -> Optional[Path]:
-    """Return directory to add to sys.path (contains the app package)."""
     extensions = root / "extensions"
     if extensions.is_dir():
         for src_dir in sorted(extensions.glob("**/src")):

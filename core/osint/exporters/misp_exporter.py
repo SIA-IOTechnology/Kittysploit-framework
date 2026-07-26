@@ -43,7 +43,6 @@ def export_osint_misp_event(
     tlp: str = "AMBER",
     info: str = "",
 ) -> Dict[str, Any]:
-    """Build a MISP Event dict from OSINT graph and module rows."""
     root = str(synthesis.get("root_domain") or case_id or "osint-target")
     attributes: List[Dict[str, Any]] = []
     seen: set = set()

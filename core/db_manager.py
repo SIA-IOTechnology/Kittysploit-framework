@@ -47,6 +47,13 @@ class DatabaseManager:
                 import core.registry.models  # noqa: F401
             except ImportError:
                 pass  # Registry not available, continue without it
+
+            # Import kittyCluster models (extension tables) when available.
+            try:
+                import core.models.kittycluster_models  # noqa: F401
+            except Exception:
+                # Keep DB init resilient if extension is absent.
+                pass
             
             # Create all tables
             Base.metadata.create_all(engine)
@@ -56,6 +63,7 @@ class DatabaseManager:
             
             # Migrate modules table constraint if needed (to include 'workflow')
             self.migrate_modules_table_constraint(workspace)
+            self.migrate_kittycluster_schema(workspace)
             
             # Set encryption manager for encrypted fields
             if self.encryption_manager:
@@ -74,7 +82,6 @@ class DatabaseManager:
             return False
 
     def _resolve_db_path(self) -> str:
-        """Resolve a writable SQLite path for current runtime."""
         env_db_path = os.environ.get("KITTYSPLOIT_DB_PATH")
         if env_db_path:
             return os.path.abspath(os.path.expanduser(env_db_path))
@@ -96,20 +103,29 @@ class DatabaseManager:
         return os.path.join(user_data_dir, "database.db")
     
     def _setup_encryption_for_models(self):
-        """Setup encryption manager for all encrypted fields in models"""
         if not self.encryption_manager:
             return
         
         # Import models that use encryption
         from core.models.models import Credential, Loot, Session, CommandHistory
+        try:
+            from core.models.kittycluster_models import KittyClusterCommandRun, KittyClusterNode
+        except Exception:
+            KittyClusterCommandRun = None
+            KittyClusterNode = None
         
         # Set encryption manager for each model
-        for model_class in [Credential, Loot, Session, CommandHistory]:
+        models = [Credential, Loot, Session, CommandHistory]
+        if KittyClusterNode is not None:
+            models.append(KittyClusterNode)
+        if KittyClusterCommandRun is not None:
+            models.append(KittyClusterCommandRun)
+
+        for model_class in models:
             if hasattr(model_class, 'set_encryption_manager'):
                 model_class.set_encryption_manager(self.encryption_manager)
     
     def set_encryption_manager(self, encryption_manager):
-        """Set encryption manager and update existing models"""
         self.encryption_manager = encryption_manager
         self._setup_encryption_for_models()
     
@@ -193,6 +209,29 @@ class DatabaseManager:
         for workspace in list(self.sessions.keys()):
             self.close_workspace_db(workspace)
     
+    def migrate_kittycluster_schema(self, workspace: str = "default") -> bool:
+        """Add kittyCluster columns missing from older workspace databases."""
+        try:
+            engine = self.engines.get(workspace)
+            if not engine:
+                return False
+
+            inspector = inspect(engine)
+            if "kittycluster_nodes" not in inspector.get_table_names():
+                return True
+
+            with engine.begin() as conn:
+                rows = conn.execute(text("PRAGMA table_info(kittycluster_nodes)")).fetchall()
+                columns = {str(row[1]) for row in rows}
+                if "relay_via" not in columns:
+                    conn.execute(text("ALTER TABLE kittycluster_nodes ADD COLUMN relay_via VARCHAR(64)"))
+                if "downstream_url" not in columns:
+                    conn.execute(text("ALTER TABLE kittycluster_nodes ADD COLUMN downstream_url TEXT"))
+            return True
+        except Exception as exc:
+            print(f"Warning: kittycluster schema migration failed: {exc}")
+            return False
+
     def migrate_modules_table_constraint(self, workspace: str = "default") -> bool:
         """Migrate the modules table to update the CHECK constraint to include all module types
         

@@ -285,7 +285,8 @@ DANGEROUS_COMMANDS = {
     "market",
     "pattern",
     "plugin",
-    "portal",
+    "report",
+    "export",
     "proxy",
     "reset",
     "run",
@@ -1158,7 +1159,7 @@ class NaturalLanguagePlanner:
         elif self.ollama_enabled:
             from interfaces.command_system.builtin.agent.local_llm import LocalLLMService
 
-            self._llm = LocalLLMService()
+            self._llm = LocalLLMService(api_key=os.environ.get("KITTYMCP_OLLAMA_API_KEY"))
         else:
             self._llm = type("NullLLMService", (), {"last_error": None})()
         from interfaces.command_system.builtin.agent.planning_service import PlanningService

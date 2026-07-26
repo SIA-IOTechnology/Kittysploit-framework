@@ -19,7 +19,6 @@ class SandboxExecutor:
     """Exécuteur de sandbox pour tester les modules de manière sécurisée"""
     
     def __init__(self):
-        """Initialise l'exécuteur de sandbox"""
         self.blocked_modules: Set[str] = {
             'os', 'sys', 'subprocess', 'socket', 'shutil', 'ctypes',
             'pickle', 'marshal', 'eval', 'exec', '__builtin__', '__builtins__'

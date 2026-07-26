@@ -24,10 +24,14 @@ class Module(Scanner, Http_client):
         ),
         "author": "KittySploit Team",
         "severity": "high",
-        "modules": [],
+        "cve": "CVE-2026-21643",
+        "modules": [
+            "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli",
+        ],
         "references": [
             "https://www.fortiguard.com/psirt/FG-IR-25-1142",
             "https://bishopfox.com/blog/cve-2026-21643-pre-authentication-sql-injection-in-forticlient-ems-7-4-4",
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-21643",
         ],
         "tags": [
             "web",
@@ -38,37 +42,43 @@ class Module(Scanner, Http_client):
             "exposure",
             "cve-2026-21643",
         ],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-        'cost': 1.0,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 2,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "cost": 1.0,
+            "noise": 0.5,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": ["forticlient", "fortinet", "ems"],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": ["/api/v1/init_consts"],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [
+                    {"capability": "db_access", "from_detail": "sqli"},
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli",
+                ],
+            },
+        },
     }
 
     @staticmethod
@@ -194,5 +204,3 @@ class Module(Scanner, Http_client):
             sites_enabled="true",
         )
         return True
-
-        return False

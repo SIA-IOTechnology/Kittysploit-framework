@@ -13,9 +13,10 @@ Supports two modes:
 """
 
 import socket
-import os
+import subprocess
+import sys
 from typing import Optional, Tuple
-from core.output_handler import print_info, print_warning
+from core.output_handler import print_info, print_warning, print_error
 
 try:
     import socks
@@ -31,6 +32,57 @@ _original_socket = socket.socket
 
 # Singleton reference set by install_socket_wrapper
 _route_manager = None
+
+
+def _ensure_pysocks() -> bool:
+    """Import or install PySocks into the active interpreter (venv-aware)."""
+    global socks, SOCKS_AVAILABLE
+    try:
+        import socks as _socks
+        socks = _socks
+        SOCKS_AVAILABLE = True
+        return True
+    except ImportError:
+        pass
+
+    print_warning("PySocks not installed. Installing into current Python environment...")
+    # Always use the running interpreter's pip — bare `pip` often hits system
+    # Python (PEP 668) even when KittySploit was relaunched under ./venv.
+    cmd = [sys.executable, "-m", "pip", "install", "PySocks", "--quiet"]
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError:
+        print_warning(
+            "pip blocked (externally-managed environment). "
+            "Retrying with --break-system-packages..."
+        )
+        try:
+            subprocess.check_call(cmd + ["--break-system-packages"])
+        except Exception as exc:
+            print_error(f"Could not install PySocks: {exc}")
+            print_info(
+                "Install manually, then restart KittySploit:\n"
+                "  ./venv/bin/python -m pip install PySocks\n"
+                "  # or: sudo apt install python3-socks"
+            )
+            return False
+    except FileNotFoundError:
+        print_error("pip is not available for this Python interpreter")
+        print_info(
+            "Install PySocks into the project venv: "
+            "./venv/bin/python -m pip install PySocks"
+        )
+        return False
+
+    try:
+        import socks as _socks
+        socks = _socks
+        SOCKS_AVAILABLE = True
+        print_info(f"PySocks installed for {sys.executable}")
+        return True
+    except ImportError:
+        print_error("PySocks install reported success but import still fails")
+        return False
 
 
 class ProxiedSocket:
@@ -50,7 +102,8 @@ class ProxiedSocket:
         cls._proxy_type = proxy_type
 
         if enabled:
-            print_info(f"Socket proxy configured: {proxy_type}://{host}:{port}")
+            scheme = "socks5" if int(proxy_type) == int(getattr(socks, "SOCKS5", 2)) else "socks4"
+            print_info(f"Socket proxy configured: {scheme}://{host}:{port}")
         else:
             print_info("Socket proxy disabled")
 
@@ -63,13 +116,12 @@ class ProxiedSocket:
             try:
                 sock.set_proxy(cls._proxy_type, cls._proxy_host, cls._proxy_port)
             except AttributeError:
-                print_warning("socks module not available - installing...")
-                try:
-                    import subprocess
-                    subprocess.check_call(['pip', 'install', 'PySocks', '--quiet'])
-                    import socks as _s
-                    sock.set_proxy(cls._proxy_type, cls._proxy_host, cls._proxy_port)
-                except Exception:
+                if _ensure_pysocks():
+                    try:
+                        sock.set_proxy(cls._proxy_type, cls._proxy_host, cls._proxy_port)
+                    except Exception:
+                        print_warning("Could not configure SOCKS proxy for socket")
+                else:
                     print_warning("Could not configure SOCKS proxy for socket")
 
         return sock
@@ -112,17 +164,11 @@ def install_socket_wrapper(framework=None):
     """
     global _route_manager
     try:
-        try:
-            import socks as _socks
-        except ImportError:
-            print_warning("PySocks not installed. Installing...")
-            try:
-                import subprocess
-                subprocess.check_call(['pip', 'install', 'PySocks', '--quiet'])
-                import socks as _socks
-            except Exception:
-                print_warning("Could not install PySocks - socket proxy will not work")
-                return False
+        if not _ensure_pysocks():
+            print_warning("Could not install PySocks - socket proxy will not work")
+            return False
+
+        import socks as _socks
 
         # Grab the route manager if the framework exposes one
         if framework and hasattr(framework, 'route_manager'):

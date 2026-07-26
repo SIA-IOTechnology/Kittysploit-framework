@@ -172,7 +172,6 @@ class Module(Post, System, LinuxSessionMixin):
                 if match:
                     ip = match.group(1)
                     netmask = match.group(2)
-                    # Convert netmask to CIDR (simplified)
                     if netmask == "255.255.255.0":
                         ip_parts = ip.split('.')
                         return f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"

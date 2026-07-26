@@ -295,6 +295,10 @@ def sync_attack_graph_from_kb(
         kb["attack_graph_stale_modules"] = sorted(stale)[:48]
 
     kb["attack_graph_phase_delta"] = delta
+
+    from interfaces.command_system.builtin.agent.campaign_world import sync_campaign_world
+
+    sync_campaign_world(kb, hostname=hostname, results=results)
     return delta
 
 

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_action_outcome.schema.json",
+  "title": "KittySploit Agent Action Outcome",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "action_id": {"$ref": "common.schema.json#/$defs/id"},
+    "verdict": {
+      "type": "string",
+      "enum": ["confirmed", "no_signal", "refuted", "blocked", "module_error", "policy_denied", "planned", "skipped"]
+    },
+    "module_path": {"type": ["string", "null"]},
+    "phase": {"type": "string"},
+    "duration_ms": {"type": "number", "minimum": 0},
+    "network_requests": {"type": "integer", "minimum": 0},
+    "evidence_ids": {
+      "type": "array",
+      "items": {"$ref": "common.schema.json#/$defs/id"}
+    },
+    "message": {"type": ["string", "null"]},
+    "raw_summary": {"type": "object", "additionalProperties": true}
+  },
+  "required": ["schema_version", "id", "action_id", "verdict", "phase"],
+  "additionalProperties": true
+}

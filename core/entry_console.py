@@ -8,7 +8,9 @@ pip-installed 'kittysploit' command.
 
 import argparse
 import os
+import signal
 import sys
+import time
 from core.framework.framework import Framework
 from interfaces.cli import CLI
 from interfaces.rpc_server import RpcServer
@@ -43,6 +45,24 @@ def parse_arguments():
         '--api-key',
         help='API key for RPC/API servers (or set KITTYSPLOIT_API_KEY)',
     )
+    parser.add_argument(
+        '--ssl',
+        action='store_true',
+        help='Enable HTTPS for API/RPC servers',
+    )
+    parser.add_argument(
+        '--ssl-generate',
+        action='store_true',
+        help='Generate a self-signed cert/key in ~/.kittysploit/tls/ (implies --ssl)',
+    )
+    parser.add_argument(
+        '--ssl-cert',
+        help='SSL certificate PEM file (or KITTYSPLOIT_SSL_CERT)',
+    )
+    parser.add_argument(
+        '--ssl-key',
+        help='SSL private key PEM file (or KITTYSPLOIT_SSL_KEY)',
+    )
 
     # Embedded proxy options for kittyconsole
     parser.add_argument('--proxy', action='store_true', help='Start integrated proxy with interactive CLI')
@@ -66,6 +86,48 @@ def _resolve_server_api_key(cli_value):
     if k:
         return k
     return (os.environ.get("KITTYSPLOIT_API_KEY") or "").strip() or None
+
+
+def _resolve_server_ssl_context(args):
+    from interfaces.server_tls import prepare_server_tls
+
+    ssl_context, cert_path, key_path = prepare_server_tls(
+        ssl_enabled=getattr(args, "ssl", False),
+        ssl_generate=getattr(args, "ssl_generate", False),
+        cert=getattr(args, "ssl_cert", None),
+        key=getattr(args, "ssl_key", None),
+    )
+    if getattr(args, "ssl_generate", False) and cert_path and key_path:
+        print_success(f"Generated SSL certificate: {cert_path}")
+        print_success(f"Generated SSL private key: {key_path}")
+    return ssl_context
+
+
+def _serve_until_stopped(server, label):
+    """Keep the process alive while a daemon server thread is running."""
+
+    def signal_handler(signum, frame):
+        print_info(f"Interrupt received, shutting down {label}...")
+        server.stop()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, signal_handler)
+
+    if not server.running:
+        print_error(f"Failed to start {label}.")
+        return
+
+    print_info("Press Ctrl+C to stop")
+    try:
+        while server.running:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print_info("Keyboard interrupt received")
+    finally:
+        print_info(f"Shutting down {label}...")
+        server.stop()
 
 
 def main():
@@ -129,9 +191,20 @@ def main():
             if not api_key:
                 print_error("RPC server requires --api-key or KITTYSPLOIT_API_KEY environment variable.")
                 return
-            print_info(f"Starting RPC server on {args.rpc_host}:{args.rpc_port}...")
-            rpc_server = RpcServer(framework, host=args.rpc_host, port=args.rpc_port, api_key=api_key)
+            ssl_context = _resolve_server_ssl_context(args)
+            from interfaces.server_tls import service_scheme
+
+            scheme = service_scheme(ssl_context)
+            print_success(f"Starting RPC server on {scheme}://{args.rpc_host}:{args.rpc_port}...")
+            rpc_server = RpcServer(
+                framework,
+                host=args.rpc_host,
+                port=args.rpc_port,
+                api_key=api_key,
+                ssl_context=ssl_context,
+            )
             rpc_server.start()
+            _serve_until_stopped(rpc_server, "RPC server")
             return
         except ImportError:
             print_error("Error: RPC server module not found")
@@ -147,9 +220,21 @@ def main():
             if not api_key:
                 print_error("API server requires --api-key or KITTYSPLOIT_API_KEY environment variable.")
                 return
-            print_info(f"Starting API server on {args.api_host}:{args.api_port}...")
-            api_server = ApiServer(framework, host=args.api_host, port=args.api_port, api_key=api_key)
+            ssl_context = _resolve_server_ssl_context(args)
+            from interfaces.server_tls import service_scheme
+
+            scheme = service_scheme(ssl_context)
+            print_success(f"Starting API server on {scheme}://{args.api_host}:{args.api_port}...")
+            print_info(f"Cluster node API: {scheme}://{args.api_host}:{args.api_port}/api/node/status")
+            api_server = ApiServer(
+                framework,
+                host=args.api_host,
+                port=args.api_port,
+                api_key=api_key,
+                ssl_context=ssl_context,
+            )
             api_server.start()
+            _serve_until_stopped(api_server, "API server")
             return
         except ImportError:
             print_error("Error: API server module not found")

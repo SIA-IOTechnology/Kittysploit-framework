@@ -18,12 +18,10 @@ from core.charter_manager import CharterManager
 from core.encryption_manager import EncryptionManager
 from core.framework.shell import ShellManager
 from core.plugin_manager import PluginManager
-from core.config import Config
 from core.utils.validate import validate_module_type
 from core.framework.utils.metrics import MetricsCollector
 from core.observability.manager import ObservabilityManager
 from core.framework.utils.hooks import HookManager, HookPoint
-# Runtime Kernel - Couche N+1
 from core.framework.runtime import RuntimeKernel, EventBus, EventType
 from core.framework.runtime.extension_contract import ExtensionRegistry
 from core.framework.runtime.pipeline import Pipeline, PipelineStepType
@@ -40,7 +38,6 @@ from pathlib import Path
 
 class Framework:
     def __init__(self, clean_sessions: bool = True):
-        """Initialise le framework avec ses composants essentiels."""
         self.modules: Dict[str, Any] = {}
         self.current_module: Optional[Any] = None
         self.current_workflow: Optional[Any] = None
@@ -53,7 +50,6 @@ class Framework:
         self.observability = ObservabilityManager(self.metrics_collector)
         self.hook_manager = HookManager()
         
-        # Runtime Kernel - Couche N+1
         self.runtime_kernel = RuntimeKernel()
         self.event_bus = EventBus()
         self.extension_registry = ExtensionRegistry()
@@ -245,7 +241,6 @@ class Framework:
         *,
         label: str = "",
     ) -> None:
-        """Notify components that a session transport was reattached."""
         import time
         from core.output_handler import print_success
         from core.framework.runtime.events import EventType
@@ -495,7 +490,6 @@ class Framework:
     
     
     def load_core_modules(self) -> None:
-        """Charge uniquement les modules essentiels."""
         try:
             # Charger uniquement les modules de base
             core_modules = {
@@ -511,7 +505,6 @@ class Framework:
             self.output_handler.print_error(f"Erreur lors du chargement des modules de base: {str(e)}")
     
     def _init_modules_db(self) -> None:
-        """Initialise la base de données des modules."""
         try:
             # S'assurer que la contrainte de la table est à jour avant de charger les modules
             workspace_name = self.get_current_workspace_name()
@@ -533,7 +526,6 @@ class Framework:
             self.output_handler.print_error(f"Erreur lors de l'initialisation de la base de données des modules: {str(e)}")
     
     def _load_modules_from_files(self, session) -> None:
-        """Charge les modules depuis les fichiers dans la base de données."""
         try:
             # Mapping des dossiers vers les types de modules
             # Format: (dossier, type_module)
@@ -681,7 +673,6 @@ class Framework:
             return {}
     
     def _normalize_module_count_keys(self, counts: Dict[str, int]) -> Dict[str, int]:
-        """Merge legacy transform type keys into the banner/CLI canonical 'transforms' bucket."""
         normalized = dict(counts or {})
         legacy_transform_total = 0
         for legacy_key in ('obfuscator', 'transform'):
@@ -1090,7 +1081,6 @@ class Framework:
             return self.modules
 
     def get_module_info(self, module_path):
-        """Obtient les informations sur un module"""
         return self.module_loader.get_module_info(module_path)
 
     def load_all_plugins(self) -> None:
@@ -1100,7 +1090,6 @@ class Framework:
         pass
 
     def _init_workspaces(self) -> None:
-        """Initialize workspace management system"""
         # Initialize database for default workspace (needed for workspace management)
         self.db_manager.init_workspace_db("default")
         
@@ -1159,7 +1148,6 @@ class Framework:
                         self.module_sync_manager.workspace = self.current_workspace
     
     def get_current_workspace_name(self) -> str:
-        """Get the current workspace name"""
         current_workspace = self.workspace_manager.get_current_workspace()
         return current_workspace.name if current_workspace else "default"
     
@@ -1304,11 +1292,9 @@ class Framework:
             # Proxy disabled - no need to log
 
     def get_proxy_config(self) -> Dict[str, Any]:
-        """Retourne la configuration actuelle du proxy"""
         return self.proxy_config.copy()
     
     def is_proxy_enabled(self) -> bool:
-        """Vérifie si le proxy est activé"""
         return self.proxy_config['enabled']
     
     def _extract_target_ip_from_module(self) -> Optional[str]:
@@ -1410,7 +1396,6 @@ class Framework:
         return None
     
     def get_proxy_url(self) -> Optional[str]:
-        """Retourne l'URL du proxy si activé"""
         if self.proxy_config['enabled']:
             return self.proxy_config['http_proxy']
         return None
@@ -1527,7 +1512,6 @@ class Framework:
         self.module_sync_manager.stop_background_sync()
     
     def sync_modules_now(self) -> Dict[str, int]:
-        """Perform immediate module synchronization"""
         return self.module_sync_manager.sync_modules(force=True)
 
     def invalidate_module_caches(self, module_path: Optional[str] = None) -> None:
@@ -1535,7 +1519,6 @@ class Framework:
         self.module_loader.invalidate_caches(module_path=module_path)
     
     def get_module_sync_status(self) -> Dict:
-        """Get module synchronization status"""
         return self.module_sync_manager.get_sync_status()
     
     def search_modules_db(
@@ -1573,11 +1556,9 @@ class Framework:
     # Browser Server Methods
     
     def set_browser_server(self, browser_server):
-        """Set the browser server instance for the framework"""
         self.browser_server = browser_server
     
     def get_browser_server(self):
-        """Get the current browser server instance"""
         return self.browser_server
     
     def has_browser_server(self) -> bool:

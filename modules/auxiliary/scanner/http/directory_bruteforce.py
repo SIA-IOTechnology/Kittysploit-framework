@@ -18,6 +18,7 @@ DEFAULT_PATHS = [
     "server-status", "status", "health", "debug", "trace", "actuator",
     "actuator/health", "phpinfo.php", "info.php", "test", "staging",
     "uploads", "files", "private", "secret", "console", "manager", "wp-admin",
+    "dvwa", "dvwa/login.php", "phpMyAdmin", "phpmyadmin", "mutillidae",
 ]
 
 
@@ -27,14 +28,35 @@ class Module(Auxiliary, Http_client):
         "description": "Bruteforce common web paths using a built-in or custom wordlist.",
         "author": ["KittySploit Team"],
         "tags": ["web", "scanner", "bruteforce", "directory", "discovery"],
-        "agent": {
-            "risk": "active",
-            "effects": ["network_probe"],
-            "expected_requests": 20,
-            "reversible": True,
-            "approval_required": False,
-            "produces": ["endpoints", "risk_signals"],
-        },
+    'agent': {
+        'risk': 'active',
+        'effects': ['network_probe'],
+        'expected_requests': 20,
+        'reversible': True,
+        'approval_required': False,
+        'produces': ['endpoints', 'risk_signals'],
+        'cost': 2.0,
+        'noise': 0.5,
+        'value': 1.0,
+        'requires':         {'min_endpoints': 0,
+         'min_params': 0,
+         'tech_hints_any': [],
+         'tech_hints_all': [],
+         'specializations_any': [],
+         'risk_signals_any': [],
+         'auth_session': False,
+         'capabilities_any': [],
+         'capabilities_all': [],
+         'confidence_min': {},
+         'confidence_min_any': {},
+         'endpoint_pattern_any': [],
+         'param_any': [],
+         'api_surface_ready': False},
+        'chain':         {'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
+         'consumes_capabilities': [],
+         'option_bindings': {},
+         'suggested_followups': []},
+    },
     }
 
     wordlist = OptFile("", "Optional path wordlist (file://)", required=False)

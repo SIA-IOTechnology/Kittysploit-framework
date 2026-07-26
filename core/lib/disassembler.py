@@ -87,7 +87,6 @@ class x86Disassembler:
         }
     
     def disassemble(self, data: bytes, start_address: int = 0) -> List[Instruction]:
-        """Disassemble bytecode into instructions"""
         instructions = []
         offset = 0
         
@@ -106,7 +105,6 @@ class x86Disassembler:
         return instructions
     
     def _disassemble_instruction(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble a single instruction"""
         if len(data) == 0:
             return None
         
@@ -147,7 +145,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_two_byte(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble two-byte opcode"""
         if len(data) < 2:
             return None
         
@@ -159,7 +156,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_ret(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble ret instruction"""
         if data[0] == 0xC3:
             return Instruction(address, data[:1], "ret")
         elif data[0] == 0xC2 and len(data) >= 3:
@@ -168,7 +164,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_pop(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble pop instruction"""
         if len(data) < 1:
             return None
         
@@ -188,7 +183,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_push(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble push instruction"""
         if len(data) < 1:
             return None
         
@@ -209,7 +203,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_call(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble call instruction"""
         if len(data) < 5:
             return None
         
@@ -222,7 +215,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_jmp(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble jmp instruction"""
         if len(data) < 2:
             return None
         
@@ -240,7 +232,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_conditional_jump(self, data: bytes, address: int, mnemonic: str) -> Optional[Instruction]:
-        """Disassemble conditional jump instruction"""
         if len(data) < 2:
             return None
         
@@ -258,7 +249,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_int(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble int instruction"""
         if len(data) < 2:
             return None
         
@@ -269,7 +259,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_syscall(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble syscall instruction"""
         if len(data) < 2:
             return None
         
@@ -279,7 +268,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_mov(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble mov instruction"""
         if len(data) < 2:
             return None
         
@@ -299,7 +287,6 @@ class x86Disassembler:
         return None
     
     def _disassemble_arithmetic(self, data: bytes, address: int) -> Optional[Instruction]:
-        """Disassemble arithmetic instructions"""
         if len(data) < 2:
             return None
         
@@ -340,7 +327,6 @@ class ROPGadgetFinder:
         self.gadgets = []
     
     def find_gadgets(self, instructions: List[Instruction], max_length: int = 5) -> List[Dict[str, Any]]:
-        """Find ROP gadgets in instructions"""
         gadgets = []
         
         for i, instruction in enumerate(instructions):
@@ -371,7 +357,6 @@ class ROPGadgetFinder:
         return gadgets
     
     def _analyze_gadget(self, instructions: List[Instruction]) -> Optional[Dict[str, Any]]:
-        """Analyze a potential gadget"""
         if not instructions or not instructions[-1].is_ret:
             return None
         
@@ -412,18 +397,14 @@ class ROPGadgetFinder:
         }
     
     def find_pop_gadgets(self, count: int = 1) -> List[Dict[str, Any]]:
-        """Find gadgets that pop a specific number of values"""
         return [g for g in self.gadgets if g['stack_operations'] == count]
     
     def find_syscall_gadgets(self) -> List[Dict[str, Any]]:
-        """Find syscall gadgets"""
         return [g for g in self.gadgets if g['type'] == 'syscall']
     
     def find_gadgets_by_register(self, register: str) -> List[Dict[str, Any]]:
-        """Find gadgets that use a specific register"""
         return [g for g in self.gadgets if register in g['registers']]
     
     def get_gadget_info(self, gadget: Dict[str, Any]) -> str:
-        """Get human-readable gadget information"""
         instruction_strs = [str(inst) for inst in gadget['instructions']]
         return " ; ".join(instruction_strs)

@@ -47,7 +47,6 @@ user:$6$abc...:18561:0:99999:7:::""", "600", "root")
         self.write_file("/root/root.txt", "Root flag: DEMO{root_flag_here}", "600", "root")
     
     def _get_node_at_path(self, path: str) -> Optional[VirtualDirectory]:
-        """Get directory node at given path"""
         if not path or path == "/":
             return self.root
             
@@ -64,7 +63,6 @@ user:$6$abc...:18561:0:99999:7:::""", "600", "root")
         return current
     
     def _normalize_path(self, path: str) -> str:
-        """Convert path to absolute and normalize"""
         if not path.startswith("/"):
             # Relative path
             if self.current_path == "/":
@@ -84,7 +82,6 @@ user:$6$abc...:18561:0:99999:7:::""", "600", "root")
         return "/" + "/".join(parts)
     
     def mkdir(self, path: str, permissions: str = "755", owner: str = "user") -> bool:
-        """Create a directory"""
         path = self._normalize_path(path)
         parent_path = os.path.dirname(path)
         dir_name = os.path.basename(path)
@@ -103,7 +100,6 @@ user:$6$abc...:18561:0:99999:7:::""", "600", "root")
         return True
     
     def write_file(self, path: str, content: str, permissions: str = "644", owner: str = "user") -> bool:
-        """Create or update a file"""
         path = self._normalize_path(path)
         parent_path = os.path.dirname(path)
         file_name = os.path.basename(path)
@@ -137,7 +133,6 @@ user:$6$abc...:18561:0:99999:7:::""", "600", "root")
         return None
     
     def list_dir(self, path: str, user: str, is_root: bool = False) -> List[Dict[str, str]]:
-        """List directory contents"""
         path = self._normalize_path(path)
         dir_node = self._get_node_at_path(path)
         

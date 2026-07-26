@@ -265,7 +265,6 @@ class Module(Post):
                 print_error("Failed to save SYSTEM hive")
                 return None
             
-            # Read the file (simplified - in real implementation would need to parse hive)
             # For now, return None to indicate we need a different approach
             print_warning("[!] Direct registry parsing not fully implemented")
             print_warning("[!] This module requires direct registry API access")

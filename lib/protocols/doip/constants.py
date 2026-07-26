@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""DoIP (ISO 13400) and common UDS (ISO 14229) constants."""
+
+DOIP_DEFAULT_PORT = 13400
+DOIP_PROTOCOL_VERSION = 0x02
+DOIP_INVERSE_PROTOCOL_VERSION = 0xFD
+DOIP_HEADER_SIZE = 8
+
+# Payload types (ISO 13400-2)
+DOIP_GENERIC_NACK = 0x0000
+DOIP_VEHICLE_ID_REQUEST = 0x0001
+DOIP_VEHICLE_ID_REQUEST_EID = 0x0002
+DOIP_VEHICLE_ID_REQUEST_VIN = 0x0003
+DOIP_VEHICLE_ANNOUNCEMENT = 0x0004
+DOIP_ROUTING_ACTIVATION_REQUEST = 0x0005
+DOIP_ROUTING_ACTIVATION_RESPONSE = 0x0006
+DOIP_ALIVE_CHECK_REQUEST = 0x0007
+DOIP_ALIVE_CHECK_RESPONSE = 0x0008
+DOIP_DIAGNOSTIC_MESSAGE = 0x4001
+DOIP_DIAGNOSTIC_MESSAGE_ACK = 0x4002
+DOIP_DIAGNOSTIC_MESSAGE_NACK = 0x4003
+
+# Routing activation types
+DOIP_ACTIVATION_DEFAULT = 0x00
+DOIP_ACTIVATION_WWH_OBD = 0x01
+DOIP_ACTIVATION_CENTRAL_SECURITY = 0xE0
+
+# Routing activation response codes
+DOIP_ROUTING_SUCCESS = 0x10
+DOIP_ROUTING_UNKNOWN_SOURCE = 0x00
+DOIP_ROUTING_ALL_SOCKETS_ACTIVE = 0x01
+DOIP_ROUTING_DIFFERENT_SOURCE = 0x02
+DOIP_ROUTING_ALREADY_ACTIVE = 0x03
+DOIP_ROUTING_MISSING_AUTHENTICATION = 0x04
+DOIP_ROUTING_REJECTED_CONFIRMATION = 0x05
+DOIP_ROUTING_UNSUPPORTED_TYPE = 0x06
+DOIP_ROUTING_TLS_REQUIRED = 0x07
+
+DOIP_ROUTING_RESPONSE_NAMES = {
+    DOIP_ROUTING_UNKNOWN_SOURCE: "unknown source address",
+    DOIP_ROUTING_ALL_SOCKETS_ACTIVE: "all sockets active",
+    DOIP_ROUTING_DIFFERENT_SOURCE: "different source address",
+    DOIP_ROUTING_ALREADY_ACTIVE: "already activated",
+    DOIP_ROUTING_MISSING_AUTHENTICATION: "missing authentication",
+    DOIP_ROUTING_REJECTED_CONFIRMATION: "rejected confirmation",
+    DOIP_ROUTING_UNSUPPORTED_TYPE: "unsupported activation type",
+    DOIP_ROUTING_TLS_REQUIRED: "TLS required",
+    DOIP_ROUTING_SUCCESS: "routing successfully activated",
+}
+
+# Common logical addresses
+DOIP_TESTER_ADDRESS_DEFAULT = 0x0E00
+DOIP_FUNCTIONAL_ADDRESS = 0xE400
+
+# UDS services
+UDS_DIAGNOSTIC_SESSION_CONTROL = 0x10
+UDS_ECU_RESET = 0x11
+UDS_CLEAR_DIAGNOSTIC_INFORMATION = 0x14
+UDS_READ_DTC_INFORMATION = 0x19
+UDS_READ_DATA_BY_IDENTIFIER = 0x22
+UDS_SECURITY_ACCESS = 0x27
+UDS_COMMUNICATION_CONTROL = 0x28
+UDS_TESTER_PRESENT = 0x3E
+UDS_CONTROL_DTC_SETTING = 0x85
+UDS_NEGATIVE_RESPONSE = 0x7F
+
+# Common DIDs
+UDS_DID_VIN = 0xF190
+UDS_DID_ECU_SERIAL = 0xF18C
+UDS_DID_ECU_NAME = 0xF197
+UDS_DID_SOFTWARE_NUMBER = 0xF188
+UDS_DID_HARDWARE_NUMBER = 0xF191
+
+# ReadDTCInformation sub-functions
+UDS_DTC_REPORT_NUMBER_BY_STATUS_MASK = 0x01
+UDS_DTC_REPORT_BY_STATUS_MASK = 0x02
+UDS_DTC_REPORT_SNAPSHOT_IDENTIFICATION = 0x03
+UDS_DTC_REPORT_SNAPSHOT_RECORD = 0x04
+UDS_DTC_REPORT_EXTENDED_DATA = 0x06
+UDS_DTC_REPORT_SUPPORTED_DTC = 0x0A
+
+# Common UDS negative response codes
+UDS_NRC_NAMES = {
+    0x10: "generalReject",
+    0x11: "serviceNotSupported",
+    0x12: "subFunctionNotSupported",
+    0x13: "incorrectMessageLengthOrInvalidFormat",
+    0x14: "responseTooLong",
+    0x21: "busyRepeatRequest",
+    0x22: "conditionsNotCorrect",
+    0x24: "requestSequenceError",
+    0x25: "noResponseFromSubnetComponent",
+    0x26: "failurePreventsExecutionOfRequestedAction",
+    0x31: "requestOutOfRange",
+    0x33: "securityAccessDenied",
+    0x35: "invalidKey",
+    0x36: "exceedNumberOfAttempts",
+    0x37: "requiredTimeDelayNotExpired",
+    0x70: "uploadDownloadNotAccepted",
+    0x71: "transferDataSuspended",
+    0x72: "generalProgrammingFailure",
+    0x73: "wrongBlockSequenceCounter",
+    0x78: "requestCorrectlyReceivedResponsePending",
+    0x7E: "subFunctionNotSupportedInActiveSession",
+    0x7F: "serviceNotSupportedInActiveSession",
+}

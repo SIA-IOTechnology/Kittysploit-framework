@@ -95,6 +95,10 @@ def parse_args() -> argparse.Namespace:
         help="Ollama model name for natural-language planning (or set KITTYMCP_OLLAMA_MODEL).",
     )
     p.add_argument(
+        "--ollama-api-key",
+        help="API key for OpenAI-compatible LLM endpoints (or set KITTYMCP_OLLAMA_API_KEY).",
+    )
+    p.add_argument(
         "--ollama-timeout",
         type=int,
         help="Timeout in seconds for Ollama requests (or set KITTYMCP_OLLAMA_TIMEOUT).",
@@ -134,6 +138,8 @@ def _configure_ollama_env(args: argparse.Namespace) -> None:
         os.environ["KITTYMCP_OLLAMA_ENDPOINT"] = args.ollama_endpoint
     if args.ollama_model:
         os.environ["KITTYMCP_OLLAMA_MODEL"] = args.ollama_model
+    if args.ollama_api_key:
+        os.environ["KITTYMCP_OLLAMA_API_KEY"] = args.ollama_api_key
     if args.ollama_timeout is not None:
         os.environ["KITTYMCP_OLLAMA_TIMEOUT"] = str(args.ollama_timeout)
 

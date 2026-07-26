@@ -5,4 +5,4 @@
 Environment modules for KittySploit Framework
 """
 
-__all__ = ['dvwa', 'webgoat', 'metasploitable']
+__all__ = ['dvwa', 'webgoat', 'metasploitable', 'metasploitable3_linux']

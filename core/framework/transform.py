@@ -25,7 +25,6 @@ def normalize_transform_module_path(path: str) -> str:
 
 
 def _read_option_path(instance, opt_name: str) -> str:
-    """Read an option value without triggering instance ``__getattr__`` hooks."""
     descriptor = getattr(type(instance), opt_name, None)
     if descriptor is not None and hasattr(descriptor, "__get__"):
         try:
@@ -45,7 +44,6 @@ def _read_option_path(instance, opt_name: str) -> str:
 
 
 def get_transform_path_from_instance(instance) -> str:
-    """Read transform module path from transform or legacy obfuscator option."""
     for opt_name in (TRANSFORM_OPTION, LEGACY_OPTION):
         path = normalize_transform_module_path(_read_option_path(instance, opt_name))
         if path:
@@ -67,7 +65,6 @@ class Transform(BaseModule):
         self.type = "transform"
 
     def connection_copy(self):
-        """Return a new transform instance with the same options, for use on a single connection."""
         copy_xf = self.__class__(framework=getattr(self, "framework", None))
         for name in self.get_options():
             try:
@@ -78,7 +75,6 @@ class Transform(BaseModule):
         return copy_xf
 
     def get_supported_client_languages(self) -> List[str]:
-        """Return the list of client languages this transform supports (for payload generation)."""
         return list(getattr(self.__class__, "SUPPORTED_CLIENT_LANGUAGES", []))
 
     def encode(self, data: bytes) -> bytes:

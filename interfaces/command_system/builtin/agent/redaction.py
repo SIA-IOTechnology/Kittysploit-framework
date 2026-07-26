@@ -36,6 +36,12 @@ SECRET_PATTERNS = (
         r"(?i)\b(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*"
         r"([\"']?)[^\s,;\"']{4,}\2"
     ),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{36,}\b"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bsk-(?:proj|svcacct|ant|admin|org)-[A-Za-z0-9_\-]{32,}\b"),
+    re.compile(r"\bxox[bpasrg]-(?:[0-9]+-[0-9]+-)?[A-Za-z0-9_\-]{20,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b"),
+    re.compile(r"(?s)-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.+?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
 )
 
 

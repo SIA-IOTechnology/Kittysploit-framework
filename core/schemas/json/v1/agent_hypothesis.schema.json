@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_hypothesis.schema.json",
+  "title": "KittySploit Agent Hypothesis",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "statement": {"type": "string"},
+    "module_path": {"type": ["string", "null"]},
+    "capability": {"type": ["string", "null"]},
+    "status": {
+      "type": "string",
+      "enum": ["open", "confirmed", "refuted", "blocked"]
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {"$ref": "common.schema.json#/$defs/id"}
+    },
+    "fingerprint": {"type": "string"}
+  },
+  "required": ["schema_version", "id", "statement", "status"],
+  "additionalProperties": true
+}

@@ -328,8 +328,7 @@ class Doctor:
                     "dependencies",
                     "python_packages",
                     CheckStatus.FAIL,
-                    f"{len(missing)} missing: {', '.join(missing[:8])}"
-                    + (" ..." if len(missing) > 8 else ""),
+                    f"{len(missing)} missing: {', '.join(missing)}",
                     "pip install -e .  (or install missing packages individually)",
                 ),
             )
@@ -735,29 +734,57 @@ class Doctor:
 
     def _check_marketplace(self, report: DoctorReport) -> None:
         url = _registry_url()
+        catalog_endpoints = (
+            ("new", f"{url}/api/cli/market/modules"),
+            ("legacy", f"{url}/api/registry/extensions"),
+        )
         try:
             import requests
 
-            response = requests.get(
-                f"{url}/api/registry/extensions",
-                params={"page": 1, "per_page": 1},
-                timeout=8,
-            )
-            if response.ok:
-                _add(
-                    report,
-                    CheckResult("marketplace", "registry_api", CheckStatus.OK, url),
-                )
+            last_status: Optional[int] = None
+            last_error = ""
+            for label, endpoint in catalog_endpoints:
+                try:
+                    response = requests.get(
+                        endpoint,
+                        params={"page": 1, "per_page": 1},
+                        timeout=8,
+                    )
+                    if response.ok:
+                        detail = url
+                        if label == "legacy":
+                            detail = f"{url} (legacy registry API)"
+                        _add(
+                            report,
+                            CheckResult("marketplace", "registry_api", CheckStatus.OK, detail),
+                        )
+                        break
+                    last_status = response.status_code
+                    last_error = f"{endpoint} returned HTTP {response.status_code}"
+                except Exception as exc:
+                    last_error = f"{endpoint}: {exc}"
             else:
-                _add(
-                    report,
-                    CheckResult(
-                        "marketplace",
-                        "registry_api",
-                        CheckStatus.WARN,
-                        f"{url} returned HTTP {response.status_code}",
-                    ),
-                )
+                if last_status is not None:
+                    _add(
+                        report,
+                        CheckResult(
+                            "marketplace",
+                            "registry_api",
+                            CheckStatus.WARN,
+                            f"{url} returned HTTP {last_status}",
+                        ),
+                    )
+                else:
+                    _add(
+                        report,
+                        CheckResult(
+                            "marketplace",
+                            "registry_api",
+                            CheckStatus.WARN,
+                            f"Cannot reach {url}: {last_error}",
+                            "Offline installs still work from local paths (market install ./apps/...).",
+                        ),
+                    )
         except Exception as exc:
             _add(
                 report,

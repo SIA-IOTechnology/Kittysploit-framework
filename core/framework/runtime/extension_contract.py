@@ -33,7 +33,6 @@ class ExtensionMetadata:
 
 
 class Extension(ABC):
-    """Interface de base pour toutes les extensions"""
     
     def __init__(self, metadata: ExtensionMetadata):
         self.metadata = metadata
@@ -42,28 +41,22 @@ class Extension(ABC):
     
     @abstractmethod
     def initialize(self, context: Dict[str, Any]) -> bool:
-        """Initialise l'extension"""
         pass
     
     @abstractmethod
     def cleanup(self):
-        """Nettoie les ressources de l'extension"""
         pass
     
     def configure(self, config: Dict[str, Any]):
-        """Configure l'extension"""
         self.config.update(config)
     
     def is_enabled(self) -> bool:
-        """Vérifie si l'extension est activée"""
         return self.enabled
     
     def enable(self):
-        """Active l'extension"""
         self.enabled = True
     
     def disable(self):
-        """Désactive l'extension"""
         self.enabled = False
 
 
@@ -77,7 +70,6 @@ class HookExtension(Extension):
         self.priority = 0
     
     def initialize(self, context: Dict[str, Any]) -> bool:
-        """Enregistre le hook"""
         hook_manager = context.get("hook_manager")
         if hook_manager:
             hook_manager.register(self.hook_point, self.callback, self.priority)
@@ -85,7 +77,6 @@ class HookExtension(Extension):
         return False
     
     def cleanup(self):
-        """Désenregistre le hook"""
         # Le hook manager devrait gérer le nettoyage
         pass
 
@@ -100,7 +91,6 @@ class EventListenerExtension(Extension):
         self.priority = 0
     
     def initialize(self, context: Dict[str, Any]) -> bool:
-        """S'abonne aux événements"""
         event_bus = context.get("event_bus")
         if event_bus:
             for event_type in self.event_types:
@@ -109,7 +99,6 @@ class EventListenerExtension(Extension):
         return False
     
     def cleanup(self):
-        """Se désabonne des événements"""
         event_bus = self.config.get("event_bus")
         if event_bus:
             for event_type in self.event_types:
@@ -117,8 +106,6 @@ class EventListenerExtension(Extension):
 
 
 class MiddlewareExtension(Extension):
-    """Extension middleware pour le pipeline d'exécution"""
-    
     def __init__(self, metadata: ExtensionMetadata):
         super().__init__(metadata)
         self.order = 0  # Ordre d'exécution dans le pipeline
@@ -138,17 +125,13 @@ class MiddlewareExtension(Extension):
         pass
     
     def initialize(self, context: Dict[str, Any]) -> bool:
-        """Initialise le middleware"""
         return True
     
     def cleanup(self):
-        """Nettoie le middleware"""
         pass
 
 
 class PolicyExtension(Extension):
-    """Extension de politique de sécurité"""
-    
     def __init__(self, metadata: ExtensionMetadata):
         super().__init__(metadata)
         self.policy_level = "standard"
@@ -167,16 +150,13 @@ class PolicyExtension(Extension):
         pass
     
     def initialize(self, context: Dict[str, Any]) -> bool:
-        """Initialise la politique"""
         return True
     
     def cleanup(self):
-        """Nettoie la politique"""
         pass
 
 
 class ExtensionRegistry:
-    """Registre des extensions"""
     
     def __init__(self):
         import threading
@@ -185,7 +165,6 @@ class ExtensionRegistry:
         self.lock = threading.Lock()
     
     def register(self, extension: Extension):
-        """Enregistre une extension"""
         with self.lock:
             self.extensions[extension.metadata.name] = extension
             ext_type = extension.metadata.extension_type
@@ -194,7 +173,6 @@ class ExtensionRegistry:
             self.extensions_by_type[ext_type].append(extension)
     
     def unregister(self, extension_name: str):
-        """Désenregistre une extension"""
         with self.lock:
             extension = self.extensions.pop(extension_name, None)
             if extension:
@@ -204,22 +182,18 @@ class ExtensionRegistry:
                 extension.cleanup()
     
     def get(self, extension_name: str) -> Optional[Extension]:
-        """Récupère une extension par nom"""
         with self.lock:
             return self.extensions.get(extension_name)
     
     def get_by_type(self, extension_type: ExtensionType) -> List[Extension]:
-        """Récupère les extensions d'un type donné"""
         with self.lock:
             return self.extensions_by_type.get(extension_type, []).copy()
     
     def get_all(self) -> List[Extension]:
-        """Récupère toutes les extensions"""
         with self.lock:
             return list(self.extensions.values())
     
     def initialize_all(self, context: Dict[str, Any]):
-        """Initialise toutes les extensions"""
         for extension in self.get_all():
             if extension.is_enabled():
                 try:
@@ -228,7 +202,6 @@ class ExtensionRegistry:
                     print(f"Error initializing extension {extension.metadata.name}: {e}")
     
     def cleanup_all(self):
-        """Nettoie toutes les extensions"""
         for extension in self.get_all():
             try:
                 extension.cleanup()

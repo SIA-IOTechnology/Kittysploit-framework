@@ -50,7 +50,6 @@ class PlatformDetector:
     
     @staticmethod
     def _parse_uname(uname_output: str) -> Tuple[str, str]:
-        """Parse uname -a output"""
         platform = 'linux'
         arch = 'x64'
         

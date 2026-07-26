@@ -35,7 +35,6 @@ class ModuleReloader:
         self.lock = threading.Lock()
     
     def register_module(self, module_id: str, file_path: str, module_spec: Any = None):
-        """Enregistre un module pour le hot reload"""
         with self.lock:
             self.module_paths[module_id] = file_path
             if module_spec:
@@ -43,14 +42,12 @@ class ModuleReloader:
             self.file_times[file_path] = os.path.getmtime(file_path)
     
     def unregister_module(self, module_id: str):
-        """Désenregistre un module"""
         with self.lock:
             self.module_paths.pop(module_id, None)
             self.module_specs.pop(module_id, None)
             self.reload_callbacks.pop(module_id, None)
     
     def add_reload_callback(self, module_id: str, callback: Callable):
-        """Ajoute un callback appelé lors du rechargement"""
         with self.lock:
             if module_id not in self.reload_callbacks:
                 self.reload_callbacks[module_id] = []
@@ -144,7 +141,6 @@ class ModuleReloader:
         raise ValueError(f"Could not reload module at {file_path}")
     
     def check_all(self) -> List[str]:
-        """Vérifie tous les modules enregistrés et retourne ceux qui ont été rechargés"""
         reloaded = []
         with self.lock:
             module_ids = list(self.module_paths.keys())
@@ -183,7 +179,6 @@ class HotReloadWatcher(FileSystemEventHandler):
 
 
 class HotReloadManager:
-    """Gestionnaire de hot reload"""
     
     def __init__(self, event_bus: Optional[EventBus] = None, watch_paths: List[str] = None):
         self.reloader = ModuleReloader(event_bus)
@@ -193,7 +188,6 @@ class HotReloadManager:
         self.event_bus = event_bus
     
     def start_watching(self, watch_paths: List[str] = None):
-        """Démarre le monitoring des fichiers"""
         if not WATCHDOG_AVAILABLE:
             print("Warning: watchdog not available, file watching disabled")
             return
@@ -216,7 +210,6 @@ class HotReloadManager:
         self.watching = True
     
     def stop_watching(self):
-        """Arrête le monitoring des fichiers"""
         if self.observer:
             self.observer.stop()
             self.observer.join()
@@ -224,22 +217,17 @@ class HotReloadManager:
         self.watching = False
     
     def register_module(self, module_id: str, file_path: str, module_spec: Any = None):
-        """Enregistre un module pour le hot reload"""
         self.reloader.register_module(module_id, file_path, module_spec)
     
     def unregister_module(self, module_id: str):
-        """Désenregistre un module"""
         self.reloader.unregister_module(module_id)
     
     def add_reload_callback(self, module_id: str, callback: Callable):
-        """Ajoute un callback pour le rechargement"""
         self.reloader.add_reload_callback(module_id, callback)
     
     def check_all(self) -> List[str]:
-        """Vérifie tous les modules"""
         return self.reloader.check_all()
     
     def cleanup(self):
-        """Nettoie les ressources"""
         self.stop_watching()
 

@@ -31,7 +31,6 @@ class Payload(BaseModule):
         self._transform_path = ""
 
     def _get_transform_path(self) -> str:
-        """Return current transform option value (module path)."""
         from core.framework.transform import get_transform_path_from_instance
         return get_transform_path_from_instance(self)
 
@@ -189,15 +188,9 @@ class Payload(BaseModule):
         )
     
     def shellcode_ip(self, ip: str) -> bytes:
-        """
-        Generate shellcode for IP address (Network Byte Order)
-        """
         return socket.inet_aton(ip)
     
     def shellcode_port(self, port: int) -> bytes:
-        """
-        Generate shellcode for port (Network Byte Order)
-        """
         return port.to_bytes(2, 'big')
 
     def get_python_script(self) -> Optional[str]:

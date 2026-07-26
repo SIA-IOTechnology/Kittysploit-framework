@@ -153,7 +153,6 @@ def envelope_osint_details(
     target: str = "",
     collected_at: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Attach LE-friendly metadata to an OSINT module result dict."""
     if not isinstance(details, Mapping):
         details = {}
     stamped = dict(details)

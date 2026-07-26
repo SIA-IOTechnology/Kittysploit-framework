@@ -392,19 +392,25 @@ Examples:
                     try:
                         hostname = parts[0]
                         port = port_override or int(parts[1])
-                        # Determine scheme from port
+                        mapped = self._port_to_protocol(port)
                         if port == 443:
                             scheme = 'https'
                         elif port == 80:
                             scheme = 'http'
+                        elif mapped:
+                            scheme = mapped
                         else:
-                            scheme = 'http'  # Default
+                            scheme = 'http'
+                        if scheme in {'http', 'https'}:
+                            url = f"{scheme}://{hostname}:{port}/"
+                        else:
+                            url = f"{scheme}://{hostname}:{port}"
                         return {
                             'hostname': hostname,
                             'port': port,
                             'scheme': scheme,
                             'path': '/',
-                            'url': f"{scheme}://{hostname}:{port}/"
+                            'url': url,
                         }
                     except ValueError:
                         pass
@@ -435,7 +441,7 @@ Examples:
             # FTP
             21: 'ftp', 2121: 'ftp',
             # SSH
-            22: 'ssh', 2222: 'ssh',
+            22: 'ssh', 2222: 'ssh', 2223: 'ssh',
             # Telnet
             23: 'telnet',
             # MySQL
@@ -805,9 +811,23 @@ Examples:
 
                     if isinstance(run_return, dict):
                         for k, v in run_return.items():
-                            if k in ('reason', 'version', 'severity'):
+                            if k in ('reason', 'version', 'severity', 'client'):
                                 continue
                             dynamic_info.setdefault(k, v)
+                    else:
+                        # ModuleResult / other objects: surface nested data + session_id.
+                        nested = getattr(run_return, "data", None)
+                        if isinstance(nested, dict):
+                            for k, v in nested.items():
+                                if k in ('reason', 'version', 'severity', 'client'):
+                                    continue
+                                dynamic_info.setdefault(k, v)
+                        nested_session = (
+                            getattr(run_return, "session_id", None)
+                            or getattr(execution, "session_id", None)
+                        )
+                        if nested_session and not dynamic_info.get("session_id"):
+                            dynamic_info["session_id"] = str(nested_session)
 
                     if isinstance(run_return, bool):
                         result['vulnerable'] = run_return
@@ -816,6 +836,13 @@ Examples:
                     else:
                         result['vulnerable'] = bool(run_return)
                     result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
+                    session_token = (
+                        str(getattr(execution, "session_id", None) or "").strip()
+                        or str(dynamic_info.get("session_id") or "").strip()
+                    )
+                    if session_token:
+                        result["session_id"] = session_token
+                        dynamic_info.setdefault("session_id", session_token)
 
                     # Reason: dynamic finding text; avoid static module description as output.
                     reason = dynamic_info.get("reason")

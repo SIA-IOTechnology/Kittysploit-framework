@@ -29,13 +29,11 @@ class BaseShell:
         }
     
     def get_prompt(self) -> str:
-        """Get the shell prompt"""
         if self.is_root:
             return f"root@{self.hostname}:{self.current_dir}# "
         return f"{self.username}@{self.hostname}:{self.current_dir}$ "
     
     def execute(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the shell"""
         if not command.strip():
             return {'output': '', 'status': 0}
         
@@ -52,7 +50,6 @@ class BaseShell:
         return {'output': f"Command not found: {cmd}", 'status': 127}
     
     def cmd_ls(self, args: List[str]) -> Dict[str, Any]:
-        """List directory contents"""
         path = args[0] if args else self.current_dir
         entries = self.fs.list_dir(path, self.username, self.is_root)
         
@@ -72,7 +69,6 @@ class BaseShell:
         return {'output': '\n'.join(output), 'status': 0}
     
     def cmd_cd(self, args: List[str]) -> Dict[str, Any]:
-        """Change directory"""
         path = args[0] if args else self.env_vars['HOME']
         
         # Normalize path
@@ -89,11 +85,9 @@ class BaseShell:
         return {'output': '', 'status': 0}
     
     def cmd_pwd(self, args: List[str]) -> Dict[str, Any]:
-        """Print working directory"""
         return {'output': self.current_dir, 'status': 0}
     
     def cmd_cat(self, args: List[str]) -> Dict[str, Any]:
-        """Display file contents"""
         if not args:
             return {'output': "cat: missing operand", 'status': 1}
         
@@ -106,11 +100,9 @@ class BaseShell:
         return {'output': content, 'status': 0}
     
     def cmd_whoami(self, args: List[str]) -> Dict[str, Any]:
-        """Print current user"""
         return {'output': self.username, 'status': 0}
     
     def cmd_id(self, args: List[str]) -> Dict[str, Any]:
-        """Print user and group IDs"""
         if self.is_root:
             output = "uid=0(root) gid=0(root) groups=0(root)"
         else:
@@ -118,18 +110,15 @@ class BaseShell:
         return {'output': output, 'status': 0}
     
     def cmd_echo(self, args: List[str]) -> Dict[str, Any]:
-        """Echo arguments"""
         return {'output': ' '.join(args), 'status': 0}
     
     def cmd_env(self, args: List[str]) -> Dict[str, Any]:
-        """Print environment variables"""
         output = []
         for key, value in self.env_vars.items():
             output.append(f"{key}={value}")
         return {'output': '\n'.join(output), 'status': 0}
     
     def escalate_privileges(self) -> bool:
-        """Escalate to root privileges"""
         self.is_root = True
         self.username = "root"
         self.env_vars['USER'] = 'root'

@@ -17,7 +17,6 @@ class EncryptedString(TypeDecorator):
         self._encryption_manager = None
     
     def set_encryption_manager(self, encryption_manager):
-        """Set the encryption manager instance"""
         self._encryption_manager = encryption_manager
     
     def process_bind_param(self, value, dialect):
@@ -61,7 +60,6 @@ class EncryptedText(TypeDecorator):
         self._encryption_manager = None
     
     def set_encryption_manager(self, encryption_manager):
-        """Set the encryption manager instance"""
         self._encryption_manager = encryption_manager
     
     def process_bind_param(self, value, dialect):
@@ -105,7 +103,6 @@ class EncryptedJSON(TypeDecorator):
         self._encryption_manager = None
     
     def set_encryption_manager(self, encryption_manager):
-        """Set the encryption manager instance"""
         self._encryption_manager = encryption_manager
     
     def process_bind_param(self, value, dialect):
@@ -149,13 +146,11 @@ class EncryptedFieldMixin:
     
     @classmethod
     def set_encryption_manager(cls, encryption_manager):
-        """Set encryption manager for all encrypted fields in this model"""
         for column in cls.__table__.columns:
             if hasattr(column.type, 'set_encryption_manager'):
                 column.type.set_encryption_manager(encryption_manager)
     
     def to_dict_safe(self, exclude_encrypted=True):
-        """Convert model to dictionary, optionally excluding encrypted fields"""
         result = {}
         for column in self.__table__.columns:
             if exclude_encrypted and hasattr(column.type, '_encryption_manager'):
@@ -166,7 +161,6 @@ class EncryptedFieldMixin:
         return result
     
     def get_encrypted_fields(self):
-        """Get list of encrypted field names"""
         encrypted_fields = []
         for column in self.__table__.columns:
             if hasattr(column.type, '_encryption_manager'):

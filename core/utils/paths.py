@@ -67,7 +67,6 @@ def _resource_as_file(package: str, *parts: str) -> Iterator[Path]:
 
 
 def data_resource(*parts: str):
-    """Return an importlib Traversable for a path under data/."""
     return _resource_path(_DATA_PACKAGE, *parts)
 
 
@@ -77,12 +76,10 @@ def data_resource_exists(*parts: str) -> bool:
 
 
 def read_data_text(*parts: str, encoding: str = "utf-8", errors: str = "strict") -> str:
-    """Read a bundled text file from data/."""
     return data_resource(*parts).read_text(encoding=encoding, errors=errors)
 
 
 def read_data_lines(*parts: str, encoding: str = "utf-8", errors: str = "ignore") -> list[str]:
-    """Read a bundled text file from data/ as non-empty stripped lines."""
     return [line for line in read_data_text(*parts, encoding=encoding, errors=errors).splitlines() if line.strip()]
 
 
@@ -99,17 +96,14 @@ def data_resource_as_file(*parts: str) -> Iterator[Path]:
 
 
 def data_dir() -> Path:
-    """Return the framework data/ directory for writable runtime files."""
     return require_framework_root() / "data"
 
 
 def static_resource(*parts: str):
-    """Return an importlib Traversable for a path under interfaces/static/."""
     return _resource_path(_INTERFACES_STATIC_PACKAGE, *parts)
 
 
 def shared_static_img_dir() -> Path:
-    """Return interfaces/static/img for shared UI assets."""
     static_img = static_resource("img")
     candidate = Path(str(static_img))
     if candidate.is_dir():
@@ -118,12 +112,10 @@ def shared_static_img_dir() -> Path:
 
 
 def core_resource(*parts: str):
-    """Return an importlib Traversable for a path under core/."""
     return _resource_path(_CORE_PACKAGE, *parts)
 
 
 def read_core_text(*parts: str, encoding: str = "utf-8", errors: str = "strict") -> str:
-    """Read a bundled text file from core/."""
     return core_resource(*parts).read_text(encoding=encoding, errors=errors)
 
 

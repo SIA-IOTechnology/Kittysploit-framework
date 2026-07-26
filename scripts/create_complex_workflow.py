@@ -70,7 +70,7 @@ def create_mega_workflow():
         {"id": "e14", "from": "node_13", "to": "node_14"},
     ]
     
-    # Backwards compatibility steps (simplified execution plan)
+    # Backwards compatibility steps
     steps = [
         {"action": "variable", "name": "target_network", "value": "192.168.1.0/24"},
         {"action": "module", "module": "auxiliary/scanner/discovery/arp_sweep", "options": {"INTERFACE": "eth0"}},

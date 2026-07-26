@@ -8,13 +8,18 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from interfaces.command_system.builtin.agent.campaign_continuation import list_shell_continuation_pivots
-from interfaces.command_system.builtin.agent.goal_planner import suggest_shell_plan_followups
+from interfaces.command_system.builtin.agent.goal_planner import (
+    DRUPAL_CVE_2014_3704_SQLI_MODULE,
+    DRUPAL_DRUPALGEDDON2_MODULE,
+    suggest_shell_plan_followups,
+)
 from interfaces.command_system.builtin.agent.module_scoring import estimate_network_cost, module_path_lower
 from interfaces.command_system.builtin.agent.runtime_policy import assess_module_risk
 
 _CMS_ALTERNATIVES: Sequence[tuple[str, str]] = (
     ("auxiliary/scanner/http/drupal_scanner", "drupal"),
-    ("exploits/http/drupal_rce", "drupal"),
+    (DRUPAL_CVE_2014_3704_SQLI_MODULE, "drupal"),
+    (DRUPAL_DRUPALGEDDON2_MODULE, "drupal"),
     ("auxiliary/scanner/http/wordpress_scanner", "wordpress"),
     ("exploits/http/wordpress_plugin_upload", "wordpress"),
     ("auxiliary/scanner/http/joomla_scanner", "joomla"),

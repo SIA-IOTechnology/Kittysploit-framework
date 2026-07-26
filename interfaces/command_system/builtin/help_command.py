@@ -21,7 +21,7 @@ class HelpCommand(BaseCommand):
             'use', 'search', 'show', 'set', 'run', 'back', 'check', 'reload'
         ],
         'Workspace & Data': [
-            'workspace', 'sync', 'host', 'vuln', 'history', 'portal', 'campaign'
+            'workspace', 'sync', 'host', 'vuln', 'history', 'report', 'export', 'campaign'
         ],
         'Sessions & Shells': [
             'sessions', 'shell', 'listen', 'msf', 'route'

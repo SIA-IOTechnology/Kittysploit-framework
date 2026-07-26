@@ -48,20 +48,36 @@ class OptFile(Option):
             if not data_resource_exists(*parts):
                 raise OptionValidationError(f"File 'data/{rel_path}' does not exist.")
     
+    def _path_for(self, instance=None):
+        """Return the configured file path without reading the file."""
+        if instance is None:
+            return self._default_display_value
+        instance_id = id(instance)
+        if instance_id in self._instance_values:
+            return self._instance_values[instance_id].get('display_value', '') or self._default_display_value
+        return self._default_display_value
+
+    def to_dict(self, instance=None):
+        """
+        Serialize the option for UI/API without loading file contents.
+        Value and display_value are both the path (e.g. file://wordlists/dns.txt).
+        """
+        path = self._path_for(instance)
+        return {
+            "value": path,
+            "display_value": path,
+            "required": self.required,
+            "description": self.description,
+            "advanced": self.advanced,
+        }
+
     def validate(self, instance=None):
         """
         Validate the option without reading the file.
         Only checks if a path is set, not if the file exists.
         """
-        if instance is None:
-            value = self._default_display_value
-        else:
-            instance_id = id(instance)
-            if instance_id in self._instance_values:
-                value = self._instance_values[instance_id].get('display_value', '')
-            else:
-                value = self._default_display_value
-        
+        value = self._path_for(instance)
+
         if self.required and (value is None or value == ""):
             raise OptionValidationError(f"The option {self.label} is required and cannot be empty")
-        return True	
+        return True

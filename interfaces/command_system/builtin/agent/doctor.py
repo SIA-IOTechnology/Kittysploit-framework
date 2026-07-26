@@ -229,5 +229,5 @@ class AgentDoctor:
             "partial": int(audit.get("partial", 0) or 0),
             "missing": int(audit.get("missing", 0) or 0),
             "coverage_ratio": audit.get("coverage_ratio", 0.0),
-            "hint": "run `agent metadata --json` for the full audit",
+            "hint": "run `agent metadata --json` or `agent metadata families --suite metasploitable3-linux`",
         }

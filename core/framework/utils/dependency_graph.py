@@ -16,7 +16,6 @@ class DependencyGraph:
     """Graphe de dépendances pour tracker les relations entre modules"""
     
     def __init__(self):
-        """Initialise le graphe de dépendances"""
         self.nodes: Dict[str, DependencyNode] = {}
         self.adjacency_list: Dict[str, Set[str]] = defaultdict(set)
         self.reverse_adjacency: Dict[str, Set[str]] = defaultdict(set)

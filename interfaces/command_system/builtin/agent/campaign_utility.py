@@ -164,6 +164,8 @@ def module_utility(
     performance_memory: Any = None,
     context_memory: Any = None,
     health_memory: Any = None,
+    learning_store: Any = None,
+    learning_state: Any = None,
 ) -> float:
     """
     utility = (gain * redundancy_discount + exploit_bonus) / network_cost
@@ -200,6 +202,11 @@ def module_utility(
             u *= float(health_memory.health_multiplier(path, kb if isinstance(kb, dict) else {}))
         except Exception:
             pass
+    if learning_store is not None and path:
+        try:
+            u *= float(learning_store.utility_multiplier(path, kb if isinstance(kb, dict) else {}, learning_state))
+        except Exception:
+            pass
     try:
         u += planner_alignment_bonus(module, kb if isinstance(kb, dict) else {})
     except Exception:
@@ -227,6 +234,8 @@ def unified_module_score(
     performance_memory: Optional[Any] = None,
     context_memory: Optional[Any] = None,
     health_memory: Optional[Any] = None,
+    learning_store: Optional[Any] = None,
+    learning_state: Any = None,
 ) -> Optional[float]:
     """
     Prefer :func:`compute_generic_module_score` when ``module`` carries planner ``agent`` metadata;
@@ -248,6 +257,7 @@ def unified_module_score(
         return g
     return module_utility(
         module, kb, tech_hints, executed_paths, performance_memory, context_memory, health_memory,
+        learning_store, learning_state,
     )
 
 
@@ -260,6 +270,8 @@ def select_opportunistic_batch(
     performance_memory: Optional[Any] = None,
     context_memory: Optional[Any] = None,
     health_memory: Optional[Any] = None,
+    learning_store: Optional[Any] = None,
+    learning_state: Any = None,
 ) -> List[Dict[str, Any]]:
     """Pick up to ``limit`` unseen modules with highest unified score (generic ``agent`` or legacy utility)."""
     if limit <= 0:
@@ -288,12 +300,19 @@ def select_opportunistic_batch(
                     g *= hm
                 except Exception:
                     pass
+            if learning_store is not None:
+                path = module_path_lower(m)
+                try:
+                    g *= float(learning_store.utility_multiplier(path, kb, learning_state))
+                except Exception:
+                    pass
             scored.append((g, m))
         else:
             scored.append((
                 module_utility(
                     m, kb, tech_hints, executed_paths,
                     performance_memory, context_memory, health_memory,
+                    learning_store, learning_state,
                 ),
                 m,
             ))

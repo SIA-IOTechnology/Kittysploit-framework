@@ -19,7 +19,6 @@ class Session:
     """Gère la session utilisateur et l'état actuel du framework"""
     
     def __init__(self):
-        """Initialise une nouvelle session"""
         self.current_module = None
         self.options = {}
         self.history = []
@@ -60,7 +59,6 @@ class Session:
             self.history.append(str(module))
     
     def get_current_module(self):
-        """Retourne le module actuellement utilisé"""
         return self.current_module
     
     def set_option(self, key, value):
@@ -69,11 +67,9 @@ class Session:
         return True
     
     def get_option(self, key, default=None):
-        """Récupère une option globale de la session"""
         return self.options.get(key, default)
     
     def get_history(self):
-        """Retourne l'historique des modules utilisés"""
         return self.history
     
     def set_user(self, user_id, authenticated=True, privileges=None):
@@ -83,15 +79,12 @@ class Session:
         self.privileges = privileges
     
     def is_authenticated(self):
-        """Vérifie si l'utilisateur est authentifié"""
         return self.authenticated
     
     def get_privileges(self):
-        """Retourne les privilèges de l'utilisateur"""
         return self.privileges
     
     def clear(self):
-        """Réinitialise la session"""
         self.current_module = None
         self.options = {}
         # Conserve l'historique et les informations utilisateur

@@ -22,7 +22,6 @@ class HookManager:
         }
     
     def register(self, hook_point: HookPoint, callback: Callable, priority: int = 0):
-        """Register a hook"""
         if hook_point not in self.hooks:
             self.hooks[hook_point] = []
         
@@ -34,7 +33,6 @@ class HookManager:
         self.hooks[hook_point].sort(key=lambda x: x["priority"], reverse=True)
     
     def execute(self, hook_point: HookPoint, *args, **kwargs) -> Any:
-        """Execute hooks for a hook point"""
         if hook_point not in self.hooks:
             return None
         

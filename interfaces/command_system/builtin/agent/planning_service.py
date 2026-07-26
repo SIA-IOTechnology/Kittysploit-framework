@@ -16,7 +16,12 @@ AGENT_REASON_INSTRUCTION = (
     "Required keys: selected_paths (array), rationale (string). "
     "Optional keys: next_actions (array of {type,path,priority,options}), "
     "max_requests_next_phase (int), stop_conditions (array), reasoning_confidence (0..1). "
-    "Allowed next_actions.type values: prioritize, run_followup, run_exploit, run_post, skip. "
+    "Allowed next_actions.type values: prioritize, http_request, surface_scan, run_followup, run_exploit, run_post, skip. "
+    "Use http_request for one bounded in-scope HTTP request when a raw response will clarify routing, "
+    "auth state, version, CSRF token, API shape, or exploit preconditions; set path to a target-relative "
+    "path or same-target URL and options.method to GET/HEAD/OPTIONS unless active replay is explicitly needed. "
+    "Use surface_scan as a bounded equivalent of `scanner -u` when the stack/surface is still unclear; "
+    "set options.limit low (e.g. 4-8) and optional options.protocol. "
     "Use run_followup for scanner/auxiliary validation, run_post for post/ modules, "
     "run_exploit for exploits/ paths. "
     "Use run_followup when manual verification is needed for potential vulnerabilities."
@@ -88,12 +93,18 @@ def build_reason_prompt_payload(
         else ""
     )
     base_task = (
-        "Your job is to choose the BEST NEXT ACTION for this campaign goal (strategy.campaign_goal), "
-        "not to rank vulnerabilities by curiosity. Prefer a single coherent run_followup or run_exploit as priority 1. "
+        "You operate as a security engineer controlling this framework for strategy.campaign_goal. "
+        "Do not follow a fixed script: adapt next probes and modules to observations. "
+        "Prefer a coherent mini-plan: optional http_request probes (up to 5), then one priority-1 "
+        "run_followup or run_exploit grounded in evidence. "
         "Return strict JSON with keys: "
         "selected_paths (array, optional legacy hints), rationale (string), "
         "next_actions (array of objects: {type, path, priority, options}), "
-        "max_requests_next_phase (int, keep this low, e.g. 2-4), stop_conditions (array), reasoning_confidence (0..1). "
+        "max_requests_next_phase (int, keep this low, e.g. 2-6), stop_conditions (array), reasoning_confidence (0..1). "
+        "Use next_actions.type='surface_scan' when you need a compact scanner -u style overview before going deeper. "
+        "You may emit several next_actions.type='http_request' for a bounded mini-batch of in-scope probes "
+        "(path plus options.method/headers/body; prefer GET/HEAD/OPTIONS) to disambiguate APIs/endpoints "
+        "before selecting swagger/graphql/api_fuzzer or other catalog modules. "
         "If root response is a redirect (e.g. 301/302) or there is very little discovery surface, assume it is an authentication portal. "
         "In that case, explicitly prioritize 'auxiliary/scanner/http/login/admin_login_bruteforce' for bruteforcing instead of noisy or broad crawler fuzzing. "
         "Use request_intelligence.interesting_requests as concrete observed traffic: prefer modules that fit captured endpoints, parameters, methods, auth boundaries, and replay results. "
@@ -146,6 +157,16 @@ def build_reason_prompt_payload(
                 }
                 if request_intel
                 else {},
+                "recent_http_probes": list(knowledge_base.get("llm_http_requests") or [])[-8:],
+                "api_module_candidates": list(
+                    strategic_context.get("api_module_candidates")
+                    or [
+                        "scanner/http/swagger_detect",
+                        "scanner/http/graphql_detect",
+                        "auxiliary/scanner/http/api_fuzzer",
+                    ]
+                ),
+                "discovered_endpoints": list(knowledge_base.get("discovered_endpoints") or [])[:24],
                 "module_catalog": {
                     "total_modules": knowledge_base.get("module_capability_catalog", {}).get("total_modules", 0),
                     "by_family": knowledge_base.get("module_capability_catalog", {}).get("by_family", {}),

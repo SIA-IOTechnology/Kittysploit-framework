@@ -250,7 +250,6 @@ class Lfi(BaseModule):
             return
             
         try:
-            # Get the last command output (this is a simplified implementation)
             output = self.execute("")
             if output:
                 with open(filename, 'w', encoding='utf-8') as f:

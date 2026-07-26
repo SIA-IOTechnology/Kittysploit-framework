@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_stop_decision.schema.json",
+  "title": "KittySploit Agent Stop Decision",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "stop": {"type": "boolean"},
+    "kind": {
+      "type": "string",
+      "enum": ["hard", "soft"]
+    },
+    "reason": {"type": "string"},
+    "detail": {"type": ["string", "null"]}
+  },
+  "required": ["schema_version", "id", "stop", "kind", "reason"],
+  "additionalProperties": true
+}

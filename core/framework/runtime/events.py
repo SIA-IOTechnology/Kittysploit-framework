@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-Système d'événements (Pub/Sub) - Couche N+1
-Système de publication/souscription pour découpler les composants du framework.
-"""
-
 from typing import Dict, List, Callable, Any, Optional
 from enum import Enum
 from dataclasses import dataclass
@@ -67,7 +62,6 @@ class EventType(Enum):
 
 @dataclass
 class Event:
-    """Représente un événement"""
     event_type: EventType
     data: Dict[str, Any]
     timestamp: datetime = None

@@ -28,20 +28,16 @@ DEFAULT_GITHUB_SOURCES: Dict[str, Dict[str, str]] = {
         "repo": "SIA-IOTechnology/KittyProtocol",
         "ref": "main",
     },
+    "kittycluster": {
+        "repo": "SIA-IOTechnology/KittyCluster",
+        "ref": "main",
+    },
     "kittycosmic": {
         "repo": "SIA-IOTechnology/KittyCosmic",
         "ref": "main",
     },
     "kittyv8": {
         "repo": "SIA-IOTechnology/KittyV8Debugger",
-        "ref": "main",
-    },
-    "kittyreport": {
-        "repo": "SIA-IOTechnology/KittyReport-Studio",
-        "ref": "main",
-    },
-    "kittysupply": {
-        "repo": "SIA-IOTechnology/KittySupply-Lens",
         "ref": "main",
     },
 }

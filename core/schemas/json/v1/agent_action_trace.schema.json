@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.kittysploit.dev/json/v1/agent_action_trace.schema.json",
+  "title": "KittySploit Agent Action Trace",
+  "description": "Per-action audit record for agent runs: state delta, policy, cost, and verified verdict.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"$ref": "common.schema.json#/$defs/schema_version"},
+    "id": {"$ref": "common.schema.json#/$defs/id"},
+    "run_id": {"type": "string", "minLength": 1},
+    "phase": {"type": "string"},
+    "module_path": {"type": ["string", "null"]},
+    "action_key": {"type": "string"},
+    "started_at": {"$ref": "common.schema.json#/$defs/timestamp"},
+    "duration_ms": {"type": "number", "minimum": 0},
+    "before_state_fingerprint": {"type": "string"},
+    "after_state_fingerprint": {"type": "string"},
+    "candidates": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "score": {"type": ["number", "null"]},
+    "decision_source": {"type": ["string", "null"]},
+    "policy": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "network_cost": {
+      "type": "object",
+      "properties": {
+        "requests": {"type": "integer", "minimum": 0},
+        "bytes_sent": {"type": "integer", "minimum": 0},
+        "bytes_received": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "raw_result": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "verified_verdict": {
+      "type": "string",
+      "enum": [
+        "confirmed",
+        "no_signal",
+        "refuted",
+        "blocked",
+        "module_error",
+        "policy_denied",
+        "planned",
+        "skipped"
+      ]
+    },
+    "risk": {"type": ["string", "null"]},
+    "blocked": {"type": "boolean"},
+    "error": {"type": ["string", "null"]}
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "run_id",
+    "action_key",
+    "started_at",
+    "duration_ms",
+    "before_state_fingerprint",
+    "after_state_fingerprint",
+    "verified_verdict",
+    "blocked"
+  ],
+  "additionalProperties": true
+}

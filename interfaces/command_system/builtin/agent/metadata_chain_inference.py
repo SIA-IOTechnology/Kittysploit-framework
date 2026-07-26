@@ -371,6 +371,46 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         },
         None,
     ),
+    (
+        re.compile(r"winrm_auth_enum"),
+        {
+            "produces_capabilities": ["winrm_access", "network_service"],
+            "suggested_followups": [],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ftp_enum$"),
+        {
+            "produces_capabilities": ["service_identified"],
+            "suggested_followups": [],
+        },
+        None,
+    ),
+    (
+        re.compile(r"smb_relay_surface"),
+        {
+            "produces_capabilities": ["smb_access"],
+            "suggested_followups": [],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)crawler$"),
+        {
+            "produces_capabilities": ["endpoints"],
+            "suggested_followups": ["auxiliary/scanner/http/security_headers"],
+        },
+        None,
+    ),
+    (
+        re.compile(r"^auxiliary/scanner/http/"),
+        {
+            "produces_capabilities": ["endpoints"],
+            "suggested_followups": [],
+        },
+        None,
+    ),
 )
 
 _FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {
@@ -543,4 +583,7 @@ def enrich_agent_metadata(
         )
         base["value"] = 2.0 if high_value else 1.0
 
+    from interfaces.command_system.builtin.agent.metadata_contract_inference import apply_extended_contract_fields
+
+    base = apply_extended_contract_fields(module_path, base, info)
     return normalize_agent_block(base) or base

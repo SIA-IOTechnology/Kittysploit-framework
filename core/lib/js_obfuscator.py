@@ -316,7 +316,6 @@ class JavaScriptObfuscator:
         return code
     
     def _generate_obfuscated_name(self) -> str:
-        """Generate an obfuscated variable name"""
         # Use short random names like _0x1a2b3c
         hex_chars = ''.join(random.choices('0123456789abcdef', k=6))
         return f'_0x{hex_chars}'
@@ -518,7 +517,6 @@ class JavaScriptObfuscator:
         return code
     
     def _wrap_functions(self, code: str) -> str:
-        """Wrap function calls in complex expressions"""
         # Protect strings first
         string_map = {}
         string_counter = 0

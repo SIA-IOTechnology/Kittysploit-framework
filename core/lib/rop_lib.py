@@ -35,12 +35,10 @@ class ROPGadget:
         self.length = 1    # Number of instructions
     
     def set_architecture(self, arch: str, bits: int):
-        """Set the architecture and bitness"""
         self.arch = arch.lower()
         self.bits = bits
     
     def get_packed_address(self, endian: str = "little") -> bytes:
-        """Get the gadget address packed for the current architecture"""
         if self.bits == 32:
             return struct.pack("<I" if endian == "little" else ">I", self.address)
         else:  # 64-bit
@@ -87,14 +85,12 @@ class ROPChain:
         }
     
     def add_gadget(self, gadget: ROPGadget) -> None:
-        """Add a gadget to the chain"""
         gadget.set_architecture(self.arch, self.bits)
         self.gadgets.append(gadget)
         self.payload += gadget.get_packed_address(self.endian)
         self.stack_offset += self.bits // 8
     
     def add_value(self, value: Union[int, str, bytes]) -> None:
-        """Add a value to the chain"""
         if isinstance(value, str):
             # String value
             if self.bits == 32:
@@ -125,19 +121,15 @@ class ROPChain:
                 self.stack_offset += 8
     
     def set_register(self, register: str, value: int) -> None:
-        """Set a register value for the chain"""
         self.registers[register] = value
     
     def get_register(self, register: str) -> Optional[int]:
-        """Get a register value"""
         return self.registers.get(register)
     
     def build_payload(self) -> bytes:
-        """Build the complete ROP payload"""
         return self.payload
     
     def get_chain_info(self) -> Dict[str, Any]:
-        """Get information about the ROP chain"""
         return {
             "architecture": self.arch,
             "bits": self.bits,
@@ -177,7 +169,6 @@ class ROPExploit:
         self._initialize_analysis()
     
     def _initialize_analysis(self):
-        """Initialize binary analysis"""
         try:
             # Analyze ELF binary
             self.elf_analyzer = ELFAnalyzer(self.binary_path)
@@ -260,7 +251,6 @@ class ROPExploit:
             return []
     
     def _create_gadget_from_info(self, gadget_info: Dict[str, Any]) -> Optional[ROPGadget]:
-        """Create ROPGadget from gadget finder info"""
         try:
             # Create instruction string
             instruction_strs = [str(inst) for inst in gadget_info['instructions']]
@@ -285,7 +275,6 @@ class ROPExploit:
             return None
     
     def search_gadgets(self, pattern: str) -> List[ROPGadget]:
-        """Search for gadgets matching a pattern"""
         matching = []
         for gadget in self.gadgets:
             if pattern.lower() in gadget.instruction.lower():
@@ -293,7 +282,6 @@ class ROPExploit:
         return matching
     
     def find_pop_gadgets(self, count: int = 1) -> List[ROPGadget]:
-        """Find gadgets that pop a specific number of values"""
         matching = []
         for gadget in self.gadgets:
             if gadget.stack_operations == count:
@@ -301,11 +289,9 @@ class ROPExploit:
         return matching
     
     def find_syscall_gadgets(self) -> List[ROPGadget]:
-        """Find syscall gadgets"""
         return self.search_gadgets("syscall") + self.search_gadgets("int")
     
     def find_gadgets_by_register(self, register: str) -> List[ROPGadget]:
-        """Find gadgets that use a specific register"""
         matching = []
         for gadget in self.gadgets:
             if register in gadget.registers:
@@ -458,7 +444,6 @@ class ROPExploit:
         return payload
     
     def save_payload(self, filename: str) -> bool:
-        """Save the exploit payload to a file"""
         try:
             with open(filename, 'wb') as f:
                 f.write(self.exploit_payload)
@@ -469,7 +454,6 @@ class ROPExploit:
             return False
     
     def get_exploit_info(self) -> Dict[str, Any]:
-        """Get information about the exploit"""
         return {
             "binary": self.binary_path,
             "architecture": f"{self.arch}{self.bits}",
@@ -484,7 +468,6 @@ class ROPUtils:
     
     @staticmethod
     def find_libc_base(pid: int) -> Optional[int]:
-        """Find libc base address for a process"""
         try:
             with open(f"/proc/{pid}/maps", 'r') as f:
                 for line in f:
@@ -497,7 +480,6 @@ class ROPUtils:
     
     @staticmethod
     def find_string_address(binary_path: str, string: str) -> Optional[int]:
-        """Find address of a string in binary"""
         try:
             with open(binary_path, 'rb') as f:
                 content = f.read()
@@ -510,12 +492,10 @@ class ROPUtils:
     
     @staticmethod
     def calculate_offset(overflow_size: int, rop_chain_size: int) -> int:
-        """Calculate the offset for ROP chain placement"""
         return overflow_size - rop_chain_size
     
     @staticmethod
     def create_nop_sled(length: int) -> bytes:
-        """Create a NOP sled"""
         if length <= 0:
             return b""
         return b"\x90" * length
@@ -536,7 +516,6 @@ class ROPUtils:
     @staticmethod
     def create_rop_chain_from_gadgets(gadgets: List[ROPGadget], 
                                     values: List[Union[int, str, bytes]]) -> ROPChain:
-        """Create a ROP chain from a list of gadgets and values"""
         if len(gadgets) != len(values):
             print_error("Number of gadgets must match number of values")
             return ROPChain()
@@ -560,7 +539,6 @@ class ROPUtils:
     
     @staticmethod
     def find_rop_gadgets_autonomous(binary_path: str, max_length: int = 5) -> List[ROPGadget]:
-        """Find ROP gadgets in a binary using autonomous analysis"""
         try:
             exploit = ROPExploit(binary_path)
             return exploit.find_gadgets(max_length)
@@ -572,7 +550,6 @@ class ROPUtils:
     def create_simple_rop_chain(gadgets: List[ROPGadget], 
                               values: List[Union[int, str, bytes]], 
                               arch: str = "x86", bits: int = 32) -> ROPChain:
-        """Create a simple ROP chain from gadgets and values"""
         chain = ROPChain(arch, bits)
         
         for gadget, value in zip(gadgets, values):

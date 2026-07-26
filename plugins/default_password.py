@@ -31,11 +31,11 @@ class DefaultPasswordPlugin(Plugin):
                 return {}
 
             data = json.loads(read_data_text("default_password.json"))
-                # Handle nested structure with "_default" key
-                if "_default" in data and isinstance(data["_default"], dict):
-                    return data["_default"]
-                # If no "_default" key, assume flat structure
-                return data
+            # Handle nested structure with "_default" key
+            if "_default" in data and isinstance(data["_default"], dict):
+                return data["_default"]
+            # If no "_default" key, assume flat structure
+            return data
         except Exception as e:
             print_error(f"Failed to load database: {e}")
             return {}

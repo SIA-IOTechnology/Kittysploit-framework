@@ -127,7 +127,6 @@ class SessionManager:
         return None
 
     def _get_db_session(self):
-        """Return the SQLAlchemy session for the current workspace context."""
         if self.framework and hasattr(self.framework, 'get_db_session'):
             return self.framework.get_db_session()
         if self.db_manager:
@@ -135,7 +134,6 @@ class SessionManager:
         return None
 
     def reload_for_current_workspace(self) -> None:
-        """Clear in-memory sessions and reload those for the current workspace."""
         self.sessions.clear()
         self.browser_sessions.clear()
         self._session_metadata.clear()
@@ -153,39 +151,49 @@ class SessionManager:
 
             workspace_id = self._get_workspace_id()
                 
-            # Check if session already exists in DB
-            existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
-            
-            # Filter out non-serializable objects from session data
-            serializable_data = _make_json_serializable(session_data.data)
-            
-            if existing_db_session:
-                # Update existing session
-                existing_db_session.session_type = session_data.session_type
-                existing_db_session.target_host = session_data.host
-                existing_db_session.target_port = session_data.port
-                existing_db_session.session_data = json.dumps(serializable_data)
-                existing_db_session.last_seen = datetime.utcnow()
-                existing_db_session.is_active = True
-                if workspace_id is not None:
-                    existing_db_session.workspace_id = workspace_id
-            else:
-                # Create new session in DB
-                db_session_obj = DBSession(
-                    session_id=session_id,
-                    session_type=session_data.session_type,
-                    target_host=session_data.host,
-                    target_port=session_data.port,
-                    session_data=json.dumps(serializable_data),
-                    created_at=datetime.utcnow(),
-                    last_seen=datetime.utcnow(),
-                    is_active=True,
-                    workspace_id=workspace_id,
-                )
-                db_session.add(db_session_obj)
-            
-            db_session.commit()
-            return True
+            # Use a transaction with retry logic for atomicity
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
+                    
+                    # Filter out non-serializable objects from session data
+                    serializable_data = _make_json_serializable(session_data.data)
+                    
+                    if existing_db_session:
+                        # Update existing session
+                        existing_db_session.session_type = session_data.session_type
+                        existing_db_session.target_host = session_data.host
+                        existing_db_session.target_port = session_data.port
+                        existing_db_session.session_data = json.dumps(serializable_data)
+                        existing_db_session.last_seen = datetime.utcnow()
+                        existing_db_session.is_active = True
+                        if workspace_id is not None:
+                            existing_db_session.workspace_id = workspace_id
+                    else:
+                        # Create new session in DB
+                        db_session_obj = DBSession(
+                            session_id=session_id,
+                            session_type=session_data.session_type,
+                            target_host=session_data.host,
+                            target_port=session_data.port,
+                            session_data=json.dumps(serializable_data),
+                            created_at=datetime.utcnow(),
+                            last_seen=datetime.utcnow(),
+                            is_active=True,
+                            workspace_id=workspace_id,
+                        )
+                        db_session.add(db_session_obj)
+                    
+                    db_session.commit()
+                    return True
+                except Exception as inner_e:
+                    db_session.rollback()
+                    if attempt < max_retries - 1:
+                        import time as _time
+                        _time.sleep(0.1 * (attempt + 1))
+                        continue
+                    raise
         except Exception as e:
             print_error(f"Error syncing session {session_id} to database: {e}")
             return False
@@ -394,7 +402,6 @@ class SessionManager:
         implant_id: str = "",
         client_id: str = "",
     ) -> Optional[str]:
-        """Return a disconnected session id matching a stable implant identity."""
         identity = str(implant_id or client_id or "").strip()
         if not identity:
             return None
@@ -498,7 +505,6 @@ class SessionManager:
         return True
     
     def handle_commands_sent(self, victim_id: str, commands: List[Dict[str, Any]]) -> None:
-        """Gère l'envoi de commandes à une session de navigateur"""
         if victim_id in self.browser_sessions:
             session = self.browser_sessions[victim_id]
             session['commands_sent'] += len(commands)
@@ -514,11 +520,9 @@ class SessionManager:
                     print_error(f"Error in commands_sent callback: {e}")
     
     def get_session(self, session_id: str) -> Optional[SessionData]:
-        """Get a session by its ID"""
         return self.sessions.get(session_id)
     
     def get_browser_session(self, session_id):
-        """Get a browser session by its ID"""
         
         if session_id in self.browser_sessions:
             return self.browser_sessions[session_id]
@@ -526,15 +530,12 @@ class SessionManager:
         return None
     
     def get_sessions(self) -> List[SessionData]:
-        """Get all standard sessions"""
         return list(self.sessions.values())
     
     def get_browser_sessions(self) -> List[Dict[str, Any]]:
-        """Get all browser sessions"""
         return list(self.browser_sessions.values())
     
     def get_all_sessions(self) -> Dict[str, Any]:
-        """Get all sessions (standard and browser)"""
         all_sessions = {
             'standard': self.get_sessions(),
             'browser': self.get_browser_sessions()
@@ -562,17 +563,12 @@ class SessionManager:
             if workspace_id is not None:
                 query = query.filter(DBSession.workspace_id == workspace_id)
 
-            # Mark old sessions as inactive
-            old_sessions = query.all()
-            
-            count = 0
-            for session in old_sessions:
-                session.is_active = False
-                count += 1
-            
+            # Mark old sessions as inactive using a bulk UPDATE
+            count = query.update({DBSession.is_active: False}, synchronize_session=False)
+
             if count > 0:
                 db_session.commit()
-            
+
             return count
         except Exception as e:
             print_error(f"Error cleaning up old sessions: {e}")
@@ -598,7 +594,6 @@ class SessionManager:
         return False
     
     def remove_session(self, session_id: str) -> bool:
-        """Remove a standard session"""
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
             
@@ -619,7 +614,6 @@ class SessionManager:
         return False
     
     def remove_browser_session(self, victim_id: str) -> bool:
-        """Remove a browser session"""
         if victim_id in self.browser_sessions:
             session = self.browser_sessions.pop(victim_id)
             
@@ -639,10 +633,8 @@ class SessionManager:
         return False
     
     def add_callback(self, callback):
-        """Add a callback for session events"""
         self.callbacks.append(callback)
     
     def remove_callback(self, callback):
-        """Remove a callback"""
         if callback in self.callbacks:
             self.callbacks.remove(callback) 

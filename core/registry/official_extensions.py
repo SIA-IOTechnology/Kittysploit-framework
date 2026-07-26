@@ -160,7 +160,6 @@ def _resolve_manifest(ext_id: str, github: Dict[str, str], root: Optional[Path])
 
 
 def get_official_marketplace_modules() -> List[Dict[str, Any]]:
-    """Build browse/search entries for official GitHub-hosted extensions."""
     sources = _load_config_sources()
     root = _framework_root()
     modules: List[Dict[str, Any]] = []

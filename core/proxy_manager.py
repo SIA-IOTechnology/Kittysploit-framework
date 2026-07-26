@@ -66,7 +66,6 @@ class NetworkRequest:
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'NetworkRequest':
-        """Create from dictionary"""
         # Convert base64 back to bytes
         if isinstance(data.get('body'), str):
             data['body'] = base64.b64decode(data['body'])
@@ -76,7 +75,6 @@ class NetworkRequest:
 
 
 class ProxyManager:
-    """Manages network request interception and logging"""
     
     def __init__(self, verbose: bool = False):
         self.verbose = verbose
@@ -119,7 +117,6 @@ class ProxyManager:
     
     def start(self, host: str = "127.0.0.1", port: int = 8888, mode: str = "http",
               socks_username: Optional[str] = None, socks_password: Optional[str] = None) -> bool:
-        """Start the proxy server"""
         try:
             chosen_mode = (mode or "http").lower()
             if chosen_mode not in self.supported_modes:
@@ -159,7 +156,6 @@ class ProxyManager:
             return False
     
     def stop(self):
-        """Stop the proxy server"""
         self.is_running = False
         
         if self.proxy_socket:
@@ -173,7 +169,6 @@ class ProxyManager:
             print_info("Proxy server stopped")
     
     def _proxy_loop(self):
-        """Main proxy server loop"""
         while self.is_running:
             try:
                 client_socket, address = self.proxy_socket.accept()
@@ -195,7 +190,6 @@ class ProxyManager:
                 break
     
     def _handle_client(self, client_socket: socket.socket, address: Tuple[str, int]):
-        """Handle a client connection"""
         try:
             if self.verbose:
                 print_info(f"New client connection from {address}")
@@ -395,7 +389,6 @@ class ProxyManager:
                 print_error(f"Error handling HTTPS CONNECT: {e}")
     
     def _parse_connect_target(self, connect_line: bytes) -> Optional[Dict]:
-        """Parse CONNECT target from first line"""
         try:
             line = connect_line.decode('utf-8').strip()
             parts = line.split()
@@ -460,7 +453,6 @@ class ProxyManager:
                 print_error(f"Error handling TCP tunnel: {e}")
     
     def _create_tcp_tunnel(self, client_socket: socket.socket, host: str, port: int, request: NetworkRequest):
-        """Create TCP tunnel to target server"""
         target_socket = None
         try:
             # Connect to target server
@@ -485,10 +477,8 @@ class ProxyManager:
                     logger.debug("Failed to close TCP target socket for %s:%s", host, port, exc_info=True)
     
     def _handle_tcp_connection(self, client_socket: socket.socket, first_line: bytes, address: Tuple[str, int]):
-        """Handle generic TCP connection"""
         try:
             # For TCP, we'll just log the connection attempt
-            # In a real implementation, you'd need to know the target
             request = NetworkRequest(
                 id=f"req_{self.request_counter}",
                 timestamp=datetime.now().isoformat(),
@@ -985,7 +975,6 @@ class ProxyManager:
             self._store_request(request)
     
     def _read_line(self, socket: socket.socket) -> bytes:
-        """Read a line from socket"""
         line = b""
         socket.settimeout(5)  # Set timeout for reading
         
@@ -1012,7 +1001,6 @@ class ProxyManager:
         return line
     
     def _recv_exact(self, sock: socket.socket, size: int) -> bytes:
-        """Read an exact number of bytes from a socket."""
         data = b""
         while len(data) < size:
             chunk = sock.recv(size - len(data))
@@ -1022,7 +1010,6 @@ class ProxyManager:
         return data
     
     def _store_request(self, request: NetworkRequest):
-        """Store captured request"""
         with self._lock:
             self.request_counter += 1
             request.id = f"req_{self.request_counter}"
@@ -1034,12 +1021,10 @@ class ProxyManager:
                 self.captured_requests.pop(0)
     
     def get_requests(self, limit: int = 50) -> List[Dict]:
-        """Get captured requests"""
         with self._lock:
             return [req.to_dict() for req in self.captured_requests[-limit:]]
     
     def get_request_by_id(self, request_id: str) -> Optional[Dict]:
-        """Get specific request by ID"""
         with self._lock:
             for req in self.captured_requests:
                 if req.id == request_id:
@@ -1047,13 +1032,11 @@ class ProxyManager:
         return None
     
     def clear_requests(self):
-        """Clear all captured requests"""
         with self._lock:
             self.captured_requests.clear()
             self.request_counter = 0
     
     def export_requests(self, filename: str) -> bool:
-        """Export requests to JSON file"""
         try:
             with self._lock:
                 data = {
@@ -1077,7 +1060,6 @@ class ProxyManager:
             return False
     
     def replay_request(self, request_id: str) -> bool:
-        """Replay a captured request"""
         try:
             request_data = self.get_request_by_id(request_id)
             if not request_data:
@@ -1142,7 +1124,6 @@ class ProxyManager:
             return False
     
     def get_status(self) -> Dict:
-        """Get proxy status"""
         return {
             'is_running': self.is_running,
             'mode': self.mode,

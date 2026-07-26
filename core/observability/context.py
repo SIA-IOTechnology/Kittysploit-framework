@@ -47,7 +47,6 @@ def reset_session(token: Token) -> None:
 
 
 def get_correlation() -> Dict[str, Any]:
-    """Return non-empty correlation fields for logs and metrics."""
     fields: Dict[str, Any] = {}
     run_id = _run_id.get()
     if run_id:

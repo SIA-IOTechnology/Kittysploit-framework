@@ -12,7 +12,6 @@ from .base_shell import BaseShell
 from core.output_handler import print_info, print_error
 
 class JavaScriptShell(BaseShell):
-    """JavaScript shell implementation for browser sessions"""
     
     def __init__(self, session_id: str, session_type: str = "browser", browser_server=None):
         super().__init__(session_id, session_type)
@@ -56,11 +55,9 @@ class JavaScriptShell(BaseShell):
         return "js> "
     
     def get_prompt(self) -> str:
-        """Get the current shell prompt"""
         return self.prompt_template
     
     def execute_command(self, command: str) -> Dict[str, Any]:
-        """Execute a command in the JavaScript shell"""
         if not command.strip():
             return {'output': '', 'status': 0, 'error': ''}
         
@@ -86,11 +83,9 @@ class JavaScriptShell(BaseShell):
             return {'output': '', 'status': 1, 'error': f'JavaScript error: {str(e)}'}
     
     def get_available_commands(self) -> List[str]:
-        """Get list of available commands"""
         return list(self.builtin_commands.keys())
     
     def _execute_javascript(self, code: str) -> Dict[str, Any]:
-        """Execute JavaScript code in the real browser"""
         code = code.strip()
         
         # Check if browser server is available
@@ -101,7 +96,6 @@ class JavaScriptShell(BaseShell):
         return self._send_to_browser(code)
     
     def _send_to_browser(self, code: str) -> Dict[str, Any]:
-        """Send JavaScript code to the real browser"""
         try:
             # Check if session exists in browser server
             if not self.browser_server.get_session(self.session_id):
@@ -125,7 +119,6 @@ class JavaScriptShell(BaseShell):
     
     # Built-in command implementations
     def _cmd_help(self, args: str) -> Dict[str, Any]:
-        """Show help"""
         help_text = """JavaScript Shell Commands:
   help                    Show this help
   clear                   Clear screen
@@ -152,11 +145,9 @@ JavaScript Examples:
         return {'output': help_text + '\n', 'status': 0, 'error': ''}
     
     def _cmd_clear(self, args: str) -> Dict[str, Any]:
-        """Clear screen"""
         return {'output': '\033[2J\033[H', 'status': 0, 'error': ''}
     
     def _cmd_history(self, args: str) -> Dict[str, Any]:
-        """Show command history"""
         limit = 50
         if args and args.isdigit():
             limit = int(args)
@@ -169,28 +160,24 @@ JavaScript Examples:
         return {'output': '\n'.join(output_lines) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_env(self, args: str) -> Dict[str, Any]:
-        """Show environment variables"""
         env_output = []
         for key, value in self.environment_vars.items():
             env_output.append(f"{key}={value}")
         return {'output': '\n'.join(env_output) + '\n', 'status': 0, 'error': ''}
     
     def _cmd_eval(self, args: str) -> Dict[str, Any]:
-        """Evaluate JavaScript code"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'eval: code required'}
         
         return self._execute_javascript(args)
     
     def _cmd_exec(self, args: str) -> Dict[str, Any]:
-        """Execute JavaScript code"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'exec: code required'}
         
         return self._execute_javascript(args)
     
     def _cmd_inject(self, args: str) -> Dict[str, Any]:
-        """Inject JavaScript into page"""
         if not args:
             return {'output': '', 'status': 1, 'error': 'inject: code required'}
         
@@ -198,7 +185,6 @@ JavaScript Examples:
         return {'output': f'[INJECTED] {args}\n', 'status': 0, 'error': ''}
     
     def _cmd_dom(self, args: str) -> Dict[str, Any]:
-        """Show DOM information"""
         dom_info = """DOM Information:
   document.title: "KittySploit Browser Test Page"
   document.URL: "http://localhost:9000/test"
@@ -209,19 +195,15 @@ JavaScript Examples:
         return {'output': dom_info + '\n', 'status': 0, 'error': ''}
     
     def _cmd_cookies(self, args: str) -> Dict[str, Any]:
-        """Show cookies"""
         return {'output': 'No cookies found\n', 'status': 0, 'error': ''}
     
     def _cmd_localStorage(self, args: str) -> Dict[str, Any]:
-        """Show localStorage"""
         return {'output': 'localStorage is empty\n', 'status': 0, 'error': ''}
     
     def _cmd_sessionStorage(self, args: str) -> Dict[str, Any]:
-        """Show sessionStorage"""
         return {'output': 'sessionStorage is empty\n', 'status': 0, 'error': ''}
     
     def _cmd_navigator(self, args: str) -> Dict[str, Any]:
-        """Show navigator info"""
         nav_info = """Navigator Information:
   userAgent: "Mozilla/5.0 (compatible)"
   platform: "unknown"
@@ -231,7 +213,6 @@ JavaScript Examples:
         return {'output': nav_info + '\n', 'status': 0, 'error': ''}
     
     def _cmd_location(self, args: str) -> Dict[str, Any]:
-        """Show location info"""
         loc_info = """Location Information:
   href: "http://localhost:9000/test"
   protocol: "http:"
@@ -244,6 +225,5 @@ JavaScript Examples:
         return {'output': loc_info + '\n', 'status': 0, 'error': ''}
     
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
-        """Exit shell"""
         self.deactivate()
         return {'output': 'exit\n', 'status': 0, 'error': ''}

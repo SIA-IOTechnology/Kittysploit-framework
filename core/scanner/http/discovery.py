@@ -99,7 +99,6 @@ def build_injection_targets(
     paths: Sequence[str],
     params: Sequence[str],
 ) -> List[Tuple[str, str]]:
-    """Return unique (path, param) pairs derived from discovered surface."""
     targets: List[Tuple[str, str]] = []
     seen: Set[Tuple[str, str]] = set()
     for raw_path in paths or []:

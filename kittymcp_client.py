@@ -60,6 +60,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--ollama-endpoint", help="Ollama-compatible chat endpoint.")
     parser.add_argument("--ollama-model", help="Ollama model name.")
+    parser.add_argument("--ollama-api-key", help="API key for OpenAI-compatible endpoints.")
     parser.add_argument("--ollama-timeout", type=int, help="Ollama request timeout in seconds.")
     parser.add_argument(
         "--no-ollama",
@@ -106,6 +107,8 @@ def _configure_ollama_env(args: argparse.Namespace) -> bool:
         os.environ["KITTYMCP_OLLAMA_ENDPOINT"] = args.ollama_endpoint
     if args.ollama_model:
         os.environ["KITTYMCP_OLLAMA_MODEL"] = args.ollama_model
+    if args.ollama_api_key:
+        os.environ["KITTYMCP_OLLAMA_API_KEY"] = args.ollama_api_key
     if args.ollama_timeout is not None:
         os.environ["KITTYMCP_OLLAMA_TIMEOUT"] = str(args.ollama_timeout)
     return _env_truthy("KITTYMCP_OLLAMA_ENABLED")

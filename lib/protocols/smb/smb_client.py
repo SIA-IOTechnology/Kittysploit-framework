@@ -98,6 +98,22 @@ class SMBClient:
 
     # ---------- Shares / browsing ----------
 
+    def _summarize_error(self, exc: Exception) -> str:
+        text = str(exc).strip()
+        if not text:
+            return exc.__class__.__name__
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        message = lines[0] if lines else exc.__class__.__name__
+        status = ""
+        for line in lines:
+            if line.startswith("Status:"):
+                status = line
+                break
+        if status and status not in message:
+            return f"{message} ({status})"
+        return message
+
     def list_shares(self) -> List[str]:
         """
         List available shares. Returns share names.
@@ -116,7 +132,7 @@ class SMBClient:
             print_error(f"list_shares failed -> {e}")
             return shares
 
-    def list_path(self, share: str, path: str = "\\") -> List[Dict[str, Any]]:
+    def list_path(self, share: str, path: str = "\\", quiet: bool = False) -> List[Dict[str, Any]]:
         """
         List directory entries in `share` at `path`.
         Returns list of dicts: name, is_dir, size, last_write
@@ -137,8 +153,18 @@ class SMBClient:
                 })
             return entries
         except Exception as e:
-            print_error(f"list_path failed for {share}:{path} -> {e}")
+            if not quiet:
+                print_error(f"list_path failed for {share}:{path} -> {self._summarize_error(e)}")
             return entries
+
+    def can_list_path(self, share: str, path: str = "\\") -> bool:
+        """Return True when the share/path can be listed, even if it is empty."""
+        self._require()
+        try:
+            self.conn.listPath(share, path, timeout=self.timeout)
+            return True
+        except Exception:
+            return False
 
     # ---------- File operations ----------
 
@@ -153,7 +179,7 @@ class SMBClient:
             print_success(f"Downloaded {share}:{remote_path} -> {local_path}")
             return True
         except Exception as e:
-            print_error(f"get_file failed -> {e}")
+            print_error(f"get_file failed -> {self._summarize_error(e)}")
             return False
 
     def put_file(self, share: str, local_path: str, remote_path: str) -> bool:
@@ -167,7 +193,7 @@ class SMBClient:
             print_success(f"Uploaded {local_path} -> {share}:{remote_path}")
             return True
         except Exception as e:
-            print_error(f"put_file failed -> {e}")
+            print_error(f"put_file failed -> {self._summarize_error(e)}")
             return False
 
     def delete_file(self, share: str, remote_path: str) -> bool:
@@ -177,7 +203,7 @@ class SMBClient:
             print_success(f"Deleted file {share}:{remote_path}")
             return True
         except Exception as e:
-            print_error(f"delete_file failed -> {e}")
+            print_error(f"delete_file failed -> {self._summarize_error(e)}")
             return False
 
     def create_directory(self, share: str, path: str) -> bool:
@@ -187,7 +213,7 @@ class SMBClient:
             print_success(f"Created directory {share}:{path}")
             return True
         except Exception as e:
-            print_error(f"create_directory failed -> {e}")
+            print_error(f"create_directory failed -> {self._summarize_error(e)}")
             return False
 
     def delete_directory(self, share: str, path: str) -> bool:
@@ -197,7 +223,7 @@ class SMBClient:
             print_success(f"Deleted directory {share}:{path}")
             return True
         except Exception as e:
-            print_error(f"delete_directory failed -> {e}")
+            print_error(f"delete_directory failed -> {self._summarize_error(e)}")
             return False
 
 

@@ -22,6 +22,10 @@ class DockerEnvironment(BaseModule):
     ready_timeout = OptInteger(120, "Timeout in seconds for the service to be ready", True)
     dockerfile_path = OptString("", "Path to Dockerfile to build image from (optional)", False)
     image_tar_path = OptString("", "Path to .tar file to load image from (optional)", False)
+    expected_image_digest = OptString("", "Optional sha256 digest pin (sha256:...)", False)
+    lab_network_name = OptString("", "Dedicated Docker network for isolated lab traffic", False)
+    lab_network_internal = OptBool(True, "Disallow outbound internet on the lab network", False)
+    lab_network_subnet = OptString("172.30.0.0/24", "Subnet for the dedicated lab network", False)
     keep_stdin_open = OptBool(True, "Keep STDIN open for the container (docker -i)", False)
     allocate_tty = OptBool(True, "Allocate a pseudo-TTY for the container (docker -t)", False)
 
@@ -34,6 +38,116 @@ class DockerEnvironment(BaseModule):
         self.environment_vars = {}
         self.volumes = {}
         self.network_mode = "bridge"
+        self._lab_network_id: str | None = None
+
+    def _ensure_lab_network(self) -> bool:
+        """Create or reuse a dedicated lab network when ``lab_network_name`` is set."""
+        name = str(getattr(self, "lab_network_name", "") or "").strip()
+        if not name or not self.client:
+            return True
+        try:
+            existing = self.client.networks.list(names=[name])
+            if existing:
+                self._lab_network_id = existing[0].id
+                return True
+            internal = bool(getattr(self, "lab_network_internal", True))
+            create_kwargs = {"driver": "bridge", "internal": internal}
+            subnet = str(getattr(self, "lab_network_subnet", "") or "").strip()
+            if subnet:
+                create_kwargs["ipam"] = docker.types.IPAMConfig(
+                    pool_configs=[docker.types.IPAMPool(subnet=subnet)]
+                )
+            network = self.client.networks.create(name, **create_kwargs)
+            self._lab_network_id = network.id
+            print_success(f"Lab network '{name}' ready (internal={internal})")
+            return True
+        except Exception as exc:
+            print_error(f"Could not create lab network '{name}': {exc}")
+            return False
+
+    def _expected_host_ports(self) -> set[int]:
+        ports: set[int] = set()
+        for binding in (self.exposed_ports or {}).values():
+            if isinstance(binding, (tuple, list)):
+                ports.add(int(binding[-1]))
+            else:
+                ports.add(int(binding))
+        return ports
+
+    def _container_published_host_ports(self, container) -> set[int]:
+        container.reload()
+        published: set[int] = set()
+        for bindings in (container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}).values():
+            if not bindings:
+                continue
+            for binding in bindings:
+                host_port = binding.get("HostPort")
+                if host_port:
+                    published.add(int(host_port))
+        return published
+
+    def _container_has_expected_port_bindings(self, container) -> bool:
+        expected = self._expected_host_ports()
+        if not expected:
+            return True
+        return expected.issubset(self._container_published_host_ports(container))
+
+    def _attach_lab_network(self, container) -> bool:
+        """Attach a running container to the lab network after host ports are published."""
+        name = str(getattr(self, "lab_network_name", "") or "").strip()
+        if not name or not self.client:
+            return True
+        try:
+            container.reload()
+            networks = container.attrs.get("NetworkSettings", {}).get("Networks", {}) or {}
+            if name in networks:
+                return True
+            self.client.networks.get(name).connect(container)
+            print_success(f"Container attached to lab network '{name}'")
+            return True
+        except Exception as exc:
+            print_error(f"Could not attach container to lab network '{name}': {exc}")
+            return False
+
+    def _verify_image_digest(self) -> bool:
+        expected = str(getattr(self, "expected_image_digest", "") or "").strip()
+        if not expected or not self.client:
+            return True
+        try:
+            actual = self.get_image_digest()
+            if expected not in {actual, actual.replace("sha256:", "")}:
+                digests = self._list_image_digests()
+                print_error(
+                    f"Image digest mismatch for {self.image_name}: "
+                    f"expected {expected}, got {digests or actual or 'none'}"
+                )
+                return False
+            print_success(f"Image digest verified: {expected[:24]}...")
+            return True
+        except Exception as exc:
+            print_error(f"Image digest verification failed: {exc}")
+            return False
+
+    def _list_image_digests(self) -> list[str]:
+        if not self.client:
+            return []
+        try:
+            image = self.client.images.get(self.image_name)
+            digests: list[str] = []
+            for row in (getattr(image, "attrs", {}) or {}).get("RepoDigests") or []:
+                if "@" in row:
+                    digests.append(row.split("@", 1)[1])
+            image_id = str(getattr(image, "id", "") or "")
+            if image_id.startswith("sha256:"):
+                digests.append(image_id)
+            return digests
+        except Exception:
+            return []
+
+    def get_image_digest(self) -> str:
+        """Return the sha256 digest for the currently resolved local image."""
+        digests = self._list_image_digests()
+        return digests[0] if digests else ""
 
     def _is_docker_permission_error(self, error):
         """Return True when Docker access fails due to socket permissions."""
@@ -46,7 +160,6 @@ class DockerEnvironment(BaseModule):
         )
 
     def _print_linux_docker_help(self, permission_issue=False):
-        """Print Linux-specific Docker troubleshooting tips."""
         if permission_issue:
             print_error("Docker socket permission denied.")
             print_info("Add your user to the docker group and reconnect:")
@@ -204,7 +317,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def wait_for_service(self, host, port, timeout=60):
-        """Wait for the service to be available on the specified port"""
         print_status(f"Waiting for the service to be available on {host}:{port}...")
         start_time = time.time()
         
@@ -226,7 +338,6 @@ class DockerEnvironment(BaseModule):
         return False
     
     def start_container(self):
-        """Start the Docker container"""
         if not self.container_name:
             self.container_name = f"kittysploit_{self._type}_{int(time.time())}"
             
@@ -237,19 +348,31 @@ class DockerEnvironment(BaseModule):
                 existing_container.reload()
                 
                 if existing_container.status == "running":
-                    # Container is already running, reuse it
-                    print_success(f"Container {self.container_name} is already running (ID: {existing_container.id[:12]})")
-                    print_info("Reusing existing container instead of creating a new one")
-                    self.container = existing_container
-                    return True
+                    if self._container_has_expected_port_bindings(existing_container):
+                        print_success(
+                            f"Container {self.container_name} is already running (ID: {existing_container.id[:12]})"
+                        )
+                        print_info("Reusing existing container instead of creating a new one")
+                        self.container = existing_container
+                        return self._attach_lab_network(existing_container)
+                    print_warning(
+                        f"Container {self.container_name} is running without expected published ports; recreating..."
+                    )
+                    existing_container.remove(force=True)
                 else:
-                    # Container exists but is stopped, restart it
-                    print_status(f"Container {self.container_name} exists but is stopped. Restarting...")
-                    existing_container.start()
-                    existing_container.reload()
-                    self.container = existing_container
-                    print_success(f"Container {self.container_name} restarted successfully (ID: {existing_container.id[:12]})")
-                    return True
+                    if self._container_has_expected_port_bindings(existing_container):
+                        print_status(f"Container {self.container_name} exists but is stopped. Restarting...")
+                        existing_container.start()
+                        existing_container.reload()
+                        self.container = existing_container
+                        print_success(
+                            f"Container {self.container_name} restarted successfully (ID: {existing_container.id[:12]})"
+                        )
+                        return self._attach_lab_network(existing_container)
+                    print_warning(
+                        f"Container {self.container_name} exists without expected published ports; recreating..."
+                    )
+                    existing_container.remove(force=True)
             except docker.errors.NotFound:
                 # The container doesn't exist, that's normal - we'll create it
                 pass
@@ -289,26 +412,42 @@ class DockerEnvironment(BaseModule):
             
             print_status(f"Starting container {self.container_name}...")
             print_status(f"Ports configuration: {docker_ports}")
-            
+
+            run_kwargs = {
+                "image": self.image_name,
+                "name": self.container_name,
+                "detach": True,
+                "ports": docker_ports,
+                "environment": self.environment_vars,
+                "volumes": self.volumes,
+                "auto_remove": self.auto_cleanup,
+                "stdin_open": bool(self.keep_stdin_open),
+                "tty": bool(self.allocate_tty),
+            }
+            lab_network = str(getattr(self, "lab_network_name", "") or "").strip()
+            if lab_network:
+                if not self._ensure_lab_network():
+                    return False
+            else:
+                run_kwargs["network_mode"] = self.network_mode
+
+            command = getattr(self, "container_command", None)
+            if command:
+                if isinstance(command, str):
+                    run_kwargs["command"] = command
+                else:
+                    run_kwargs["command"] = list(command)
+
             # Create and start the container
             try:
-                self.container = self.client.containers.run(
-                    self.image_name,
-                    name=self.container_name,
-                    detach=True,
-                    ports=docker_ports,
-                    environment=self.environment_vars,
-                    volumes=self.volumes,
-                    network_mode=self.network_mode,
-                    auto_remove=self.auto_cleanup,
-                    stdin_open=bool(self.keep_stdin_open),
-                    tty=bool(self.allocate_tty)
-                )
+                self.container = self.client.containers.run(**run_kwargs)
                 
                 if self.container:
                     print_success(f"Container {self.container_name} started successfully (ID: {self.container.id})")
                 else:
                     print_error("Container.run() returned None")
+                    return False
+                if lab_network and not self._attach_lab_network(self.container):
                     return False
             except docker.errors.APIError as e:
                 print_error(f"Docker API error: {str(e)}")
@@ -342,7 +481,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def stop_container(self):
-        """Stop the Docker container"""
         if not self.container:
             return True
             
@@ -363,7 +501,6 @@ class DockerEnvironment(BaseModule):
             return False
     
     def _resolve_container_image(self):
-        """Return the most useful identifier for the current container image"""
         if not self.container:
             return self.image_name
         try:
@@ -378,7 +515,6 @@ class DockerEnvironment(BaseModule):
             return self.image_name
 
     def _collect_port_bindings(self):
-        """Return normalized port bindings for the running container"""
         if not self.container:
             return {}
 
@@ -445,7 +581,6 @@ class DockerEnvironment(BaseModule):
         return fallback
 
     def _build_container_info_stub(self):
-        """Return a base info dict used by get_container_info"""
         return {
             "id": getattr(self.container, "id", None) if self.container else None,
             "name": getattr(self.container, "name", self.container_name) if self.container_name else None,
@@ -457,7 +592,6 @@ class DockerEnvironment(BaseModule):
         }
 
     def get_container_info(self):
-        """Get normalized container information for downstream modules"""
         info = self._build_container_info_stub()
 
         if not self.container:
@@ -487,7 +621,6 @@ class DockerEnvironment(BaseModule):
             return info
 
     def print_container_overview(self, container_info=None):
-        """Print a concise summary of the currently running container"""
         container_info = container_info or self.get_container_info()
         status = container_info.get("status")
 
@@ -535,7 +668,6 @@ class DockerEnvironment(BaseModule):
         return True
     
     def get_container_ip(self):
-        """Get the container IP address"""
         if not self.container:
             return None
             
@@ -570,7 +702,6 @@ class DockerEnvironment(BaseModule):
             self.exposed_ports = {"80/tcp": ('127.0.0.1', 80)}
 
     def run_docker(self):
-        """Execute the module - handles Docker connection, image pull, and container start"""
         # Vérifier Docker
         if not self.check_docker():
             print_error("Docker check failed")
@@ -579,6 +710,9 @@ class DockerEnvironment(BaseModule):
         # Pull the image if necessary
         if not self.pull_image():
             print_error("Image pull failed")
+            return False
+
+        if not self._verify_image_digest():
             return False
             
         # Configure the exposed ports (calls expose_ports() which can be overridden)
@@ -628,7 +762,6 @@ class DockerEnvironment(BaseModule):
         return self.on_environment_ready()
 
     def _exploit(self):
-        """Execute the module and return the result"""
         try:
             return self.run()
         except Exception as e:

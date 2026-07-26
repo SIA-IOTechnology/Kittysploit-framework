@@ -1,0 +1,109 @@
+{
+  "id": "metasploitable3-windows",
+  "version": "1.0",
+  "image": {
+    "provider": "vagrant",
+    "box": "rapid7/metasploitable3-win2k8",
+    "box_version": null,
+    "digest": null,
+    "provisioning": {
+      "version": "1.0.0",
+      "method": "vagrant-box",
+      "sbom_ref": null
+    },
+    "note": "No official Docker image. Build the box locally with Rapid7 metasploitable3 scripts or vagrant box add."
+  },
+  "network": {
+    "name": "kittysploit_lab_ms3_windows",
+    "private_ip": "172.28.128.3",
+    "host_bind": "127.0.0.1",
+    "internal": true
+  },
+  "credentials": {
+    "local_admin": {"username": "vagrant", "password": "vagrant"},
+    "rdp": {"username": "vagrant", "password": "vagrant"},
+    "winrm": {"username": "vagrant", "password": "vagrant"}
+  },
+  "services": [
+    {
+      "id": "smb",
+      "protocol": "tcp",
+      "port": 445,
+      "host_port": 5445,
+      "description": "Microsoft SMB",
+      "required": true
+    },
+    {
+      "id": "http",
+      "protocol": "tcp",
+      "port": 80,
+      "host_port": 8881,
+      "description": "IIS HTTP",
+      "required": true
+    },
+    {
+      "id": "rdp",
+      "protocol": "tcp",
+      "port": 3389,
+      "host_port": 13389,
+      "description": "Remote Desktop",
+      "required": true
+    },
+    {
+      "id": "winrm",
+      "protocol": "tcp",
+      "port": 5985,
+      "host_port": 15985,
+      "description": "WinRM HTTP",
+      "required": true
+    },
+    {
+      "id": "netbios",
+      "protocol": "tcp",
+      "port": 139,
+      "host_port": 139,
+      "description": "NetBIOS (in-VM unless additionally forwarded)",
+      "required": false
+    }
+  ],
+  "expected_paths": [
+    {
+      "id": "smb_share_enum",
+      "family": "smb",
+      "port": 5445,
+      "produces": "service_identified"
+    },
+    {
+      "id": "http_iis_root",
+      "family": "web",
+      "url": "http://127.0.0.1:8881/",
+      "produces": "service_identified"
+    },
+    {
+      "id": "rdp_access",
+      "family": "access",
+      "protocol": "rdp",
+      "port": 13389,
+      "credential_ref": "rdp",
+      "produces": "session"
+    },
+    {
+      "id": "winrm_shell",
+      "family": "access",
+      "protocol": "winrm",
+      "port": 15985,
+      "credential_ref": "winrm",
+      "produces": "session"
+    }
+  ],
+  "session": {
+    "protocol": "winrm",
+    "host": "127.0.0.1",
+    "port": 15985,
+    "username": "vagrant",
+    "verification_command": "whoami",
+    "expected_identity_contains": "vagrant"
+  },
+  "terminal_privilege": "user",
+  "tags": ["windows", "metasploitable3", "internal-lab", "agent-benchmark", "vagrant"]
+}

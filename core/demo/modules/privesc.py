@@ -26,11 +26,9 @@ class PrivescDemo(Demo):
         self.session_manager = None  # Will be set by DemoManager
     
     def set_session_manager(self, session_manager):
-        """Set the session manager to use"""
         self.session_manager = session_manager
     
     def run(self, options: dict) -> dict:
-        """Run the privilege escalation"""
         # Update instance options with provided options
         self.options.update(options)
         

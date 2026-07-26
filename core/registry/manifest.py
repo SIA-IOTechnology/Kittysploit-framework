@@ -74,7 +74,6 @@ class ExtensionManifest:
     install_path: Optional[str] = None  # Installation path relative to framework root (e.g: modules/auxiliary/test_module)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert manifest to dictionary"""
         return {
             "id": self.id,
             "name": self.name,
@@ -108,7 +107,6 @@ class ExtensionManifest:
         }
     
     def to_toml(self) -> str:
-        """Convert manifest to TOML"""
         data = self.to_dict()
         # Nettoyer les valeurs None
         cleaned = {}
@@ -168,7 +166,6 @@ class ManifestParser:
     
     @staticmethod
     def _parse_dict(data: Dict[str, Any]) -> ExtensionManifest:
-        """Parse a dictionary into ExtensionManifest"""
         # Compatibility
         compatibility = None
         if "compatibility" in data:

@@ -111,18 +111,15 @@ class SQLInjectionDemo(Demo):
         return True
 
     def get_options(self) -> dict:
-        """Return current options"""
         return self.current_options
 
     def validate_options(self) -> bool:
-        """Validate that all required options are set"""
         for name, option in self.OPTIONS.items():
             if option.get('required', False) and not self.current_options.get(name):
                 return False
         return True
 
     def _simulate_delay(self, seconds):
-        """Simulate a response delay"""
         time.sleep(seconds)
         return True
 
@@ -193,7 +190,6 @@ class SQLInjectionDemo(Demo):
         }
 
     def run(self, options):
-        """Execute SQL injection demonstration"""
         target_url = options['target_url']
         injection_type = options['injection_type']
         parameter = options['parameter']

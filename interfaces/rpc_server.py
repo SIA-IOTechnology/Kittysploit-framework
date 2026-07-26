@@ -13,11 +13,23 @@ import base64
 import time
 import socket
 import uuid
+import re
 from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
 import io
 import sys
 
+from interfaces.node_command_service import RelayRemoteClientError, RelayService
 from interfaces.api_security import RotatingTokenManager, iso_timestamp
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _sanitize_rpc_text(value):
+    """Strip control/ANSI sequences that break XML-RPC responses."""
+    if value is None:
+        return None
+    text = _ANSI_ESCAPE_RE.sub("", str(value))
+    return "".join(ch for ch in text if ch in "\t\n\r" or ord(ch) >= 0x20)
 
 # Imports optionnels pour les fonctionnalités avancées
 try:
@@ -75,10 +87,11 @@ class RpcServer:
     Compatible avec les fonctionnalités du runtime kernel (pipelines, events, resources).
     """
     
-    def __init__(self, framework, host='127.0.0.1', port=8888, api_key=None):
+    def __init__(self, framework, host='127.0.0.1', port=8888, api_key=None, ssl_context=None):
         self.host = host
         self.port = port
         self.api_key = (api_key or "").strip() or None
+        self.ssl_context = ssl_context
         self.framework = framework
         self.clients = {}
         self.server = None
@@ -92,6 +105,7 @@ class RpcServer:
         self.interpreters = {}  # Stocke les interpréteurs par session
         self.started_at = time.time()
         self.token_manager = RotatingTokenManager(self.api_key, issuer="kittysploit-rpc")
+        self.relay_service = RelayService()
         
         # Initialize registry service if available (mode serveur uniquement)
         # Note: Le registry est normalement un service distant géré par KittySploit
@@ -149,6 +163,8 @@ class RpcServer:
                 allow_none=True,
                 logRequests=True
             )
+            if self.ssl_context is not None:
+                self.server.socket = self.ssl_context.wrap_socket(self.server.socket, server_side=True)
             self.server.api_key = self.api_key
             self.server.token_manager = self.token_manager
             
@@ -157,6 +173,8 @@ class RpcServer:
             
             # Routes de base
             self.server.register_function(self.health, 'health')
+            self.server.register_function(self.relay_status, 'relay_status')
+            self.server.register_function(self.relay_command, 'relay_command')
             self.server.register_function(self.get_modules, 'get_modules')
             self.server.register_function(self.get_module_info, 'get_module_info')
             self.server.register_function(self.get_module_options, 'get_module_options')
@@ -187,7 +205,8 @@ class RpcServer:
                 self.server.register_function(self.purchase_extension, 'purchase_extension')
             
             self.running = True
-            logging.info(f"RPC server started on {self.host}:{self.port}")
+            scheme = "https" if self.ssl_context is not None else "http"
+            logging.info(f"RPC server started on {scheme}://{self.host}:{self.port}")
 
             self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
             self.server_thread.start()
@@ -369,26 +388,40 @@ class RpcServer:
         sys.stderr = stderr
         
         try:
-            # Exécuter le code avec runsource (méthode recommandée)
-            exec_result = interpreter.runsource(code)
-            
-            # Récupérer les sorties
-            output = stdout.getvalue()
-            error = stderr.getvalue()
-            
+            # Multi-line payloads (e.g. kittyCluster command dispatch) need exec mode.
+            symbol = "exec" if "\n" in str(code or "") else "single"
+            exec_result = interpreter.runsource(code, symbol=symbol)
+
+            output = _sanitize_rpc_text(stdout.getvalue())
+            error = _sanitize_rpc_text(stderr.getvalue())
+
             return {
                 'output': output if output else None,
                 'error': error if error else None,
                 'result': str(exec_result) if exec_result is not None else None
             }
-            
+
         except Exception as e:
             logging.exception("Error executing interpreter code")
-            return {'error': str(e)}
+            return {'error': _sanitize_rpc_text(str(e))}
         finally:
             # Restaurer stdout et stderr
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+
+    def relay_status(self, payload):
+        """Relay a node status request to an explicit target."""
+        try:
+            return self.relay_service.relay_status(payload or {})
+        except (ValueError, RelayRemoteClientError) as exc:
+            return {"error": _sanitize_rpc_text(str(exc))}
+
+    def relay_command(self, payload):
+        """Relay a node command request to an explicit target."""
+        try:
+            return self.relay_service.relay_command(payload or {})
+        except (ValueError, RelayRemoteClientError) as exc:
+            return {"error": _sanitize_rpc_text(str(exc))}
             
     def get_module_info(self, module_name):
         """Récupère les informations d'un module"""
@@ -420,8 +453,10 @@ class RpcServer:
         return {'status': 'success', 'message': 'Module option defined'}
 
     def get_sessions(self):
-        """Récupère les sessions disponibles"""
-        return list(self.interpreters.keys())
+        """List active framework sessions for cluster topology."""
+        from interfaces.node_command_service import serialize_sessions
+
+        return serialize_sessions(self.framework)
     
     def health(self, detailed=False):
         """Health check - Retourne l'état du serveur"""

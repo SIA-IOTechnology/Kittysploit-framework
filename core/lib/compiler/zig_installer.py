@@ -34,13 +34,11 @@ class ZigInstaller:
     }
     
     def __init__(self):
-        """Initialize the installer"""
         self.framework_root = self._get_framework_root()
         self.zig_executable_dir = self.framework_root / "core" / "lib" / "compiler" / "zig_executable"
         self.platform_info = self._detect_platform()
         
     def _get_framework_root(self) -> Path:
-        """Get the framework root directory"""
         current_file = Path(__file__)
         return current_file.parent.parent.parent.parent
     
@@ -108,7 +106,6 @@ class ZigInstaller:
         return url
     
     def _get_zig_executable_name(self) -> str:
-        """Get the name of the Zig executable for the current platform"""
         if self.platform_info['system'] == 'windows':
             return 'zig.exe'
         return 'zig'

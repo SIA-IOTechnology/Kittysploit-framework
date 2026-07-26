@@ -73,7 +73,6 @@ class Config:
     _instance = None
     
     def __init__(self, config_file: Optional[str] = None):
-        """Initialize configuration"""
         if config_file is None:
             config_file = self._find_config_file(Path.cwd())
 
@@ -111,7 +110,6 @@ class Config:
         return None
     
     def load_config(self):
-        """Load configuration from file, or use in-memory defaults."""
         if tomllib is None:
             self.config = self._get_default_config()
             self._update_class_attributes()
@@ -161,7 +159,6 @@ class Config:
             print(f"Warning: Could not create default configuration at {config_path}: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration"""
         return {
             'framework': {
                 'version': self.VERSION,
@@ -174,7 +171,6 @@ class Config:
         }
     
     def _update_class_attributes(self):
-        """Update class attributes from loaded config"""
         # Update proxy config
         proxy_config = self.config.get('proxy', {})
         if proxy_config:
@@ -194,11 +190,9 @@ class Config:
             Config.DEFAULT_WORKSPACE = framework['default_workspace']
     
     def get_config(self) -> Dict[str, Any]:
-        """Get full configuration"""
         return self.config
     
     def get_config_value(self, key: str) -> Any:
-        """Get configuration value by key"""
         return self.config.get(key)
     
     def get_config_value_by_path(self, path: str) -> Any:

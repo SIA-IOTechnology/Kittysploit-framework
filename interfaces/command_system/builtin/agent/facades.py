@@ -8,6 +8,10 @@ Public methods mirror the former ``AgentCommand._*`` helpers without the leading
 underscore so tests and callers can depend on stable, purpose-named entry points.
 """
 
+from __future__ import annotations
+
+import time
+
 from interfaces.command_system.builtin.agent.state import AgentState
 
 
@@ -69,6 +73,72 @@ class AgentServices:
         self.report = self.core._report
         self.llm = self.core._llm
 
+    def bootstrap_recon_for_adaptive(self, state: AgentState) -> AgentState:
+        """Run scan/analyze once before the adaptive loop (LangGraph/linear parity)."""
+        phase = str(state.current_phase or "init")
+        if phase in {"reason", "act", "exploit", "report"}:
+            if phase in {"reason", "exploit"}:
+                state.current_phase = "act"
+            return state
+
+        sequence = (
+            ("scan", self.core._node_scan),
+            ("analyze", self.core._node_analyze),
+        )
+        names = [name for name, _fn in sequence]
+        if phase == "analyze":
+            sequence = sequence[1:]
+        elif phase not in {"", "init", "scan"}:
+            return state
+
+        start_index = names.index(phase) if phase in names else 0
+        for name, fn in sequence[start_index:]:
+            state.phase_started_at = time.monotonic()
+            state.current_phase = name
+            self.core._emit_phase_operator_event(state, name)
+            if state.error:
+                return state
+            stop = self.core._phase_stop_reason(state, name)
+            if stop:
+                state.campaign_stop_reason = stop
+                return state
+            state = fn(state)
+            if state.error or state.campaign_stop_reason:
+                return state
+        state.current_phase = "act"
+        return state
+
     def run_agent_flow(self, state: AgentState) -> AgentState:
-        """Run LangGraph workflow or linear fallback (see :meth:`AgentWorkflowCore._run_agent_flow`)."""
-        return self.core._run_agent_flow(state)
+        """Run adaptive loop or LangGraph/linear workflow (see :meth:`AgentWorkflowCore._run_agent_flow`)."""
+        from interfaces.command_system.builtin.agent.adaptive_loop import (
+            AdaptiveLoopEngine,
+            adaptive_loop_enabled,
+        )
+        from interfaces.command_system.builtin.agent.egress_gateway import agent_egress_context
+        from interfaces.command_system.builtin.agent.network_budget import (
+            install_requests_budget_hook,
+            network_budget_context,
+        )
+        from interfaces.command_system.builtin.agent.runtime_policy import runtime_policy_context
+
+        install_requests_budget_hook()
+        store = getattr(state, "run_store", None)
+        if store is not None:
+            self.core._paths = store.paths
+            self.report.set_paths(store.paths)
+            self.core._module_perf.set_paths(store.paths)
+            self.core._module_health.set_paths(store.paths)
+            self.core._module_ctx.set_paths(store.paths)
+        if getattr(state, "module_health", None) is None:
+            state.module_health = self.core._module_health
+
+        with network_budget_context(getattr(state, "network_budget", None)), runtime_policy_context(
+            getattr(state, "runtime_policy", None),
+            getattr(state, "scope_guard", None),
+        ), agent_egress_context(getattr(state, "cancellation_token", None)):
+            if adaptive_loop_enabled(state):
+                state = self.bootstrap_recon_for_adaptive(state)
+                if state.error or state.campaign_stop_reason:
+                    return state
+                return AdaptiveLoopEngine(self).run(state)
+            return self.core._run_agent_flow(state)

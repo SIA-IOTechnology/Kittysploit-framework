@@ -1,0 +1,21 @@
+# -*- mode: ruby -*-
+# Metasploitable3 Windows lab — host-only forwarded ports for KittySploit benchmarks.
+# Requires a locally available box (default: rapid7/metasploitable3-win2k8).
+
+host_bind = ENV.fetch("MS3_HOST_BIND", "127.0.0.1")
+smb_host_port = Integer(ENV.fetch("MS3_SMB_HOST_PORT", "5445"))
+http_host_port = Integer(ENV.fetch("MS3_HTTP_HOST_PORT", "8881"))
+rdp_host_port = Integer(ENV.fetch("MS3_RDP_HOST_PORT", "13389"))
+winrm_host_port = Integer(ENV.fetch("MS3_WINRM_HOST_PORT", "15985"))
+
+Vagrant.configure("2") do |config|
+  config.vm.define "win2k8", primary: true do |win|
+    win.vm.box = ENV.fetch("MS3_WIN_BOX", "rapid7/metasploitable3-win2k8")
+    win.vm.hostname = "ms3-win2k8"
+    win.vm.network "private_network", ip: "172.28.128.3"
+    win.vm.network "forwarded_port", guest: 445, host: smb_host_port, host_ip: host_bind, id: "smb"
+    win.vm.network "forwarded_port", guest: 80, host: http_host_port, host_ip: host_bind, id: "http"
+    win.vm.network "forwarded_port", guest: 3389, host: rdp_host_port, host_ip: host_bind, id: "rdp"
+    win.vm.network "forwarded_port", guest: 5985, host: winrm_host_port, host_ip: host_bind, id: "winrm"
+  end
+end

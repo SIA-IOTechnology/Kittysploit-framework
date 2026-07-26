@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -136,16 +137,38 @@ class AuthContextOperations:
     def auth_context_signature(self, context: Optional[Dict[str, Any]]) -> str:
         if not isinstance(context, dict):
             return ""
+        password = str(context.get("password", "")).strip()
+        if password and not password.startswith("vault:"):
+            password = hashlib.sha256(password.encode("utf-8")).hexdigest()[:12]
         return "|".join([
             str(context.get("username", "")).strip().lower(),
-            str(context.get("password", "")).strip(),
+            password,
             str(context.get("login_path", "")).strip().lower(),
             str(context.get("final_path", "")).strip().lower(),
         ])
 
-    def merge_auth_context(self, knowledge_base: Any, candidate: Optional[Dict[str, Any]]) -> None:
+    def merge_auth_context(
+        self,
+        knowledge_base: Any,
+        candidate: Optional[Dict[str, Any]],
+        *,
+        state: Any = None,
+    ) -> None:
         if not isinstance(knowledge_base, dict) or not isinstance(candidate, dict):
             return
+
+        vault = None
+        if state is not None or isinstance(knowledge_base, dict):
+            from interfaces.command_system.builtin.agent.credential_vault import (
+                get_credential_vault,
+                scrub_plaintext_secrets_in_kb,
+                sync_vault_index_to_kb,
+                vault_sensitive_fields,
+            )
+
+            vault = get_credential_vault(state=state, kb=knowledge_base)
+            candidate = dict(candidate)
+            vault_sensitive_fields(candidate, vault, source=str(candidate.get("source_module") or "auth"))
 
         existing_store = []
         for row in knowledge_base.get("credential_store", []) or []:
@@ -171,6 +194,10 @@ class AuthContextOperations:
         current = knowledge_base.get("active_auth_context", {})
         if self.score_auth_context(merged) >= self.score_auth_context(current):
             knowledge_base["active_auth_context"] = merged
+
+        if vault is not None:
+            scrub_plaintext_secrets_in_kb(knowledge_base, vault)
+            sync_vault_index_to_kb(knowledge_base, vault)
 
     def get_active_auth_context(self, knowledge_base: Any) -> Dict[str, Any]:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
@@ -256,14 +283,25 @@ class AuthContextOperations:
     def seed_http_session_from_auth(
         self, module_instance: Any, state: AgentState, auth_context: Any = None
     ) -> None:
+        from interfaces.command_system.builtin.agent.credential_vault import (
+            get_credential_vault,
+            is_vault_handle,
+        )
+
         context = auth_context if isinstance(auth_context, dict) else self.get_active_auth_context(
             state.knowledge_base
         )
         if not context:
             return
+        vault = get_credential_vault(state=state, kb=state.knowledge_base)
         cookies = context.get("cookies") or {}
         merged_cookies = self.sanitize_cookie_map(cookies)
+        for name, value in list(merged_cookies.items()):
+            if is_vault_handle(value):
+                merged_cookies[name] = str(vault.resolve(value) or "")
         cookie_header = str(context.get("cookie_header") or "").strip()
+        if is_vault_handle(cookie_header):
+            cookie_header = str(vault.resolve(cookie_header) or "")
         has_cookie_jar = bool(
             hasattr(module_instance, "session")
             and getattr(module_instance, "session", None) is not None
@@ -315,7 +353,27 @@ class AuthContextOperations:
             final_path=final_path,
             session_cookie=session_cookie,
         )
-        return compose_auth_option_overrides(ctx)
+        overrides = compose_auth_option_overrides(ctx)
+        from interfaces.command_system.builtin.agent.credential_vault import (
+            get_credential_vault,
+            is_vault_handle,
+            vault_sensitive_fields,
+        )
+
+        vault = get_credential_vault(state)
+        safe_overrides: Dict[str, Any] = {}
+        for key, value in overrides.items():
+            if is_vault_handle(value):
+                safe_overrides[key] = value
+            elif str(key).lower() in {"password", "pass", "passwd", "token", "cookie", "session_cookie"}:
+                safe_overrides[key] = vault.store(value, kind=str(key).lower(), source=module_path)
+            else:
+                safe_overrides[key] = value
+        if isinstance(safe_overrides.get("cookies"), dict):
+            nested = dict(safe_overrides["cookies"])
+            vault_sensitive_fields({"cookies": nested}, vault, source=module_path)
+            safe_overrides["cookies"] = nested
+        return safe_overrides
 
     def select_best_login_path(self, knowledge_base: Any) -> str:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}

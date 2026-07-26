@@ -5,6 +5,7 @@ class Module(Post):
 	__info__ = {
 		"name": "Collect PHP and webserver extension list",
 		"description": "Collect PHP and webserver extension list",
+		"session_type": SessionType.PHP,
 		"arch": Arch.PHP,
 	'agent': {
 	    'risk': 'intrusive',

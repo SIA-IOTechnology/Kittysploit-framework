@@ -43,7 +43,6 @@ class RedisShell(BaseShell):
         self._initialize_redis_connection()
 
     def _initialize_redis_connection(self):
-        """Initialize Redis connection from session/listener"""
         try:
             if not self.framework:
                 return
@@ -94,7 +93,6 @@ class RedisShell(BaseShell):
         return self._redis_execute(command)
 
     def _redis_execute(self, command: str) -> Dict[str, Any]:
-        """Execute raw Redis command via execute_command"""
         if not self.connection:
             return {'output': '', 'status': 1, 'error': 'Redis connection not available'}
         try:

@@ -59,8 +59,8 @@ class WorkspaceIntelStore:
         name: Optional[str] = None,
         state: str = "open",
         source: str = "",
+        hostname: Optional[str] = None,
     ) -> bool:
-        """Attach an open port to a host in the current workspace."""
         if not host_address or not port:
             return False
         session = self._db_session()
@@ -87,6 +87,15 @@ class WorkspaceIntelStore:
 
             host.status = "up"
             host.updated_at = datetime.utcnow()
+            # Keep DNS name when scanning via domain (don't overwrite with empty)
+            if hostname and str(hostname).strip():
+                hn = str(hostname).strip()
+                if not host.hostname:
+                    host.hostname = hn
+                elif host.hostname.lower() != hn.lower() and host.address != hn:
+                    # Prefer FQDN over short labels when longer
+                    if len(hn) > len(host.hostname or ""):
+                        host.hostname = hn
 
             svc_name = name or ICS_SERVICE_NAMES.get(int(port)) or TCP_SERVICE_NAMES.get(int(port), f"tcp-{port}")
             service = (
@@ -124,14 +133,26 @@ class WorkspaceIntelStore:
         results: Dict[str, Dict[int, str]],
         *,
         source: str = "portscan",
+        hostnames: Optional[Dict[str, str]] = None,
     ) -> int:
-        """Persist all open ports from a {host: {port: state}} scan result."""
+        """Persist all open ports from a {host: {port: state}} scan result.
+
+        hostnames: optional map {ip: original_domain} so Domain↔IP stays linked on the map.
+        """
         saved = 0
+        hostnames = hostnames or {}
         for host_address, ports in (results or {}).items():
+            hostname = hostnames.get(host_address)
             for port, state in (ports or {}).items():
                 if state != "open":
                     continue
-                if self.record_open_port(host_address, int(port), state="open", source=source):
+                if self.record_open_port(
+                    host_address,
+                    int(port),
+                    state="open",
+                    source=source,
+                    hostname=hostname,
+                ):
                     saved += 1
         return saved
 

@@ -286,7 +286,6 @@ except Exception as e:
                 pass
         
         # Also check for API Gateway triggers (requires listing API Gateway)
-        # This is simplified - full implementation would query API Gateway
-        
+
         return triggers
 

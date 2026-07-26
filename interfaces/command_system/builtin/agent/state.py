@@ -81,12 +81,17 @@ class AgentState:
     decision_source: str = "heuristic"
     knowledge_base: Dict[str, Any] = field(default_factory=dict)
     new_sessions: List[Any] = field(default_factory=list)
+    verified_sessions: List[Any] = field(default_factory=list)
     sessions_before: Dict[str, Set[str]] = field(default_factory=_default_sessions_before)
     report_path: Optional[str] = None
     error: Optional[str] = None
     metrics: AgentMetrics = field(default_factory=AgentMetrics)
     history_scores: Dict[str, Any] = field(default_factory=dict)
     host_profile: Dict[str, Any] = field(default_factory=dict)
+    active_host_id: str = ""
+    active_service_id: str = ""
+    post_exploit_mission: Dict[str, Any] = field(default_factory=dict)
+    credential_vault: Any = None
     campaign_stop_reason: Optional[str] = None
     scan_specializations: List[str] = field(default_factory=list)
     scan_tech_hints: List[str] = field(default_factory=list)
@@ -119,6 +124,12 @@ class AgentState:
     completed_phases: List[str] = field(default_factory=list)
     replan_count: int = 0
     replan_pending: bool = False
+    adaptive_loop_enabled: bool = False
+    hierarchical_planner_enabled: bool = False
+    shadow_mode_enabled: bool = False
+    specialist_sequential_enabled: bool = False
+    specialist_parallel_enabled: bool = False
+    adaptive_loop: Any = None
 
 
 def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
@@ -161,6 +172,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "decision_source": state.decision_source,
         "knowledge_base": state.knowledge_base,
         "new_sessions": state.new_sessions,
+        "verified_sessions": state.verified_sessions,
         "sessions_before": {
             "standard": set(state.sessions_before.get("standard", set())),
             "browser": set(state.sessions_before.get("browser", set())),
@@ -179,6 +191,9 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         },
         "history_scores": state.history_scores,
         "host_profile": state.host_profile,
+        "active_host_id": state.active_host_id,
+        "active_service_id": state.active_service_id,
+        "post_exploit_mission": state.post_exploit_mission,
         "campaign_stop_reason": state.campaign_stop_reason,
         "scan_specializations": state.scan_specializations,
         "scan_tech_hints": state.scan_tech_hints,
@@ -211,6 +226,11 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "completed_phases": list(state.completed_phases),
         "replan_count": state.replan_count,
         "replan_pending": state.replan_pending,
+        "adaptive_loop_enabled": state.adaptive_loop_enabled,
+        "hierarchical_planner_enabled": state.hierarchical_planner_enabled,
+        "shadow_mode_enabled": state.shadow_mode_enabled,
+        "specialist_sequential_enabled": state.specialist_sequential_enabled,
+        "specialist_parallel_enabled": state.specialist_parallel_enabled,
     }
 
 
@@ -286,12 +306,16 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         decision_source=str(d.get("decision_source", "heuristic")),
         knowledge_base=dict(d.get("knowledge_base") or {}),
         new_sessions=list(d.get("new_sessions") or []),
+        verified_sessions=list(d.get("verified_sessions") or []),
         sessions_before=sessions_before,
         report_path=d.get("report_path"),
         error=d.get("error"),
         metrics=metrics,
         history_scores=dict(d.get("history_scores") or {}),
         host_profile=dict(d.get("host_profile") or {}),
+        active_host_id=str(d.get("active_host_id") or ""),
+        active_service_id=str(d.get("active_service_id") or ""),
+        post_exploit_mission=dict(d.get("post_exploit_mission") or {}),
         campaign_stop_reason=d.get("campaign_stop_reason"),
         scan_specializations=list(d.get("scan_specializations") or []),
         scan_tech_hints=list(d.get("scan_tech_hints") or []),
@@ -324,6 +348,11 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         completed_phases=list(d.get("completed_phases") or []),
         replan_count=int(d.get("replan_count", 0) or 0),
         replan_pending=bool(d.get("replan_pending", False)),
+        adaptive_loop_enabled=bool(d.get("adaptive_loop_enabled", False)),
+        hierarchical_planner_enabled=bool(d.get("hierarchical_planner_enabled", False)),
+        shadow_mode_enabled=bool(d.get("shadow_mode_enabled", False)),
+        specialist_sequential_enabled=bool(d.get("specialist_sequential_enabled", False)),
+        specialist_parallel_enabled=bool(d.get("specialist_parallel_enabled", False)),
     )
 
 

@@ -47,7 +47,6 @@ class WorkflowStep:
         return False
     
     def to_dict(self):
-        """Convert the step to a dictionary"""
         data = {
             "module_path": self.module_path,
             "options": self.options,
@@ -68,7 +67,6 @@ class WorkflowStep:
     
     @classmethod
     def from_dict(cls, data):
-        """Create a step from a dictionary"""
         step = cls(
             module_path=data["module_path"],
             options=data.get("options", {}),
@@ -186,7 +184,6 @@ class Workflow(BaseModule):
         self.results = {}  # Results of the steps executed
     
     def add_step(self, step):
-        """Add a step to the workflow"""
         self.steps[step.name] = step
         
         # If it's the first step, define it as the start step
@@ -194,18 +191,15 @@ class Workflow(BaseModule):
             self.start_step = step.name
     
     def set_start_step(self, step_name):
-        """Define the start step"""
         if step_name in self.steps:
             self.start_step = step_name
         else:
             raise ValueError(f"The step {step_name} does not exist in this workflow")
     
     def run(self):
-        """Execute the workflow"""
         raise NotImplementedError("Workflows must implement the run() method")
 
     def _exploit(self):
-        """Execute the workflow"""
         # Call run() to build the workflow steps (if implemented)
         self.run()
         
@@ -324,7 +318,6 @@ class Workflow(BaseModule):
             restore_module_context(self.framework, previous_module)
     
     def save(self, filename):
-        """Save the workflow to a JSON file"""
         data = {
             "name": self.name,
             "description": self.description,
@@ -344,7 +337,6 @@ class Workflow(BaseModule):
     
     @classmethod
     def load(cls, filename, framework=None):
-        """Load a workflow from a JSON file"""
         try:
             with open(filename, 'r') as f:
                 data = json.load(f)

@@ -300,7 +300,6 @@ def build_scored_password_candidates(
     *,
     count: int = 20,
 ) -> List[Dict[str, Any]]:
-    """Build ranked password suggestions from persona / company intel."""
     count = max(1, min(50, int(count or 20)))
     scored: List[Tuple[str, int, str]] = []
     years = _year_variants()
@@ -472,7 +471,6 @@ def harvest_password_candidates_from_results(
     root_domain: str = "",
     count: int = 32,
 ) -> List[str]:
-    """Merge persona module JSON outputs with generated password candidates."""
     extracted: List[str] = []
     for row in results or []:
         if not isinstance(row, dict):

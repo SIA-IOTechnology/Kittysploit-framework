@@ -93,7 +93,6 @@ class SimpleCollaborationServer:
         self._server_thread = None
     
     def start(self):
-        """Start the collaboration server"""
         try:
             # Create server socket
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -120,7 +119,6 @@ class SimpleCollaborationServer:
             self.is_running = False
     
     def stop(self):
-        """Stop the collaboration server"""
         self.is_running = False
         
         # Close all client connections
@@ -143,7 +141,6 @@ class SimpleCollaborationServer:
             print_info("Collaboration server stopped")
     
     def _server_loop(self):
-        """Main server loop"""
         while self.is_running:
             try:
                 # Wait for connections
@@ -162,7 +159,6 @@ class SimpleCollaborationServer:
                 break
     
     def _handle_new_client(self, client_socket, address):
-        """Handle new client connection"""
         try:
             # Receive initial data (may be larger than 1024 bytes)
             request = self._recv_json_blocking(client_socket)
@@ -207,7 +203,6 @@ class SimpleCollaborationServer:
             # Get chat history for this workspace
             workspace_chat_history = []
             for msg in self.chat_messages:
-                # For now, send all messages (in a real implementation, you might want to filter by workspace)
                 workspace_chat_history.append(msg.to_dict())
             
             # Get workspace data for this workspace
@@ -294,7 +289,6 @@ class SimpleCollaborationServer:
                     print_info(f"Client {client.username} disconnected")
     
     def _handle_client_message(self, client: CollaborationClient, message: Dict):
-        """Handle message from client"""
         message_type = message.get('type', 'unknown')
         
         if message_type == 'chat_message':
@@ -365,7 +359,6 @@ class SimpleCollaborationServer:
                     print_error(f"Failed to send chat history to {client.username}: {e}")
     
     def _broadcast_message(self, message: Dict, workspace: str = None, exclude_client: str = None):
-        """Broadcast message to clients"""
         with self._lock:
             if self.verbose:
                 print_info(f"Broadcasting to {len(self.clients)} clients (workspace: {workspace}, exclude: {exclude_client})")
@@ -396,12 +389,10 @@ class SimpleCollaborationServer:
                 print_info(f"Message broadcasted to {sent_count} clients")
     
     def _send_json(self, sock, payload: Dict) -> None:
-        """Send a JSON payload terminated with a newline."""
         data = (json.dumps(payload) + '\n').encode('utf-8')
         sock.sendall(data)
     
     def _recv_json_blocking(self, sock, timeout: float = 5.0) -> Optional[Dict]:
-        """Receive a newline-delimited JSON payload."""
         previous_timeout = sock.gettimeout()
         buffer = ''
         try:
@@ -424,7 +415,6 @@ class SimpleCollaborationServer:
             sock.settimeout(previous_timeout)
     
     def _extract_messages_from_buffer(self, client: CollaborationClient) -> List[Dict]:
-        """Return complete JSON messages from a client's buffer."""
         messages = []
         while '\n' in client.recv_buffer:
             line, remainder = client.recv_buffer.split('\n', 1)
@@ -439,7 +429,6 @@ class SimpleCollaborationServer:
         return messages
     
     def get_status(self) -> Dict:
-        """Get server status"""
         with self._lock:
             return {
                 'is_running': self.is_running,
@@ -452,12 +441,10 @@ class SimpleCollaborationServer:
             }
     
     def get_clients(self) -> List[Dict]:
-        """Get connected clients"""
         with self._lock:
             return [client.to_dict() for client in self.clients.values()]
     
     def get_chat_history(self, limit: int = 50) -> List[Dict]:
-        """Get chat message history"""
         with self._lock:
             return [msg.to_dict() for msg in self.chat_messages[-limit:]]
     

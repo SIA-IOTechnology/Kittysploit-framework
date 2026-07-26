@@ -4,581 +4,129 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KittySploit | Session Hub</title>
+    <title>KittySploit | Sessions</title>
     <link rel="icon" type="image/x-icon" href="/static/img/favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.js"></script>
-    <style>
-        body {
-            background: #0a0a0f;
-            background-image:
-                linear-gradient(rgba(0, 255, 255, 0.02) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 255, 255, 0.02) 1px, transparent 1px);
-            background-size: 40px 40px;
-            color: #fff;
-            font-family: 'Segoe UI', sans-serif;
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 60px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid rgba(0, 255, 255, 0.1);
-        }
-
-        .header-title h1 {
-            font-size: 28px;
-            color: #fff;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 5px;
-        }
-
-        .header-title h1 i {
-            color: #00ffff;
-            margin-right: 10px;
-        }
-
-        .user-badge {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 10px 20px;
-            border-radius: 30px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .user-avatar {
-            width: 35px;
-            height: 35px;
-            background: linear-gradient(45deg, #00ffff, #00ccff);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #000;
-            font-weight: bold;
-        }
-
-        .actions-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-        }
-
-        .btn-create {
-            background: rgba(0, 255, 255, 0.1);
-            color: #00ffff;
-            border: 1px solid #00ffff;
-            padding: 12px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .btn-create:hover {
-            background: #00ffff;
-            color: #000;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
-        }
-
-        .btn-join {
-            background: rgba(0, 255, 157, 0.1);
-            color: #00ff9d;
-            border: 1px solid #00ff9d;
-            padding: 12px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .btn-join:hover {
-            background: #00ff9d;
-            color: #000;
-            box-shadow: 0 0 20px rgba(0, 255, 157, 0.3);
-        }
-
-        .rooms-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 25px;
-        }
-
-        .room-card {
-            background: rgba(20, 20, 30, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 25px;
-            cursor: pointer;
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .room-card:hover {
-            transform: translateY(-5px);
-            border-color: #00ffff;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-
-        .room-card.public::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: #00ff9d;
-        }
-
-        .room-card.private::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: #ff0055;
-        }
-
-        .room-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 20px;
-        }
-
-        .room-id {
-            font-family: 'Consolas', monospace;
-            font-size: 18px;
-            color: #fff;
-            font-weight: bold;
-        }
-
-        .room-type {
-            font-size: 10px;
-            text-transform: uppercase;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            letter-spacing: 1px;
-        }
-
-        .room-type.public {
-            background: rgba(0, 255, 157, 0.1);
-            color: #00ff9d;
-        }
-
-        .room-type.private {
-            background: rgba(255, 0, 85, 0.1);
-            color: #ff0055;
-        }
-
-        .room-details {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .detail-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 13px;
-        }
-
-        .detail-item i {
-            width: 16px;
-            text-align: center;
-        }
-
-        .empty-state {
-            grid-column: 1 / -1;
-            text-align: center;
-            padding: 60px;
-            color: rgba(255, 255, 255, 0.3);
-        }
-
-        .empty-state i {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-
-        /* Modal Styles */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal-container {
-            background: rgba(20, 20, 30, 0.95);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(0, 255, 255, 0.2);
-            border-radius: 12px;
-            width: 90%;
-            max-width: 500px;
-            max-height: 80vh;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 10px 40px rgba(0, 255, 255, 0.3);
-        }
-
-        .modal-header {
-            padding: 20px 25px;
-            border-bottom: 1px solid rgba(0, 255, 255, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .modal-header h3 {
-            margin: 0;
-            color: #00ffff;
-            font-size: 20px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        .icon-btn {
-            background: none;
-            border: none;
-            color: rgba(255, 255, 255, 0.6);
-            padding: 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 18px;
-        }
-
-        .icon-btn:hover {
-            color: #ff0055;
-            background: rgba(255, 0, 85, 0.1);
-        }
-
-        .modal-body {
-            padding: 25px;
-            overflow-y: auto;
-            flex: 1;
-        }
-
-        .modal-footer {
-            padding: 20px 25px;
-            border-top: 1px solid rgba(0, 255, 255, 0.1);
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: rgba(255, 255, 255, 0.8);
-            font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: bold;
-        }
-
-        .form-group input[type="text"],
-        .form-group textarea {
-            width: 100%;
-            padding: 12px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(0, 255, 255, 0.2);
-            border-radius: 6px;
-            color: #fff;
-            font-family: inherit;
-            font-size: 14px;
-            transition: all 0.2s;
-            box-sizing: border-box;
-        }
-
-        .form-group input[type="text"]:focus,
-        .form-group textarea:focus {
-            outline: none;
-            border-color: #00ffff;
-            box-shadow: 0 0 10px rgba(0, 255, 255, 0.2);
-        }
-
-        .form-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-
-        .radio-group {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-
-        .radio-option {
-            position: relative;
-            cursor: pointer;
-        }
-
-        .radio-option input[type="radio"] {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
-        }
-
-        .option-card {
-            display: flex;
-            align-items: center;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(0, 255, 255, 0.2);
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            min-height: 80px;
-        }
-
-        .radio-option:hover .option-card {
-            background: rgba(0, 255, 255, 0.1);
-            border-color: rgba(0, 255, 255, 0.4);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 255, 255, 0.2);
-        }
-
-        .radio-option input[type="radio"]:checked + .option-card {
-            background: rgba(0, 255, 255, 0.15);
-            border-color: #00ffff;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
-        }
-
-        .public-option input[type="radio"]:checked + .option-card {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(0, 255, 255, 0.05));
-            border-color: #00ffff;
-        }
-
-        .private-option input[type="radio"]:checked + .option-card {
-            background: linear-gradient(135deg, rgba(255, 0, 85, 0.15), rgba(255, 0, 85, 0.05));
-            border-color: #ff0055;
-        }
-
-        .option-icon {
-            width: 50px;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0, 255, 255, 0.1);
-            border-radius: 10px;
-            margin-right: 15px;
-            flex-shrink: 0;
-        }
-
-        .option-icon i {
-            font-size: 24px;
-            color: #00ffff;
-        }
-
-        .private-option .option-icon {
-            background: rgba(255, 0, 85, 0.1);
-        }
-
-        .private-option .option-icon i {
-            color: #ff0055;
-        }
-
-        .option-content {
-            flex: 1;
-        }
-
-        .option-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #fff;
-            margin-bottom: 4px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .option-description {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.6);
-        }
-
-        .option-check {
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .radio-option input[type="radio"]:checked + .option-card .option-check {
-            opacity: 1;
-        }
-
-        .option-check i {
-            color: #00ffff;
-            font-size: 20px;
-        }
-
-        .private-option input[type="radio"]:checked + .option-card .option-check i {
-            color: #ff0055;
-        }
-
-        .action-btn {
-            padding: 10px 20px;
-            background: rgba(0, 255, 255, 0.1);
-            border: 1px solid #00ffff;
-            color: #00ffff;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: bold;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: all 0.3s;
-            letter-spacing: 0.5px;
-        }
-
-        .action-btn:hover {
-            background: #00ffff;
-            color: #000;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
-        }
-
-        .saved-session-item {
-            padding: 10px;
-            margin-bottom: 8px;
-            background: rgba(0, 0, 0, 0.2);
-            border: 1px solid rgba(0, 255, 255, 0.1);
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .saved-session-item:hover {
-            background: rgba(0, 255, 255, 0.05);
-            border-color: rgba(0, 255, 255, 0.3);
-        }
-
-        .saved-session-info {
-            flex: 1;
-        }
-
-        .saved-session-id {
-            font-family: 'Consolas', monospace;
-            color: #00ffff;
-            font-weight: bold;
-            font-size: 14px;
-        }
-
-        .saved-session-description {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-top: 4px;
-        }
-
-        .saved-session-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .saved-session-btn {
-            padding: 6px 12px;
-            background: rgba(0, 255, 255, 0.1);
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            color: #00ffff;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            transition: all 0.2s;
-        }
-
-        .saved-session-btn:hover {
-            background: rgba(0, 255, 255, 0.2);
-        }
-
-        .saved-session-btn.delete {
-            color: #ff0055;
-            border-color: rgba(255, 0, 85, 0.3);
-        }
-
-        .saved-session-btn.delete:hover {
-            background: rgba(255, 0, 85, 0.1);
-        }
-
-        .form-group input[type="checkbox"] {
-            width: auto;
-            margin-right: 8px;
-            cursor: pointer;
-        }
-    </style>
 </head>
 
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="header-title">
-                <h1><i class="fas fa-network-wired"></i> Session Hub</h1>
+    <div class="app-shell">
+        <aside class="nav-sidebar">
+            <div class="nav-brand">
+                <img src="/static/img/logo.png" alt="KittySploit" onerror="this.style.display='none'">
+                <span>KittySploit</span>
             </div>
-            <div class="user-badge">
-                <div class="user-avatar" id="userAvatar"></div>
-                <div class="user-name" id="userName">Loading...</div>
-                <i class="fas fa-sign-out-alt" style="cursor: pointer; color: #ff0055;" onclick="logout()"></i>
-            </div>
-        </div>
-
-        <div class="actions-bar">
-            <h2 style="font-size: 18px; color: rgba(255,255,255,0.7);">Active Sessions</h2>
-            <div style="display: flex; gap: 15px;">
-                <button class="btn-create" onclick="createRoom()">
-                    <i class="fas fa-plus"></i> Initialize New Session
-                </button>
-                <button class="btn-join" onclick="showJoinRoomModal()">
-                    <i class="fas fa-sign-in-alt"></i> Join Session
+            <nav class="nav-menu">
+                <a class="nav-item active" href="/rooms">
+                    <i class="fas fa-layer-group"></i>
+                    <span class="nav-label">Sessions</span>
+                    <span class="nav-badge" id="navSessionCount">0</span>
+                </a>
+            </nav>
+            <div class="nav-footer">
+                <button class="nav-item" type="button" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span class="nav-label">Sign out</span>
                 </button>
             </div>
-        </div>
+        </aside>
 
-        <div id="roomsContainer" class="rooms-grid">
-            <div class="empty-state">
-                <i class="fas fa-circle-notch fa-spin"></i>
-                <p>Scanning network for active sessions...</p>
+        <div class="shell-main">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <div class="breadcrumb">
+                        <span>KittyCollab</span>
+                        <span class="sep">/</span>
+                        <strong>Sessions</strong>
+                    </div>
+                </div>
+                <div class="topbar-center">
+                    <span class="status-pill"><span class="dot"></span> Live</span>
+                </div>
+                <div class="topbar-right">
+                    <div class="user-chip">
+                        <span class="name" id="userName">…</span>
+                        <div class="user-avatar" id="userAvatar"></div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="workspace sessions-layout">
+                <div class="sessions-list-pane">
+                    <div class="pane-header">
+                        <h2>Sessions</h2>
+                        <div class="pane-actions">
+                            <button class="btn-secondary btn-sm" type="button" onclick="showJoinRoomModal()" title="Join session">
+                                <i class="fas fa-sign-in-alt"></i>
+                            </button>
+                            <button class="btn-primary btn-sm" type="button" onclick="createRoom()">
+                                <i class="fas fa-plus"></i> New
+                            </button>
+                        </div>
+                    </div>
+                    <div id="roomsContainer" class="sessions-scroll">
+                        <div class="empty-state">
+                            <i class="fas fa-circle-notch fa-spin"></i>
+                            <p>Loading sessions…</p>
+                        </div>
+                    </div>
+                    <div class="pane-footer" id="sessionsFooter">0 sessions</div>
+                </div>
+
+                <div class="sessions-detail-pane">
+                    <div class="detail-empty" id="detailEmpty">
+                        <i class="fas fa-comments"></i>
+                        <h3>Select a session</h3>
+                        <p>Choose a session from the list, or create a new collaborative workspace.</p>
+                        <div class="detail-actions">
+                            <button class="btn-primary btn-sm" type="button" onclick="createRoom()">
+                                <i class="fas fa-plus"></i> New session
+                            </button>
+                            <button class="btn-secondary btn-sm" type="button" onclick="showJoinRoomModal()">
+                                <i class="fas fa-sign-in-alt"></i> Join
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="detail-content" id="detailContent">
+                        <div class="detail-hero">
+                            <div class="severity-badge" id="detailTypeBadge">PUBLIC</div>
+                            <h1 id="detailTitle">Session</h1>
+                            <p class="hero-desc" id="detailDescription">No description</p>
+                        </div>
+                        <div class="meta-row">
+                            <div class="meta-cell">
+                                <div class="label">Host</div>
+                                <div class="value" id="detailHost">—</div>
+                            </div>
+                            <div class="meta-cell">
+                                <div class="label">Members</div>
+                                <div class="value" id="detailMembers">—</div>
+                            </div>
+                            <div class="meta-cell">
+                                <div class="label">Created</div>
+                                <div class="value" id="detailCreated">—</div>
+                            </div>
+                            <div class="meta-cell">
+                                <div class="label">Session ID</div>
+                                <div class="value" id="detailId" style="font-family:var(--mono);font-size:12px;">—</div>
+                            </div>
+                        </div>
+                        <div class="detail-body">
+                            <div class="detail-card">
+                                <h4>Workspace</h4>
+                                <p>Open the collaborative editor to share modules, files, chat, and notes with your team.</p>
+                            </div>
+                        </div>
+                        <div class="detail-cta">
+                            <button class="btn-primary btn-sm" type="button" id="openSessionBtn">
+                                <i class="fas fa-arrow-right"></i> Open session
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -587,55 +135,47 @@
     <div class="modal-overlay" id="createRoomModal" onclick="if(event.target === this) closeCreateRoomModal()">
         <div class="modal-container">
             <div class="modal-header">
-                <h3>Initialize New Session</h3>
-                <button class="icon-btn" onclick="closeCreateRoomModal()">
+                <h3>New session</h3>
+                <button class="icon-btn" type="button" onclick="closeCreateRoomModal()">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
                     <label>Description</label>
-                    <textarea id="roomDescriptionInput" rows="3" placeholder="Enter session description..."></textarea>
+                    <textarea id="roomDescriptionInput" rows="3" placeholder="What is this session about?"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Session Type</label>
+                    <label>Visibility</label>
                     <div class="radio-group">
                         <label class="radio-option public-option">
                             <input type="radio" name="roomType" value="public" checked>
                             <div class="option-card">
-                                <div class="option-icon">
-                                    <i class="fas fa-globe"></i>
-                                </div>
+                                <div class="option-icon"><i class="fas fa-globe"></i></div>
                                 <div class="option-content">
                                     <div class="option-title">Public</div>
-                                    <div class="option-description">Visible to all</div>
+                                    <div class="option-description">Visible to everyone</div>
                                 </div>
-                                <div class="option-check">
-                                    <i class="fas fa-check-circle"></i>
-                                </div>
+                                <div class="option-check"><i class="fas fa-check-circle"></i></div>
                             </div>
                         </label>
                         <label class="radio-option private-option">
                             <input type="radio" name="roomType" value="private">
                             <div class="option-card">
-                                <div class="option-icon">
-                                    <i class="fas fa-lock"></i>
-                                </div>
+                                <div class="option-icon"><i class="fas fa-lock"></i></div>
                                 <div class="option-content">
                                     <div class="option-title">Private</div>
-                                    <div class="option-description">Access restricted</div>
+                                    <div class="option-description">Invite only</div>
                                 </div>
-                                <div class="option-check">
-                                    <i class="fas fa-check-circle"></i>
-                                </div>
+                                <div class="option-check"><i class="fas fa-check-circle"></i></div>
                             </div>
                         </label>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="action-btn" onclick="closeCreateRoomModal()">Cancel</button>
-                <button class="action-btn" onclick="submitCreateRoom()">Create Session</button>
+                <button class="btn-secondary btn-sm" type="button" onclick="closeCreateRoomModal()">Cancel</button>
+                <button class="btn-primary btn-sm" type="button" onclick="submitCreateRoom()">Create session</button>
             </div>
         </div>
     </div>
@@ -644,68 +184,65 @@
     <div class="modal-overlay" id="joinRoomModal" onclick="if(event.target === this) closeJoinRoomModal()">
         <div class="modal-container">
             <div class="modal-header">
-                <h3>Join Session</h3>
-                <button class="icon-btn" onclick="closeJoinRoomModal()">
+                <h3>Join session</h3>
+                <button class="icon-btn" type="button" onclick="closeJoinRoomModal()">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
                     <label>Session ID</label>
-                    <input type="text" id="joinRoomIdInput" placeholder="Enter session ID (e.g., abc12345)" style="font-family: 'Consolas', monospace;">
+                    <input type="text" id="joinRoomIdInput" placeholder="e.g. abc12345" style="font-family: var(--mono);">
                 </div>
                 <div class="form-group" id="joinTokenGroup" style="display: none;">
-                    <label>Access Token</label>
-                    <input type="text" id="joinTokenInput" placeholder="Enter access token">
+                    <label>Access token</label>
+                    <input type="text" id="joinTokenInput" placeholder="Required for private sessions">
                 </div>
                 <div class="form-group">
-                    <label>
+                    <label style="display:flex;align-items:center;font-weight:500;text-transform:none;">
                         <input type="checkbox" id="saveSessionCheckbox" checked>
-                        <span style="margin-left: 8px;">Save session for quick access</span>
+                        Save for quick access
                     </label>
                 </div>
-                <div class="form-group" id="savedSessionsGroup" style="margin-top: 20px;">
-                    <label>Saved Sessions</label>
-                    <div id="savedSessionsList" style="max-height: 200px; overflow-y: auto;">
-                        <!-- Saved sessions will be loaded here -->
-                    </div>
+                <div class="form-group" id="savedSessionsGroup">
+                    <label>Saved sessions</label>
+                    <div id="savedSessionsList" style="max-height: 200px; overflow-y: auto;"></div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="action-btn" onclick="closeJoinRoomModal()">Cancel</button>
-                <button class="action-btn" onclick="submitJoinRoom()">Join Session</button>
+                <button class="btn-secondary btn-sm" type="button" onclick="closeJoinRoomModal()">Cancel</button>
+                <button class="btn-primary btn-sm" type="button" onclick="submitJoinRoom()">Join session</button>
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration de l'URL du serveur (peut être définie depuis le serveur ou sessionStorage)
         window.KITTYCOLLAB_SERVER_URL = "{{ server_url|default('') }}";
-        // Utiliser l'URL sauvegardée dans sessionStorage si disponible
         if (!window.KITTYCOLLAB_SERVER_URL) {
             window.KITTYCOLLAB_SERVER_URL = sessionStorage.getItem('server_url');
         }
-        // Utiliser l'URL du serveur distant si configurée, sinon utiliser l'origine locale
-        // Pour Socket.IO, utiliser toujours l'origine locale qui fera le proxy vers le SaaS
-        const SERVER_URL = window.location.origin; // Utiliser le serveur local pour éviter CORS
+        const SERVER_URL = window.location.origin;
         const SAAS_URL = window.KITTYCOLLAB_SERVER_URL || "https://collab.kittysploit.com";
         const SERVER_TOKEN = "{{ api_token|default('') }}";
         const TOKEN_VALUE = SERVER_TOKEN.trim();
         if (TOKEN_VALUE) {
             sessionStorage.setItem('token', TOKEN_VALUE);
         }
+
         let socket = null;
         let currentUsername = '';
         let currentToken = '';
         let cachedRooms = [];
+        let selectedRoomId = null;
         let loadRoomsTimeout = null;
         let isLoadingRooms = false;
         let loadRoomsAttempts = 0;
-        let maxLoadRoomsAttempts = 5; // Limiter à 5 tentatives
+        let maxLoadRoomsAttempts = 5;
         let roomListUpdatedListener = null;
-        let hasLoadedRoomsOnce = false; // Pour savoir si on a déjà chargé les rooms une fois
-        let socketConnected = false; // État de connexion Socket.IO (accessible globalement)
-        let useSocketIO = true; // Indicateur pour savoir si on doit utiliser Socket.IO (accessible globalement)
+        let hasLoadedRoomsOnce = false;
+        let socketConnected = false;
+        let useSocketIO = true;
+        let pollingInterval = null;
 
         window.addEventListener('load', function () {
             currentUsername = sessionStorage.getItem('username');
@@ -718,285 +255,290 @@
 
             document.getElementById('userName').textContent = currentUsername;
             document.getElementById('userAvatar').textContent = currentUsername.charAt(0).toUpperCase();
+            document.getElementById('openSessionBtn').addEventListener('click', function () {
+                if (selectedRoomId) joinRoom(selectedRoomId);
+            });
 
-            // Essayer Socket.IO mais avec gestion d'erreur CORS
-            
-            function tryConnectSocketIO() {
-                if (!useSocketIO) {
-                    console.log('Socket.IO disabled due to CORS, using HTTP polling instead');
-                    // Charger les rooms via HTTP
-                    loadRooms();
-                    // Mettre en place un polling périodique pour les mises à jour
-                    startPolling();
-                    return;
-                }
-                
-                // Ne pas essayer de se connecter si on a déjà échoué
-                if (socket && !socketConnected) {
-                    console.log('Socket.IO already failed, skipping connection attempt');
-                    useSocketIO = false;
-                    loadRooms();
-                    startPolling();
-                    return;
-                }
-                
-                socket = io(SAAS_URL, {
-                    reconnection: false, // Désactiver la reconnexion automatique pour éviter les boucles
-                    reconnectionAttempts: 0, // Pas de tentatives de reconnexion
-                    timeout: 5000, // Timeout plus court pour détecter rapidement les erreurs
-                    transports: ['websocket'], // Utiliser uniquement WebSocket (le serveur n'autorise que WebSocket)
-                    upgrade: false,
-                    forceNew: true // Forcer une nouvelle connexion
-                });
+            tryConnectSocketIO();
+            loadSavedSessions();
+        });
 
-                socket.on('connect', function () {
-                    console.log('Socket.IO connected successfully');
-                    socketConnected = true;
-                    // Charger les rooms une seule fois au démarrage
-                    loadRooms();
-                    // Écouter les mises à jour mais avec debounce et limite pour éviter les scans en boucle
-                    if (roomListUpdatedListener) {
+        function tryConnectSocketIO() {
+            if (!useSocketIO) {
+                loadRooms();
+                startPolling();
+                return;
+            }
+
+            if (socket && !socketConnected) {
+                useSocketIO = false;
+                loadRooms();
+                startPolling();
+                return;
+            }
+
+            socket = io(SAAS_URL, {
+                reconnection: false,
+                reconnectionAttempts: 0,
+                timeout: 5000,
+                transports: ['websocket'],
+                upgrade: false,
+                forceNew: true
+            });
+
+            socket.on('connect', function () {
+                socketConnected = true;
+                loadRooms();
+                if (roomListUpdatedListener) {
+                    socket.off('room_list_updated', roomListUpdatedListener);
+                }
+                roomListUpdatedListener = function () {
+                    if (loadRoomsAttempts >= maxLoadRoomsAttempts) {
                         socket.off('room_list_updated', roomListUpdatedListener);
+                        return;
                     }
-                    roomListUpdatedListener = function() {
-                        // Ne pas écouter les mises à jour si on a déjà fait trop de tentatives
-                        if (loadRoomsAttempts >= maxLoadRoomsAttempts) {
-                            console.warn('Too many room_list_updated events, ignoring to prevent loop');
-                            socket.off('room_list_updated', roomListUpdatedListener);
-                            return;
-                        }
-                        
-                        if (loadRoomsTimeout) {
-                            clearTimeout(loadRoomsTimeout);
-                        }
-                        // Debounce de 5 secondes pour éviter les scans en boucle (augmenté pour load balancer)
-                        loadRoomsTimeout = setTimeout(function() {
-                            if (!isLoadingRooms && hasLoadedRoomsOnce) {
-                                // Ne recharger que si on a déjà chargé une fois (évite les appels initiaux multiples)
-                                loadRooms();
-                            }
-                        }, 5000);
-                    };
-                    socket.on('room_list_updated', roomListUpdatedListener);
-                });
+                    if (loadRoomsTimeout) clearTimeout(loadRoomsTimeout);
+                    loadRoomsTimeout = setTimeout(function () {
+                        if (!isLoadingRooms && hasLoadedRoomsOnce) loadRooms();
+                    }, 5000);
+                };
+                socket.on('room_list_updated', roomListUpdatedListener);
+            });
 
-                socket.on('connect_error', function(error) {
-                    console.error('Socket.IO connection error:', error);
-                    
-                    // Détecter les erreurs CORS (peuvent avoir différents formats)
-                    const errorStr = JSON.stringify(error).toLowerCase();
-                    const isCorsError = error.message && (
-                        error.message.includes('CORS') || 
-                        error.message.includes('Access-Control') ||
-                        error.message.includes('TransportError') ||
-                        error.message.includes('xhr poll error') ||
-                        errorStr.includes('cors') ||
-                        errorStr.includes('access-control')
-                    );
-                    
-                    // Toujours désactiver Socket.IO après une erreur de connexion
-                    // Les erreurs CORS ou de transport indiquent que Socket.IO ne peut pas fonctionner
-                    console.warn('Socket.IO connection failed, disabling Socket.IO and using HTTP polling instead');
+            socket.on('connect_error', function () {
+                useSocketIO = false;
+                socketConnected = false;
+                if (socket) {
+                    socket.removeAllListeners();
+                    socket.disconnect();
+                    socket.close();
+                    socket = null;
+                }
+                loadRooms();
+                startPolling();
+            });
+
+            socket.on('disconnect', function (reason) {
+                socketConnected = false;
+                if (useSocketIO && reason !== 'io client disconnect') {
+                    useSocketIO = false;
+                    if (socket) {
+                        socket.removeAllListeners();
+                        socket = null;
+                    }
+                    startPolling();
+                }
+            });
+
+            socket.io.on('error', function () {
+                if (useSocketIO) {
                     useSocketIO = false;
                     socketConnected = false;
-                    
-                    // Désactiver complètement Socket.IO
                     if (socket) {
                         socket.removeAllListeners();
                         socket.disconnect();
                         socket.close();
                         socket = null;
                     }
-                    
-                    // Charger les rooms via HTTP
                     loadRooms();
-                    // Mettre en place un polling périodique
                     startPolling();
-                });
-
-                socket.on('disconnect', function(reason) {
-                    console.warn('Socket.IO disconnected:', reason);
-                    socketConnected = false;
-                    // Si déconnecté et Socket.IO était utilisé, basculer vers polling
-                    if (useSocketIO && reason !== 'io client disconnect') {
-                        console.log('Socket.IO disconnected unexpectedly, switching to HTTP polling');
-                        useSocketIO = false;
-                        if (socket) {
-                            socket.removeAllListeners();
-                            socket = null;
-                        }
-                        startPolling();
-                    }
-                });
-                
-                // Écouter aussi les erreurs de transport directement
-                socket.io.on('error', function(error) {
-                    console.error('Socket.IO transport error:', error);
-                    if (useSocketIO) {
-                        console.warn('Transport error detected, disabling Socket.IO');
-                        useSocketIO = false;
-                        socketConnected = false;
-                        if (socket) {
-                            socket.removeAllListeners();
-                            socket.disconnect();
-                            socket.close();
-                            socket = null;
-                        }
-                        loadRooms();
-                        startPolling();
-                    }
-                });
-            }
-            
-            // Fonction pour démarrer le polling HTTP périodique
-            let pollingInterval = null;
-            function startPolling() {
-                if (pollingInterval) {
-                    clearInterval(pollingInterval);
                 }
-                // Polling toutes les 30 secondes pour les mises à jour
-                pollingInterval = setInterval(function() {
-                    if (!isLoadingRooms && hasLoadedRoomsOnce) {
-                        loadRooms();
-                    }
-                }, 30000);
-            }
-            
-            // Essayer de se connecter via Socket.IO
-            tryConnectSocketIO();
+            });
+        }
 
-            // Précharger les sessions sauvegardées pour l'affichage rapide
-            loadSavedSessions();
-        });
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollingInterval = setInterval(function () {
+                if (!isLoadingRooms && hasLoadedRoomsOnce) loadRooms();
+            }, 30000);
+        }
+
+        function showLoadError(message) {
+            const container = document.getElementById('roomsContainer');
+            container.innerHTML =
+                '<div class="empty-state error">' +
+                '<i class="fas fa-exclamation-triangle"></i>' +
+                '<p><strong>Unable to load sessions</strong></p>' +
+                '<p class="hint">' + (message || 'The collaboration service is unavailable. Try again later.') + '</p>' +
+                '<button class="btn-secondary" type="button" onclick="retryLoadRooms()" style="margin-top:14px;">Retry</button>' +
+                '</div>';
+            updateSessionCount(0);
+        }
+
+        function retryLoadRooms() {
+            loadRoomsAttempts = 0;
+            hasLoadedRoomsOnce = false;
+            document.getElementById('roomsContainer').innerHTML =
+                '<div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i><p>Loading sessions…</p></div>';
+            loadRooms();
+        }
 
         async function loadRooms() {
-            // Éviter les appels simultanés
-            if (isLoadingRooms) {
-                console.log('loadRooms already in progress, skipping');
-                return;
-            }
-            
-            // Limiter le nombre de tentatives
+            if (isLoadingRooms) return;
+
             if (loadRoomsAttempts >= maxLoadRoomsAttempts) {
-                console.warn('Max loadRooms attempts reached, stopping');
-                const container = document.getElementById('roomsContainer');
-                if (container && !hasLoadedRoomsOnce) {
-                    container.innerHTML = `
-                        <div class="empty-state" style="color: #ffaa00;">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <p><strong>Unable to load sessions</strong></p>
-                            <p>Too many connection attempts. Please refresh the page.</p>
-                            <button class="action-btn" onclick="location.reload()" style="margin-top: 15px;">Refresh Page</button>
-                        </div>`;
+                if (!hasLoadedRoomsOnce) {
+                    showLoadError('Too many connection attempts. Please refresh the page.');
                 }
                 return;
             }
-            
+
             isLoadingRooms = true;
             loadRoomsAttempts++;
-            
-            try {
-                // Utiliser le serveur local qui fait le proxy vers le SaaS (évite CORS)
-                let url = window.location.origin + '/api/rooms';
-                if (currentToken) {
-                    url += '?token=' + encodeURIComponent(currentToken);
-                }
-                
-                const res = await fetch(url);
-                const data = await res.json();
 
-                if (data.status === 'success') {
-                    const newRooms = data.rooms || [];
-                    // Vérifier si les données ont réellement changé
-                    const roomsChanged = JSON.stringify(newRooms) !== JSON.stringify(cachedRooms);
-                    if (roomsChanged || !hasLoadedRoomsOnce) {
-                        cachedRooms = newRooms;
-                        hasLoadedRoomsOnce = true;
-                        // Réinitialiser le compteur après un succès
-                        loadRoomsAttempts = 0;
-                        // Afficher toutes les rooms accessibles (publiques + privées accessibles avec le token)
-                        renderRooms(cachedRooms);
-                    } else {
-                        console.log('Rooms data unchanged, skipping render');
-                    }
-                } else {
-                    console.error('Error loading rooms:', data.message);
+            try {
+                let url = window.location.origin + '/api/rooms';
+                if (currentToken) url += '?token=' + encodeURIComponent(currentToken);
+
+                const res = await fetch(url);
+                let data = null;
+                try {
+                    data = await res.json();
+                } catch (parseErr) {
+                    data = { status: 'error', message: 'Invalid response from server' };
+                }
+
+                if (!res.ok || data.status !== 'success') {
+                    const msg = (data && data.message) ? data.message : ('HTTP ' + res.status);
+                    console.error('Error loading rooms:', msg);
                     if (!hasLoadedRoomsOnce) {
-                        cachedRooms = [];
-                        renderRooms([]);
+                        showLoadError(msg);
+                    }
+                    return;
+                }
+
+                const newRooms = data.rooms || [];
+                const roomsChanged = JSON.stringify(newRooms) !== JSON.stringify(cachedRooms);
+                if (roomsChanged || !hasLoadedRoomsOnce) {
+                    cachedRooms = newRooms;
+                    hasLoadedRoomsOnce = true;
+                    loadRoomsAttempts = 0;
+                    renderRooms(cachedRooms);
+                    if (selectedRoomId) {
+                        const stillThere = cachedRooms.find(r => r.id === selectedRoomId);
+                        if (stillThere) selectRoom(selectedRoomId);
+                        else clearSelection();
                     }
                 }
             } catch (e) {
                 console.error('Error loading rooms:', e);
                 if (!hasLoadedRoomsOnce) {
-                    cachedRooms = [];
-                    renderRooms([]);
+                    showLoadError(e.message || 'Network error');
                 }
             } finally {
                 isLoadingRooms = false;
             }
         }
-        
+
+        function updateSessionCount(n) {
+            document.getElementById('navSessionCount').textContent = n;
+            document.getElementById('sessionsFooter').textContent = n + (n === 1 ? ' session' : ' sessions');
+        }
+
+        function escapeHtml(str) {
+            return String(str || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function renderRooms(rooms) {
             const container = document.getElementById('roomsContainer');
-            
+            updateSessionCount(rooms.length);
+
             try {
                 if (rooms.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-satellite-dish"></i>
-                            <p>No active sessions detected.</p>
-                            <p style="font-size: 12px; margin-top: 10px;">Initialize a new session to begin.</p>
-                        </div>`;
-                } else {
-                    container.innerHTML = rooms.map(room => {
-                        const typeClass = room.is_public ? 'public' : 'private';
-                        const typeLabel = room.is_public ? 'PUBLIC' : 'PRIVATE';
-                        const description = room.description || 'No description';
-                        const descriptionHtml = description && description !== 'No description' 
-                            ? '<div class="room-description" style="padding: 10px; margin: 10px 0; background: rgba(0,255,255,0.05); border-left: 2px solid #00ffff; font-size: 13px; color: rgba(255,255,255,0.8);">' + description + '</div>' 
-                            : '';
-                        const operatives = room.connected_users !== undefined ? room.connected_users : (room.guest_count + 1);
-                        const createdDate = new Date(room.created_at);
-                        const day = String(createdDate.getDate()).padStart(2, '0');
-                        const month = String(createdDate.getMonth() + 1).padStart(2, '0');
-                        const year = createdDate.getFullYear();
-                        const activeSince = day + '/' + month + '/' + year;
-                        
-                        return '<div class="room-card ' + typeClass + '" onclick="joinRoom(\'' + room.id + '\')">' +
-                            '<div class="room-header">' +
-                            '<div class="room-id">#' + room.id + '</div>' +
-                            '<div class="room-type ' + typeClass + '">' + typeLabel + '</div>' +
-                            '</div>' +
-                            descriptionHtml +
-                            '<div class="room-details">' +
-                            '<div class="detail-item">' +
-                            '<i class="fas fa-user-astronaut" style="color: #00ffff;"></i>' +
-                            '<span>Host: ' + room.host_username + '</span>' +
-                            '</div>' +
-                            '<div class="detail-item">' +
-                            '<i class="fas fa-users" style="color: #b0b0b0;"></i>' +
-                            '<span>Operatives: ' + operatives + '</span>' +
-                            '</div>' +
-                            '<div class="detail-item">' +
-                            '<i class="far fa-clock" style="color: #b0b0b0;"></i>' +
-                            '<span>Active since: ' + activeSince + '</span>' +
-                            '</div>' +
-                            '</div>' +
-                            '</div>';
-                    }).join('');
+                    container.innerHTML =
+                        '<div class="empty-state">' +
+                        '<i class="fas fa-inbox"></i>' +
+                        '<p>No active sessions</p>' +
+                        '<p class="hint">Create a new session to get started.</p>' +
+                        '</div>';
+                    return;
                 }
+
+                container.innerHTML = rooms.map(function (room) {
+                    const typeClass = room.is_public ? 'public' : 'private';
+                    const typeLabel = room.is_public ? 'Public' : 'Private';
+                    const letter = room.is_public ? 'P' : 'R';
+                    const description = room.description || 'No description';
+                    const operatives = room.connected_users !== undefined
+                        ? room.connected_users
+                        : ((room.guest_count || 0) + 1);
+                    const createdDate = room.created_at ? new Date(room.created_at) : null;
+                    const activeSince = createdDate && !isNaN(createdDate)
+                        ? String(createdDate.getDate()).padStart(2, '0') + '/' +
+                          String(createdDate.getMonth() + 1).padStart(2, '0') + '/' +
+                          createdDate.getFullYear()
+                        : '—';
+                    const activeClass = selectedRoomId === room.id ? ' active' : '';
+
+                    return '<div class="session-card ' + typeClass + activeClass + '" data-room-id="' + escapeHtml(room.id) + '" onclick="selectRoom(\'' + escapeHtml(room.id) + '\')">' +
+                        '<div class="session-status ' + typeClass + '">' + letter + '</div>' +
+                        '<div class="session-body">' +
+                        '<div class="session-title-row">' +
+                        '<div class="session-id">#' + escapeHtml(room.id) + '</div>' +
+                        '<span class="session-badge ' + typeClass + '">' + typeLabel + '</span>' +
+                        '</div>' +
+                        '<div class="session-desc">' + escapeHtml(description) + '</div>' +
+                        '<div class="session-meta">' +
+                        '<span><i class="fas fa-user"></i> ' + escapeHtml(room.host_username || '—') + '</span>' +
+                        '<span><i class="fas fa-users"></i> ' + operatives + '</span>' +
+                        '<span><i class="far fa-clock"></i> ' + activeSince + '</span>' +
+                        '</div>' +
+                        '</div>' +
+                        '</div>';
+                }).join('');
             } catch (e) {
                 console.error('Error rendering rooms:', e);
             }
         }
 
+        function clearSelection() {
+            selectedRoomId = null;
+            document.getElementById('detailEmpty').style.display = 'flex';
+            document.getElementById('detailContent').classList.remove('visible');
+            document.querySelectorAll('.session-card.active').forEach(function (el) {
+                el.classList.remove('active');
+            });
+        }
+
+        function selectRoom(roomId) {
+            const room = cachedRooms.find(function (r) { return r.id === roomId; });
+            if (!room) return;
+
+            selectedRoomId = roomId;
+            document.querySelectorAll('.session-card').forEach(function (el) {
+                el.classList.toggle('active', el.getAttribute('data-room-id') === roomId);
+            });
+
+            const typeClass = room.is_public ? 'public' : 'private';
+            const badge = document.getElementById('detailTypeBadge');
+            badge.className = 'severity-badge ' + typeClass;
+            badge.textContent = room.is_public ? 'Public session' : 'Private session';
+
+            document.getElementById('detailTitle').textContent = '#' + room.id;
+            document.getElementById('detailDescription').textContent = room.description || 'No description';
+            document.getElementById('detailHost').textContent = room.host_username || '—';
+            const operatives = room.connected_users !== undefined
+                ? room.connected_users
+                : ((room.guest_count || 0) + 1);
+            document.getElementById('detailMembers').textContent = operatives;
+            document.getElementById('detailId').textContent = room.id;
+
+            const createdDate = room.created_at ? new Date(room.created_at) : null;
+            document.getElementById('detailCreated').textContent =
+                createdDate && !isNaN(createdDate) ? createdDate.toLocaleDateString() : '—';
+
+            document.getElementById('detailEmpty').style.display = 'none';
+            document.getElementById('detailContent').classList.add('visible');
+        }
+
         function createRoom() {
-            // Reset form
             document.getElementById('roomDescriptionInput').value = '';
             document.querySelector('input[name="roomType"][value="public"]').checked = true;
-            
-            // Show modal
             document.getElementById('createRoomModal').style.display = 'flex';
         }
 
@@ -1008,10 +550,8 @@
             const description = document.getElementById('roomDescriptionInput').value.trim();
             const roomType = document.querySelector('input[name="roomType"]:checked').value;
             const isPublic = roomType === 'public';
-            // Get token from sessionStorage (already provided during login)
             const token = sessionStorage.getItem('token') || '';
 
-            // Essayer d'abord via Socket.IO si connecté
             if (socket && socketConnected && useSocketIO) {
                 try {
                     socket.emit('create_room', {
@@ -1026,8 +566,7 @@
                         window.location.href = '/editor';
                     });
 
-                    socket.once('error', function (data) {
-                        // Si erreur Socket.IO, essayer via HTTP
+                    socket.once('error', function () {
                         createRoomViaHTTP(description, isPublic, token);
                     });
 
@@ -1037,8 +576,7 @@
                     console.error('Socket.IO error, trying HTTP fallback:', e);
                 }
             }
-            
-            // Fallback: utiliser HTTP via le proxy local
+
             await createRoomViaHTTP(description, isPublic, token);
         }
 
@@ -1046,9 +584,7 @@
             try {
                 const response = await fetch(window.location.origin + '/api/rooms/create', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         username: currentUsername,
                         is_public: isPublic,
@@ -1058,33 +594,29 @@
                 });
 
                 const data = await response.json();
-                
+
                 if (data.status === 'success' && data.room_id) {
                     sessionStorage.setItem('currentRoomId', data.room_id);
                     closeCreateRoomModal();
                     window.location.href = '/editor';
                 } else {
-                    alert('Error creating room: ' + (data.message || 'Unknown error'));
+                    alert('Error creating session: ' + (data.message || 'Unknown error'));
                 }
             } catch (e) {
                 console.error('Error creating room via HTTP:', e);
-                alert('Error creating room: ' + e.message);
+                alert('Error creating session: ' + e.message);
             }
         }
 
         function getRoomDescription(roomId) {
-            const room = cachedRooms.find(r => r.id === roomId);
-            if (room && room.description) {
-                return room.description;
-            }
+            const room = cachedRooms.find(function (r) { return r.id === roomId; });
+            if (room && room.description) return room.description;
             return 'Saved session';
         }
 
-        async function joinRoom(roomId, descHint = null) {
-            // Utilise simplement le token courant (sessionStorage) ou celui saisi
+        async function joinRoom(roomId, descHint) {
             currentToken = sessionStorage.getItem('token') || currentToken || '';
-            const descriptionHint = descHint || getRoomDescription(roomId);
-            // Essayer Socket.IO seulement si connecté
+
             if (socket && socketConnected && useSocketIO) {
                 try {
                     socket.emit('join_room', {
@@ -1099,26 +631,43 @@
                     });
 
                     socket.once('error', function (data) {
-                        alert('Access Denied: ' + data.message);
+                        alert('Access denied: ' + (data.message || 'Unable to join'));
                     });
                     return;
                 } catch (e) {
                     console.error('Socket.IO error:', e);
                 }
             }
-            
-            // Fallback: afficher un message si Socket.IO n'est pas disponible
-            alert('Cannot join room: Socket.IO connection is not available due to CORS restrictions. Please check your connection or contact support.');
+
+            // HTTP join fallback
+            try {
+                const response = await fetch(window.location.origin + '/api/rooms/' + encodeURIComponent(roomId) + '/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: currentUsername,
+                        token: currentToken
+                    })
+                });
+                const data = await response.json();
+                if (data.status === 'success' || response.ok) {
+                    sessionStorage.setItem('currentRoomId', roomId);
+                    window.location.href = '/editor';
+                } else {
+                    alert('Access denied: ' + (data.message || 'Unable to join'));
+                }
+            } catch (e) {
+                // Soft fallback: open editor with room id (Socket.IO may connect there)
+                sessionStorage.setItem('currentRoomId', roomId);
+                window.location.href = '/editor';
+            }
         }
 
-        // Saved sessions management (persisted on backend, sans token)
         async function fetchSavedSessions() {
             try {
                 const res = await fetch('/api/saved-sessions');
                 const data = await res.json();
-                if (data.status === 'success') {
-                    return data.sessions || [];
-                }
+                if (data.status === 'success') return data.sessions || [];
             } catch (e) {
                 console.warn('Failed to fetch saved sessions', e);
             }
@@ -1142,9 +691,7 @@
 
         async function removeSavedSession(roomId) {
             try {
-                await fetch('/api/saved-sessions/' + encodeURIComponent(roomId), {
-                    method: 'DELETE'
-                });
+                await fetch('/api/saved-sessions/' + encodeURIComponent(roomId), { method: 'DELETE' });
                 loadSavedSessions();
             } catch (e) {
                 console.warn('Failed to delete session', e);
@@ -1154,74 +701,60 @@
         async function loadSavedSessions() {
             const sessions = await fetchSavedSessions();
             const list = document.getElementById('savedSessionsList');
-            
-            if (!list) {
-                return; // List element doesn't exist
-            }
-            
+            if (!list) return;
+
             if (sessions.length === 0) {
-                list.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.4); font-size: 13px;">No saved sessions</div>';
+                list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px;">No saved sessions</div>';
                 return;
             }
-            
-            list.innerHTML = sessions.map(session => {
+
+            list.innerHTML = sessions.map(function (session) {
                 const description = session.description || 'No description';
                 const roomId = session.id || '';
-                
                 return '<div class="saved-session-item">' +
-                    '<div class="saved-session-info" onclick="joinSavedSession(\'' + roomId + '\', \'' + description.replace(/'/g, "\\'") + '\')">' +
-                    '<div class="saved-session-id">#' + roomId + '</div>' +
-                    '<div class="saved-session-description">' + description + '</div>' +
+                    '<div class="saved-session-info" onclick="joinSavedSession(\'' + escapeHtml(roomId) + '\')">' +
+                    '<div class="saved-session-id">#' + escapeHtml(roomId) + '</div>' +
+                    '<div class="saved-session-description">' + escapeHtml(description) + '</div>' +
                     '</div>' +
                     '<div class="saved-session-actions">' +
-                    '<button class="saved-session-btn" onclick="joinSavedSession(\'' + roomId + '\', \'' + description.replace(/'/g, "\\'") + '\')">Join</button>' +
-                    '<button class="saved-session-btn delete" onclick="removeSavedSession(\'' + roomId + '\')">Delete</button>' +
+                    '<button class="saved-session-btn" type="button" onclick="joinSavedSession(\'' + escapeHtml(roomId) + '\')">Join</button>' +
+                    '<button class="saved-session-btn delete" type="button" onclick="removeSavedSession(\'' + escapeHtml(roomId) + '\')">Delete</button>' +
                     '</div>' +
                     '</div>';
             }).join('');
         }
 
-        function joinSavedSession(roomId, description) {
-            // Join immediately using current token (from session) and keep description hint
-            joinRoom(roomId, description);
+        function joinSavedSession(roomId) {
+            joinRoom(roomId, getRoomDescription(roomId));
         }
 
         function setupJoinRoomHandlers() {
             const roomIdInput = document.getElementById('joinRoomIdInput');
-            if (roomIdInput) {
-                roomIdInput.addEventListener('blur', function() {
-                    const roomId = this.value.trim();
-                    if (roomId) {
-                        fetch(SERVER_URL + '/api/rooms')
-                            .then(res => res.json())
-                            .then(data => {
-                                if (data.status === 'success') {
-                                    const room = data.rooms.find(r => r.id === roomId);
-                                    if (room && !room.is_public) {
-                                        document.getElementById('joinTokenGroup').style.display = 'block';
-                                    }
-                                }
-                            })
-                            .catch(() => {});
-                    }
-                });
-            }
+            if (!roomIdInput) return;
+            roomIdInput.addEventListener('blur', function () {
+                const roomId = this.value.trim();
+                if (!roomId) return;
+                fetch(SERVER_URL + '/api/rooms')
+                    .then(function (res) { return res.json(); })
+                    .then(function (data) {
+                        if (data.status === 'success') {
+                            const room = (data.rooms || []).find(function (r) { return r.id === roomId; });
+                            if (room && !room.is_public) {
+                                document.getElementById('joinTokenGroup').style.display = 'block';
+                            }
+                        }
+                    })
+                    .catch(function () {});
+            });
         }
 
         function showJoinRoomModal() {
-            // Reset form
             document.getElementById('joinRoomIdInput').value = '';
             document.getElementById('joinTokenInput').value = '';
             document.getElementById('joinTokenGroup').style.display = 'none';
             document.getElementById('saveSessionCheckbox').checked = true;
-            
-            // Setup handlers
             setupJoinRoomHandlers();
-            
-            // Load saved sessions
             loadSavedSessions();
-            
-            // Show modal
             document.getElementById('joinRoomModal').style.display = 'flex';
         }
 
@@ -1239,32 +772,39 @@
                 return;
             }
 
-            // Join the room
-            if (socket && socket.connected) {
+            if (token) {
+                sessionStorage.setItem('token', token);
+                currentToken = token;
+            }
+
+            if (socket && socketConnected && useSocketIO) {
                 socket.emit('join_room', {
                     room_id: roomId,
                     username: currentUsername,
-                    token: token
+                    token: token || currentToken
                 });
 
                 socket.once('room_joined', async function (data) {
                     if (saveSession) {
-                        // Enregistrer avec la vraie description si possible (cache + fallback)
-                        let desc = getRoomDescription(roomId);
-                        try {
-                            await saveSessionPersisted(roomId, desc);
-                        } catch (e) {}
+                        try { await saveSessionPersisted(roomId, getRoomDescription(roomId)); } catch (e) {}
                     }
                     sessionStorage.setItem('currentRoomId', data.room_id);
                     window.location.href = '/editor';
                 });
 
                 socket.once('error', function (data) {
-                    alert('Access Denied: ' + data.message);
+                    alert('Access denied: ' + (data.message || 'Unable to join'));
                 });
 
                 closeJoinRoomModal();
+                return;
             }
+
+            if (saveSession) {
+                try { await saveSessionPersisted(roomId, getRoomDescription(roomId)); } catch (e) {}
+            }
+            closeJoinRoomModal();
+            await joinRoom(roomId);
         }
 
         function logout() {
@@ -1274,5 +814,4 @@
     </script>
 </body>
 
-</html>
 </html>

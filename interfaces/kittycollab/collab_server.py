@@ -84,17 +84,31 @@ class CollabWebServer:
             }
         })
 
-        # Validate API key once at startup
+        # Soft-validate API key at startup (optional — UI works without it)
         if self.verbose:
             print_info(f"Validating API key against {self.saas_url}...")
         self._validate_api_key()
-        if self.verbose:
-            if self.api_key_valid:
+        if self.api_key_valid:
+            if self.verbose:
                 print_success("API key validation successful")
-            else:
-                print_error(f"API key validation failed: {self.api_key_error}")
+        else:
+            print_warning(
+                self.api_key_error
+                or "No valid API key — KittyCollab will run without SaaS auth headers."
+            )
 
         self._setup_routes()
+
+    def _saas_headers(self, extra=None):
+        """Build SaaS request headers; include auth only when available."""
+        headers = {'User-Agent': 'Kittysploit-Framework/2.0'}
+        if self.api_key:
+            headers['X-API-Key'] = self.api_key
+        if self.api_session_token:
+            headers['Authorization'] = f'Bearer {self.api_session_token}'
+        if extra:
+            headers.update(extra)
+        return headers
     
     def _invalidate_room_files_cache(self, room_id: str = None):
         """Invalide le cache des fichiers d'une room (ou toutes si room_id est None)"""
@@ -117,9 +131,9 @@ class CollabWebServer:
             return ''
 
     def _validate_api_key(self) -> bool:
-        """Valide l'API key en interrogeant le serveur SaaS"""
+        """Valide l'API key en interrogeant le serveur SaaS (soft — never blocks the app)"""
         if not self.api_key:
-            self.api_key_error = "No API key configured. Add a valid key in config.toml (section [FRAMEWORK])."
+            self.api_key_error = "No API key configured. Public session listing still available."
             if self.verbose:
                 print_warning(self.api_key_error)
             return False
@@ -156,7 +170,7 @@ class CollabWebServer:
                 try:
                     error_body = response.text[:200]
                     self.api_key_error = f"Failed to validate the API key (HTTP {response.status_code}): {error_body}"
-                except:
+                except Exception:
                     self.api_key_error = f"Failed to validate the API key (HTTP {response.status_code})."
 
         except requests.exceptions.Timeout:
@@ -169,16 +183,8 @@ class CollabWebServer:
             self.api_key_error = f"Unable to validate the API key: {e}"
 
         if self.verbose:
-            print_error(self.api_key_error)
+            print_warning(self.api_key_error)
         return False
-
-    def _render_invalid_api_key(self):
-        """Affiche une page dédiée si l'API key est absente ou invalide"""
-        return render_template(
-            'invalid_api_key.html',
-            server_url=self.saas_url or '',
-            error_message=self.api_key_error
-        ), 403
     
     def _setup_routes(self):
         """Configure les routes pour servir les pages HTML"""
@@ -186,8 +192,6 @@ class CollabWebServer:
         @self.app.route('/')
         def index():
             """Page de login"""
-            if not self.api_key_valid:
-                return self._render_invalid_api_key()
             if self.verbose:
                 print_info(f"[GET /] Serving login page")
             try:
@@ -203,8 +207,6 @@ class CollabWebServer:
         @self.app.route('/rooms')
         def rooms():
             """Page des salons"""
-            if not self.api_key_valid:
-                return self._render_invalid_api_key()
             if self.verbose:
                 print_info(f"[GET /rooms] Serving rooms page")
             try:
@@ -220,8 +222,6 @@ class CollabWebServer:
         @self.app.route('/editor')
         def editor():
             """Page de l'éditeur"""
-            if not self.api_key_valid:
-                return self._render_invalid_api_key()
             if self.verbose:
                 print_info(f"[GET /editor] Serving editor page")
             try:
@@ -296,20 +296,10 @@ class CollabWebServer:
         @self.app.route('/api/rooms', methods=['GET'])
         def proxy_rooms():
             """Proxy pour récupérer la liste des rooms depuis le serveur SaaS"""
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
-            
             try:
                 token = request.args.get('token', '')
                 url = f"{self.saas_url}/api/rooms"
-                headers = {
-                    'X-API-Key': self.api_key,  # Utiliser l'API key originale pour l'authentification
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                # Ajouter le token de session si disponible (pour les rooms privées)
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
-                # Ajouter le token passé en paramètre si fourni
+                headers = self._saas_headers()
                 if token:
                     url += f'?token={token}'
                 
@@ -327,10 +317,6 @@ class CollabWebServer:
             """Proxy pour récupérer la liste des fichiers d'une room depuis le serveur SaaS avec cache"""
             if self.verbose:
                 print_info(f"[GET /api/rooms/{room_id}/files] Proxy request received")
-            if not self.api_key_valid:
-                if self.verbose:
-                    print_error(f"[GET /api/rooms/{room_id}/files] API key not valid")
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             import time
             current_time = time.time()
@@ -347,12 +333,7 @@ class CollabWebServer:
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/files"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 resp = requests.get(url, headers=headers, timeout=10)
                 resp.raise_for_status()
@@ -393,8 +374,6 @@ class CollabWebServer:
             """Proxy catch-all pour les opérations sur les fichiers (upload, delete, content, etc.)"""
             if self.verbose:
                 print_info(f"[{request.method} /api/rooms/{room_id}/files/{file_path}] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 # Construire l'URL complète vers le SaaS
@@ -403,12 +382,7 @@ class CollabWebServer:
                 if request.query_string:
                     url += '?' + request.query_string.decode('utf-8')
                 
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 # Copier les headers Content-Type si présents
                 if request.content_type:
@@ -457,17 +431,10 @@ class CollabWebServer:
             """Proxy pour l'upload de fichiers vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[POST /api/rooms/{room_id}/upload] Proxy upload request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/upload"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 # Préparer les fichiers pour l'upload
                 files = {}
@@ -492,19 +459,10 @@ class CollabWebServer:
         @self.app.route('/api/rooms/create', methods=['POST'])
         def proxy_create_room():
             """Proxy pour créer un salon via HTTP vers le serveur SaaS"""
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
-            
             try:
                 payload = request.get_json(force=True) or {}
                 url = f"{self.saas_url}/api/rooms/create"
-                headers = {
-                    'Content-Type': 'application/json',
-                    'X-API-Key': self.api_key,  # Utiliser l'API key originale pour l'authentification
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers({'Content-Type': 'application/json'})
                 
                 # Ajouter le token d'accès si fourni
                 if payload.get('access_token'):
@@ -523,17 +481,10 @@ class CollabWebServer:
             """Proxy pour les notes d'une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[{request.method} /api/rooms/{room_id}/notes] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/notes"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.method == 'GET':
                     resp = requests.get(url, headers=headers, timeout=10)
@@ -560,17 +511,10 @@ class CollabWebServer:
             """Proxy pour la description d'une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[{request.method} /api/rooms/{room_id}/description] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/description"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.method == 'GET':
                     resp = requests.get(url, headers=headers, timeout=10)
@@ -595,17 +539,10 @@ class CollabWebServer:
             """Proxy pour rejoindre une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[POST /api/rooms/{room_id}/join] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/join"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.is_json:
                     headers['Content-Type'] = 'application/json'
@@ -625,17 +562,10 @@ class CollabWebServer:
             """Proxy pour quitter une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[POST /api/rooms/{room_id}/leave] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/leave"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.is_json:
                     headers['Content-Type'] = 'application/json'
@@ -656,8 +586,6 @@ class CollabWebServer:
             """Proxy pour supprimer une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[{request.method} /api/rooms/{room_id}/delete] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 # SaaS endpoint (REST): DELETE /api/rooms/<room_id>
@@ -665,12 +593,7 @@ class CollabWebServer:
                 # Forward query params (e.g. ?username=...) if provided by the client
                 if request.query_string:
                     url += '?' + request.query_string.decode('utf-8')
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.method == 'DELETE':
                     resp = requests.delete(url, headers=headers, timeout=10)
@@ -699,17 +622,10 @@ class CollabWebServer:
             """Proxy pour partager un module dans une room vers le serveur SaaS"""
             if self.verbose:
                 print_info(f"[POST /api/rooms/{room_id}/share_module] Proxy request received")
-            if not self.api_key_valid:
-                return jsonify({'status': 'error', 'message': 'API key not valid'}), 401
             
             try:
                 url = f"{self.saas_url}/api/rooms/{room_id}/share_module"
-                headers = {
-                    'X-API-Key': self.api_key,
-                    'User-Agent': 'Kittysploit-Framework/2.0'
-                }
-                if self.api_session_token:
-                    headers['Authorization'] = f'Bearer {self.api_session_token}'
+                headers = self._saas_headers()
                 
                 if request.is_json:
                     headers['Content-Type'] = 'application/json'
@@ -727,8 +643,6 @@ class CollabWebServer:
         @self.app.route('/test')
         def test():
             """Route de test"""
-            if not self.api_key_valid:
-                return self._render_invalid_api_key()
             if self.verbose:
                 print_info(f"[GET /test] Test route called")
             return "<h1>Server is working!</h1><p>If you see this, the server is running correctly.</p>", 200

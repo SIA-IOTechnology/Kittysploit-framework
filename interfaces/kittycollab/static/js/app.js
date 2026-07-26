@@ -1325,7 +1325,7 @@ function setupFileCursorTracking() {
         if (userId === socket.id) return; // Ignorer notre propre curseur
         
         const position = data.position;
-        const color = data.color || '#00ffff';
+        const color = data.color || '#63c2de';
         const username = data.username || 'Unknown';
 
         // Remove old decoration for this user
@@ -1420,7 +1420,7 @@ function setupModuleCursorTracking() {
         if (userId === socket.id) return; // Ignorer notre propre curseur
         
         const position = data.position;
-        const color = data.color || '#00ffff';
+        const color = data.color || '#63c2de';
         const username = data.username || 'Unknown';
 
         // Remove old decoration for this user

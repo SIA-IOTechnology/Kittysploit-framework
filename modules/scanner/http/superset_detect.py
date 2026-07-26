@@ -13,6 +13,11 @@ class Module(Scanner, Http_client):
         "description": "Detects Superset health API and login UI.",
         "author": ["KittySploit Team"],
         "severity": "medium",
+        "cve": ["CVE-2026-23980"],
+        "modules": [
+            "scanner/http/superset_cve_2026_23980",
+            "auxiliary/scanner/http/superset_cve_2026_23980_sqli",
+        ],
         "tags": ["web", "scanner", "superset", "apache", "bi", "panel"],
     'agent': {
         'risk': 'active',
@@ -42,7 +47,10 @@ class Module(Scanner, Http_client):
                                    {'capability': 'db_access', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': []},
+         'suggested_followups': [
+             'scanner/http/superset_cve_2026_23980',
+             'auxiliary/scanner/http/superset_cve_2026_23980_sqli',
+         ]},
     },
     }
 

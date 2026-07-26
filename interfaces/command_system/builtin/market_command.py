@@ -50,11 +50,11 @@ class MarketCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "market [list|search|install|update|uninstall|info|installed|launch|register|login|buy]"
+        return "market [create|publish|mine|versions|remove|status|list|search|install|update|uninstall|info|installed|launch|register|login|logout|buy]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
-        return ['list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'launch', 'register', 'login', 'buy']
+        return ['create', 'publish', 'mine', 'versions', 'remove', 'status', 'list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'launch', 'register', 'login', 'logout', 'buy']
 
     def _refresh_module_catalog(self) -> None:
         """Invalidate module discovery caches after marketplace changes."""
@@ -72,6 +72,12 @@ Usage: {self.usage}
 This command allows you to browse, search, and install modules from the KittySploit marketplace.
 
 Subcommands:
+    create <id>   Create a publishable marketplace module project
+    publish <path> Publish a local marketplace module project
+    mine          List your published marketplace modules
+    versions <id> List published versions for one of your modules
+    remove <id>   Remove/unpublish one of your marketplace modules or versions
+    status        Show marketplace login/session status
     list          List all available modules
     search <term> Search for modules by name or description
     install [id]  Install by ID, local path, or github:owner/repo (or --all-free)
@@ -82,9 +88,18 @@ Subcommands:
     uninstall [id] Uninstall a module (all if --all flag, or specific module)
     register      Register a new account
     login         Login to your account
+    logout        Remove saved marketplace credentials
     buy <id>      Purchase a module from the marketplace
 
 Examples:
+    market create my-new-tool         # Create apps/my-new-tool
+    market create my-exploit --type exploit --author "Jane Doe"
+    market publish apps/my-new-tool   # Publish a local marketplace project
+    market mine                      # List your published modules
+    market versions my-new-tool      # List versions for your module
+    market remove my-new-tool --version 1.0.0
+    market status                    # Show current marketplace account status
+    market logout                    # Remove saved marketplace credentials
     market list                      # List all modules
     market search "proxy"            # Search for proxy-related modules
     market install test-module       # Install module with ID test-module
@@ -108,16 +123,108 @@ Examples:
         self.timeout = 10
         self.api_key = None  # Keep for backward compatibility
         self.token = None  # Bearer token for new API
+        self.account_email = None
+        self.account_username = None
         self._load_account_config()
     
     def _create_parser(self) -> argparse.ArgumentParser:
         """Create command parser"""
         parser = argparse.ArgumentParser(
+            prog="market",
             description="Browse and install modules from the marketplace",
             add_help=True
         )
         
         subparsers = parser.add_subparsers(dest='action', help='Available actions')
+
+        # Create command
+        from core.registry.scaffold import (
+            MARKETPLACE_CREATE_TYPE_ALIASES,
+            MARKETPLACE_CREATE_TYPES,
+        )
+
+        create_parser = subparsers.add_parser(
+            'create',
+            help='Create a publishable marketplace module project',
+        )
+        create_parser.add_argument(
+            'module_id',
+            nargs='?',
+            help='Unique marketplace module ID (for example: my-new-tool)',
+        )
+        create_parser.add_argument(
+            '--type',
+            choices=MARKETPLACE_CREATE_TYPES
+            + tuple(sorted(MARKETPLACE_CREATE_TYPE_ALIASES)),
+            default='scanner',
+            type=self._normalize_marketplace_create_type,
+            help='Module template type (default: scanner)',
+        )
+        create_parser.add_argument(
+            '--name',
+            help='Human-readable module name',
+        )
+        create_parser.add_argument('--author', help='Module author')
+        create_parser.add_argument('--description', help='Module description')
+        create_parser.add_argument(
+            '--version',
+            default='0.1.0',
+            help='Initial semantic version (default: 0.1.0)',
+        )
+        create_parser.add_argument(
+            '--path',
+            help='Install subpath under modules/ (default depends on --type)',
+        )
+        create_parser.add_argument(
+            '--output',
+            default='apps',
+            help='Parent directory in which the project is created (default: apps)',
+        )
+        network_group = create_parser.add_mutually_exclusive_group()
+        network_group.add_argument(
+            '--network',
+            dest='network_access',
+            action='store_true',
+            default=None,
+            help='Declare network access',
+        )
+        network_group.add_argument(
+            '--no-network',
+            dest='network_access',
+            action='store_false',
+            help='Do not declare network access',
+        )
+        create_parser.add_argument(
+            '--database',
+            action='store_true',
+            help='Declare database access',
+        )
+        create_parser.add_argument(
+            '--price',
+            type=float,
+            default=0.0,
+            help='Marketplace price (default: 0.0/free)',
+        )
+        create_parser.add_argument(
+            '--currency',
+            default='EUR',
+            help='Three-letter currency code (default: EUR)',
+        )
+        create_parser.add_argument(
+            '--license',
+            dest='license_name',
+            default='MIT',
+            help='License identifier (default: MIT)',
+        )
+        create_parser.add_argument(
+            '--kittysploit-min',
+            default='1.0.0',
+            help='Minimum compatible KittySploit version (default: 1.0.0)',
+        )
+        create_parser.add_argument(
+            '--kittysploit-max',
+            help='Maximum compatible KittySploit version',
+        )
         
         # List command
         list_parser = subparsers.add_parser('list', help='List all available modules')
@@ -141,6 +248,64 @@ Examples:
         )
         install_parser.add_argument('--force', '-f', action='store_true', help='Force installation')
         install_parser.add_argument('--all-free', '-a', action='store_true', help='Install all free modules from the marketplace')
+
+        # Publish command
+        publish_parser = subparsers.add_parser(
+            'publish',
+            help='Publish a local marketplace module project',
+        )
+        publish_parser.add_argument(
+            'path',
+            help='Path to a marketplace project directory or .zip/.kext bundle',
+        )
+        publish_parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            help='Validate and package locally without uploading',
+        )
+        publish_parser.add_argument(
+            '--keep-bundle',
+            action='store_true',
+            help='Keep the generated bundle under dist/',
+        )
+
+        # Status command
+        subparsers.add_parser(
+            'status',
+            help='Show marketplace login/session status',
+        )
+
+        # Publisher commands
+        mine_parser = subparsers.add_parser(
+            'mine',
+            help='List your published marketplace modules',
+        )
+        mine_parser.add_argument('--page', '-p', type=int, default=1, help='Page number')
+        mine_parser.add_argument('--limit', '-l', type=int, default=20, help='Items per page')
+
+        versions_parser = subparsers.add_parser(
+            'versions',
+            help='List published versions for a marketplace module',
+        )
+        versions_parser.add_argument('module_id', help='Marketplace module ID')
+
+        remove_parser = subparsers.add_parser(
+            'remove',
+            help='Remove/unpublish one of your marketplace modules or versions',
+        )
+        remove_parser.add_argument('module_id', help='Marketplace module ID')
+        remove_parser.add_argument('--version', help='Specific version to remove')
+        remove_parser.add_argument('--reason', default='', help='Reason for removal')
+        remove_parser.add_argument('--yes', '-y', action='store_true', help='Do not prompt for confirmation')
+
+        yank_parser = subparsers.add_parser(
+            'yank',
+            help=argparse.SUPPRESS,
+        )
+        yank_parser.add_argument('module_id', help=argparse.SUPPRESS)
+        yank_parser.add_argument('--version', help=argparse.SUPPRESS)
+        yank_parser.add_argument('--reason', default='', help=argparse.SUPPRESS)
+        yank_parser.add_argument('--yes', '-y', action='store_true', help=argparse.SUPPRESS)
         
         # Update command
         update_parser = subparsers.add_parser('update', help='Update installed modules')
@@ -184,6 +349,9 @@ Examples:
         
         # Login command
         subparsers.add_parser('login', help='Login to your account')
+
+        # Logout command
+        subparsers.add_parser('logout', help='Remove saved marketplace credentials')
         
         # Buy command
         buy_parser = subparsers.add_parser('buy', help='Purchase a module from the marketplace')
@@ -195,17 +363,8 @@ Examples:
         """Execute the market command"""
         try:
             if not args:
-                # Prompt for account setup when unauthenticated, but still show the catalog.
-                if not self.token and not self.api_key:
-                    self._prompt_account_setup()
-
-                parsed_args = argparse.Namespace(
-                    action='list',
-                    category=None,
-                    page=1,
-                    limit=20,
-                )
-                return self._browse_modules(parsed_args)
+                self.show_help()
+                return True
 
             if args[0].lower() in ['help', '--help', '-h']:
                 self.show_help()
@@ -223,7 +382,18 @@ Examples:
                 return True
             
             # Check authentication for actions that require it
-            requires_auth = parsed_args.action in ['install', 'update', 'publish', 'buy']
+            requires_auth = parsed_args.action in [
+                'install',
+                'update',
+                'publish',
+                'buy',
+                'mine',
+                'versions',
+                'remove',
+                'yank',
+            ]
+            if parsed_args.action == 'publish' and getattr(parsed_args, 'dry_run', False):
+                requires_auth = False
             if requires_auth and not self.token and not self.api_key:
                 print_warning("This action requires an account")
                 if self._prompt_account_setup():
@@ -232,7 +402,19 @@ Examples:
                     return False
             
             # Execute the appropriate action
-            if parsed_args.action == 'list':
+            if parsed_args.action == 'create':
+                return self._create_marketplace_module(parsed_args)
+            elif parsed_args.action == 'publish':
+                return self._publish_marketplace_module(parsed_args)
+            elif parsed_args.action == 'mine':
+                return self._list_my_marketplace_modules(parsed_args)
+            elif parsed_args.action == 'versions':
+                return self._list_marketplace_versions(parsed_args)
+            elif parsed_args.action in {'remove', 'yank'}:
+                return self._remove_marketplace_module(parsed_args)
+            elif parsed_args.action == 'status':
+                return self._show_marketplace_status()
+            elif parsed_args.action == 'list':
                 return self._browse_modules(parsed_args)
             elif parsed_args.action == 'search':
                 return self._search_modules(parsed_args)
@@ -252,6 +434,8 @@ Examples:
                 return self._register_account()
             elif parsed_args.action == 'login':
                 return self._login_account()
+            elif parsed_args.action == 'logout':
+                return self._logout_account()
             elif parsed_args.action == 'buy':
                 return self._buy_module(parsed_args)
             else:
@@ -263,6 +447,660 @@ Examples:
         except Exception as e:
             print_error(f"Error executing market command: {str(e)}")
             return False
+
+    def _create_marketplace_module(self, args) -> bool:
+        """Create a self-contained marketplace project without contacting the SaaS."""
+        try:
+            from core.registry.scaffold import MarketplaceScaffoldGenerator
+
+            if not args.module_id:
+                if not self._prompt_marketplace_create(args):
+                    return False
+
+            generator = MarketplaceScaffoldGenerator(
+                module_id=args.module_id,
+                module_type=args.type,
+                name=args.name,
+                description=args.description,
+                author=args.author,
+                version=args.version,
+                subpath=args.path,
+                network_access=args.network_access,
+                database_access=args.database,
+                price=args.price,
+                currency=args.currency,
+                license_name=args.license_name,
+                kittysploit_min=args.kittysploit_min,
+                kittysploit_max=args.kittysploit_max,
+            )
+            result = generator.generate(output_parent=args.output)
+        except (KeyboardInterrupt, EOFError):
+            print_warning("Marketplace module creation cancelled")
+            return True
+        except FileExistsError as exc:
+            print_error(str(exc))
+            return False
+        except (OSError, ValueError) as exc:
+            print_error(f"Marketplace module creation failed: {exc}")
+            return False
+
+        print_success(f"Created marketplace module: {result.project_dir}")
+        print_info(f"  Manifest: {result.manifest_path}")
+        source_label = "UI entry:" if result.module_type == "ui" else "Module:  "
+        print_info(f"  {source_label} {result.module_path}")
+        print_info(f"  Tests:    {result.test_path}")
+        print_info("")
+        print_info("Next steps:")
+        print_info(f"  1. Edit:    {result.module_path}")
+        print_info(f"  2. Test:    market install {result.project_dir}")
+        print_info(f"  3. Publish: market publish {result.project_dir}")
+        return True
+
+    def _publish_marketplace_module(self, args) -> bool:
+        """Validate, package, and upload a marketplace project to the registry."""
+        try:
+            import tempfile
+            import zipfile
+
+            from core.registry.manifest import ManifestParser
+        except ImportError as exc:
+            print_error(f"Marketplace publishing is unavailable: {exc}")
+            return False
+
+        source_path = Path(args.path).expanduser().resolve()
+        cleanup_bundle = False
+
+        try:
+            if source_path.is_dir():
+                manifest_path = source_path / "extension.toml"
+                if not manifest_path.is_file():
+                    print_error(f"Manifest not found: {manifest_path}")
+                    return False
+
+                manifest = ManifestParser.parse(str(manifest_path))
+                if not manifest:
+                    print_error(f"Invalid manifest: {manifest_path}")
+                    return False
+
+                valid, errors = ManifestParser.validate(manifest)
+                if not valid:
+                    print_error("Manifest validation failed:")
+                    for error in errors:
+                        print_error(f"  - {error}")
+                    return False
+
+                entry_path = source_path / (manifest.entry_point or "")
+                if not entry_path.is_file():
+                    print_error(f"Entry point not found: {entry_path}")
+                    return False
+
+                if args.keep_bundle:
+                    bundle_dir = source_path / "dist"
+                    bundle_dir.mkdir(parents=True, exist_ok=True)
+                    bundle_path = bundle_dir / f"{manifest.id}-{manifest.version}.kext"
+                else:
+                    tmp = tempfile.NamedTemporaryFile(
+                        prefix=f"{manifest.id}-{manifest.version}-",
+                        suffix=".kext",
+                        delete=False,
+                    )
+                    tmp.close()
+                    bundle_path = Path(tmp.name)
+                    cleanup_bundle = True
+
+                self._build_marketplace_bundle(source_path, bundle_path)
+            elif source_path.is_file() and source_path.suffix.lower() in {".zip", ".kext"}:
+                bundle_path = source_path
+                manifest = self._validate_marketplace_bundle(bundle_path)
+                if not manifest:
+                    return False
+            else:
+                print_error("Publish target must be a project directory or .zip/.kext bundle")
+                return False
+
+            bundle_hash = ManifestParser.compute_bundle_hash(str(bundle_path))
+            bundle_size = bundle_path.stat().st_size
+            print_success(f"Validated marketplace bundle: {bundle_path}")
+            print_info(f"  ID:      {manifest.id}")
+            print_info(f"  Version: {manifest.version}")
+            print_info(f"  Type:    {manifest.extension_type.value}")
+            print_info(f"  Size:    {bundle_size} bytes")
+            print_info(f"  SHA256:  {bundle_hash}")
+
+            if args.dry_run:
+                print_success("Dry run complete; upload skipped")
+                return True
+
+            return self._upload_marketplace_bundle(bundle_path, manifest, bundle_hash)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            print_error(f"Marketplace publish failed: {exc}")
+            return False
+        finally:
+            if cleanup_bundle:
+                try:
+                    bundle_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _build_marketplace_bundle(self, project_dir: Path, bundle_path: Path) -> None:
+        """Create a deterministic-ish marketplace bundle from a project directory."""
+        import zipfile
+
+        ignored_dirs = {".git", "__pycache__", ".pytest_cache", "dist"}
+        ignored_suffixes = {".pyc", ".pyo"}
+        with zipfile.ZipFile(bundle_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(project_dir.rglob("*")):
+                if path.is_dir():
+                    continue
+                relative = path.relative_to(project_dir)
+                if any(part in ignored_dirs for part in relative.parts):
+                    continue
+                if path.suffix.lower() in ignored_suffixes:
+                    continue
+                archive.write(path, relative.as_posix())
+
+    def _validate_marketplace_bundle(self, bundle_path: Path):
+        """Validate a prebuilt .zip/.kext bundle and return its manifest."""
+        import tempfile
+        import zipfile
+
+        from core.registry.manifest import ManifestParser
+
+        with tempfile.TemporaryDirectory(prefix="kitty_market_publish_") as tmpdir:
+            with zipfile.ZipFile(bundle_path, "r") as archive:
+                archive.extractall(tmpdir)
+            manifest_path = Path(tmpdir) / "extension.toml"
+            if not manifest_path.is_file():
+                print_error("Manifest extension.toml not found in bundle")
+                return None
+            manifest = ManifestParser.parse(str(manifest_path))
+            if not manifest:
+                print_error("Invalid extension.toml in bundle")
+                return None
+            valid, errors = ManifestParser.validate(manifest)
+            if not valid:
+                print_error("Manifest validation failed:")
+                for error in errors:
+                    print_error(f"  - {error}")
+                return None
+            entry_path = Path(tmpdir) / (manifest.entry_point or "")
+            if not entry_path.is_file():
+                print_error(f"Entry point not found in bundle: {manifest.entry_point}")
+                return None
+            return manifest
+
+    def _upload_marketplace_bundle(self, bundle_path: Path, manifest, bundle_hash: str) -> bool:
+        """Upload a validated marketplace bundle to a compatible registry endpoint."""
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        elif self.api_key:
+            headers["X-API-Key"] = self.api_key
+
+        data = {
+            "id": manifest.id,
+            "name": manifest.name,
+            "version": manifest.version,
+            "description": manifest.description or "",
+            "extension_type": manifest.extension_type.value,
+            "price": str(manifest.price),
+            "currency": manifest.currency,
+            "license": manifest.license,
+            "bundle_hash": bundle_hash,
+        }
+        endpoints = [
+            f"{self.registry_url}/api/cli/market/publish",
+            f"{self.registry_url}/api/registry/extensions/upload",
+        ]
+
+        last_status = None
+        last_text = ""
+        for url in endpoints:
+            try:
+                with bundle_path.open("rb") as handle:
+                    files = {
+                        "bundle": (
+                            bundle_path.name,
+                            handle,
+                            "application/zip",
+                        )
+                    }
+                    response = requests.post(
+                        url,
+                        data=data,
+                        files=files,
+                        headers=headers,
+                        timeout=self.timeout,
+                    )
+                last_status = response.status_code
+                last_text = response.text[:300]
+                if response.status_code in {404, 405, 501}:
+                    continue
+                if response.status_code == 401:
+                    print_error("Authentication failed; run `market login` and retry")
+                    return False
+                response.raise_for_status()
+                payload = response.json() if response.content else {}
+                print_success("Marketplace module published")
+                if isinstance(payload, dict):
+                    public_url = payload.get("url") or payload.get("public_url")
+                    if public_url:
+                        print_info(f"  URL: {public_url}")
+                return True
+            except requests.exceptions.ConnectionError:
+                print_error("Failed to connect to marketplace server")
+                print_info(f"Server URL: {self.registry_url}")
+                return False
+            except requests.exceptions.Timeout:
+                print_error("Connection timeout - marketplace server is not responding")
+                print_info(f"Server URL: {self.registry_url}")
+                return False
+            except requests.exceptions.HTTPError as exc:
+                print_error(f"Marketplace upload failed: HTTP {exc.response.status_code}")
+                if exc.response.text:
+                    print_info(exc.response.text[:300])
+                return False
+
+        print_error("Marketplace publish endpoint is not available on this server")
+        if last_status:
+            print_info(f"Last response: HTTP {last_status} {last_text}")
+        print_info("The bundle validated locally; server-side publish support must expose /api/cli/market/publish or /api/registry/extensions/upload.")
+        return True
+
+    def _show_marketplace_status(self) -> bool:
+        """Show local and remote marketplace authentication status."""
+        print_info("=== Marketplace Status ===")
+        print_info(f"Server: {self.registry_url}")
+
+        has_token = bool(self.token)
+        has_api_key = bool(self.api_key)
+        if has_token:
+            print_success("Local credentials: bearer token configured")
+        elif has_api_key:
+            print_success("Local credentials: API key configured")
+        else:
+            print_warning("Local credentials: not logged in")
+            print_info("Run: market login")
+            return True
+
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        elif self.api_key:
+            headers["X-API-Key"] = self.api_key
+
+        try:
+            response = requests.get(
+                f"{self.registry_url}/api/auth/me",
+                headers=headers,
+                timeout=self.timeout,
+            )
+        except requests.exceptions.ConnectionError:
+            print_warning("Remote status: server unreachable")
+            return True
+        except requests.exceptions.Timeout:
+            print_warning("Remote status: timeout")
+            return True
+
+        if response.status_code == 200:
+            data = response.json() if response.content else {}
+            principal = data.get("principal") if isinstance(data, dict) else None
+            if isinstance(principal, dict):
+                print_success("Remote status: authenticated")
+                identity = self._marketplace_status_identity(data)
+                email = identity.get("email")
+                username = identity.get("username")
+                roles = principal.get("roles") or []
+                permissions = principal.get("permissions") or []
+                if email:
+                    print_info(f"Email: {email}")
+                if username:
+                    print_info(f"Username: {username}")
+                if roles:
+                    print_info(f"Roles: {', '.join(map(str, roles))}")
+                if permissions:
+                    can_publish = "*" in permissions or "registry:write" in permissions
+                    publish_state = "yes" if can_publish else "no"
+                    print_info(f"Can publish: {publish_state}")
+            else:
+                print_success("Remote status: authenticated")
+            return True
+
+        if response.status_code == 401:
+            print_error("Remote status: token rejected or expired")
+            print_info("Run: market login")
+            return True
+        if response.status_code == 403:
+            print_error("Remote status: authenticated but forbidden")
+            return True
+        if response.status_code == 404:
+            print_warning("Remote status: server does not expose /api/auth/me")
+            print_info("Local credentials are present, but the server could not verify them.")
+            return True
+
+        print_warning(f"Remote status: HTTP {response.status_code}")
+        if response.text:
+            print_info(response.text[:300])
+        return True
+
+    def _marketplace_status_identity(self, data: Dict[str, Any]) -> Dict[str, Optional[str]]:
+        """Extract account identity from common marketplace status response shapes."""
+        result = {
+            "subject": None,
+            "email": self.account_email,
+            "username": self.account_username,
+        }
+        if not isinstance(data, dict):
+            return result
+
+        principal = data.get("principal") if isinstance(data.get("principal"), dict) else {}
+        user = data.get("user") if isinstance(data.get("user"), dict) else {}
+        account = data.get("account") if isinstance(data.get("account"), dict) else {}
+
+        result["subject"] = (
+            principal.get("subject")
+            or user.get("id")
+            or account.get("id")
+            or result["email"]
+            or result["username"]
+        )
+        result["email"] = (
+            principal.get("email")
+            or user.get("email")
+            or account.get("email")
+            or result["email"]
+        )
+        result["username"] = (
+            principal.get("username")
+            or user.get("username")
+            or account.get("username")
+            or result["username"]
+        )
+        return result
+
+    def _list_my_marketplace_modules(self, args) -> bool:
+        """List marketplace modules owned by the authenticated account."""
+        data = self._publisher_request(
+            "GET",
+            "my/modules",
+            params={"page": args.page, "limit": args.limit},
+        )
+        if data is None:
+            return False
+
+        modules = self._extract_marketplace_items(data)
+        if not modules:
+            print_info("No published marketplace modules found for this account.")
+            return True
+
+        print_info("=== My Marketplace Modules ===")
+        for item in modules:
+            module_id = self._marketplace_item_public_id(item)
+            name = item.get("name") or module_id or "Unknown"
+            version = item.get("version") or item.get("latest_version") or ""
+            state = item.get("status") or ("revoked" if item.get("is_revoked") else "published")
+            downloads = item.get("downloads") or item.get("download_count")
+            line = f"{name}"
+            if version:
+                line += f" v{version}"
+            line += f" [{state}]"
+            print_info(line)
+            if module_id:
+                print_info(f"  ID: {module_id}")
+                print_info(f"  Remove: market remove {module_id}")
+            if downloads is not None:
+                print_info(f"  Downloads: {downloads}")
+        return True
+
+    def _list_marketplace_versions(self, args) -> bool:
+        """List published versions for a marketplace module."""
+        data = self._publisher_request("GET", f"my/modules/{args.module_id}/versions")
+        if data is None:
+            return False
+
+        versions = data.get("versions") if isinstance(data, dict) else data
+        if not versions:
+            print_info(f"No versions found for {args.module_id}.")
+            return True
+
+        print_info(f"=== Versions for {args.module_id} ===")
+        for item in versions:
+            if isinstance(item, str):
+                print_info(item)
+                continue
+            version = item.get("version", "unknown")
+            latest = " latest" if item.get("is_latest") else ""
+            state = item.get("status") or ("revoked" if item.get("is_revoked") else "published")
+            size = item.get("bundle_size")
+            line = f"{version}{latest} [{state}]"
+            if size is not None:
+                line += f" - {size} bytes"
+            print_info(line)
+        return True
+
+    def _remove_marketplace_module(self, args) -> bool:
+        """Remove or unpublish an owned marketplace module/version."""
+        target = args.module_id
+        if args.version:
+            target = f"{target} v{args.version}"
+        if not args.yes:
+            try:
+                answer = input(f"Unpublish {target}? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print_warning("Marketplace remove cancelled")
+                return True
+            if answer not in {"y", "yes", "o", "oui"}:
+                print_warning("Marketplace remove cancelled")
+                return True
+
+        endpoint = f"my/modules/{args.module_id}"
+        params = {}
+        if args.version:
+            endpoint += f"/versions/{args.version}"
+        if args.reason:
+            params["reason"] = args.reason
+
+        data = self._publisher_request("DELETE", endpoint, params=params)
+        if data is None:
+            return False
+
+        print_success(f"Marketplace module removed: {target}")
+        return True
+
+    def _publisher_request(self, method: str, endpoint: str, *, params: Optional[Dict[str, Any]] = None):
+        """Call authenticated publisher endpoints with SaaS and registry fallbacks."""
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        elif self.api_key:
+            headers["X-API-Key"] = self.api_key
+
+        endpoint = endpoint.strip("/")
+        urls = [
+            f"{self.registry_url}/api/cli/market/{endpoint}",
+            f"{self.registry_url}/api/registry/publisher/{endpoint}",
+        ]
+        last_status = None
+        last_text = ""
+        for url in urls:
+            try:
+                response = requests.request(
+                    method,
+                    url,
+                    params=params if method.upper() == "GET" else None,
+                    json=params if method.upper() != "GET" else None,
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+                last_status = response.status_code
+                last_text = response.text[:300]
+                if response.status_code in {404, 405, 501}:
+                    continue
+                if response.status_code == 401:
+                    print_error("Authentication failed; run `market login` and retry")
+                    return None
+                if response.status_code == 403:
+                    print_error("This account is not allowed to manage marketplace publications")
+                    return None
+                if response.status_code == 409:
+                    print_error("Marketplace conflict")
+                    if response.text:
+                        print_info(response.text[:300])
+                    return None
+                response.raise_for_status()
+                return response.json() if response.content else {}
+            except requests.exceptions.ConnectionError:
+                print_error("Failed to connect to marketplace server")
+                print_info(f"Server URL: {self.registry_url}")
+                return None
+            except requests.exceptions.Timeout:
+                print_error("Connection timeout - marketplace server is not responding")
+                print_info(f"Server URL: {self.registry_url}")
+                return None
+            except requests.exceptions.HTTPError as exc:
+                print_error(f"Marketplace request failed: HTTP {exc.response.status_code}")
+                if exc.response.text:
+                    print_info(exc.response.text[:300])
+                return None
+
+        print_error("Marketplace publisher endpoint is not available on this server")
+        if last_status:
+            print_info(f"Last response: HTTP {last_status} {last_text}")
+        print_info(
+            "Server-side publisher support must expose /api/cli/market/my/modules "
+            "or /api/registry/publisher/my/modules."
+        )
+        return None
+
+    @staticmethod
+    def _extract_marketplace_items(data) -> List[Dict[str, Any]]:
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if not isinstance(data, dict):
+            return []
+        for key in ("modules", "extensions", "items", "data", "results"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _marketplace_item_public_id(item: Dict[str, Any]) -> Optional[str]:
+        """Extract the public marketplace ID, not the database row ID."""
+        if not isinstance(item, dict):
+            return None
+
+        public_keys = (
+            "module_id",
+            "extension_id",
+            "marketplace_id",
+            "slug",
+            "manifest_id",
+            "package_id",
+            "code",
+        )
+        for key in public_keys:
+            value = item.get(key)
+            if value:
+                return str(value)
+
+        for nested_key in ("module", "extension", "manifest"):
+            nested = item.get(nested_key)
+            if isinstance(nested, dict):
+                nested_id = MarketCommand._marketplace_item_public_id(nested)
+                if nested_id:
+                    return nested_id
+
+        raw_id = item.get("id")
+        if raw_id and not str(raw_id).isdigit():
+            return str(raw_id)
+
+        name = item.get("name") or item.get("display_name") or item.get("title")
+        if name:
+            slug = str(name).strip().lower().replace("_", "-")
+            slug = "".join(char if char.isalnum() or char == "-" else "-" for char in slug)
+            slug = "-".join(part for part in slug.split("-") if part)
+            if slug:
+                return slug
+
+        return str(raw_id) if raw_id else None
+
+    def _prompt_marketplace_create(self, args) -> bool:
+        """Collect the essential scaffold settings when no module ID was supplied."""
+        from core.registry.scaffold import MARKETPLACE_CREATE_TYPES
+
+        print_info("=== Create a Marketplace Module ===")
+        module_id = input("Module ID (for example: my-new-tool): ").strip()
+        if not module_id:
+            print_error("Module ID is required")
+            return False
+        args.module_id = module_id
+
+        supported_types = list(MARKETPLACE_CREATE_TYPES)
+        default_index = supported_types.index(args.type) + 1
+        print_info("Module type:")
+        for index, module_type in enumerate(supported_types, start=1):
+            default_marker = " (default)" if module_type == args.type else ""
+            print_info(f"  {index}. {module_type}{default_marker}")
+        while True:
+            choice = input(
+                f"Choose module type [{default_index}] (1-{len(supported_types)}): "
+            ).strip().lower()
+            if not choice:
+                break
+            if choice.isdigit():
+                choice_index = int(choice)
+                if 1 <= choice_index <= len(supported_types):
+                    args.type = supported_types[choice_index - 1]
+                    break
+            module_type = self._normalize_marketplace_create_type(choice)
+            if module_type in supported_types:
+                args.type = module_type
+                break
+            print_warning(
+                f"Unsupported choice '{choice}'. Choose a number or: {', '.join(supported_types)}"
+            )
+
+        author = input("Author [Your Name]: ").strip()
+        if author:
+            args.author = author
+
+        description = input("Description [generated automatically]: ").strip()
+        if description:
+            args.description = description
+
+        default_network = args.type in {"scanner", "exploit", "listener", "ui"}
+        if args.network_access is None:
+            args.network_access = self._prompt_marketplace_boolean(
+                "Declare network access?", default=default_network
+            )
+        if not args.database:
+            args.database = self._prompt_marketplace_boolean(
+                "Declare database access?", default=False
+            )
+
+        return True
+
+    @staticmethod
+    def _normalize_marketplace_create_type(value: str) -> str:
+        from core.registry.scaffold import MARKETPLACE_CREATE_TYPE_ALIASES
+
+        module_type = str(value or "scanner").strip().lower().replace("-", "_")
+        return MARKETPLACE_CREATE_TYPE_ALIASES.get(module_type, module_type)
+
+    @staticmethod
+    def _prompt_marketplace_boolean(prompt: str, *, default: bool) -> bool:
+        """Prompt for a yes/no value while accepting an empty default."""
+        suffix = "Y/n" if default else "y/N"
+        while True:
+            value = input(f"{prompt} [{suffix}]: ").strip().lower()
+            if not value:
+                return default
+            if value in {"y", "yes", "o", "oui"}:
+                return True
+            if value in {"n", "no", "non"}:
+                return False
+            print_warning("Please answer yes or no.")
     
     def _get_registry_url(self) -> str:
         """Get registry URL from config or use default"""
@@ -301,6 +1139,8 @@ Examples:
                     # Support both old api_key and new token
                     self.token = config.get('token')
                     self.api_key = config.get('api_key')  # Backward compatibility
+                    self.account_email = config.get('email')
+                    self.account_username = config.get('username')
                     # Update registry_url from config if available
                     base_url = config.get('base_url')
                     if base_url:
@@ -500,6 +1340,46 @@ Examples:
                 json.dump(config, f, indent=2)
         except Exception:
             pass
+
+    def _logout_account(self) -> bool:
+        """Remove locally saved marketplace credentials."""
+        config_file = os.path.join(
+            os.path.expanduser("~"),
+            ".kittysploit",
+            "registry_config.json",
+        )
+        was_logged_in = bool(self.token or self.api_key or self.account_email or self.account_username)
+
+        self.token = None
+        self.api_key = None
+        self.account_email = None
+        self.account_username = None
+
+        try:
+            config = {}
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+
+            for key in ("token", "api_key", "email", "username", "expires_at"):
+                config.pop(key, None)
+
+            config_dir = os.path.dirname(config_file)
+            os.makedirs(config_dir, exist_ok=True)
+            if "base_url" not in config:
+                config["base_url"] = self.registry_url
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            if was_logged_in:
+                print_success("Logged out from marketplace")
+            else:
+                print_info("No marketplace credentials were configured")
+            print_info("Local credentials removed. Your marketplace account was not deleted.")
+            return True
+        except Exception as e:
+            print_error(f"Logout failed: {e}")
+            return False
     
     def _make_request(
         self,

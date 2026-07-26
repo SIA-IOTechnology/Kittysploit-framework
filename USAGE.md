@@ -433,7 +433,44 @@ market uninstall --all
 
 ### Publish your own modules & extensions
 
-To create and publish marketplace items, use the example templates in this repository:
+Create a ready-to-edit marketplace module project directly from the console:
+
+```bash
+market create my-new-tool
+market create my-exploit --type exploit --author "Jane Doe"
+market create my-dashboard --type ui
+market create linux-persist --type backdoor
+market create chrome-helper --type browser_exploit
+market status
+market logout
+market publish apps/my-new-tool --dry-run
+market publish apps/my-new-tool
+market mine
+market versions my-new-tool
+market remove my-new-tool --version 0.1.0
+```
+
+Run `market create` without arguments to open the interactive creation wizard.
+By default, the project is created in `./apps/<id>/` with `extension.toml`,
+`README.md`, a source entry point (`src/module.py`, or `src/main.py` for UI),
+and `tests/test_module.py`. Use `--output` to select another parent directory
+and `market create --help` for all template, compatibility, permission, and
+pricing options. Available categories include `scanner`, `analysis`, `auxiliary`,
+`backdoor`, `browser_auxiliary`, `browser_exploit`, `encoder`, `exploit`,
+`listener`, `payload`, `post`, `shortcut`, `transform`, `workflow`, and `ui`.
+The display name is derived from the module ID unless you pass `--name`.
+Use `market status` to check the configured server and whether your saved
+marketplace credentials are still accepted. Use `market logout` to remove saved
+local credentials without deleting your marketplace account.
+Use `market publish <path> --dry-run` to validate and package locally before
+uploading. Real publishing requires `market login` and a registry server with a
+publish endpoint. To publish an update, increment `version` in `extension.toml`
+and run `market publish <path>` again. Use `market mine` to list your published
+modules, `market versions <id>` to inspect releases, and `market remove <id>` to
+unpublish a module or `market remove <id> --version <version>` to remove one
+release.
+
+You can also use the example templates in this repository:
 
 - [Example exploit module](examples/marketplace_modules/example_exploit/README.md) — manifest, stub layout, `use` / `run` workflow
 - [Example UI extension](examples/marketplace_modules/example_interface/README.md) — launcher, `extension.toml`, web UI structure

@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from core.registry.manifest import ExtensionManifest
 from core.registry.models import (
     AuditLog,
     Extension,
@@ -20,6 +23,7 @@ from core.registry.models import (
     License,
     Publisher,
     Transaction,
+    User,
     Wallet,
 )
 from core.registry.signature import RegistrySignatureManager
@@ -231,6 +235,104 @@ class RegistryService:
 
         return publisher
 
+    def publish_extension_bundle(
+        self,
+        *,
+        manifest: ExtensionManifest,
+        bundle_source_path: str,
+        bundle_hash: str,
+        bundle_size: int,
+        manifest_content: str,
+        actor_id: str,
+    ) -> Dict[str, Any]:
+        """Create or update an extension from an uploaded marketplace bundle."""
+        if not actor_id:
+            raise ValueError("actor_id is required")
+
+        source = Path(bundle_source_path)
+        if not source.is_file():
+            raise FileNotFoundError(f"Bundle not found: {source}")
+
+        existing_version = (
+            self.db.query(ExtensionVersion)
+            .join(Extension)
+            .filter(
+                Extension.extension_id == manifest.id,
+                ExtensionVersion.version == manifest.version,
+            )
+            .first()
+        )
+        if existing_version:
+            raise ValueError(
+                f"Extension {manifest.id} version {manifest.version} already exists"
+            )
+
+        extension = self._get_extension(manifest.id)
+        if extension:
+            extension.name = manifest.name
+            extension.description = manifest.description or ""
+            extension.extension_type = manifest.extension_type.value
+            extension.price = float(manifest.price or 0.0)
+            extension.currency = manifest.currency
+            extension.license_type = manifest.license
+            extension.is_free = float(manifest.price or 0.0) <= 0
+            extension.updated_at = datetime.utcnow()
+        else:
+            extension = Extension(
+                extension_id=manifest.id,
+                name=manifest.name,
+                description=manifest.description or "",
+                extension_type=manifest.extension_type.value,
+                created_by_user_id=self._resolve_created_by_user_id(actor_id),
+                price=float(manifest.price or 0.0),
+                currency=manifest.currency,
+                license_type=manifest.license,
+                is_free=float(manifest.price or 0.0) <= 0,
+            )
+            self.db.add(extension)
+            self.db.flush()
+
+        target_name = f"{manifest.id}-{manifest.version}.kext"
+        target_path = Path(self.bundles_dir) / target_name
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target_path)
+
+        for version in extension.versions:
+            version.is_latest = False
+
+        compatibility = manifest.compatibility
+        ext_version = ExtensionVersion(
+            extension_id=extension.id,
+            version=manifest.version,
+            bundle_hash=bundle_hash,
+            bundle_path=target_name,
+            bundle_size=bundle_size,
+            manifest_content=manifest_content,
+            signature=manifest.signature,
+            kittysploit_min=(
+                compatibility.kittysploit_min if compatibility else None
+            ),
+            kittysploit_max=(
+                compatibility.kittysploit_max if compatibility else None
+            ),
+            is_latest=True,
+        )
+        self.db.add(ext_version)
+        self._audit(
+            action="publish",
+            actor_id=actor_id,
+            actor_type="user",
+            target_type="extension",
+            target_id=manifest.id,
+            details={
+                "version": manifest.version,
+                "bundle_hash": bundle_hash,
+                "bundle_size": bundle_size,
+            },
+        )
+        self.db.commit()
+        return self._extension_detail(extension)
+
     def revoke_extension(
         self,
         extension_id: str,
@@ -308,6 +410,30 @@ class RegistryService:
         self.db.add(wallet)
         self.db.flush()
         return wallet
+
+    def _resolve_created_by_user_id(self, actor_id: str) -> int:
+        try:
+            value = int(actor_id)
+            if self.db.query(User).filter(User.id == value).first():
+                return value
+        except (TypeError, ValueError):
+            pass
+
+        user = (
+            self.db.query(User)
+            .filter(
+                or_(
+                    User.email == str(actor_id),
+                    User.username == str(actor_id),
+                )
+            )
+            .first()
+        )
+        if user:
+            return user.id
+        raise ValueError(
+            "Authenticated principal must match an existing registry user"
+        )
 
     def _latest_version(self, extension: Extension) -> Optional[ExtensionVersion]:
         return self._resolve_version(extension, None)

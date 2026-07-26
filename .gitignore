@@ -90,4 +90,5 @@ artifacts/*
 TODO.md
 
 tests/*
+!tests/test_market_create.py
 docs/ROADMAP-AGENT-100X.md

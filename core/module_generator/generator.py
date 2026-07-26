@@ -20,11 +20,41 @@ MODULE_KINDS = {
         "http_mixin": True,
         "template": "run",
     },
+    "analysis": {
+        "base": "Analysis",
+        "default_subpath": "analysis/reporting",
+        "http_mixin": False,
+        "template": "run",
+    },
     "auxiliary": {
         "base": "Auxiliary",
         "default_subpath": "auxiliary/scanner",
         "http_mixin": False,
         "template": "run",
+    },
+    "backdoor": {
+        "base": "Backdoor",
+        "default_subpath": "backdoors/linux",
+        "http_mixin": False,
+        "template": "check_run",
+    },
+    "browser_auxiliary": {
+        "base": "BrowserAuxiliary",
+        "default_subpath": "browser_auxiliary/misc",
+        "http_mixin": False,
+        "template": "check_run",
+    },
+    "browser_exploit": {
+        "base": "BrowserExploit",
+        "default_subpath": "browser_exploits/multi",
+        "http_mixin": False,
+        "template": "browser_exploit",
+    },
+    "encoder": {
+        "base": "Encoder",
+        "default_subpath": "encoders/python",
+        "http_mixin": False,
+        "template": "encoder",
     },
     "exploit": {
         "base": "Exploit",
@@ -49,6 +79,24 @@ MODULE_KINDS = {
         "default_subpath": "listeners/multi",
         "http_mixin": False,
         "template": "listener",
+    },
+    "shortcut": {
+        "base": "Shortcut",
+        "default_subpath": "shortcut",
+        "http_mixin": False,
+        "template": "check_run",
+    },
+    "transform": {
+        "base": "Transform",
+        "default_subpath": "transforms/python",
+        "http_mixin": False,
+        "template": "transform",
+    },
+    "workflow": {
+        "base": "Workflow",
+        "default_subpath": "workflow",
+        "http_mixin": False,
+        "template": "run",
     },
 }
 
@@ -189,6 +237,14 @@ class ModuleSkeletonGenerator:
             return self._render_listener_module()
         if template == "exploit":
             return self._render_exploit_module()
+        if template == "browser_exploit":
+            return self._render_browser_exploit_module()
+        if template == "check_run":
+            return self._render_check_run_module()
+        if template == "encoder":
+            return self._render_encoder_module()
+        if template == "transform":
+            return self._render_transform_module()
         return self._render_run_module()
 
     def render_tests(self, module_relative: str, metadata_path: Path) -> str:
@@ -291,6 +347,102 @@ class Module({bases}):
 {body}
 '''
 
+    def _render_browser_exploit_module(self) -> str:
+        return f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""{self.display_name}"""
+
+from kittysploit import *
+
+
+class Module(BrowserExploit):
+
+    __info__ = {self._info_repr()}
+
+    payload = OptString("", "Payload module path (optional)", required=False, advanced=True)
+
+    def check(self):
+        print_info("Checking browser exploit prerequisites")
+        print_warning("Replace this stub with browser/session checks")
+        return True
+
+    def run(self):
+        if not self.check():
+            return False
+        print_info("Browser exploit stub")
+        print_warning("Replace this stub with browser exploitation logic")
+        return True
+'''
+
+    def _render_check_run_module(self) -> str:
+        bases = ", ".join(self._base_classes())
+        return f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""{self.display_name}"""
+
+from kittysploit import *
+
+
+class Module({bases}):
+
+    __info__ = {self._info_repr()}
+
+    def check(self):
+        print_info("Checking prerequisites")
+        print_warning("Replace this stub with real checks")
+        return True
+
+    def run(self):
+        if not self.check():
+            return False
+        print_info("Running module stub")
+        print_warning("Replace this stub with module logic")
+        return True
+'''
+
+    def _render_encoder_module(self) -> str:
+        return f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""{self.display_name}"""
+
+from kittysploit import *
+
+
+class Module(Encoder):
+
+    __info__ = {self._info_repr()}
+
+    def encode(self, payload):
+        print_info("Encoding payload stub")
+        if isinstance(payload, bytes):
+            return payload
+        return str(payload)
+'''
+
+    def _render_transform_module(self) -> str:
+        return f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""{self.display_name}"""
+
+from kittysploit import *
+
+
+class Module(Transform):
+
+    __info__ = {self._info_repr()}
+    SUPPORTED_CLIENT_LANGUAGES = ["python"]
+
+    def encode(self, data: bytes) -> bytes:
+        return data
+
+    def decode(self, data: bytes) -> bytes:
+        return data
+'''
+
     def _render_payload_module(self) -> str:
         return f'''#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -349,7 +501,11 @@ class Module(Listener):
                 "    ssl = OptBool(False, \"Use HTTPS\", True, advanced=True)\n"
                 "    base_path = OptString(\"/\", \"Base web path\", required=False)\n\n"
             )
-        return "    rhosts = OptString(\"\", \"Target host(s)\", required=True)\n\n"
+        if self.module_type == "post":
+            return (
+                "    session_id = OptString(\"\", \"Session ID to use\", required=False)\n\n"
+            )
+        return ""
 
     def _render_options_exploit(self) -> str:
         if self.http_mixin:
@@ -359,7 +515,7 @@ class Module(Listener):
                 "    ssl = OptBool(False, \"Use HTTPS\", True, advanced=True)\n"
                 "    base_path = OptString(\"/\", \"Base web path\", required=False)\n\n"
             )
-        return "    rhosts = OptString(\"\", \"Target host(s)\", required=True)\n\n"
+        return ""
 
     def _render_run_body(self) -> str:
         if self.http_mixin:
@@ -454,6 +610,8 @@ class Module(Listener):
             return {"lhost": {"type": "OptString", "required": True}, "lport": {"type": "OptPort", "required": True}}
         if self.module_type == "listener":
             return {"lhost": {"type": "OptString", "required": False}, "lport": {"type": "OptPort", "required": True}}
+        if self.module_type == "post":
+            return {"session_id": {"type": "OptString", "required": False}}
         if self.http_mixin:
             return {
                 "rhost": {"type": "OptString", "required": True},
@@ -461,17 +619,32 @@ class Module(Listener):
                 "ssl": {"type": "OptBool", "required": False},
                 "base_path": {"type": "OptString", "required": False},
             }
-        return {"rhosts": {"type": "OptString", "required": True}}
+        return {}
 
     def _normalize_type(self, module_type: str) -> str:
         value = (module_type or "scanner").strip().lower()
         remap = {
+            "analyses": "analysis",
+            "analyzer": "analysis",
+            "backdoors": "backdoor",
+            "browser": "browser_auxiliary",
+            "browser_aux": "browser_auxiliary",
+            "browser_auxiliaries": "browser_auxiliary",
+            "browser_exploits": "browser_exploit",
+            "browser-exploit": "browser_exploit",
+            "browser-exploits": "browser_exploit",
+            "encoders": "encoder",
             "scan": "scanner",
             "scanners": "scanner",
             "exploits": "exploit",
             "payloads": "payload",
             "listeners": "listener",
             "aux": "auxiliary",
+            "shortcuts": "shortcut",
+            "transforms": "transform",
+            "obfuscator": "transform",
+            "obfuscators": "transform",
+            "workflows": "workflow",
         }
         value = remap.get(value, value)
         if value not in MODULE_KINDS:

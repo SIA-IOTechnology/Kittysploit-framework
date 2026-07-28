@@ -41,7 +41,9 @@ class AdaptiveLoopConfig:
     max_iterations: int = 24
     max_replans: int = 8
     min_novelty_to_continue: int = 1
-    checkpoint_each_action: bool = True
+    # Checkpoint every N actions (1 = each action). Higher = less I/O latency.
+    checkpoint_each_action: bool = False
+    checkpoint_every_n: int = 4
 
 
 @dataclass
@@ -55,6 +57,7 @@ class AdaptiveLoopState:
     leases: List[ActionLease] = field(default_factory=list)
     stop: Optional[StopDecision] = None
     goal_progress: Optional[GoalProgress] = None
+    actions_since_checkpoint: int = 0
 
 
 class AdaptiveLoopEngine:
@@ -111,6 +114,8 @@ class AdaptiveLoopEngine:
 
             action = pending.pop(0)
             if self._is_refuted(state, action):
+                continue
+            if self._already_observed(state, action):
                 continue
 
             lease = self._acquire_budget(state, action)
@@ -170,6 +175,12 @@ class AdaptiveLoopEngine:
 
             if self.config.checkpoint_each_action:
                 self._checkpoint_action(state, action, outcome)
+            else:
+                every_n = max(1, int(self.config.checkpoint_every_n or 4))
+                loop_state.actions_since_checkpoint += 1
+                if loop_state.actions_since_checkpoint >= every_n:
+                    self._checkpoint_action(state, action, outcome)
+                    loop_state.actions_since_checkpoint = 0
 
         self._finalize_state(state, loop_state)
         return state
@@ -179,15 +190,36 @@ class AdaptiveLoopEngine:
         catalog = []
         try:
             expanded = bool(getattr(state, "expanded_surface", False))
-            catalog = self.services.module_catalog.discover_campaign_modules(expanded=expanded)[:48]
+            catalog = self.services.module_catalog.discover_campaign_modules(expanded=expanded)
+            catalog = self._filter_catalog_for_target(state, catalog)[:48]
         except Exception:
             catalog = []
+        learning = getattr(self.services, "learning", None)
+        similar_episodes: List[Dict[str, Any]] = []
+        if learning is not None and isinstance(kb, dict):
+            try:
+                from interfaces.command_system.builtin.agent.planner_context import (
+                    retrieve_similar_episodes,
+                )
+
+                similar_episodes = retrieve_similar_episodes(
+                    kb,
+                    learning_store=learning,
+                    state=state,
+                    limit=4,
+                )
+                if similar_episodes:
+                    kb["adaptive_similar_episodes"] = similar_episodes
+                    state.knowledge_base = kb
+            except Exception:
+                similar_episodes = []
         return {
             "phase": getattr(state, "current_phase", ""),
             "goal": getattr(state, "campaign_goal", ""),
             "knowledge_base": kb,
             "catalog_modules": catalog,
             "metrics": getattr(state, "metrics", None),
+            "similar_episodes": similar_episodes,
         }
 
     def _default_plan(self, state: Any, observation: Mapping[str, Any]) -> List[AgentAction]:
@@ -200,7 +232,8 @@ class AdaptiveLoopEngine:
 
         kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
         modules = observation.get("catalog_modules") or []
-        actions = self._heuristic_plan_actions(modules, kb)
+        actions = self._heuristic_plan_actions(modules, kb, state=state)
+        self._record_plan_preferences(state, actions, modules)
         from interfaces.command_system.builtin.agent.shadow_planner import (
             shadow_mode_enabled,
         )
@@ -212,18 +245,87 @@ class AdaptiveLoopEngine:
             ShadowPlannerService(self.services).evaluate_shadow(state, observation, actions)
         return actions
 
-    @staticmethod
+    def _filter_catalog_for_target(self, state: Any, modules: Sequence[Any]) -> List[Any]:
+        from interfaces.command_system.builtin.agent.goal_planner import (
+            path_matches_forced_protocol,
+            resolve_campaign_protocol,
+        )
+        from interfaces.command_system.builtin.agent.module_stack_gate import hard_stack_skip_reason
+
+        protocol = resolve_campaign_protocol(
+            state,
+            getattr(state, "knowledge_base", None)
+            if isinstance(getattr(state, "knowledge_base", None), dict)
+            else {},
+        )
+        kb = getattr(state, "knowledge_base", None)
+        kb_map = kb if isinstance(kb, dict) else {}
+        observed = {
+            str(item).strip()
+            for item in (kb_map.get("observed_modules") or [])
+            if str(item).strip()
+        }
+        catalog = getattr(self.services, "module_catalog", None)
+        get_meta = getattr(catalog, "get_agent_metadata", None) if catalog is not None else None
+        filtered: List[Any] = []
+        for row in modules or []:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path") or "").strip()
+            if not path:
+                continue
+            if path in observed:
+                continue
+            if not path_matches_forced_protocol(path, protocol):
+                continue
+            agent = None
+            if callable(get_meta):
+                try:
+                    agent = get_meta(path)
+                except Exception:
+                    agent = None
+            # Prefer agent metadata already on the catalog row when present.
+            if agent is None and isinstance(row.get("agent"), dict):
+                agent = row.get("agent")
+            skip = hard_stack_skip_reason(path, kb_map, agent if isinstance(agent, dict) else None)
+            if skip:
+                continue
+            filtered.append(row)
+        return filtered
+
     def _heuristic_plan_actions(
+        self,
         modules: Sequence[Any],
         kb: Mapping[str, Any],
+        state: Any = None,
     ) -> List[AgentAction]:
+        """Score catalog rows with ActionScorer + LearningStore bandit / episode hints."""
         from interfaces.command_system.builtin.agent.action_planner import (
             ActionScorer,
             action_profile_from_module,
             planner_alignment_bonus,
             planner_state_from_kb,
         )
+        from interfaces.command_system.builtin.agent.goal_planner import (
+            path_matches_forced_protocol,
+            resolve_campaign_protocol,
+        )
 
+        protocol = resolve_campaign_protocol(state, kb if isinstance(kb, dict) else {})
+        learning = getattr(self.services, "learning", None)
+        similar = list(kb.get("adaptive_similar_episodes") or []) if isinstance(kb, dict) else []
+        boosted_paths = {
+            str(row.get("module_path") or "")
+            for row in similar
+            if isinstance(row, dict)
+            and str(row.get("status") or "").lower() in {"confirmed", "success"}
+        }
+        demoted_paths = {
+            str(row.get("module_path") or "")
+            for row in similar
+            if isinstance(row, dict)
+            and str(row.get("status") or "").lower() in {"refuted", "blocked", "error"}
+        }
         scored: List[tuple[float, AgentAction]] = []
         scorer = ActionScorer()
         planner_state = planner_state_from_kb(kb if isinstance(kb, dict) else {})
@@ -233,8 +335,25 @@ class AdaptiveLoopEngine:
             path = str(row.get("path") or "")
             if not path:
                 continue
+            if not path_matches_forced_protocol(path, protocol):
+                continue
             profile = action_profile_from_module(row)
-            score = scorer.score(profile, planner_state) + planner_alignment_bonus(row, kb if isinstance(kb, dict) else {})
+            score = scorer.score(profile, planner_state) + planner_alignment_bonus(
+                row, kb if isinstance(kb, dict) else {}
+            )
+            if learning is not None:
+                try:
+                    score *= float(
+                        learning.utility_multiplier(
+                            path, kb if isinstance(kb, dict) else {}, state
+                        )
+                    )
+                except Exception:
+                    pass
+            if path in boosted_paths:
+                score += 12.0
+            if path in demoted_paths:
+                score -= 8.0
             action_type = "run_exploit" if path.startswith("exploits/") else "run_followup"
             scored.append((
                 score,
@@ -249,6 +368,48 @@ class AdaptiveLoopEngine:
             ))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [action for _score, action in scored[:5]]
+
+    def _record_plan_preferences(
+        self,
+        state: Any,
+        actions: Sequence[AgentAction],
+        modules: Sequence[Any],
+    ) -> None:
+        learning = getattr(self.services, "learning", None)
+        if learning is None or not actions:
+            return
+        chosen = str(actions[0].path or "").strip()
+        if not chosen:
+            return
+        rejected: List[Dict[str, Any]] = []
+        seen = {chosen}
+        for action in list(actions)[1:6]:
+            path = str(getattr(action, "path", "") or "").strip()
+            if path and path not in seen:
+                rejected.append({"path": path, "reason": "lower_ranked_plan_action"})
+                seen.add(path)
+        if not rejected:
+            for row in modules:
+                if not isinstance(row, dict):
+                    continue
+                path = str(row.get("path") or "").strip()
+                if not path or path in seen:
+                    continue
+                rejected.append({"path": path, "reason": "not_selected_by_adaptive_plan"})
+                seen.add(path)
+                if len(rejected) >= 4:
+                    break
+        if not rejected:
+            return
+        try:
+            learning.record_preferences(
+                state,
+                chosen_path=chosen,
+                rejected_alternatives=rejected,
+                outcome="adaptive_plan",
+            )
+        except Exception:
+            pass
 
     def _default_act(self, state: Any, action: AgentAction) -> Dict[str, Any]:
         if getattr(state, "dry_run", False) or getattr(state, "plan_only", False):
@@ -286,32 +447,28 @@ class AdaptiveLoopEngine:
                 modules = self.services.module_catalog.discover_campaign_modules(
                     expanded=bool(getattr(state, "expanded_surface", False))
                 )
+                modules = self._filter_catalog_for_target(state, modules)
             except Exception:
                 modules = []
-            scanners = [
-                row for row in modules
-                if isinstance(row, dict)
-                and str(row.get("path", "")).startswith(("scanner/", "auxiliary/scanner/"))
-            ][: max(1, min(int((action.options or {}).get("limit") or 4), 8))]
+            kb = getattr(state, "knowledge_base", {}) or {}
+            limit = max(1, min(int((action.options or {}).get("limit") or 4), 8))
+            ranked = self._heuristic_plan_actions(
+                [
+                    row for row in modules
+                    if isinstance(row, dict)
+                    and str(row.get("path", "")).startswith(("scanner/", "auxiliary/scanner/"))
+                ],
+                kb if isinstance(kb, dict) else {},
+                state=state,
+            )[:limit]
             results = []
-            for row in scanners:
-                path = str(row.get("path") or "")
-                if not path:
-                    continue
-                sub = AgentAction(
-                    type="run_followup",
-                    path=path,
-                    priority=action.priority,
-                    risk="active",
-                    reason="surface_scan:delegate",
-                    status="planned",
-                )
+            for sub in ranked:
                 results.append(self._default_act(state, sub))
             return {
                 "blocked": False,
                 "error": "",
                 "execution": None,
-                "surface_scan_results": results,
+                "surface_results": results,
                 "planned": False,
             }
         path = str(action.path or "")
@@ -364,6 +521,12 @@ class AdaptiveLoopEngine:
         if not isinstance(kb, dict):
             kb = {}
             state.knowledge_base = kb
+        kb_before = {
+            "tech_hints": list(kb.get("tech_hints") or []),
+            "risk_signals": list(kb.get("risk_signals") or []),
+            "discovered_endpoints": list(kb.get("discovered_endpoints") or [])[:40],
+            "discovered_params": list(kb.get("discovered_params") or [])[:40],
+        }
         refuted = kb.setdefault("refuted_hypotheses", [])
         if outcome.verdict == "refuted":
             hyp = Hypothesis(
@@ -378,12 +541,36 @@ class AdaptiveLoopEngine:
         if action.path and action.path not in observed:
             observed.append(action.path)
 
+        learning = getattr(self.services, "learning", None)
+        if learning is None:
+            return
+        try:
+            catalog = getattr(self.services, "module_catalog", None)
+            meta_fn = getattr(catalog, "get_agent_metadata", None) if catalog is not None else None
+            learning.record_action_outcome(
+                state,
+                action,
+                outcome,
+                phase="adaptive",
+                get_agent_metadata=meta_fn if callable(meta_fn) else None,
+                kb_before=kb_before,
+            )
+        except Exception:
+            pass
+
     def _evaluate_stop(
         self,
         state: Any,
         loop_state: AdaptiveLoopState,
         observation: Mapping[str, Any],
     ) -> StopDecision:
+        if self._goal_reached(state, loop_state):
+            return StopDecision(
+                stop=True,
+                kind="soft",
+                reason="goal_reached",
+                detail="Goal milestones already satisfied",
+            )
         metrics = getattr(state, "metrics", None)
         if metrics is not None and int(getattr(metrics, "scope_blocks", 0) or 0) > 0:
             return StopDecision(stop=True, kind="hard", reason="scope_violation")
@@ -396,8 +583,17 @@ class AdaptiveLoopEngine:
             used = int(getattr(metrics, "network_units_used", 0) or 0) if metrics else 0
             if used >= budget:
                 return StopDecision(stop=True, kind="hard", reason="budget_exhausted")
+        # Avoid premature low-novelty soft-stop while chasing auth/shell with room to replan.
         if loop_state.iteration > 1 and not loop_state.pivots and loop_state.replans == 0:
             if all(row.verdict in {"no_signal", "blocked"} for row in loop_state.outcomes[-2:]):
+                goal = str(getattr(state, "campaign_goal", "") or "").lower().replace("_", "-")
+                pursuing = (
+                    "shell" in goal
+                    or goal in {"obtain-auth", "post-auth"}
+                    or bool(getattr(state, "shell_hunter", False))
+                )
+                if pursuing and loop_state.iteration < max(4, self.config.max_iterations // 3):
+                    return StopDecision(stop=False)
                 return StopDecision(stop=True, kind="soft", reason="low_novelty")
         return StopDecision(stop=False)
 
@@ -419,7 +615,8 @@ class AdaptiveLoopEngine:
         )
 
     def _goal_progress(self, state: Any, observation: Mapping[str, Any]) -> GoalProgress:
-        goal = str(getattr(state, "campaign_goal", "") or observation.get("goal") or "recon")
+        goal_raw = str(getattr(state, "campaign_goal", "") or observation.get("goal") or "recon")
+        goal = goal_raw.lower().replace("_", "-")
         kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
         signals = {str(item).lower() for item in (kb.get("risk_signals") or [])}
         milestones: List[str] = []
@@ -427,11 +624,36 @@ class AdaptiveLoopEngine:
             milestones.append("signals_observed")
         if kb.get("observed_modules"):
             milestones.append("modules_executed")
-        ratio = min(1.0, len(milestones) / 3.0)
-        return GoalProgress(goal=goal, completion_ratio=ratio, milestones=milestones)
+        if signals.intersection({
+            "login_form_detected",
+            "login_surface_detected",
+            "login_redirect_detected",
+        }):
+            milestones.append("login_surface")
+        if signals.intersection({"credentials_obtained", "authenticated_session", "auth_obtained"}):
+            milestones.append("auth_obtained")
+        if signals.intersection({"interactive_shell", "shell_obtained"}) or getattr(state, "new_sessions", None):
+            milestones.append("shell_obtained")
+
+        if goal in {"obtain-auth"} or goal.endswith("-auth"):
+            needed = ("login_surface", "auth_obtained")
+            hit = sum(1 for m in needed if m in milestones)
+            ratio = hit / float(len(needed))
+        elif "shell" in goal:
+            needed = ("signals_observed", "modules_executed", "shell_obtained")
+            hit = sum(1 for m in needed if m in milestones)
+            # Auth on the way to shell counts as partial progress.
+            if "auth_obtained" in milestones and "shell_obtained" not in milestones:
+                hit = max(hit, 2)
+            ratio = hit / float(len(needed))
+        elif goal in {"recon", "validate"}:
+            ratio = min(1.0, len([m for m in milestones if m in {"signals_observed", "modules_executed"}]) / 2.0)
+        else:
+            ratio = min(1.0, len(milestones) / 4.0)
+        return GoalProgress(goal=goal_raw, completion_ratio=min(1.0, float(ratio)), milestones=milestones)
 
     def _goal_reached(self, state: Any, loop_state: AdaptiveLoopState) -> bool:
-        goal = str(getattr(state, "campaign_goal", "") or "").lower()
+        goal = str(getattr(state, "campaign_goal", "") or "").lower().replace("_", "-")
         post = getattr(state, "post_exploit_mission", {}) or {}
         if isinstance(post, dict) and post.get("all_complete"):
             return True
@@ -445,6 +667,9 @@ class AdaptiveLoopEngine:
         if "shell" in goal:
             sessions = getattr(state, "new_sessions", []) or []
             return bool(sessions)
+        if goal in {"obtain-auth", "obtain_auth"} or goal.endswith("-auth") or goal.endswith("_auth"):
+            from interfaces.command_system.builtin.agent.goal_planner import kb_auth_terminal_reached
+            return kb_auth_terminal_reached(kb)
         return loop_state.goal_progress.completion_ratio >= 0.66 if loop_state.goal_progress else False
 
     def _is_refuted(self, state: Any, action: AgentAction) -> bool:
@@ -457,6 +682,15 @@ class AdaptiveLoopEngine:
             if str(row.get("fingerprint") or "") == f"{action.path}:{action.type}":
                 return True
         return False
+
+    @staticmethod
+    def _already_observed(state: Any, action: AgentAction) -> bool:
+        path = str(getattr(action, "path", "") or "").strip()
+        if not path:
+            return False
+        kb = getattr(state, "knowledge_base", {}) or {}
+        observed = kb.get("observed_modules") or []
+        return path in {str(item).strip() for item in observed if str(item).strip()}
 
     def _hypotheses(self, state: Any) -> List[Hypothesis]:
         kb = getattr(state, "knowledge_base", {}) or {}
@@ -497,6 +731,10 @@ class AdaptiveLoopEngine:
         if not hasattr(state, "adaptive_loop") or state.adaptive_loop is None:
             state.adaptive_loop = loop_state
         try:
+            from interfaces.command_system.builtin.agent.network_budget import (
+                sync_metrics_from_budget,
+            )
+
             state.report_path = self.services.report.generate_report(
                 state.raw_target,
                 state.target_info,
@@ -510,10 +748,20 @@ class AdaptiveLoopEngine:
                 decision_timeline=state.decision_timeline,
                 run_id=state.run_id,
                 workspace=state.workspace,
-                metrics=state.metrics,
+                metrics=getattr(state.metrics, "__dict__", None) or state.metrics,
                 campaign_stop_reason=state.campaign_stop_reason,
-                network_budget=state.network_budget,
-                runtime_policy=state.runtime_policy,
+                network_budget=sync_metrics_from_budget(state),
+                runtime_policy={
+                    "safety_profile": getattr(state, "safety_profile", ""),
+                    "dry_run": bool(getattr(state, "dry_run", False)),
+                    "plan_only": bool(getattr(state, "plan_only", False)),
+                    "tls_verify": bool(
+                        getattr(getattr(state, "runtime_policy", None), "tls_verify", True)
+                    ),
+                    "mission_profile": str(
+                        getattr(getattr(state, "runtime_policy", None), "mission_profile", "") or ""
+                    ),
+                },
                 decision_source="adaptive_loop",
             )
         except Exception:
@@ -521,6 +769,23 @@ class AdaptiveLoopEngine:
 
 
 def adaptive_loop_enabled(state: Any) -> bool:
-    if getattr(state, "adaptive_loop_enabled", False):
+    """
+    Adaptive observe/plan/act loop is ON by default (pairs with hierarchical planner).
+
+    Force off with ``state.adaptive_loop_enabled=False``,
+    ``KITTYSPLOIT_AGENT_ADAPTIVE=0``, or safety profile ``safe``.
+    """
+    env = os.environ.get("KITTYSPLOIT_AGENT_ADAPTIVE", "").strip().lower()
+    if env in {"0", "false", "no", "off"}:
+        return False
+    if env in {"1", "true", "yes", "on"}:
         return True
-    return os.environ.get("KITTYSPLOIT_AGENT_ADAPTIVE", "").strip().lower() in {"1", "true", "yes"}
+    flag = getattr(state, "adaptive_loop_enabled", None)
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    profile = str(getattr(state, "safety_profile", "") or "").strip().lower()
+    if profile == "safe":
+        return False
+    return True

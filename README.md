@@ -1,157 +1,144 @@
 <div align="center">
-  <img src="static/logo.jpg" alt="KittySploit Logo" width="160">
+  <img src="static/logo.jpg" alt="KittySploit logo" width="150">
 
-  # KittySploit Framework
-  ### *The Next-Gen Exploitation Engine for Modern Red Teams*
+# KittySploit
 
-  [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
-  [![Zig](https://img.shields.io/badge/Payloads-Zig_0.16-orange.svg?style=for-the-badge&logo=zig)](https://ziglang.org/)
-  [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-  [![Donate](https://img.shields.io/badge/Sponsor-Liberapay-yellow.svg?style=for-the-badge&logo=liberapay)](https://liberapay.com/KittySploit/donate)
-  [![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/RNskjwSW5W)
+**A modular offensive security framework for pentesters, researchers and red teams.**
 
-  **[Website](https://kittysploit.com) • [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki) • [Usage Guide](USAGE.md) • [Marketplace](USAGE.md) • [Discord](https://discord.gg/RNskjwSW5W)**
+Scan targets, organize engagements, run security modules and build
+AI-assisted testing plans from a single console.
 
-  *Modular • Extensible • AI-Powered*
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord\&logoColor=white)](https://discord.gg/RNskjwSW5W)
+
+**[Get started](#quick-start) · [Documentation](USAGE.md) · [Website](https://kittysploit.com) · [Discord](https://discord.gg/RNskjwSW5W)**
+
 </div>
 
----
+<img src="docs/screenshots/banner.png" alt="KittySploit offensive security framework" width="100%">
 
 ## Why KittySploit?
 
-While traditional tools struggle with modern web architectures and automated defense, KittySploit redefines the offensive landscape with cutting-edge tech:
+Security testing often requires separate tools for scanning, exploitation, traffic analysis, automation and engagement tracking.
 
-| **Autonomous AI** | **Zig Payloads** | **Live Collab** | **Smart Proxy** |
-| :--- | :--- | :--- | :--- |
-| AI agents that plan attacks via local LLMs (Ollama). | Stealthy payloads compiled with integrated Zig 0.16. | Real-time shared editor for seamless team operations. | Auto-detects tech and runs modules directly from traffic. |
+KittySploit brings these workflows together in an extensible, Metasploit-inspired console built for modern security assessments.
 
----
-
-## Key Features
-
-- **Autonomous Agent**: Feed a target, and the AI handles reconnaissance and suggests exploitation paths.
-- **Ultra-Fast Core**: Dependency-free x64 polymorphic encoders and a high-performance Python core.
-- **Evasion-First**: Advanced obfuscation and multi-protocol session handling to bypass modern EDR/WAF.
-- **KittyProxy**: Intelligent web proxy that auto-discovers REST APIs, GraphQL, and WebSockets.
-- **Modern Web UI**: Beautiful and intuitive graphical interfaces for proxy analysis and collaborative editing.
-- **Marketplace**: Easily install or share new modules through our community-driven marketplace.
-
----
-
-## Vision: KittySploit 2.0
-
-KittySploit **1.x** lays the groundwork — modular architecture, rapid iteration, and a growing ecosystem. The long-term goal is **version 2.0**: not just another pentest framework, but a genuinely best-in-class offensive platform.
-
-**What 2.0 means for us:**
-
-| **Powerful** | **Stable** | **Complete** |
-| :--- | :--- | :--- |
-| Deep coverage across web, network, cloud, and OT — with AI-assisted planning, evasion-first payloads, and workflows that scale from recon to post-exploitation. | A battle-tested core, predictable APIs, and reliability you can trust on real engagements — not just demos. | One cohesive toolchain: agent, proxy, OSINT, payloads, collaboration, and marketplace — fully integrated, not bolted together. |
-
-We're building toward that north star release by release. Every module, every fix, and every contribution moves us closer to **2.0**.
-
----
-
-## Screenshots
-
-<div align="center">
-  <img src="docs/screenshots/banner.png" alt="Banner" width="100%">
-  <br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/banner.png">banner.png</a>
-  <br><br>
-  <table width="100%">
-    <tr>
-      <td width="50%"><img src="docs/screenshots/cli-interface.png" alt="CLI Interface"></td>
-      <td width="50%"><img src="docs/screenshots/kittyproxy-1.png" alt="KittyProxy"></td>
-    </tr>
-    <tr>
-      <td align="center"><i>Interactive CLI</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/cli-interface.png">KittySploit Framework</a></td>
-      <td align="center"><i>Traffic Analysis Detail</i><br><a href="https://github.com/SIA-IOTechnology/KittyProxy">Extension KittyProxy</a></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="docs/screenshots/kittycollab.png" alt="KittyCollab"></td>
-      <td width="50%"><img src="docs/screenshots/kittyosint.png" alt="KittyOsint"></td>
-    </tr>
-    <tr>
-      <td align="center"><i>Collaborative Editor</i><br><a href="https://github.com/SIA-IOTechnology/Kittysploit-framework/blob/main/docs/screenshots/kittycollab.png">KittyCollab</a></td>
-      <td align="center"><i>Intelligent OSINT Graph</i><br><a href="https://github.com/SIA-IOTechnology/KittyOsint">Extension KittyOsint</a></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="docs/screenshots/marketplace.png" alt="Marketplace"></td>
-      <td width="50%"><img src="docs/screenshots/kittyproxy-2.png" alt="KittyProxy Detail"></td>
-    </tr>
-    <tr>
-      <td align="center"><i>GUI interface</i><br><a href="https://github.com/SIA-IOTechnology/KittyCosmic">Extension KittyCosmic</a></td>
-      <td align="center"><i>AI-Powered Proxy</i><br><a href="https://github.com/SIA-IOTechnology/KittyProxy">Extension KittyProxy</a></td>
-    </tr>
-    <tr>
-      <td width="50%"><img src="docs/screenshots/kittyv8.png" alt="Marketplace"></td>
-      <td width="50%"><img src="docs/screenshots/kittyprotocol.png" alt="KittyProxy Detail"></td>
-    </tr>
-    <tr>
-      <td align="center"><i>V8 Engine Debugger</i><br><a href="https://github.com/SIA-IOTechnology/KittyV8Debugger">Extension KittyV8DEbugger</a></td>
-      <td align="center"><i>Protocol Analysis</i><br><a href="https://github.com/SIA-IOTechnology/KittyProtocol">Extension KittyProtocol</a></td>
-    </tr>
-  </table>
-</div>
-
----
+* **Modular console** — search, configure and execute security modules.
+* **Scanner and workflows** — automate repeatable reconnaissance and testing tasks.
+* **Workspaces and scopes** — keep hosts, vulnerabilities and engagement boundaries organized.
+* **AI-assisted planning** — use local Ollama models to analyze targets and prepare testing plans.
+* **Extension ecosystem** — add proxy, OSINT, GUI and protocol-analysis capabilities.
+* **Automation ready** — interactive console, one-shot commands, RPC and API modes.
 
 ## Quick Start
 
-**Linux / macOS One-Liner:**
+### Linux and macOS
+
+```bash
+git clone https://github.com/SIA-IOTechnology/Kittysploit-framework.git
+cd Kittysploit-framework
+./install/install.sh
+python3 kittyconsole.py
+```
+
+A one-line installer is also available:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
 ```
-or 
-```bash
-git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && ./install/install.sh
-``` 
 
-**Windows:**
+### Windows
+
 ```batch
-git clone https://github.com/SIA-IOTechnology/Kittysploit-framework && cd Kittysploit-framework && install\install.bat
-```
-
-**Start:**
-```bash
+git clone https://github.com/SIA-IOTechnology/Kittysploit-framework.git
+cd Kittysploit-framework
+install\install.bat
 python kittyconsole.py
 ```
 
----
+## Your First Session
 
-## Example: AI-Assisted Planning
+Verify the installation:
 
-Let the framework plan your attack using a local LLM:
-
-```bash
-kittysploit agent target.com --llm-local --llm-model llama3.1:8b
+```text
+kittysploit> doctor
 ```
 
-More examples are available in [USAGE.md](USAGE.md).
+Create a workspace and define the authorized scope:
 
----
+```text
+kittysploit> workspace create demo-lab
+kittysploit> scope enable
+kittysploit> scope allow ip 192.168.56.0/24
+```
 
-## How We Compare
+Search and inspect modules:
 
-| Feature | KittySploit | Metasploit | Cobalt Strike |
-| :--- | :---: | :---: | :---: |
-| **Language** | Python / Zig | Ruby | Java |
-| **Live Collaboration** | ✅ | ❌ | ✅ |
-| **AI/LLM Planning** | ✅ | ❌ | ❌ |
-| **Modern Payloads** | ✅ (Zig/ASM) | ⚠️ (C/ASM) | ✅ |
-| **Native Tor Routing** | ✅ | ❌ | ⚠️ |
-| **Integrated Marketplace** | ✅ | ❌ | ❌ |
-| **GUI / Web UI** | ✅ | ❌ | ✅ |
-| **Complex Workflows** | ✅ | ⚠️ | ✅ |
-| **Open Source** | ✅ | ✅ | ❌ |
+```text
+kittysploit> search wordpress
+kittysploit> show exploits
+kittysploit> show auxiliary
+```
 
----
+Run a scanner against your local lab:
 
-<div align="center">
-  <h3>Ready to upgrade your arsenal?</h3>
-  <p>If you find this project useful, please consider giving it a ⭐. It helps others discover the framework!</p>
-  
-  [🌐 Official Website](https://kittysploit.com) • [💬 Discord](https://discord.gg/RNskjwSW5W) • [📄 MIT License](LICENSE) • [💖 Donate](https://liberapay.com/KittySploit/donate)
-  
-  [![Donate using Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/KittySploit/donate)
-</div>
+```text
+kittysploit> scanner -u http://192.168.56.10
+```
+
+## AI-Assisted Planning
+
+KittySploit can use a local Ollama model to prepare a testing plan without automatically launching intrusive actions:
+
+```bash
+kittysploit agent lab.local \
+  --llm-local \
+  --llm-model llama3.1:8b \
+  --plan-only \
+  --dry-run
+```
+
+The agent supports reconnaissance, analysis, planning, reporting and configurable safety profiles.
+
+## KittySploit Ecosystem
+
+| Project                                                                | Purpose                             |
+| ---------------------------------------------------------------------- | ----------------------------------- |
+| [KittyProxy](https://github.com/SIA-IOTechnology/KittyProxy)           | Web traffic capture and analysis    |
+| [KittyCosmic](https://github.com/SIA-IOTechnology/KittyCosmic)         | Graphical interface and marketplace |
+| [KittyOsint](https://github.com/SIA-IOTechnology/KittyOsint)           | Visual OSINT investigation          |
+| [KittyProtocol](https://github.com/SIA-IOTechnology/KittyProtocol)     | Protocol analysis                   |
+| [KittyV8Debugger](https://github.com/SIA-IOTechnology/KittyV8Debugger) | V8 debugging and analysis           |
+
+[View more screenshots](docs/screenshots/) · [Read the complete usage guide](USAGE.md)
+
+## Documentation
+
+* [Usage guide](USAGE.md)
+* [Project wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
+* [Extension marketplace](https://kittysploit.com)
+* [Report a bug or request a feature](https://github.com/SIA-IOTechnology/Kittysploit-framework/issues)
+
+## Project Status
+
+KittySploit 1.x provides the foundation for a broader offensive security platform.
+
+The framework is still evolving. Interfaces and workflows may change between releases, so validate new versions in a controlled lab before using them during an engagement.
+
+## Community
+
+KittySploit is open source and community-driven.
+
+* Give the repository a ⭐ to help others discover it.
+* Join the [Discord community](https://discord.gg/RNskjwSW5W).
+* Open an issue to report a bug or suggest an improvement.
+* Support development through [Liberapay](https://liberapay.com/KittySploit/donate).
+
+## Acknowledgments
+
+Thanks to [Woody](https://github.com/v-Woody) for their contributions.
+
+## License
+
+KittySploit is released under the [MIT License](LICENSE).

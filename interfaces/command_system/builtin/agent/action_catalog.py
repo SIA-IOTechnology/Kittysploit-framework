@@ -15,7 +15,12 @@ from interfaces.command_system.builtin.agent.action_planner import (
     planner_state_from_kb,
     ActionScorer,
 )
-from interfaces.command_system.builtin.agent.goal_planner import filter_actions_for_goal, normalize_goal
+from interfaces.command_system.builtin.agent.goal_planner import (
+    filter_actions_for_goal,
+    normalize_goal,
+    path_matches_forced_protocol,
+    resolve_campaign_protocol,
+)
 from interfaces.command_system.builtin.agent.http_probe_actions import (
     api_surface_ambiguous,
     http_surface_observed,
@@ -198,6 +203,7 @@ def build_admissible_catalog(
     executed_actions: Optional[Sequence[str]] = None,
     limit: int = 48,
     state: Any = None,
+    learning_store: Any = None,
 ) -> List[CatalogAction]:
     """Return deterministic catalog entries the LLM may rank but not invent."""
     kb = kb if isinstance(kb, dict) else {}
@@ -209,11 +215,20 @@ def build_admissible_catalog(
     rows: List[CatalogAction] = []
     rows.extend(_build_probe_catalog_actions(kb=kb, goal=goal_n, state=state, executed=executed))
 
+    protocol = resolve_campaign_protocol(state, kb)
+    learning = learning_store
+    from interfaces.command_system.builtin.agent.module_stack_gate import hard_stack_skip_reason
+
     for module_row in modules:
         if not isinstance(module_row, dict):
             continue
         path = str(module_row.get("path") or "").strip()
         if not path:
+            continue
+        if not path_matches_forced_protocol(path, protocol):
+            continue
+        agent_meta = module_row.get("agent") if isinstance(module_row.get("agent"), dict) else None
+        if hard_stack_skip_reason(path, kb, agent_meta):
             continue
         action_type = _action_type_for_path(path)
         if not filter_actions_for_goal([{"type": action_type, "path": path}], goal_n):
@@ -222,8 +237,12 @@ def build_admissible_catalog(
             continue
         profile = action_profile_from_module(module_row)
         score = scorer.score(profile, planner_state) + planner_alignment_bonus(module_row, kb)
+        if learning is not None and path:
+            try:
+                score *= float(learning.utility_multiplier(path, kb, state))
+            except Exception:
+                pass
         low_path = path.lower()
-        protocol = str(kb.get("protocol") or getattr(state, "protocol", "") or "").lower()
         if protocol in {"smb", "cifs"} or "smb" in " ".join(str(s).lower() for s in (kb.get("services") or [])):
             if "/smb/" in low_path or "smb_" in low_path:
                 score += 35.0

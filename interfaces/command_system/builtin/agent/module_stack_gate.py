@@ -89,6 +89,19 @@ def infer_stack_gate_for_path(module_path: str) -> Dict[str, Any]:
             },
         }
 
+    if "angular_xss" in low or "/angular/" in low:
+        return {
+            "requires": {"tech_hints_any": ["angular", "angularjs"]},
+        }
+    if "react_xss" in low:
+        return {
+            "requires": {"tech_hints_any": ["react", "nextjs"]},
+        }
+    if "apache_vuln" in low or "apache_httpd" in low:
+        return {
+            "requires": {"tech_hints_any": ["apache", "httpd"]},
+        }
+
     for cms, tokens in CMS_PATH_TOKENS.items():
         if any(token in low for token in tokens):
             floor = 0.65 if low.startswith("exploits/") else 0.3
@@ -204,3 +217,51 @@ def resolve_module_stack_mismatch(
         has_tech_evidence=has_tech_evidence,
         has_nextjs_evidence=has_nextjs_evidence,
     )
+
+
+def is_hard_stack_skip_reason(reason: str, module_path: str = "") -> bool:
+    """
+    True when a stack mismatch should hard-skip launch (save HTTP), not merely soft-rank.
+
+    Soft reasons (unmet confidence on cold recon / detectors) stay runnable so the
+    agent can establish stack evidence. Hard reasons: explicit incompatibility,
+    framework scanners missing their required tech hints, or exploits that still
+    lack required stack confidence.
+    """
+    text = str(reason or "").strip().lower()
+    if not text:
+        return False
+    if "incompatible" in text or "stack mismatch" in text:
+        return True
+    path = str(module_path or "").lower()
+    if "requires tech hint" in text:
+        # ``*_detect`` modules may establish the missing hint; specialized
+        # scanners/exploits should not burn budget without stack evidence.
+        leaf = path.rsplit("/", 1)[-1]
+        if "_detect" in leaf or leaf.endswith("detect"):
+            return False
+        return True
+    if path.startswith(("exploit/", "exploits/")) and "confidence" in text:
+        return True
+    return False
+
+
+def hard_stack_skip_reason(
+    module_path: str,
+    kb: Dict[str, Any],
+    agent: Optional[Mapping[str, Any]] = None,
+    *,
+    has_tech_evidence: Optional[Callable[[str, float], bool]] = None,
+    has_nextjs_evidence: Optional[Callable[[], bool]] = None,
+) -> str:
+    """Return mismatch reason only when it warrants a hard pre-launch skip."""
+    reason = resolve_module_stack_mismatch(
+        module_path,
+        kb,
+        agent,
+        has_tech_evidence=has_tech_evidence,
+        has_nextjs_evidence=has_nextjs_evidence,
+    )
+    if is_hard_stack_skip_reason(reason, module_path):
+        return reason
+    return ""

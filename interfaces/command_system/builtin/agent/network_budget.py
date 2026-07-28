@@ -107,14 +107,20 @@ def sync_metrics_from_budget(state: Any) -> Dict[str, Any]:
 
 
 def module_budget_units(module_or_info: Any, module_path: str = "", default: int = 1) -> int:
+    from interfaces.command_system.builtin.agent.module_scoring import estimate_expected_requests
     from interfaces.command_system.builtin.agent.runtime_policy import assess_module_risk
 
     payload = module_or_info
     if isinstance(payload, dict) and isinstance(payload.get("__info__"), dict):
         payload = payload["__info__"]
-    risk = assess_module_risk(payload, module_path)
+    path = str(module_path or "").strip()
+    if not path and isinstance(payload, dict):
+        path = str(payload.get("path", "") or "").strip()
+    risk = assess_module_risk(payload, path)
     if risk.declared:
         return max(1, int(risk.expected_requests or 1))
+    if path:
+        return estimate_expected_requests(path.lower())
     return max(1, int(default or 1))
 
 

@@ -22,33 +22,43 @@ class Module(Auxiliary, Http_client):
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
-        'expected_requests': 2,
+        'expected_requests': 6,
         'reversible': True,
         'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
+        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
         'cost': 1.0,
-        'noise': 0.5,
+        'noise': 0.4,
         'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
+        'requires': {
+            'min_endpoints': 0,
+            'min_params': 0,
+            'tech_hints_any': ['apache', 'httpd'],
+            'tech_hints_all': [],
+            'specializations_any': [],
+            'risk_signals_any': [],
+            'auth_session': False,
+            'capabilities_any': [],
+            'capabilities_all': [],
+            'confidence_min': {},
+            'confidence_min_any': {},
+            'endpoint_pattern_any': [],
+            'param_any': [],
+            'api_surface_ready': False,
+        },
+        'chain': {
+            'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
+            'consumes_capabilities': [],
+            'option_bindings': {},
+            'suggested_followups': [],
+        },
     },
     }
+
+    force_scan = OptBool(
+        False,
+        "Run even when Apache is not detected on the target",
+        required=False,
+    )
 
     # Known Apache CVEs and vulnerable versions
     APACHE_CVES = {
@@ -442,14 +452,24 @@ class Module(Auxiliary, Http_client):
         # Detect Apache version
         print_status("Detecting Apache version...")
         version = self.detect_apache_version()
+        apache_present = bool(version) or bool(self.check())
 
         if version:
             print_success(f"Apache version detected: {version}")
             if 'server_header' in self.server_info:
                 print_info(f"Server header: {self.server_info['server_header']}")
+        elif apache_present:
+            print_success("Apache indicators detected (version unknown)")
         else:
-            print_warning("Could not detect Apache version")
-            print_info("Continuing with generic checks...")
+            print_warning("Apache not detected")
+            if not self.force_scan:
+                print_info(
+                    "Skipping Apache vulnerability probes. "
+                    "Set force_scan=true to override."
+                )
+                print_info("No Apache-specific vulnerabilities detected.")
+                return True
+            print_info("force_scan enabled — continuing without Apache confirmation")
 
         print_info("")
 

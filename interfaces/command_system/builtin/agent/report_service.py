@@ -4,6 +4,7 @@
 """Agent Markdown/JSON reports and historical false-positive heuristics."""
 
 import os
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -282,6 +283,51 @@ class ReportService:
     def _sanitize_nested(self, value: Any, parent_key: str = "") -> Any:
         return sanitize_nested(value, parent_key)
 
+    @staticmethod
+    def _coerce_network_budget(network_budget: Any) -> Dict[str, Any]:
+        """Accept a dict or ``NetworkBudget`` snapshot for report serialization."""
+        if network_budget is None:
+            return {}
+        if isinstance(network_budget, dict):
+            return dict(network_budget)
+        snapshot = getattr(network_budget, "snapshot", None)
+        if callable(snapshot):
+            try:
+                data = snapshot()
+            except Exception:
+                return {}
+            return dict(data) if isinstance(data, dict) else {}
+        return {}
+
+    @staticmethod
+    def _coerce_report_mapping(value: Any) -> Dict[str, Any]:
+        """Coerce dataclasses / policy objects into a plain JSON-safe dict."""
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            try:
+                data = to_dict()
+            except Exception:
+                data = None
+            if isinstance(data, dict):
+                return dict(data)
+        if is_dataclass(value) and not isinstance(value, type):
+            try:
+                return dict(asdict(value))
+            except Exception:
+                pass
+        raw = getattr(value, "__dict__", None)
+        if isinstance(raw, dict):
+            return {
+                key: item
+                for key, item in raw.items()
+                if not str(key).startswith("_")
+            }
+        return {}
+
     def sanitize_report_result(self, result):
         if not isinstance(result, dict):
             return result
@@ -337,7 +383,7 @@ class ReportService:
             safe_decision_timeline = [self.sanitize_report_result(r) for r in (decision_timeline or [])]
             safe_llm_plan = self._sanitize_nested(dict(llm_plan or {}))
             safe_execution_plan = self._sanitize_nested(dict(execution_plan or {}))
-            safe_network_budget = self._sanitize_nested(dict(network_budget or {}))
+            safe_network_budget = self._sanitize_nested(self._coerce_network_budget(network_budget))
             report_summary = self._build_report_summary(
                 safe_contextual_findings,
                 safe_llm_plan,
@@ -367,8 +413,8 @@ class ReportService:
                     ),
                 },
                 "network_budget": safe_network_budget,
-                "metrics": self._sanitize_nested(metrics or {}),
-                "runtime_policy": self._sanitize_nested(runtime_policy or {}),
+                "metrics": self._sanitize_nested(self._coerce_report_mapping(metrics)),
+                "runtime_policy": self._sanitize_nested(self._coerce_report_mapping(runtime_policy)),
                 "llm_plan": safe_llm_plan,
                 "knowledge_base": safe_knowledge_base,
                 "execution_plan": safe_execution_plan,

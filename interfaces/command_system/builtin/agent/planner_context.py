@@ -335,6 +335,7 @@ def build_planner_llm_context(
     *,
     catalog_action_ids: Optional[Sequence[str]] = None,
     findings: Optional[Sequence[Mapping[str, Any]]] = None,
+    learning_store: Any = None,
 ) -> Dict[str, Any]:
     kb = _kb_from(state, observation)
     host_ctx = build_host_service_context(state, observation)
@@ -343,6 +344,8 @@ def build_planner_llm_context(
         kb,
         target_profile=host_ctx.target_profile,
         capability_rung=host_ctx.capability_rung,
+        learning_store=learning_store,
+        state=state,
     )
     from interfaces.command_system.builtin.agent.adversarial_guard import sanitize_finding_rows
 
@@ -376,12 +379,14 @@ def attach_planner_context(
     *,
     catalog_action_ids: Optional[Sequence[str]] = None,
     findings: Optional[Sequence[Mapping[str, Any]]] = None,
+    learning_store: Any = None,
 ) -> Dict[str, Any]:
     context = build_planner_llm_context(
         state,
         observation,
         catalog_action_ids=catalog_action_ids,
         findings=findings,
+        learning_store=learning_store,
     )
     state.planner_llm_context = context
     host_service = context.get("host_service") if isinstance(context.get("host_service"), dict) else {}

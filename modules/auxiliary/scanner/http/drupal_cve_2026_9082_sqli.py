@@ -106,8 +106,8 @@ class Module(Auxiliary, Http_client):
     max_length = OptInteger(120, "Max chars to extract", required=False, advanced=True)
     table_limit = OptInteger(20, "Max tables for action=tables", required=False, advanced=True)
 
-    def __init__(self, framework=None):
-        super().__init__(framework)
+    def __init__(self):
+        super().__init__()
         self._rt = ""
 
     def _timeout(self) -> int:

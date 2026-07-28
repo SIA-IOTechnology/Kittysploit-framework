@@ -451,6 +451,7 @@ class HierarchicalPlannerEngine:
             goal=getattr(state, "campaign_goal", ""),
             executed_actions=getattr(state, "executed_actions", []) or [],
             state=state,
+            learning_store=getattr(self.services, "learning", None),
         )
         from interfaces.command_system.builtin.agent.planner_context import (
             attach_planner_context,
@@ -462,6 +463,7 @@ class HierarchicalPlannerEngine:
             observation,
             catalog_action_ids=[row.action_id for row in catalog],
             findings=getattr(state, "contextual_findings", None) or getattr(state, "vulnerable_results", None),
+            learning_store=getattr(self.services, "learning", None),
         )
         from interfaces.command_system.builtin.agent.model_router import (
             TASK_HTTP_RECON,
@@ -639,9 +641,26 @@ class HierarchicalPlannerEngine:
 
 
 def hierarchical_planner_enabled(state: Any) -> bool:
-    if getattr(state, "hierarchical_planner_enabled", False):
+    """
+    Hierarchical planner is ON by default for live campaigns.
+
+    Force off with ``state.hierarchical_planner_enabled=False``,
+    ``KITTYSPLOIT_AGENT_HIERARCHICAL=0``, or safety profile ``safe``.
+    """
+    env = os.environ.get("KITTYSPLOIT_AGENT_HIERARCHICAL", "").strip().lower()
+    if env in {"0", "false", "no", "off"}:
+        return False
+    if env in {"1", "true", "yes", "on"}:
         return True
-    return os.environ.get("KITTYSPLOIT_AGENT_HIERARCHICAL", "").strip().lower() in {"1", "true", "yes"}
+    flag = getattr(state, "hierarchical_planner_enabled", None)
+    if flag is True:
+        return True
+    if flag is False:
+        return False
+    profile = str(getattr(state, "safety_profile", "") or "").strip().lower()
+    if profile == "safe":
+        return False
+    return True
 
 
 def parse_llm_tactical_rank(

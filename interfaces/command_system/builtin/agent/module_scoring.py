@@ -52,6 +52,11 @@ def estimate_network_cost(path_lower: str) -> float:
     return max(0.4, cost)
 
 
+def estimate_expected_requests(path_lower: str) -> int:
+    """Integer request budget units inferred from module path (when undeclared)."""
+    return max(1, int(round(float(estimate_network_cost(str(path_lower or "").lower())))))
+
+
 def module_path_lower(module: Dict) -> str:
     return str(module.get("path", "") or "").lower()
 

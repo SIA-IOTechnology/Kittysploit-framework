@@ -27,6 +27,7 @@ from interfaces.command_system.builtin.agent.attack_chain_memory import (
 )
 from core.playbooks.coverage import playbook_readiness_bonus
 from interfaces.command_system.builtin.agent.goal_planner import (
+    is_auth_operator_goal,
     is_shell_operator_goal,
     operator_goal_from_mapping,
 )
@@ -128,6 +129,78 @@ def shell_goal_gain_bonus(path_lower: str, kb: Dict[str, Any]) -> float:
     return bonus
 
 
+def auth_goal_gain_bonus(path_lower: str, kb: Dict[str, Any]) -> float:
+    """Prefer login/credential/auth-bypass modules when operator pursues obtain-auth."""
+    if not isinstance(kb, dict) or not path_lower:
+        return 0.0
+    if not is_auth_operator_goal(operator_goal_from_mapping(kb)):
+        return 0.0
+    signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
+    if signals.intersection({"authenticated_session", "credentials_obtained", "auth_obtained"}):
+        return 0.0
+    bonus = 0.0
+    if any(x in path_lower for x in ("login", "bruteforce", "admin_login", "credential", "password")):
+        bonus += 1.7
+    if "auth" in path_lower and "oauth" not in path_lower:
+        bonus += 0.85
+    if path_lower.startswith("exploits/") and any(
+        x in path_lower for x in ("auth", "bypass", "sqli", "login", "credential")
+    ):
+        bonus += 1.25
+    if signals.intersection({
+        "login_form_detected",
+        "login_surface_detected",
+        "login_redirect_detected",
+    }) and any(x in path_lower for x in ("login", "bruteforce", "auth", "admin_login", "credential")):
+        bonus += 1.15
+    return bonus
+
+
+def goal_alignment_delta(
+    module: Dict[str, Any],
+    kb: Dict[str, Any],
+    path: str,
+    *,
+    include_pre_cost_bonuses: bool = True,
+    include_chain_observation_penalty: bool = True,
+) -> float:
+    """
+    Shared additive adjustments for goal/chain/playbook alignment.
+
+    Applied on the metadata ``compute_generic_module_score`` path so planner ``agent``
+    metadata does not drop shell/auth/chain bonuses. Legacy ``module_utility`` already
+    folds pre-cost bonuses into gain; pass ``include_pre_cost_bonuses=False`` there.
+    """
+    if not isinstance(kb, dict):
+        kb = {}
+    path = str(path or "").lower()
+    delta = 0.0
+    if include_pre_cost_bonuses:
+        delta += exploit_proximity_bonus(path, kb)
+        delta += shell_goal_gain_bonus(path, kb)
+        delta += auth_goal_gain_bonus(path, kb)
+        delta += attack_graph_next_action_bonus(path, kb)
+        delta -= attack_graph_stale_penalty(path, kb)
+    try:
+        delta += float(planner_alignment_bonus(module, kb) or 0.0)
+    except Exception:
+        pass
+    try:
+        delta += float(chain_readiness_bonus(module, kb) or 0.0)
+    except Exception:
+        pass
+    if include_chain_observation_penalty:
+        try:
+            delta -= float(chain_observation_penalty(module, kb) or 0.0)
+        except Exception:
+            pass
+    try:
+        delta += float(playbook_readiness_bonus(module, kb) or 0.0)
+    except Exception:
+        pass
+    return delta
+
+
 def attack_graph_stale_penalty(path_lower: str, kb: Dict[str, Any]) -> float:
     """Penalize modules that ran without growing the attack graph."""
     if not path_lower or not isinstance(kb, dict):
@@ -181,6 +254,7 @@ def module_utility(
     gain = expected_information_gain(blob, path, tech_hints, kb if isinstance(kb, dict) else {})
     gain += exploit_proximity_bonus(path, kb if isinstance(kb, dict) else {})
     gain += shell_goal_gain_bonus(path, kb if isinstance(kb, dict) else {})
+    gain += auth_goal_gain_bonus(path, kb if isinstance(kb, dict) else {})
     red = redundancy_penalty(path, executed_paths)
     stale = attack_graph_stale_penalty(path, kb if isinstance(kb, dict) else {})
     graph_bonus = attack_graph_next_action_bonus(path, kb if isinstance(kb, dict) else {})
@@ -207,22 +281,13 @@ def module_utility(
             u *= float(learning_store.utility_multiplier(path, kb if isinstance(kb, dict) else {}, learning_state))
         except Exception:
             pass
-    try:
-        u += planner_alignment_bonus(module, kb if isinstance(kb, dict) else {})
-    except Exception:
-        pass
-    try:
-        u += chain_readiness_bonus(module, kb if isinstance(kb, dict) else {})
-    except Exception:
-        pass
-    try:
-        u -= chain_observation_penalty(module, kb if isinstance(kb, dict) else {})
-    except Exception:
-        pass
-    try:
-        u += playbook_readiness_bonus(module, kb if isinstance(kb, dict) else {})
-    except Exception:
-        pass
+    u += goal_alignment_delta(
+        module,
+        kb if isinstance(kb, dict) else {},
+        path,
+        include_pre_cost_bonuses=False,
+        include_chain_observation_penalty=True,
+    )
     return u
 
 
@@ -245,8 +310,10 @@ def unified_module_score(
         module, kb, tech_hints, executed_paths, performance_memory, context_memory,
     )
     if g is not None:
-        if g >= 0 and health_memory is not None:
-            path = module_path_lower(module)
+        if g < 0:
+            return g
+        path = module_path_lower(module)
+        if health_memory is not None:
             try:
                 hm = float(health_memory.health_multiplier(path, kb if isinstance(kb, dict) else {}))
                 if hm < 0.4:
@@ -254,6 +321,20 @@ def unified_module_score(
                 g *= hm
             except Exception:
                 pass
+        if learning_store is not None and path:
+            try:
+                g *= float(learning_store.utility_multiplier(path, kb if isinstance(kb, dict) else {}, learning_state))
+            except Exception:
+                pass
+        # Generic path already applies chain_observation_penalty (scaled); skip re-adding it.
+        # Still add pre-cost goal bonuses so metadata modules keep shell/auth/chain alignment.
+        g += goal_alignment_delta(
+            module,
+            kb if isinstance(kb, dict) else {},
+            path,
+            include_pre_cost_bonuses=True,
+            include_chain_observation_penalty=False,
+        )
         return g
     return module_utility(
         module, kb, tech_hints, executed_paths, performance_memory, context_memory, health_memory,
@@ -285,36 +366,19 @@ def select_opportunistic_batch(
         return []
     scored = []
     for m in unseen:
-        g = compute_generic_module_score(
-            m, kb, tech_hints, executed_paths, performance_memory, context_memory,
+        score = unified_module_score(
+            m,
+            kb,
+            tech_hints,
+            executed_paths,
+            performance_memory,
+            context_memory,
+            health_memory,
+            learning_store,
+            learning_state,
         )
-        if g is not None and g < 0:
+        if score is None or score < 0:
             continue
-        if g is not None:
-            if health_memory is not None:
-                path = module_path_lower(m)
-                try:
-                    hm = float(health_memory.health_multiplier(path, kb))
-                    if hm < 0.4:
-                        continue
-                    g *= hm
-                except Exception:
-                    pass
-            if learning_store is not None:
-                path = module_path_lower(m)
-                try:
-                    g *= float(learning_store.utility_multiplier(path, kb, learning_state))
-                except Exception:
-                    pass
-            scored.append((g, m))
-        else:
-            scored.append((
-                module_utility(
-                    m, kb, tech_hints, executed_paths,
-                    performance_memory, context_memory, health_memory,
-                    learning_store, learning_state,
-                ),
-                m,
-            ))
+        scored.append((score, m))
     scored.sort(key=lambda item: (item[0], str(item[1].get("path", ""))), reverse=True)
     return [m for _, m in scored[:limit]]

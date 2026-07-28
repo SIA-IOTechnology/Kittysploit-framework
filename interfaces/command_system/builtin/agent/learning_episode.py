@@ -244,6 +244,58 @@ def episode_from_module_result(
     )
 
 
+def episode_from_action_outcome(
+    state: Any,
+    action: Any,
+    outcome: Any,
+    *,
+    phase: str = "adaptive",
+    agent_meta: Optional[Mapping[str, Any]] = None,
+    tenant_id: str = "",
+) -> Optional[DecisionEpisode]:
+    """Build a learnable episode from an adaptive-loop ActionOutcome."""
+    verdict = str(getattr(outcome, "verdict", "") or "").strip().lower()
+    if not is_learnable_verdict(verdict):
+        return None
+    path = str(
+        getattr(outcome, "module_path", None)
+        or getattr(action, "path", None)
+        or ""
+    ).strip()
+    if not path:
+        return None
+    kb = getattr(state, "knowledge_base", None)
+    kb_map = kb if isinstance(kb, dict) else {}
+    index = build_context_index(state, kb_map)
+    fingerprint = build_context_fingerprint(index)
+    agent = agent_meta if isinstance(agent_meta, dict) else {}
+    module_version = str(agent.get("version") or agent.get("module_version") or "unknown")
+    raw = getattr(outcome, "raw_summary", None)
+    raw_map = raw if isinstance(raw, Mapping) else {}
+    vulnerable = bool(raw_map.get("vulnerable"))
+    params = sanitize_episode_params({
+        "action_type": getattr(action, "type", ""),
+        "message": getattr(outcome, "message", "") or "",
+        "network_requests": getattr(outcome, "network_requests", 0),
+    })
+    failure_type = ""
+    if verdict == VERDICT_REFUTED:
+        failure_type = str(getattr(outcome, "message", "") or "refuted")[:120]
+    return DecisionEpisode(
+        context_fingerprint=fingerprint,
+        context_index=index,
+        action_path=path,
+        safe_params=params,
+        verdict=verdict,
+        real_gain=compute_real_gain(verdict=verdict, vulnerable=vulnerable),
+        failure_type=failure_type,
+        phase=str(getattr(outcome, "phase", None) or phase or "adaptive")[:80],
+        module_version=module_version,
+        tenant_id=tenant_id,
+        run_id=str(getattr(state, "run_id", "") or ""),
+    )
+
+
 def mission_memory(kb: MutableMapping[str, Any]) -> Dict[str, Any]:
     raw = kb.get(MISSION_MEMORY_KEY)
     if not isinstance(raw, dict):

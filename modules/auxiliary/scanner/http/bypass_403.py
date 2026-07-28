@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.bypass_confirm import is_confirmed_bypass
 import os
 
 
@@ -10,38 +11,45 @@ class Module(Auxiliary, Http_client):
 
     __info__ = {
         'name': '403 bypass tester',
-        'description': "Try to bypass 403 (forbidden) on a web resource using common tricks.",
+        'description': (
+            "Try to bypass 403 (forbidden) on a web resource. Homepage collapses "
+            "(e.g. /admin/../, ignored rewrite headers) are filtered out."
+        ),
         'author': 'KittySploit Team',
         'tags': ['web', 'scanner', 'bypass', '403'],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
-        'cost': 1.0,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
+        'agent': {
+            'risk': 'active',
+            'effects': ['network_probe'],
+            'expected_requests': 12,
+            'reversible': True,
+            'approval_required': False,
+            'produces': ['risk_signals', 'endpoints'],
+            'cost': 1.0,
+            'noise': 0.4,
+            'value': 0.8,
+            'requires': {
+                'min_endpoints': 0,
+                'min_params': 0,
+                'tech_hints_any': [],
+                'tech_hints_all': [],
+                'specializations_any': [],
+                'risk_signals_any': [],
+                'auth_session': False,
+                'capabilities_any': [],
+                'capabilities_all': [],
+                'confidence_min': {},
+                'confidence_min_any': {},
+                'endpoint_pattern_any': [],
+                'param_any': [],
+                'api_surface_ready': False,
+            },
+            'chain': {
+                'produces_capabilities': [{'capability': 'endpoints', 'from_detail': ''}],
+                'consumes_capabilities': [],
+                'option_bindings': {},
+                'suggested_followups': [],
+            },
+        },
     }
 
     path = OptString("/admin", "Chemin ou ressource à tester", required=True)
@@ -145,23 +153,6 @@ class Module(Auxiliary, Http_client):
             "content_type": response.headers.get("Content-Type", ""),
         }
 
-    def _is_interesting(self, sig, baseline):
-        if not sig:
-            return False
-        if not baseline:
-            return sig["status"] != 403
-
-        status_changed = sig["status"] != baseline["status"]
-        if status_changed and sig["status"] != 403:
-            return True
-
-        if not self.compare_soft403:
-            return False
-
-        length_delta = abs(sig["length"] - baseline["length"])
-        threshold = max(150, int(baseline["length"] * 0.35))
-        return length_delta > threshold
-
     def _fetch(self, path, headers=None):
         try:
             return self.http_request(
@@ -176,15 +167,27 @@ class Module(Auxiliary, Http_client):
 
     def run(self):
         print_status(f"Target: {self.target}:{self.port} | Test the path {self.path}")
+        target_path = self._normalize_path(str(self.path or "/admin"))
 
-        baseline_resp = self._fetch(self.path)
+        home_sig = self._response_signature(self._fetch("/"))
+        baseline_resp = self._fetch(target_path)
         baseline_sig = self._response_signature(baseline_resp)
         if baseline_sig:
-            print_info(f"Reference response: status={baseline_sig['status']} len={baseline_sig['length']}")
+            print_info(
+                f"Reference response: status={baseline_sig['status']} len={baseline_sig['length']}"
+            )
         else:
             print_warning("Unable to get a reference response, the differences will be less reliable.")
+        if home_sig:
+            print_info(f"Homepage control: status={home_sig['status']} len={home_sig['length']}")
 
-        variants = self._base_variations(self.path)
+        if baseline_sig and int(baseline_sig.get("status") or 0) != 403:
+            print_warning(
+                f"Path {target_path} is not 403 (got {baseline_sig.get('status')}); "
+                "bypass results may be less meaningful."
+            )
+
+        variants = self._base_variations(target_path)
         for extra in self._load_extra_paths():
             variants.append((f"extra:{extra}", extra, None))
 
@@ -198,19 +201,40 @@ class Module(Auxiliary, Http_client):
             filtered.append((name, path, headers))
 
         findings = []
+        confirmed = 0
         for name, path, headers in filtered:
             resp = self._fetch(path, headers=headers)
             sig = self._response_signature(resp)
-            interesting = self._is_interesting(sig, baseline_sig)
+            interesting = False
+            if sig and self.compare_soft403:
+                interesting = is_confirmed_bypass(
+                    sig,
+                    blocked_sig=baseline_sig,
+                    home_sig=home_sig,
+                    name=name,
+                    path=path,
+                    target_path=target_path,
+                    blocked_status=403,
+                )
+            elif sig and not self.compare_soft403:
+                interesting = sig["status"] not in {403, 400, 404}
             if sig:
                 note = "yes" if interesting else "no"
                 findings.append([name, path, sig['status'], sig['length'], note])
                 if interesting:
-                    print_success(f"[{name}] Possible bypass: {path} -> {sig['status']} (len={sig['length']})")
+                    confirmed += 1
+                    print_success(
+                        f"[{name}] Confirmed bypass candidate: {path} -> "
+                        f"{sig['status']} (len={sig['length']})"
+                    )
             else:
                 findings.append([name, path, "err", 0, "no"])
 
         print_table(['Test', 'Path', 'Code', 'Size', 'Diff?'], findings)
+        if confirmed:
+            print_success(f"Confirmed bypass candidates: {confirmed}")
+        else:
+            print_info("No confirmed 403 bypass (homepage collapses / errors filtered out).")
         return True
 
 

@@ -21,6 +21,9 @@ class ModuleRunnerHooks(Protocol):
     def record_waf_signals_from_results(
         self, state: Any, results: List[Any], phase_name: str
     ) -> bool: ...
+    def abort_batch_after_results(
+        self, state: Any, results: List[Any], phase_name: str
+    ) -> bool: ...
 
 
 class WorkflowModuleRunnerHooks:
@@ -46,6 +49,9 @@ class WorkflowModuleRunnerHooks:
 
     def record_waf_signals_from_results(self, state, results, phase_name):
         return self._core._record_waf_signals_from_results(state, results, phase_name)
+
+    def abort_batch_after_results(self, state, results, phase_name):
+        return self._core._abort_module_batch_early(state, results, phase_name)
 
 
 class AgentModuleRunner:
@@ -98,12 +104,12 @@ class AgentModuleRunner:
             return [], skipped
         allowed: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
-        units_left = remaining
+        units_left = int(remaining)
         for module in modules or []:
-            units = module_budget_units(module, str(module.get("path", "")))
-            if self.module_uses_http_client(module):
-                allowed.append(module)
-                continue
+            path = str(module.get("path", "") if isinstance(module, dict) else "")
+            units = module_budget_units(module, path)
+            # Admission control for HTTP and non-HTTP alike. Actual HTTP spend is still
+            # charged by the requests/aiohttp hooks; this only caps how many modules we launch.
             if units_left < units:
                 skipped.append(self.budget_skip_result(module, phase_name))
                 continue
@@ -183,6 +189,8 @@ class AgentModuleRunner:
                 self._hooks.adapt_rate_limit_from_results(state, batch_results)
                 if self._hooks.record_waf_signals_from_results(state, batch_results, phase_name):
                     break
+                if self._hooks.abort_batch_after_results(state, batch_results, phase_name):
+                    break
             return results
 
         fallback_units = sum(
@@ -198,11 +206,21 @@ class AgentModuleRunner:
         ):
             results.extend([self.budget_skip_result(module, phase_name) for module in allowed])
             return results
-        self._hooks.sleep_between_agent_actions(state, phase_name)
-        batch_results = scanner._execute_modules(allowed, target_info, effective_threads, verbose)
-        if elite_auto_correct is not None:
-            elite_auto_correct(state, scanner, batch_results)
-        results.extend(batch_results)
-        self._hooks.adapt_rate_limit_from_results(state, batch_results)
-        self._hooks.record_waf_signals_from_results(state, batch_results, phase_name)
+
+        # Sub-batches so goal/WAF stops can abort mid-wave without serializing everything.
+        chunk_size = max(2, min(len(allowed), max(2, int(effective_threads or 1) * 2)))
+        for offset in range(0, len(allowed), chunk_size):
+            if self._hooks.phase_stop_reason(state, phase_name):
+                break
+            chunk = allowed[offset: offset + chunk_size]
+            self._hooks.sleep_between_agent_actions(state, f"{phase_name}:chunk{offset}")
+            batch_results = scanner._execute_modules(chunk, target_info, effective_threads, verbose)
+            if elite_auto_correct is not None:
+                elite_auto_correct(state, scanner, batch_results)
+            results.extend(batch_results)
+            self._hooks.adapt_rate_limit_from_results(state, batch_results)
+            if self._hooks.record_waf_signals_from_results(state, batch_results, phase_name):
+                break
+            if self._hooks.abort_batch_after_results(state, batch_results, phase_name):
+                break
         return results

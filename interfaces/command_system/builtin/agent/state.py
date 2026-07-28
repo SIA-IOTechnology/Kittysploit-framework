@@ -14,6 +14,7 @@ class AgentMetrics:
     deterministic_steps: int = 0
     llm_calls: int = 0
     llm_fallback_count: int = 0
+    llm_cache_hits: int = 0
     network_units_used: int = 0
     network_units_skipped: int = 0
     approvals_requested: int = 0
@@ -124,8 +125,9 @@ class AgentState:
     completed_phases: List[str] = field(default_factory=list)
     replan_count: int = 0
     replan_pending: bool = False
-    adaptive_loop_enabled: bool = False
-    hierarchical_planner_enabled: bool = False
+    # None = auto (ON except safety=safe / env opt-out); True/False = force.
+    adaptive_loop_enabled: Optional[bool] = None
+    hierarchical_planner_enabled: Optional[bool] = None
     shadow_mode_enabled: bool = False
     specialist_sequential_enabled: bool = False
     specialist_parallel_enabled: bool = False
@@ -183,6 +185,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
             "deterministic_steps": m.deterministic_steps,
             "llm_calls": m.llm_calls,
             "llm_fallback_count": m.llm_fallback_count,
+            "llm_cache_hits": m.llm_cache_hits,
             "network_units_used": m.network_units_used,
             "network_units_skipped": m.network_units_skipped,
             "approvals_requested": m.approvals_requested,
@@ -254,6 +257,7 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
             deterministic_steps=int(mm.get("deterministic_steps", 0)),
             llm_calls=int(mm.get("llm_calls", 0)),
             llm_fallback_count=int(mm.get("llm_fallback_count", 0)),
+            llm_cache_hits=int(mm.get("llm_cache_hits", 0)),
             network_units_used=int(mm.get("network_units_used", 0)),
             network_units_skipped=int(mm.get("network_units_skipped", 0)),
             approvals_requested=int(mm.get("approvals_requested", 0)),
@@ -348,8 +352,14 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         completed_phases=list(d.get("completed_phases") or []),
         replan_count=int(d.get("replan_count", 0) or 0),
         replan_pending=bool(d.get("replan_pending", False)),
-        adaptive_loop_enabled=bool(d.get("adaptive_loop_enabled", False)),
-        hierarchical_planner_enabled=bool(d.get("hierarchical_planner_enabled", False)),
+        adaptive_loop_enabled=(
+            None if d.get("adaptive_loop_enabled") is None else bool(d.get("adaptive_loop_enabled"))
+        ),
+        hierarchical_planner_enabled=(
+            None
+            if d.get("hierarchical_planner_enabled") is None
+            else bool(d.get("hierarchical_planner_enabled"))
+        ),
         shadow_mode_enabled=bool(d.get("shadow_mode_enabled", False)),
         specialist_sequential_enabled=bool(d.get("specialist_sequential_enabled", False)),
         specialist_parallel_enabled=bool(d.get("specialist_parallel_enabled", False)),

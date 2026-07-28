@@ -158,6 +158,7 @@ from interfaces.command_system.builtin.agent.chain_context import (
     sync_chain_context_to_kb,
 )
 from interfaces.command_system.builtin.agent.goal_planner import (
+    is_auth_operator_goal,
     is_shell_operator_goal,
     kb_api_surface_ready,
     kb_client_js_surface_ready,
@@ -940,6 +941,7 @@ class AgentWorkflowCore:
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         allowed: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
         for module in modules or []:
             path = module.get("path") if isinstance(module, dict) else ""
             reason = self._module_block_reason_for_profile(state, path, module)
@@ -960,10 +962,76 @@ class AgentWorkflowCore:
                     "details": {"safety_profile": self._normalized_safety_profile(state)},
                 })
                 continue
+            stack_reason = self._module_hard_stack_skip_reason(str(path or ""), kb)
+            if stack_reason:
+                skipped.append({
+                    "module": module.get("name", path) if isinstance(module, dict) else str(path),
+                    "path": path,
+                    "status": "skipped",
+                    "vulnerable": False,
+                    "message": stack_reason,
+                    "details": {"reason": "stack_mismatch"},
+                })
+                continue
             allowed.append(module)
         if skipped and getattr(state, "verbose", False):
-            print_warning(f"Safety profile skipped {len(skipped)} noisy module(s)")
+            print_warning(f"Safety/stack profile skipped {len(skipped)} module(s)")
         return allowed, skipped
+
+    def _abort_module_batch_early(
+        self,
+        state: AgentState,
+        results: List[Any],
+        phase_name: str,
+    ) -> bool:
+        """
+        True when remaining modules in this wave should be skipped (goal already met).
+
+        Lightweight: folds positive auth/shell evidence into the KB, then checks milestones.
+        """
+        if not results:
+            return False
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else None
+        if kb is None:
+            return False
+        risk = {str(x).lower() for x in (kb.get("risk_signals") or [])}
+        blob = " ".join(
+            f"{row.get('message', '')} {row.get('details', '')} {row.get('path', '')}".lower()
+            for row in results
+            if isinstance(row, dict)
+        )
+        added = False
+        if any(tok in blob for tok in ("authenticated as", "valid credentials", "session cookie", "login success")):
+            if "credentials_obtained" not in risk:
+                risk.add("credentials_obtained")
+                added = True
+            if "authenticated" in blob or "session" in blob:
+                if "authenticated_session" not in risk:
+                    risk.add("authenticated_session")
+                    added = True
+        if any(tok in blob for tok in ("interactive shell", "meterpreter", "shell opened", "got a shell")):
+            if "shell_obtained" not in risk:
+                risk.add("shell_obtained")
+                added = True
+        if added:
+            kb["risk_signals"] = sorted(risk)
+
+        operator = self._operator_campaign_goal(state)
+        if is_auth_operator_goal(operator) and self._credential_milestone_reached(kb):
+            state.campaign_stop_reason = (
+                f"{phase_name}: auth milestone reached — goal obtain-auth complete"
+            )
+            return True
+        if (
+            is_shell_operator_goal(operator) or bool(getattr(state, "shell_hunter", False))
+        ) and self._has_shell_milestone(state):
+            state.campaign_stop_reason = f"{phase_name}: shell_obtained"
+            return True
+        if self._has_shell_milestone(state) and not is_shell_operator_goal(operator):
+            # Shell is a terminal win even for non-shell goals.
+            state.campaign_stop_reason = f"{phase_name}: shell_obtained"
+            return True
+        return False
 
     def _filter_catalog_candidates_for_policy(
         self,
@@ -2204,6 +2272,20 @@ class AgentWorkflowCore:
             has_nextjs_evidence=lambda: self._has_nextjs_evidence(kb),
         )
 
+    def _module_hard_stack_skip_reason(self, path: str, knowledge_base: Dict[str, Any]) -> str:
+        """Hard pre-launch skip only (incompatible stack / unproven exploit), not cold detectors."""
+        from interfaces.command_system.builtin.agent.module_stack_gate import hard_stack_skip_reason
+
+        kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+        agent = self._catalog.get_agent_metadata(path)
+        return hard_stack_skip_reason(
+            path,
+            kb,
+            agent,
+            has_tech_evidence=lambda tech, threshold=0.65: self._has_tech_evidence(kb, tech, threshold),
+            has_nextjs_evidence=lambda: self._has_nextjs_evidence(kb),
+        )
+
     def _filter_stack_compatible_paths(self, paths: List[str], knowledge_base: Dict[str, Any]) -> List[str]:
         compatible = []
         for path in paths or []:
@@ -2737,6 +2819,31 @@ class AgentWorkflowCore:
                 phase_threads,
                 tech_hints,
             )
+
+        operator = self._operator_campaign_goal(state)
+        # obtain-auth: credentials/session are the goal — stop without post-auth / shell chase.
+        if is_auth_operator_goal(operator):
+            state.campaign_stop_reason = (
+                f"{phase_label}: auth milestone reached — goal obtain-auth complete"
+            )
+            if verbose:
+                print_status(
+                    "Auth goal complete: halting recon/injection and post-auth waves."
+                )
+            for hint in state.knowledge_base.get("tech_hints", []) or []:
+                tech_hints.add(str(hint).lower())
+            state.scan_tech_hints = sorted(tech_hints)
+            state.scan_modules_executed = len(executed_paths)
+            return self._finalize_scan_campaign(
+                state,
+                modules,
+                scanner,
+                all_results,
+                executed_paths,
+                phase_threads,
+                tech_hints,
+            )
+
         state.campaign_stop_reason = (
             f"{phase_label}: credentials obtained — halting broad scan; pivot to post-auth / privilege escalation"
         )
@@ -5436,6 +5543,9 @@ class AgentWorkflowCore:
             "requires approval",
             "excessive redirect",
             "rate-limit noise",
+            "goal obtain-auth complete",
+            "auth milestone reached",
+            "auth goal complete",
         )
         return any(token in text for token in hard_tokens)
 
@@ -5444,6 +5554,8 @@ class AgentWorkflowCore:
 
     def _should_run_shell_hunter_finalization(self, state: AgentState) -> bool:
         if self._has_shell_milestone(state):
+            return False
+        if is_auth_operator_goal(self._operator_campaign_goal(state)):
             return False
         if self._is_hard_campaign_stop_reason(state.campaign_stop_reason):
             return False
@@ -5568,7 +5680,7 @@ class AgentWorkflowCore:
             if self._module_block_reason_for_profile(state, path):
                 executed_paths.add(path)
                 continue
-            mismatch = self._module_stack_mismatch_reason(path, kb)
+            mismatch = self._module_hard_stack_skip_reason(path, kb)
             if mismatch:
                 executed_paths.add(path)
                 if verbose:
@@ -6561,15 +6673,31 @@ class AgentWorkflowCore:
             [m for m in (candidates or []) if isinstance(m, dict)],
             phase=str(getattr(state, "current_phase", "") or "catalog"),
         )
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        if isinstance(state.knowledge_base, dict):
+            operator = self._operator_campaign_goal(state)
+            if operator:
+                state.knowledge_base["operator_campaign_goal"] = operator
+            if state.campaign_goal:
+                state.knowledge_base["planner_campaign_goal"] = state.campaign_goal
+            kb = state.knowledge_base
+        # Drop hard stack mismatches before ranking so limit slots go to compatible modules.
+        if kb:
+            candidates = [
+                m for m in candidates
+                if not self._module_hard_stack_skip_reason(str(m.get("path", "") or ""), kb)
+            ]
         return select_opportunistic_batch(
             candidates,
-            state.knowledge_base,
+            kb,
             tech_hints,
             executed_paths,
             limit,
             self._module_perf,
             self._module_ctx,
             self._module_health,
+            self._learning,
+            state,
         )
 
     def _build_module_decision_report(
@@ -6592,6 +6720,8 @@ class AgentWorkflowCore:
             self._module_perf,
             self._module_ctx,
             self._module_health,
+            self._learning,
+            state,
         )
         reason = self._action_reason_for_path(
             path,
@@ -6619,6 +6749,8 @@ class AgentWorkflowCore:
                 self._module_perf,
                 self._module_ctx,
                 self._module_health,
+                self._learning,
+                state,
             )
             if g is None:
                 g = -1.0
@@ -6716,6 +6848,8 @@ class AgentWorkflowCore:
                     self._module_perf,
                     self._module_ctx,
                     self._module_health,
+                    self._learning,
+                    state,
                 )
                 parts.append(f"{tail}={u:.2f}")
             kb_s = information_score_kb(state.knowledge_base)
@@ -9648,11 +9782,16 @@ class AgentWorkflowCore:
         state: AgentState,
         actions: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Drop planned modules that conflict with an explicit ``--protocol`` constraint."""
-        protocol = str(getattr(state, "protocol", "") or "").strip().lower()
-        if not protocol:
-            kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
-            protocol = str(kb.get("protocol") or "").strip().lower()
+        """Drop planned modules that conflict with campaign protocol / web target."""
+        from interfaces.command_system.builtin.agent.goal_planner import (
+            path_matches_forced_protocol,
+            resolve_campaign_protocol,
+        )
+
+        protocol = resolve_campaign_protocol(
+            state,
+            state.knowledge_base if isinstance(state.knowledge_base, dict) else {},
+        )
         if not protocol:
             return actions
         filtered: List[Dict[str, Any]] = []
@@ -9791,9 +9930,17 @@ class AgentWorkflowCore:
         if "dom_xss_signal" in risk_signals and not cms_lock:
             candidates.extend([
                 "auxiliary/scanner/http/xss_scanner",
-                "auxiliary/scanner/http/react_xss",
-                "auxiliary/scanner/http/angular_xss",
             ])
+            # Framework-specific XSS probes only when that stack was fingerprinted.
+            if self._has_tech_evidence(knowledge_base, "react", threshold=0.55) or "react" in hints:
+                candidates.append("auxiliary/scanner/http/react_xss")
+            if (
+                self._has_tech_evidence(knowledge_base, "angular", threshold=0.55)
+                or self._has_tech_evidence(knowledge_base, "angularjs", threshold=0.55)
+                or "angular" in hints
+                or "angularjs" in hints
+            ):
+                candidates.append("auxiliary/scanner/http/angular_xss")
         if kb_client_js_surface_ready(knowledge_base) or self._has_nextjs_evidence(knowledge_base) or any(
             h in hints for h in ("nextjs", "react", "nodejs", "javascript")
         ):

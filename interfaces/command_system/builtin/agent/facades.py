@@ -58,6 +58,7 @@ class AgentServices:
         "auth",
         "report",
         "llm",
+        "learning",
     )
 
     def __init__(self, framework) -> None:
@@ -72,6 +73,7 @@ class AgentServices:
         self.auth = AuthContextService(self.core)
         self.report = self.core._report
         self.llm = self.core._llm
+        self.learning = self.core._learning
 
     def bootstrap_recon_for_adaptive(self, state: AgentState) -> AgentState:
         """Run scan/analyze once before the adaptive loop (LangGraph/linear parity)."""
@@ -129,6 +131,10 @@ class AgentServices:
             self.core._module_perf.set_paths(store.paths)
             self.core._module_health.set_paths(store.paths)
             self.core._module_ctx.set_paths(store.paths)
+            try:
+                self.learning.set_paths(store.paths)
+            except Exception:
+                pass
         if getattr(state, "module_health", None) is None:
             state.module_health = self.core._module_health
 

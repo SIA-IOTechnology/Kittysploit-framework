@@ -88,18 +88,31 @@ class SpecialistRunRecord:
 
 
 def specialist_execution_mode(state: Any) -> ExecutionMode:
+    """
+    Specialist fan-out mode.
+
+    Defaults: ``parallel`` (normal/aggressive), ``sequential`` (discreet), ``inline`` (safe).
+    Override with ``KITTYSPLOIT_AGENT_SPECIALISTS`` = parallel|sequential|inline|0.
+    """
     if getattr(state, "specialist_parallel_enabled", False):
         return "parallel"
     if getattr(state, "specialist_sequential_enabled", False):
         return "sequential"
     env = os.environ.get("KITTYSPLOIT_AGENT_SPECIALISTS", "").strip().lower()
+    if env in {"0", "false", "no", "off"}:
+        return "inline"
     if env in {"parallel", "sequential", "inline"}:
         return env
     if os.environ.get("KITTYSPLOIT_AGENT_SPECIALISTS_PARALLEL", "").strip().lower() in {"1", "true", "yes"}:
         return "parallel"
     if os.environ.get("KITTYSPLOIT_AGENT_SPECIALISTS_SEQUENTIAL", "").strip().lower() in {"1", "true", "yes"}:
         return "sequential"
-    return "inline"
+    profile = str(getattr(state, "safety_profile", "") or "").strip().lower()
+    if profile == "safe":
+        return "inline"
+    if profile == "discreet":
+        return "sequential"
+    return "parallel"
 
 
 def _path_matches_specialist(profile: SpecialistProfile, path: str, kb: Mapping[str, Any]) -> bool:
@@ -627,6 +640,8 @@ class SpecialistComparisonService:
                 kb=kb,
                 goal=getattr(state, "campaign_goal", ""),
                 executed_actions=getattr(state, "executed_actions", []) or [],
+                state=state,
+                learning_store=getattr(self.services, "learning", None),
             )
             inline = commander._propose_inline(
                 state,

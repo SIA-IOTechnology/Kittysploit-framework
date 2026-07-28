@@ -21,8 +21,12 @@ GOAL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "skip_exploitation": True,
     },
     "obtain-auth": {
-        "allowed_action_types": ["prioritize", "run_followup"],
-        "terminal_conditions": ["shell_obtained"],
+        "allowed_action_types": ["prioritize", "run_followup", "run_exploit"],
+        "terminal_conditions": [
+            "auth_obtained",
+            "authenticated_session",
+            "credentials_obtained",
+        ],
         "default_budget": 25,
         "skip_exploitation": False,
     },
@@ -36,6 +40,20 @@ GOAL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "allowed_action_types": ["prioritize", "run_followup", "run_exploit", "run_post"],
         "terminal_conditions": ["shell_obtained"],
         "default_budget": 35,
+        "skip_exploitation": False,
+    },
+    # Tactical goal set by _sync_campaign_goal when findings warrant exploitation.
+    "exploit": {
+        "allowed_action_types": ["prioritize", "run_followup", "run_exploit"],
+        "terminal_conditions": ["shell_obtained", "no_vulnerabilities"],
+        "default_budget": 30,
+        "skip_exploitation": False,
+    },
+    # Milestone stop goal when a shell/session was already obtained.
+    "shell-obtained": {
+        "allowed_action_types": ["prioritize", "run_post"],
+        "terminal_conditions": ["shell_obtained"],
+        "default_budget": 10,
         "skip_exploitation": False,
     },
     "evidence-only": {
@@ -80,19 +98,32 @@ def normalize_goal(goal: Optional[str]) -> str:
         "post_auth": "post-auth",
         "evidence_only": "evidence-only",
         "detection_validation": "detection-validation",
+        "shell_obtained": "shell-obtained",
+        "shell-stop": "shell-obtained",
+        "campaign_exploit": "exploit",
     }
     return aliases.get(value, value)
 
 
 SHELL_OPERATOR_GOALS = frozenset({"obtain-shell"})
-EXPLOIT_OPERATOR_GOALS = frozenset({"obtain-shell", "post-auth"})
+AUTH_OPERATOR_GOALS = frozenset({"obtain-auth"})
+EXPLOIT_OPERATOR_GOALS = frozenset({"obtain-shell", "post-auth", "obtain-auth", "exploit"})
 DRUPAL_CVE_2014_3704_SQLI_MODULE = "exploits/multi/http/drupal_cve_2014_3704_sqli"
 DRUPAL_DRUPALGEDDON2_MODULE = "exploits/http/drupal_rce"
 SHELL_CAPABILITY_NAMES = frozenset({"shell", "rce", "session", "interactive_shell"})
+AUTH_TERMINAL_SIGNALS = frozenset({
+    "authenticated_session",
+    "credentials_obtained",
+    "auth_obtained",
+})
 
 
 def is_shell_operator_goal(goal: Optional[str]) -> bool:
     return normalize_goal(goal) in SHELL_OPERATOR_GOALS
+
+
+def is_auth_operator_goal(goal: Optional[str]) -> bool:
+    return normalize_goal(goal) in AUTH_OPERATOR_GOALS
 
 
 def is_exploit_operator_goal(goal: Optional[str]) -> bool:
@@ -106,10 +137,19 @@ def operator_goal_from_mapping(mapping: Any) -> str:
     raw = (
         mapping.get("operator_goal")
         or mapping.get("operator_campaign_goal")
+        or mapping.get("planner_campaign_goal")
         or mapping.get("campaign_goal")
         or ""
     )
     return normalize_goal(str(raw).strip() or None) if str(raw).strip() else ""
+
+
+def kb_auth_terminal_reached(kb: Any) -> bool:
+    """True when KB risk signals indicate credentials or an authenticated session."""
+    if not isinstance(kb, Mapping):
+        return False
+    signals = {str(s).lower() for s in (kb.get("risk_signals") or [])}
+    return bool(signals.intersection(AUTH_TERMINAL_SIGNALS))
 
 
 def _module_observed_in_kb(kb: Mapping[str, Any], *needles: str) -> bool:
@@ -499,11 +539,68 @@ def kb_smb_surface_ready(kb: Mapping[str, Any], state: Any = None) -> bool:
     return bool(signals.intersection({"smb_surface", "smb_detected", "cifs_detected"}))
 
 
+_LOCAL_RF_PATH_TOKENS = (
+    "/bluetooth/",
+    "/ble/",
+    "ble_scan",
+    "bleedingtooth",
+    "/wifi/",
+    "/wireless/",
+    "/nfc/",
+    "/zigbee/",
+    "/zwave/",
+    "/z-wave/",
+    "rfkill",
+    "classic_scan",
+)
+
+
+def is_local_rf_module_path(path: str) -> bool:
+    """True for host-local RF modules (BLE/WiFi/NFC/…) that cannot target a remote URL."""
+    low = str(path or "").strip().lower()
+    return bool(low) and any(token in low for token in _LOCAL_RF_PATH_TOKENS)
+
+
+def resolve_campaign_protocol(
+    state: Any = None,
+    kb: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Resolve effective protocol from state, KB, or target URL scheme.
+
+    HTTPS targets resolve to ``http`` because module trees live under
+    ``scanner/http/`` / ``auxiliary/scanner/http/``.
+    """
+    proto = ""
+    if state is not None:
+        proto = str(getattr(state, "protocol", "") or "").strip().lower()
+    if not proto and isinstance(kb, Mapping):
+        proto = str(kb.get("protocol") or "").strip().lower()
+    if not proto and state is not None:
+        target_info = getattr(state, "target_info", None) or {}
+        if isinstance(target_info, Mapping):
+            scheme = str(target_info.get("scheme") or "").strip().lower()
+            if scheme:
+                proto = scheme
+        if not proto:
+            raw = str(getattr(state, "raw_target", "") or "").strip().lower()
+            if raw.startswith("https://"):
+                proto = "https"
+            elif raw.startswith("http://"):
+                proto = "http"
+    if proto == "https":
+        return "http"
+    return proto
+
+
 def path_matches_forced_protocol(path: str, protocol: str) -> bool:
     """Return False when a module path clearly conflicts with an operator-forced protocol."""
     proto = str(protocol or "").strip().lower()
     low = str(path or "").strip().lower()
-    if not proto or not low:
+    if not low:
+        return True
+    if proto in {"http", "https"} and is_local_rf_module_path(low):
+        return False
+    if not proto:
         return True
     if proto in {"http", "https"}:
         foreign = (
@@ -516,6 +613,13 @@ def path_matches_forced_protocol(path: str, protocol: str) -> bool:
             "/ldap/",
             "/rdp/",
             "/vnc/",
+            "/bluetooth/",
+            "/ble/",
+            "/wifi/",
+            "/wireless/",
+            "/nfc/",
+            "/zigbee/",
+            "/zwave/",
         )
         if any(token in low for token in foreign):
             return False
@@ -870,7 +974,19 @@ def suggest_shell_plan_followups(
 def build_goal_plan(goal: Optional[str], *, request_budget: int = 0) -> Dict[str, Any]:
     key = normalize_goal(goal)
     if key not in GOAL_DEFINITIONS:
-        raise ValueError(f"Unknown campaign goal: {goal}")
+        # Tactical / milestone goals may appear mid-campaign; never crash the run.
+        token = str(goal or "").strip().lower()
+        if any(part in token for part in ("exploit", "shell", "auth", "post")):
+            if "post" in token:
+                key = "post-auth"
+            elif "auth" in token:
+                key = "obtain-auth"
+            else:
+                key = "exploit"
+            if key not in GOAL_DEFINITIONS:
+                key = "exploit"
+        else:
+            key = "recon"
     definition = GOAL_DEFINITIONS[key]
     budget = int(request_budget or definition.get("default_budget", 20))
     return {

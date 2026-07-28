@@ -90,6 +90,12 @@ def planner_uses_heuristic_only(state: Any) -> bool:
 
 
 def detect_impasse(state: Any, observation: Mapping[str, Any]) -> tuple[bool, str]:
+    """
+    Escalate to the strong/operator model only on real stalls.
+
+    Early recon ambiguity (API surface) and first WAF hits are *not* impasses —
+    those are handled by ``TASK_HTTP_RECON`` + the small model / probes.
+    """
     kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
     if int(getattr(state, "replan_count", 0) or 0) >= 2:
         return True, "replan_stall"
@@ -101,22 +107,25 @@ def detect_impasse(state: Any, observation: Mapping[str, Any]) -> tuple[bool, st
         return True, "no_admissible_action"
     try:
         from interfaces.command_system.builtin.agent.strategic_llm_policy import (
-            api_surface_ambiguous,
             chain_is_blocked,
             waf_or_blocking_active,
         )
 
-        if waf_or_blocking_active(kb if isinstance(kb, dict) else {}, state):
-            return True, "waf_or_blocking"
         if chain_is_blocked(kb if isinstance(kb, dict) else {}):
             return True, "chain_blocked"
-        if api_surface_ambiguous(kb if isinstance(kb, dict) else {}, state):
-            return True, "api_surface_ambiguous"
+        # Only escalate WAF after a soft stall (already replan_count>=2 above),
+        # or when the campaign already recorded repeated blocking.
+        if waf_or_blocking_active(kb if isinstance(kb, dict) else {}, state):
+            signals = {str(s).lower() for s in (kb.get("risk_signals") or [])} if isinstance(kb, dict) else set()
+            if int(getattr(state, "replan_count", 0) or 0) >= 1 or "waf_escalate" in signals:
+                return True, "waf_or_blocking"
     except Exception:
         pass
     prior_plan = getattr(state, "hierarchical_plan", None)
     if isinstance(prior_plan, dict) and not prior_plan.get("selected_action"):
-        return True, "prior_plan_empty"
+        empty_streak = int(getattr(state, "empty_plan_streak", 0) or 0)
+        if empty_streak >= 1:
+            return True, "prior_plan_empty"
     return False, ""
 
 
@@ -223,6 +232,7 @@ def attempt_llm_tactical_rank(
         return None
     from interfaces.command_system.builtin.agent.adversarial_guard import audit_observations, wrap_llm_observations
     from interfaces.command_system.builtin.agent.hierarchical_planner import parse_llm_tactical_rank
+    from interfaces.command_system.builtin.agent.llm_response_cache import get_llm_response_cache
     from interfaces.command_system.builtin.agent.local_llm import LocalLLMService
 
     context = getattr(state, "planner_llm_context", {}) or {}
@@ -231,6 +241,8 @@ def attempt_llm_tactical_rank(
         state.adversarial_audit = audit.to_dict()
         return None
 
+    # Prefer highest-heuristic actions so the LLM ranks a tighter, better set.
+    ranked_catalog = sorted(catalog, key=lambda row: float(row.heuristic_score or 0.0), reverse=True)[:12]
     admissible = [
         sanitize_nested({
             "action_id": row.action_id,
@@ -239,7 +251,7 @@ def attempt_llm_tactical_rank(
             "capability_target": row.capability_target,
             "action_type": row.action.type,
         })
-        for row in catalog[:12]
+        for row in ranked_catalog
     ]
     payload = wrap_llm_observations({
         **context,
@@ -254,18 +266,41 @@ def attempt_llm_tactical_rank(
     instruction = TACTICAL_RANK_INSTRUCTION
     if route.task == TASK_HTTP_RECON:
         instruction = HTTP_RECON_INSTRUCTION
-    response = llm.query_json(
-        endpoint=endpoint,
+
+    cache = get_llm_response_cache()
+    cache_key = cache.cache_key(
+        phase=f"tactical_rank:{route.task}",
         model=str(route.model),
-        instruction=instruction,
-        payload=payload,
-        timeout=int(getattr(state, "llm_timeout", 20) or 20),
-        allow_remote=bool(getattr(state, "llm_allow_remote", False)),
+        endpoint=endpoint,
+        goal=str(getattr(state, "campaign_goal", "") or ""),
+        payload=sanitize_nested(payload) if isinstance(payload, dict) else {"payload": str(payload)},
     )
+    response = cache.get(cache_key)
+    cache_hit = response is not None
+    if not cache_hit:
+        response = llm.query_json(
+            endpoint=endpoint,
+            model=str(route.model),
+            instruction=instruction,
+            payload=payload,
+            timeout=int(getattr(state, "llm_timeout", 20) or 20),
+            allow_remote=bool(getattr(state, "llm_allow_remote", False)),
+        )
+        if isinstance(response, dict):
+            cache.put(cache_key, response)
+    if cache_hit:
+        try:
+            metrics = getattr(state, "metrics", None)
+            if metrics is not None:
+                metrics.llm_cache_hits = int(getattr(metrics, "llm_cache_hits", 0) or 0) + 1
+        except Exception:
+            pass
+
     if not isinstance(response, dict):
         return None
+    parse_catalog = ranked_catalog or catalog
     if response.get("action_id"):
-        return parse_llm_tactical_rank(response, catalog, kb=kb)
+        return parse_llm_tactical_rank(response, parse_catalog, kb=kb)
     selected_paths = response.get("selected_paths") or []
     action_id = selected_paths[0] if selected_paths else ""
     return parse_llm_tactical_rank(
@@ -278,6 +313,6 @@ def attempt_llm_tactical_rank(
             "confidence": response.get("reasoning_confidence") or 0.5,
             "verification": "catalog membership",
         },
-        catalog,
+        parse_catalog,
         kb=kb,
     )

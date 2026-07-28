@@ -614,6 +614,19 @@ Examples:
             print_error(f"Invalid target: {parsed.target}")
             return False
 
+        # Infer protocol from URL scheme when operator omitted --protocol
+        # (prevents local RF/BLE modules from entering HTTP campaigns).
+        # Module paths use scanner/http/… — normalize https → http for gating.
+        effective_protocol = str(parsed.protocol or "").strip().lower() or None
+        if effective_protocol == "https":
+            effective_protocol = "http"
+        if not effective_protocol:
+            scheme = str((target_info or {}).get("scheme") or "").strip().lower()
+            if scheme in {"http", "https"}:
+                effective_protocol = "http"
+            elif scheme:
+                effective_protocol = scheme
+
         # Fail closed on public targets: internal-lab must never widen approvals there.
         # Loopback without attestation is warned (oracle still fails-closed in helper).
         mission = str(
@@ -732,7 +745,7 @@ Examples:
             raw_target=parsed.target,
             target_info=target_info,
             scanner=scanner,
-            protocol=parsed.protocol,
+            protocol=effective_protocol,
             expanded_surface=bool(getattr(parsed, "expanded_surface", False)),
             threads=threads,
             verbose=parsed.verbose,
@@ -815,6 +828,7 @@ Examples:
             run_store=run_store,
         )
         # Operator --protocol always wins over any lab-hint KB seed.
+        # Otherwise seed from inferred URL scheme so planners filter local RF modules.
         if parsed.protocol:
             state.knowledge_base["protocol"] = str(parsed.protocol).strip().lower()
         elif not state.knowledge_base.get("protocol") and state.protocol:
@@ -826,6 +840,21 @@ Examples:
                 setattr(state.metrics, "network_units_skipped", skipped),
             ),
         )
+        try:
+            from interfaces.command_system.builtin.agent.intelligence_defaults import (
+                apply_intelligence_defaults,
+            )
+
+            intel = apply_intelligence_defaults(state)
+            if parsed.verbose:
+                print_info(
+                    "Planner intelligence: "
+                    f"hierarchical={intel.get('hierarchical_planner')} "
+                    f"adaptive={intel.get('adaptive_loop')} "
+                    f"specialists={intel.get('specialists')}"
+                )
+        except Exception:
+            pass
         try:
             from core.observability import set_run_id, set_workspace
 

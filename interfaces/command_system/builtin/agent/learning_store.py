@@ -19,6 +19,7 @@ from interfaces.command_system.builtin.agent.learning_episode import (
     append_preference_pair,
     build_context_fingerprint,
     build_context_index,
+    episode_from_action_outcome,
     episode_from_module_result,
     is_learnable_verdict,
     mission_memory,
@@ -152,6 +153,51 @@ class LearningStore:
                 outcome="phase_batch",
             )
         return recorded
+
+    def record_action_outcome(
+        self,
+        state: Any,
+        action: Any,
+        outcome: Any,
+        *,
+        phase: str = "adaptive",
+        get_agent_metadata: Optional[Callable[[str], Mapping[str, Any]]] = None,
+        kb_before: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
+        """Persist a verified adaptive-loop outcome into mission/target/global memory."""
+        if not should_record_learning(state):
+            return False
+        path = str(
+            getattr(outcome, "module_path", None)
+            or getattr(action, "path", None)
+            or ""
+        ).strip()
+        meta_fn = get_agent_metadata or (lambda _path: {})
+        agent_meta = meta_fn(path) if path else {}
+        episode = episode_from_action_outcome(
+            state,
+            action,
+            outcome,
+            phase=phase,
+            agent_meta=agent_meta if isinstance(agent_meta, Mapping) else {},
+            tenant_id=tenant_id(state),
+        )
+        if episode is None:
+            return False
+        kb_after = getattr(state, "knowledge_base", None)
+        delta_info = 0.0
+        if isinstance(kb_before, Mapping) and isinstance(kb_after, Mapping):
+            before = kb_metrics_snapshot(kb_before)
+            after = kb_metrics_snapshot(kb_after)
+            delta_info = float(after.get("info", 0.0) or 0.0) - float(before.get("info", 0.0) or 0.0)
+        raw = getattr(outcome, "raw_summary", None)
+        raw_map = raw if isinstance(raw, Mapping) else {}
+        episode.real_gain = self._compute_gain(
+            episode.verdict,
+            {"vulnerable": bool(raw_map.get("vulnerable"))},
+            delta_info=delta_info,
+        )
+        return self._persist_episode(state, episode)
 
     @staticmethod
     def _compute_gain(verdict: str, result: Mapping[str, Any], *, delta_info: float) -> float:

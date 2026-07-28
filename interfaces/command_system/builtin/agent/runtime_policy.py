@@ -340,15 +340,20 @@ def assess_module_risk(module_or_info: Any, module_path: str = "") -> ModuleRisk
     path = str(module_path or info.get("path") or "").lower()
     tags = {str(tag).lower() for tag in (info.get("tags") or [])} if isinstance(info, dict) else set()
     blob = " ".join((path, " ".join(tags)))
+    try:
+        from interfaces.command_system.builtin.agent.module_scoring import estimate_expected_requests
+        heuristic_units = estimate_expected_requests(path) if path else 1
+    except Exception:
+        heuristic_units = 1
     if any(token in blob for token in ("wipe", "delete", "persistence", "dos", "ransom", "cleanup")):
-        return ModuleRisk("destructive", ("target_modification",), 1, False, True, False, "legacy heuristic")
+        return ModuleRisk("destructive", ("target_modification",), heuristic_units, False, True, False, "legacy heuristic")
     if path.startswith(("exploit/", "exploits/", "post/")) or any(
         token in blob for token in ("bruteforce", "password", "credential", "upload", "write_access")
     ):
-        return ModuleRisk("intrusive", ("active_exploitation",), 1, False, True, False, "legacy heuristic")
+        return ModuleRisk("intrusive", ("active_exploitation",), heuristic_units, False, True, False, "legacy heuristic")
     if path.startswith(("scanner/", "auxiliary/scanner/")):
-        return ModuleRisk("active", ("network_probe",), 1, True, False, False, "legacy heuristic")
-    return ModuleRisk("read", (), 1, True, False, False, "legacy heuristic")
+        return ModuleRisk("active", ("network_probe",), heuristic_units, True, False, False, "legacy heuristic")
+    return ModuleRisk("read", (), heuristic_units, True, False, False, "legacy heuristic")
 
 
 def normalize_mission_profile(value: Any) -> str:
@@ -756,6 +761,27 @@ class StopConditionEvaluator:
         conditions = {str(value).strip().lower() for value in conditions if str(value).strip()}
         if "shell_obtained" in conditions and getattr(state, "new_sessions", None):
             return "shell_obtained"
+        auth_stops = conditions.intersection({
+            "auth_obtained",
+            "authenticated_session",
+            "credentials_obtained",
+        })
+        if auth_stops:
+            kb = getattr(state, "knowledge_base", {}) or {}
+            signals = {
+                str(value).lower()
+                for value in (kb.get("risk_signals", []) if isinstance(kb, dict) else [])
+            }
+            if "authenticated_session" in signals and (
+                "authenticated_session" in auth_stops or "auth_obtained" in auth_stops
+            ):
+                return "authenticated_session"
+            if "credentials_obtained" in signals and (
+                "credentials_obtained" in auth_stops or "auth_obtained" in auth_stops
+            ):
+                return "credentials_obtained"
+            if "auth_obtained" in signals and "auth_obtained" in auth_stops:
+                return "auth_obtained"
         if "target_unreachable" in conditions and getattr(state, "target_reachable", None) is False:
             return "target_unreachable"
         if "waf_or_blocking_detected" in conditions:

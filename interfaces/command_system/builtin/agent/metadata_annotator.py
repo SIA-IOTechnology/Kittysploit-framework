@@ -63,11 +63,20 @@ def infer_agent_metadata(module_path: str, info: Optional[Dict[str, Any]] = None
     else:
         family_key = family
     produces = list(PRODUCES_BY_FAMILY.get(family_key, ["risk_signals"]))
-    expected = max(1, int(risk.expected_requests or 1))
+    try:
+        from interfaces.command_system.builtin.agent.module_scoring import estimate_expected_requests
+        path_units = estimate_expected_requests(module_path)
+    except Exception:
+        path_units = 1
+    expected = max(1, int(risk.expected_requests or 1), int(path_units or 1))
     if family_key in {"scanner", "auxiliary/scanner"} and expected < 2:
         expected = 2
     if family_key in {"exploits", "post"} and expected < 2:
         expected = 2
+    # Hot noisy modules: prefer path cost so inferred metadata matches admission budget.
+    low = str(module_path or "").lower()
+    if any(tok in low for tok in ("crawler", "bruteforce", "fuzzer", "fuzz", "directory_bruteforce")):
+        expected = max(expected, path_units)
     effects = list(risk.effects) or (
         ["network_probe"] if risk.level in {"read", "active"} else ["active_exploitation"]
     )

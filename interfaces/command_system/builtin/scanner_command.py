@@ -108,9 +108,13 @@ Options:
     --no-cache           Disable HTTP request caching
     --no-dedup           Disable grouping/deduplication of identical findings
     --no-save            Do not auto-save vulnerable findings to the workspace DB
+    --no-stack-gate      Disable stack fingerprint gating (run CMS/SPA modules blindly)
 
 By default only low-noise checks run (HTTP methods, security/headers, banners,
 non-HTTP services). Product/panel fingerprints are opt-in.
+Stack gating skips WordPress/Joomla/Drupal/Next.js/React modules when the
+target shows no evidence of that stack (saves requests/time; use --no-stack-gate
+to disable).
 
 Examples:
     scanner -u https://example.com
@@ -268,6 +272,28 @@ Examples:
             timing: Dict[str, float] = {}
             scan_t0 = time.perf_counter()
             with scan_http_session(pool_size=max(20, options["threads"] * 2)):
+                # Fingerprint `/` (+ cheap CMS confirms) BEFORE prefetch so we do
+                # not pull hundreds of WordPress/plugin paths on non-CMS targets.
+                if not options.get("no_stack_gate") and not options.get("module"):
+                    gate_t0 = time.perf_counter()
+                    modules, gate_info = self._apply_stack_gate(
+                        modules, target_info, options
+                    )
+                    timing["stack_gate"] = time.perf_counter() - gate_t0
+                    if gate_info.get("skipped"):
+                        print_info(
+                            f"Stack gate skipped {gate_info['skipped']} module(s) "
+                            f"({gate_info.get('summary') or 'no matching stack'})"
+                        )
+                    if gate_info.get("hints"):
+                        print_info(
+                            f"Stack fingerprint: {', '.join(gate_info['hints'])}"
+                        )
+                    if not modules:
+                        print_warning("No modules left after stack gating")
+                        return False
+                    print_info(f"Running {len(modules)} module(s) after stack gate")
+
                 if not options.get("no_cache", False):
                     prefetch_t0 = time.perf_counter()
                     self._prefetch_http_probes(modules, target_info, options["threads"])
@@ -341,6 +367,7 @@ Examples:
             'no_cache': False,
             'no_dedup': False,
             'no_save': False,
+            'no_stack_gate': False,
             'all': False,
         }
         
@@ -421,6 +448,9 @@ Examples:
                 i += 1
             elif arg == '--no-cache':
                 options['no_cache'] = True
+                i += 1
+            elif arg == '--no-stack-gate':
+                options['no_stack_gate'] = True
                 i += 1
             elif arg == '--all':
                 options['all'] = True
@@ -943,6 +973,154 @@ Examples:
             return target_scheme
         return "https" if int(port) == 443 else "http"
 
+    def _http_ports_for_fingerprint(self, target_info: Dict[str, Any]) -> List[int]:
+        """Ports to use for homepage fingerprint (prefer open web ports)."""
+        open_ports = list(target_info.get("open_ports") or [])
+        configured = target_info.get("port")
+        web = [p for p in open_ports if int(p) in self._STANDARD_HTTP_PORTS]
+        if configured and int(configured) in self._STANDARD_HTTP_PORTS:
+            if int(configured) not in web:
+                web.insert(0, int(configured))
+            else:
+                web = [int(configured)] + [p for p in web if int(p) != int(configured)]
+        if not web and configured:
+            web = [int(configured)]
+        if not web:
+            web = [443, 80]
+        # Dedupe preserve order
+        seen = set()
+        out: List[int] = []
+        for p in web:
+            ip = int(p)
+            if ip not in seen:
+                seen.add(ip)
+                out.append(ip)
+        return out[:2]
+
+    def _fetch_http_path(
+        self,
+        hostname: str,
+        port: int,
+        path: str,
+        scheme: str,
+        *,
+        timeout: float = 10.0,
+    ):
+        """GET a path using scan session + response cache when available."""
+        from lib.scanner.probe_prefetch import probe_url
+
+        url = probe_url(hostname, port, path, scheme=scheme)
+        try:
+            from lib.scanner.cache import get_cache, is_cache_enabled
+
+            if is_cache_enabled():
+                cached = get_cache().get("GET", url)
+                if cached is not None:
+                    return cached
+        except Exception:
+            pass
+
+        try:
+            import requests
+            from lib.scanner.http_pool import get_scan_session
+
+            session = get_scan_session()
+            owns = False
+            if session is None:
+                session = requests.Session()
+                owns = True
+            try:
+                resp = session.get(url, timeout=timeout, verify=False, allow_redirects=True)
+            finally:
+                if owns:
+                    session.close()
+            try:
+                from lib.scanner.cache import get_cache, is_cache_enabled
+
+                if is_cache_enabled():
+                    get_cache().set("GET", url, resp)
+            except Exception:
+                pass
+            return resp
+        except Exception:
+            return None
+
+    def _apply_stack_gate(
+        self,
+        modules: List[Dict[str, Any]],
+        target_info: Dict[str, Any],
+        options: Dict[str, Any],
+    ) -> tuple:
+        """
+        Fingerprint the HTTP surface, then drop CMS/SPA modules that do not match.
+
+        Returns ``(kept_modules, info_dict)``.
+        """
+        from lib.scanner.stack_fingerprint import (
+            CONFIRM_PATHS,
+            apply_confirm_response,
+            filter_modules_by_stack,
+            fingerprint_http_response,
+            merge_fingerprint_kb,
+            needed_confirm_families,
+            summarize_skips,
+        )
+
+        hostname = target_info.get("hostname") or ""
+        info: Dict[str, Any] = {
+            "skipped": 0,
+            "summary": "",
+            "hints": [],
+        }
+        if not hostname:
+            return modules, info
+
+        # Only gate when the selected set actually contains specialized modules
+        from lib.scanner.stack_fingerprint import families_present_in_modules
+
+        if not families_present_in_modules(modules):
+            return modules, info
+
+        kb: Dict[str, Any] = {"tech_hints": [], "tech_confidence": {}}
+        ports = self._http_ports_for_fingerprint(target_info)
+        print_info("Fingerprinting HTTP stack (homepage + cheap CMS confirms)...")
+
+        for port in ports:
+            scheme = self._scheme_for_port(port, target_info)
+            resp = self._fetch_http_path(hostname, port, "/", scheme)
+            if resp is None:
+                continue
+            kb = merge_fingerprint_kb(kb, fingerprint_http_response(resp))
+
+        from lib.scanner.stack_fingerprint import confidence_for
+
+        for tech in needed_confirm_families(modules, kb):
+            for path in CONFIRM_PATHS.get(tech, ()):
+                confirmed = False
+                for port in ports:
+                    scheme = self._scheme_for_port(port, target_info)
+                    resp = self._fetch_http_path(hostname, port, path, scheme)
+                    if resp is None:
+                        continue
+                    before = confidence_for(kb, tech)
+                    kb = apply_confirm_response(kb, tech, resp)
+                    if confidence_for(kb, tech) > before:
+                        confirmed = True
+                        break
+                if confirmed:
+                    break
+
+        kept, skipped = filter_modules_by_stack(modules, kb)
+        info["skipped"] = len(skipped)
+        info["summary"] = summarize_skips(skipped, modules)
+        info["hints"] = list(kb.get("tech_hints") or [])
+        if options.get("verbose") and skipped:
+            for path, reason in skipped[:12]:
+                print_status(f"  skip {path}: {reason}")
+            if len(skipped) > 12:
+                print_status(f"  ... and {len(skipped) - 12} more")
+        return kept, info
+
     def _prefetch_http_probes(
         self,
         modules: List[Dict[str, Any]],
@@ -1341,6 +1519,8 @@ Examples:
         if timing:
             print_empty()
             print_info("Timing:")
+            if "stack_gate" in timing:
+                print_info(f"  Stack gate: {self._format_duration(timing['stack_gate'])}")
             if "prefetch" in timing:
                 print_info(f"  Prefetch:  {self._format_duration(timing['prefetch'])}")
             if "execute" in timing:

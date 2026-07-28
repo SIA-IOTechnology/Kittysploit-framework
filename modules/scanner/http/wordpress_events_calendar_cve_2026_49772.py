@@ -117,7 +117,8 @@ class Module(Scanner, Http_client, Wordpress):
         response, _ = self._events_get("ASC", timeout)
         if not response or response.status_code != 200:
             return None
-        total = response.headers.get("X-WP-Total") or response.headers.get("x-wp-total")
+        headers = getattr(response, "headers", None) or {}
+        total = headers.get("X-WP-Total") or headers.get("x-wp-total")
         if total and str(total).isdigit():
             return int(total)
         return None

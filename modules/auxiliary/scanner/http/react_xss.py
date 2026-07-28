@@ -393,4 +393,4 @@ class Module(Auxiliary, Http_client):
         else:
             print_info("No React XSS vulnerabilities detected.")
         
-        return True
+        return bool(self.vulnerabilities)

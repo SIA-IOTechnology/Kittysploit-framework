@@ -79,6 +79,8 @@ class Wordpress(BaseModule):
                 payload = json.loads(response.text or "")
             except Exception:
                 return False
+        if not isinstance(payload, dict):
+            return False
         namespaces = payload.get("namespaces") or []
         return namespace in namespaces
 

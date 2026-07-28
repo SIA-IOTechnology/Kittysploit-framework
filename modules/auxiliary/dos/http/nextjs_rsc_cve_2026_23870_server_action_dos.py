@@ -21,7 +21,7 @@ class Module(Auxiliary, Http_client):
         "author": ["KittySploit Team"],
         "cve": "CVE-2026-23870",
         "references": ["https://github.com/advisories/GHSA-8h8q-6873-q5fj"],
-        "tags": ["http", "dos", "nextjs", "react", "rsc", "server-action"],
+        "tags": ["http", "dos", "nextjs", "rsc", "server-action"],
     }
 
     rows = OptInteger(15000, "Cyclic RSC form rows in POST body", required=False)

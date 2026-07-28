@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "GCP Storage detection",
         "description": "Detects Google Cloud Storage API (XML/JSON listing or GCP error format).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["cloud", "scanner", "gcp", "google", "storage", "bucket"],

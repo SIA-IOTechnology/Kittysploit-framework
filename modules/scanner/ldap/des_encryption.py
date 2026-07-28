@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD DES Kerberos encryption",
         "description": "Detects accounts restricted to DES Kerberos encryption (weak).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "kerberos", "des", "encryption"],

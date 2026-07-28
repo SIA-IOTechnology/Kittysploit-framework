@@ -31,7 +31,7 @@ class Module(Scanner, Tcp_scanner_client):
             "Detects reachable llama.cpp RPC servers and identifies builds that may be "
             "affected by the pre-PR #20908 null-buffer bypass issue."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "",
         "modules": [],

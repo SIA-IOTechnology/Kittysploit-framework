@@ -14,7 +14,7 @@ class Module(Scanner, Ics_scanner_client):
             "Detects Siemens S7 PLCs with weak or missing access protection "
             "(protection level 1 / no password)."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "tags": ["ics", "siemens", "s7comm", "misconfiguration", "plc"],
     'agent': {

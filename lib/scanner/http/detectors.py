@@ -138,24 +138,80 @@ def evidence_nextjs(response) -> Optional[str]:
 
 def is_nextjs(response) -> bool:
     return evidence_nextjs(response) == "Next.js"
-    """Détecte une version avec un pattern regex"""
-    if not response:
+
+
+def evidence_react(response) -> Optional[str]:
+    """
+    Return a React SPA label when the response looks like CRA/Vite/React
+    without Next.js markers. Prefer classify_spa_stack() for Next vs React.
+    """
+    if not response or php_stack_likely(response) or detect_wordpress(response):
         return None
-    
-    # Headers
-    if hasattr(response, 'headers'):
-        for header_value in response.headers.values():
-            match = re.search(pattern, header_value, re.IGNORECASE)
-            if match:
-                return match.group(1)
-    
-    # Body
-    if hasattr(response, 'text'):
-        match = re.search(pattern, response.text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    
+    if is_nextjs(response):
+        return None
+
+    body = getattr(response, "text", None) or ""
+    body_lower = body[:80000].lower()
+
+    # Vite React
+    if "/@vite/client" in body_lower or "/@react-refresh" in body_lower:
+        return "React (Vite)"
+    if re.search(r"/assets/index-[a-z0-9_-]+\.js", body_lower):
+        if "react" in body_lower or 'id="root"' in body_lower or "id='root'" in body_lower:
+            return "React (Vite)"
+
+    # Create React App / webpack SPA
+    cra_markers = (
+        "/static/js/main.",
+        "/static/js/bundle.js",
+        "/static/js/runtime-main.",
+        "asset-manifest.json",
+    )
+    if any(m in body_lower for m in cra_markers):
+        return "React (CRA)"
+
+    classic = (
+        "data-reactroot",
+        "data-reactid",
+        "__react_devtools_global_hook__",
+        "react-dom.production",
+        "react-dom.development",
+        "react.production.min.js",
+        "react.development.js",
+    )
+    if any(m in body_lower for m in classic):
+        return "React"
+
+    # Root mount + react chunk hint
+    if ('id="root"' in body_lower or "id='root'" in body_lower) and (
+        "react" in body_lower or "/static/js/" in body_lower or "/assets/" in body_lower
+    ):
+        return "React"
+
     return None
+
+
+def is_react(response) -> bool:
+    return evidence_react(response) is not None
+
+
+def classify_spa_stack(response) -> str:
+    """
+    Distinguish Next.js from standalone React SPAs.
+
+    Returns one of: nextjs | react_cra | react_vite | react | none
+    """
+    if is_nextjs(response):
+        return "nextjs"
+    label = evidence_react(response) or ""
+    low = label.lower()
+    if "vite" in low:
+        return "react_vite"
+    if "cra" in low:
+        return "react_cra"
+    if label:
+        return "react"
+    return "none"
 
 
 def has_header(response, header_name: str, value_pattern: str = None) -> bool:

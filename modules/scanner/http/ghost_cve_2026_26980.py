@@ -17,7 +17,7 @@ class Module(Scanner, Http_client):
             "slug filter SQL injection, 3.24.0–6.19.0). Scrapes the public Content API "
             "key from HTML, then verifies the EXP(710) boolean oracle on /ghost/api/content/tags/."
         ),
-        "author": ["Nicholas Carlini", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-26980",
         "references": [

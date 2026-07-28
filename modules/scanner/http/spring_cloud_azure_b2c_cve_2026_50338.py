@@ -14,7 +14,7 @@ class Module(Scanner, Http_client, EntraTokenMixin):
     __info__ = {
         "name": "Spring Cloud Azure B2C CVE-2026-50338 Detection",
         "description": "Detect B2C JWT-protected APIs; verify CVE-2026-50338 when Entra creds are set",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-50338",
         "references": [

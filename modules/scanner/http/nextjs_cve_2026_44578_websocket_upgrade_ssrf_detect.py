@@ -32,7 +32,7 @@ class Module(Scanner, Http_client):
             "active probe: absolute-URI WebSocket upgrade to AWS IMDSv1. Companion "
             "auxiliary confirms SSRF / cloud metadata."
         ),
-        "author": ["Hadrian Security", "mitsec", "ynsmroztas", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-44578",
         "references": [

@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "AWS S3 public object read detect",
         "description": "Checks anonymous read access to a user-provided object path (no exploitation).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/aws/s3_file_download",

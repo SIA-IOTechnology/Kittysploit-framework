@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Azure Blob public object read detect",
         "description": "Checks anonymous read access to a user-provided blob path (no exploitation).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/azure/blob_file_download",

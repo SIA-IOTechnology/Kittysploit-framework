@@ -33,7 +33,7 @@ class Module(Scanner, Http_client):
             "59777 (CVE-2019-6447). Sends getDeviceInfo and fingerprints "
             "responses from affected builds <= 4.1.9.7.4."
         ),
-        "author": ["Nehal Zaman", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2019-6447",
         "references": [

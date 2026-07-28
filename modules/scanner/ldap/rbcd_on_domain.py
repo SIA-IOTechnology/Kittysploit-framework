@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD RBCD on domain object",
         "description": "Detects msDS-AllowedToActOnBehalfOfOtherIdentity on domain NC (critical).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "rbcd", "delegation", "domain"],

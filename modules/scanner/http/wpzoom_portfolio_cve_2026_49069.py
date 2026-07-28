@@ -17,7 +17,7 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects WPZOOM Portfolio plugin versions <= 1.4.21 affected by "
             "unauthenticated reflected XSS (CVE-2026-49069)."
         ),
-        "author": ["Kent Apostol", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "cve": _CVE,
         "references": [

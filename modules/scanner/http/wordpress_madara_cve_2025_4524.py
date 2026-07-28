@@ -21,7 +21,7 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects Madara theme/plugin versions <= 1.6.0.5 affected by CVE-2025-4524 "
             "(unauthenticated LFI via madara_load_more template parameter)."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2025-4524",
         "modules": [

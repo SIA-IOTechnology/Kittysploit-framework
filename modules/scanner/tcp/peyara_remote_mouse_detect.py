@@ -13,7 +13,7 @@ class Module(Scanner, Websocket_client):
             "an Engine.IO OPEN frame, and a Socket.IO namespace connect handshake. "
             "No keyboard injection is performed."
         ),
-        "author": ["tmrswrr", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "modules": [
             "exploits/windows/tcp/peyara_remote_mouse_rce",

@@ -3,11 +3,41 @@
 
 import sys
 import os
+import re
 import threading
 import queue
 import logging
 import uuid
 from colorama import init, Fore, Style
+
+# CSI / OSC sequences (colorama, prompt_toolkit, etc.) — ignored for column width.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|].*?(?:\x07|\x1b\\))")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", str(text or ""))
+
+
+def _visible_len(text: str) -> int:
+    """Display width of text, excluding ANSI escape sequences."""
+    return len(_strip_ansi(text))
+
+
+def _pad_visible(text: str, width: int) -> str:
+    """Left-justify using visible width so colored cells keep column alignment."""
+    text = str(text or "")
+    return text + (" " * max(0, width - _visible_len(text)))
+
+
+def _truncate_visible(text: str, width: int) -> str:
+    """Truncate to visible width (ANSI stripped if truncation is needed)."""
+    text = str(text or "")
+    if _visible_len(text) <= width:
+        return text
+    plain = _strip_ansi(text)
+    if width <= 3:
+        return plain[:width]
+    return plain[: width - 3] + "..."
 
 try:
     _terminal_size = os.get_terminal_size
@@ -127,6 +157,67 @@ def color_yellow(text):
 def color_blue(text):
     return f"{Fore.BLUE}{text}{Style.RESET_ALL}"
     
+_progress_lock = threading.Lock()
+_progress_active = False
+
+
+def end_progress() -> None:
+    """Finish an in-place progress line (newline) if one is active."""
+    global _progress_active
+    with _progress_lock:
+        if _progress_active and is_interactive_terminal():
+            _safe_stream_write(sys.stdout, "\n")
+        _progress_active = False
+
+
+def print_progress(
+    current: int,
+    total: int,
+    *,
+    label: str = "Progress",
+    extra: str = "",
+    width: int = 28,
+) -> None:
+    """
+    In-place progress line for interactive TTYs (``\\r`` overwrite).
+
+    Non-TTY / redirected output: print sparingly (~every 10% or final).
+    """
+    global _progress_active
+    if is_thread_output_quiet():
+        return
+    total = max(int(total), 1)
+    current = max(0, min(int(current), total))
+    pct = 100.0 * current / total
+    filled = int(width * current / total)
+    bar = "#" * filled + "-" * (width - filled)
+    suffix = f" {extra}" if extra else ""
+    line = f"{label} [{bar}] {current}/{total} ({pct:5.1f}%){suffix}"
+
+    with _progress_lock:
+        if is_interactive_terminal():
+            # Pad/truncate to terminal width so leftover chars disappear
+            try:
+                cols = max(40, _terminal_size().columns - 1)
+            except Exception:
+                cols = 79
+            if len(line) > cols:
+                line = line[: cols - 3] + "..."
+            else:
+                line = line.ljust(cols)
+            _safe_stream_write(sys.stdout, "\r" + line)
+            _progress_active = True
+            if current >= total:
+                _safe_stream_write(sys.stdout, "\n")
+                _progress_active = False
+            return
+
+        # Log-friendly fallback: ~10% steps + first/last
+        step = max(1, total // 10)
+        if current == 1 or current >= total or current % step == 0:
+            print(line.rstrip())
+
+
 def print_empty():
     if is_thread_output_quiet():
         return
@@ -135,17 +226,24 @@ def print_empty():
 def print_info(message="", **kwargs):
     if is_thread_output_quiet():
         return
+    end_progress()
     print(message, **kwargs)
 
 def print_status(message="", **kwargs):
     if is_thread_output_quiet():
         return
+    end_progress()
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.BLUE}*{Style.RESET_ALL}] {message}", **kwargs)
     else:
         print(f"[*] {message}", **kwargs)
 
 def print_error(message="", **kwargs):
+    # Respect quiet mode (scanner non-verbose): modules often call print_error
+    # for soft "not detected" negatives that should not spam the progress bar.
+    if is_thread_output_quiet():
+        return
+    end_progress()
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.RED}!{Style.RESET_ALL}] {message}", **kwargs)
     else:
@@ -154,6 +252,7 @@ def print_error(message="", **kwargs):
 def print_success(message="", **kwargs):
     if is_thread_output_quiet():
         return
+    end_progress()
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.GREEN}+{Style.RESET_ALL}] {message}", **kwargs)
     else:
@@ -162,6 +261,7 @@ def print_success(message="", **kwargs):
 def print_warning(message="", **kwargs):
     if is_thread_output_quiet():
         return
+    end_progress()
     if USE_COLORS and is_interactive_terminal():
         print(f"[{Fore.YELLOW}~{Style.RESET_ALL}] {message}", **kwargs)
     else:
@@ -175,15 +275,15 @@ def _wrap_cell_text(cell_value: str, col_width: int) -> list:
     current_line = ""
     for word in words:
         test_line = current_line + (" " if current_line else "") + word
-        if len(test_line) <= col_width:
+        if _visible_len(test_line) <= col_width:
             current_line = test_line
         else:
             if current_line:
                 wrapped_lines.append(current_line)
-            if len(word) > col_width:
-                # Break very long tokens across lines
-                rest = word
-                while len(rest) > col_width:
+            if _visible_len(word) > col_width:
+                # Break very long tokens across lines (visible width; strip if colored)
+                rest = _strip_ansi(word) if _visible_len(word) != len(word) else word
+                while _visible_len(rest) > col_width:
                     wrapped_lines.append(rest[:col_width])
                     rest = rest[col_width:]
                 current_line = rest
@@ -218,15 +318,15 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
     separator_width = 3 * num_separators
     available_width = max_width - separator_width
     
-    # Calculate minimum and maximum widths for each column
+    # Calculate minimum and maximum widths for each column (visible chars only)
     col_widths = []
     for i, header in enumerate(headers):
-        min_width = len(str(header))
+        min_width = _visible_len(header)
         max_width_col = min_width
         
         for row in rows:
             if i < len(row):
-                cell_len = len(str(row[i]))
+                cell_len = _visible_len(row[i])
                 max_width_col = max(max_width_col, cell_len)
         
         col_widths.append(max_width_col)
@@ -252,18 +352,27 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
             name_column_index = i
             break
 
-    # Special handling: "Description" column should get priority for extra space
+    # Special handling: "Description" (or expand_headers) gets priority for extra space
     desc_column_index = None
     for i, header in enumerate(headers):
         if str(header).lower() == "description":
             desc_column_index = i
             break
+    if desc_column_index is None:
+        for name in kwargs.get("expand_headers") or ():
+            hl = str(name).strip().lower()
+            for i, header in enumerate(headers):
+                if str(header).strip().lower() == hl:
+                    desc_column_index = i
+                    break
+            if desc_column_index is not None:
+                break
 
     # Columns that should wrap (not truncate) so paths and long values stay readable
     wrap_column_indices = set()
     for i, header in enumerate(headers):
         h = str(header).lower().strip()
-        if h in ("description", "current setting", "value", "setting", "details"):
+        if h in ("description", "current setting", "value", "setting", "details", "evidence"):
             wrap_column_indices.add(i)
     for h in kwargs.get("wrap_extra_headers") or ():
         hl = str(h).strip().lower()
@@ -271,6 +380,23 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
             if str(header).strip().lower() == hl:
                 wrap_column_indices.add(i)
                 break
+    if desc_column_index is not None:
+        wrap_column_indices.add(desc_column_index)
+
+    # Wrap columns share space: prefer a readable width, then wrap leftover text
+    # (instead of demanding the full cell length and crushing neighbors).
+    if wrap_column_indices:
+        for i in wrap_column_indices:
+            header_w = _visible_len(headers[i])
+            hl = str(headers[i]).strip().lower()
+            if i == desc_column_index:
+                soft = max(header_w, min(col_widths[i], max(40, available_width // 3)))
+            elif hl in ("path", "module", "scanner", "finding"):
+                # Paths wrap only when truly needed — keep a wide soft target.
+                soft = max(header_w, min(col_widths[i], max(52, available_width // 2)))
+            else:
+                soft = max(header_w, min(col_widths[i], 28))
+            col_widths[i] = soft
     
     # Distribute available width proportionally
     total_min_width = sum(col_widths)
@@ -294,7 +420,7 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
                         desc_target_width = int(desc_base_width * scale_factor * 1.5)
                         
                         # Calculate minimum width needed for other columns (excluding Name and Description)
-                        min_other_width = sum(len(str(headers[i])) for i in range(len(headers)) if i != name_column_index and i != desc_column_index)
+                        min_other_width = sum(_visible_len(headers[i]) for i in range(len(headers)) if i != name_column_index and i != desc_column_index)
                         # Ensure Description doesn't take too much space
                         desc_target_width = min(desc_target_width, remaining_width - min_other_width)
                         desc_target_width = max(desc_target_width, int(desc_base_width * scale_factor))
@@ -317,20 +443,20 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
                             elif i == desc_column_index:
                                 col_widths[i] = desc_target_width
                             else:
-                                col_widths[i] = max(int(col_widths[i] * scale_factor_others), len(str(headers[i])))
+                                col_widths[i] = max(int(col_widths[i] * scale_factor_others), _visible_len(headers[i]))
                     else:
                         # No Description column, use standard scaling
                         scale_factor = remaining_width / total_remaining
                         for i in range(len(col_widths)):
                             if i != name_column_index:
-                                col_widths[i] = max(int(col_widths[i] * scale_factor), len(str(headers[i])))
+                                col_widths[i] = max(int(col_widths[i] * scale_factor), _visible_len(headers[i]))
                         col_widths[name_column_index] = name_width
                 else:
                     col_widths[name_column_index] = name_width
             else:
                 # Fallback: scale all columns
                 scale_factor = available_width / total_min_width
-                col_widths = [max(int(w * scale_factor), len(str(headers[i]))) for i, w in enumerate(col_widths)]
+                col_widths = [max(int(w * scale_factor), _visible_len(headers[i])) for i, w in enumerate(col_widths)]
         else:
             # No Name column, but still prioritize Description if it exists
             if desc_column_index is not None:
@@ -353,27 +479,49 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
                     if i == desc_column_index:
                         col_widths[i] = desc_target_width
                     else:
-                        col_widths[i] = max(int(col_widths[i] * scale_factor_others), len(str(headers[i])))
+                        col_widths[i] = max(int(col_widths[i] * scale_factor_others), _visible_len(headers[i]))
             else:
                 # No Name or Description column, scale proportionally
                 scale_factor = available_width / total_min_width
-                col_widths = [max(int(w * scale_factor), len(str(headers[i]))) for i, w in enumerate(col_widths)]
+                col_widths = [max(int(w * scale_factor), _visible_len(headers[i])) for i, w in enumerate(col_widths)]
     else:
-        # Use natural widths, but give extra space to Description if available
-        if desc_column_index is not None:
-            # Calculate how much extra space is available
-            extra_space = available_width - total_min_width
-            if extra_space > 0:
+        # Use natural widths; give leftover terminal space to Path then Description.
+        extra_space = available_width - total_min_width
+        if extra_space > 0:
+            path_idx = None
+            for i, header in enumerate(headers):
+                if str(header).strip().lower() == "path":
+                    path_idx = i
+                    break
+            # Prefer filling Path up to its natural (full) cell width first.
+            if path_idx is not None:
+                natural = 0
+                for row in rows:
+                    if path_idx < len(row):
+                        natural = max(natural, _visible_len(row[path_idx]))
+                natural = max(natural, _visible_len(headers[path_idx]))
+                grow = min(extra_space, max(0, natural - col_widths[path_idx]))
+                if grow > 0:
+                    col_widths[path_idx] += grow
+                    extra_space -= grow
+            if desc_column_index is not None and extra_space > 0:
                 if prefer_single_line:
                     col_widths[desc_column_index] += extra_space
                 else:
-                    # Give extra space to Description column to help it fit on one line
                     col_widths[desc_column_index] += min(extra_space, int(available_width * 0.3))
         
         # Cap columns at reasonable maximum (skip when prefer_single_line — Description uses spare width)
         if not prefer_single_line:
             max_col_width = available_width // len(headers) * 2  # Allow columns to be up to 2x average
-            col_widths = [min(w, max_col_width) for w in col_widths]
+            # Never cap Path/Name below natural content when there is room overall
+            capped = []
+            for i, w in enumerate(col_widths):
+                hl = str(headers[i]).strip().lower()
+                if hl in ("path", "name") or i == name_column_index:
+                    capped.append(w)
+                else:
+                    capped.append(min(w, max_col_width))
+            col_widths = capped
 
     # Re-apply minimum widths (scaling can drive columns below column_min_widths) then fit by shrinking Description first.
     if column_min_widths:
@@ -383,7 +531,7 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
                 col_widths[i] = max(col_widths[i], int(column_min_widths[hs]))
         desc_floor = 18
         if desc_column_index is not None:
-            desc_floor = max(desc_floor, len(str(headers[desc_column_index])))
+            desc_floor = max(desc_floor, _visible_len(headers[desc_column_index]))
         while sum(col_widths) + separator_width > max_width and desc_column_index is not None:
             if col_widths[desc_column_index] <= desc_floor:
                 break
@@ -394,7 +542,7 @@ def _compute_table_layout(headers, rows, max_width=80, expand_to_terminal=True, 
             progressed = False
             for i in range(len(col_widths)):
                 hs = str(headers[i])
-                floor = len(str(headers[i]))
+                floor = _visible_len(headers[i])
                 if column_min_widths and hs in column_min_widths:
                     floor = max(floor, int(column_min_widths[hs]))
                 if col_widths[i] > floor:
@@ -463,7 +611,7 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
     # Build header line
     header_parts = []
     for i, header in enumerate(headers):
-        header_parts.append(str(header).ljust(col_widths[i]))
+        header_parts.append(_pad_visible(header, col_widths[i]))
     header_line = " | ".join(header_parts)
     
     # Print header with compact separator
@@ -471,7 +619,7 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
     # Separator must match the rendered table width only. Using max_width here breaks layout
     # because max_width is often expanded to terminal width while column content stays compact.
     separator_char = "─" if _stream_isatty(sys.stdout) else "-"
-    separator_len = len(header_line)
+    separator_len = _visible_len(header_line)
     print_info(separator_char * separator_len)
     
     for row in rows:
@@ -487,7 +635,7 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                 cell_lines.append([cell_value])
                 max_lines = max(max_lines, 1)
             elif i == desc_column_index and prefer_single_line:
-                if len(cell_value) <= col_widths[i]:
+                if _visible_len(cell_value) <= col_widths[i]:
                     cell_lines.append([cell_value])
                 else:
                     wrapped = _wrap_cell_text(cell_value, col_widths[i])
@@ -499,8 +647,7 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                 max_lines = max(max_lines, len(wrapped))
             else:
                 # Other columns: truncate if too long (with ellipsis)
-                if len(cell_value) > col_widths[i]:
-                    cell_value = cell_value[:col_widths[i] - 3] + "..."
+                cell_value = _truncate_visible(cell_value, col_widths[i])
                 cell_lines.append([cell_value])
         
         # Print all lines for this row
@@ -513,7 +660,7 @@ def print_table(headers, rows, max_width=80, expand_to_terminal=True, **kwargs):
                 else:
                     cell_value = ""  # Empty for continuation lines
                 
-                row_parts.append(cell_value.ljust(col_widths[i]))
+                row_parts.append(_pad_visible(cell_value, col_widths[i]))
             
             row_line = " | ".join(row_parts)
             print_info(row_line)

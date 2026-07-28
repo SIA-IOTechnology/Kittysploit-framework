@@ -565,7 +565,15 @@ class ModuleLoader:
         
         return modules
     
-    def load_module(self, module_path: str, load_only: bool = False, framework=None, silent: bool = False):
+    def load_module(
+        self,
+        module_path: str,
+        load_only: bool = False,
+        framework=None,
+        silent: bool = False,
+        *,
+        fast: bool = False,
+    ):
         """Load a module by its path
         
         Args:
@@ -573,9 +581,16 @@ class ModuleLoader:
             load_only: If True, don't cache the module
             framework: Framework instance to pass to the module
             silent: If True, don't print error messages (useful for discovery)
+            fast: If True, skip contract/policy validation (bulk scanner path)
         """
         self.last_load_failure = None
         try:
+            if not load_only and module_path in self.modules_cache:
+                instance = self.modules_cache[module_path]
+                if framework is not None:
+                    instance.framework = framework
+                return instance
+
             if module_path.startswith("modules/marketplace/"):
                 return self._load_extension_module(module_path, load_only, framework, silent)
 
@@ -602,51 +617,57 @@ class ModuleLoader:
                 )
                 return None
 
-            if not self._validate_module_contract(module_path, resolved_file, silent=silent):
-                return None
+            # Bulk scanner: skip expensive AST contract + policy on every load.
+            # Contract is still memoized when validation runs (interactive use).
+            skip_validation = fast or (
+                silent and module_path.startswith("scanner/")
+            )
+            if not skip_validation:
+                if not self._validate_module_contract(module_path, resolved_file, silent=silent):
+                    return None
 
-            if self.enable_policy_validation and self.validator:
-                try:
-                    with open(resolved_file, "r", encoding="utf-8") as f:
-                        module_code = f.read()
+                if self.enable_policy_validation and self.validator:
+                    try:
+                        with open(resolved_file, "r", encoding="utf-8") as f:
+                            module_code = f.read()
 
-                    validation_result = self.validator.validate(module_path, module_code)
+                        validation_result = self.validator.validate(module_path, module_code)
 
-                    if not validation_result.get("valid", True):
-                        errors = validation_result.get("errors", [])
-                        self._fail(
-                            module_path,
-                            LoadFailureKind.POLICY,
-                            "Policy validation failed",
-                            contract_errors=list(errors),
-                            silent=silent,
-                        )
-                        return None
-
-                    warnings = validation_result.get("warnings", [])
-                    if warnings and not silent:
-                        for warning in warnings:
-                            logging.warning("Module %s: %s", module_path, warning)
-
-                    approval_status = validation_result.get("approval_status")
-                    if approval_status and approval_status not in ["approved", "auto_approved", "pending"]:
-                        if approval_status in ["rejected", "revoked"]:
+                        if not validation_result.get("valid", True):
+                            errors = validation_result.get("errors", [])
                             self._fail(
                                 module_path,
-                                LoadFailureKind.POLICY_REJECTED,
-                                f"Module approval status is {approval_status}",
+                                LoadFailureKind.POLICY,
+                                "Policy validation failed",
+                                contract_errors=list(errors),
                                 silent=silent,
                             )
                             return None
+
+                        warnings = validation_result.get("warnings", [])
+                        if warnings and not silent:
+                            for warning in warnings:
+                                logging.warning("Module %s: %s", module_path, warning)
+
+                        approval_status = validation_result.get("approval_status")
+                        if approval_status and approval_status not in ["approved", "auto_approved", "pending"]:
+                            if approval_status in ["rejected", "revoked"]:
+                                self._fail(
+                                    module_path,
+                                    LoadFailureKind.POLICY_REJECTED,
+                                    f"Module approval status is {approval_status}",
+                                    silent=silent,
+                                )
+                                return None
+                            if not silent:
+                                logging.warning(
+                                    "Module %s requires approval (status: %s)",
+                                    module_path,
+                                    approval_status,
+                                )
+                    except Exception as e:
                         if not silent:
-                            logging.warning(
-                                "Module %s requires approval (status: %s)",
-                                module_path,
-                                approval_status,
-                            )
-                except Exception as e:
-                    if not silent:
-                        logging.warning("Policy validation error for %s: %s", module_path, e)
+                            logging.warning("Policy validation error for %s: %s", module_path, e)
 
             import_path = module_path.replace("/", ".").lstrip(".")
             module = importlib.import_module(f"modules.{import_path}")
@@ -1103,11 +1124,22 @@ class ModuleLoader:
             return self._search_modules_filesystem(filters)
 
         try:
-            return self.sync_manager.search_modules(filters=filters)
+            results = self.sync_manager.search_modules(filters=filters)
+            # Stale DB index: newly added modules won't appear until `sync`.
+            # Fall back to a filesystem parse so search still works.
+            if not results:
+                fs_results = self._search_modules_filesystem(filters)
+                if fs_results:
+                    logging.debug(
+                        "search_modules_db: DB empty for query; using filesystem fallback "
+                        "(%s hit(s)) — run 'sync now' to refresh the index",
+                        len(fs_results),
+                    )
+                    return fs_results
+            return results
         except Exception as e:
             logging.debug(f"search_modules_db: database search failed: {e}")
-            return []
-    
+            return self._search_modules_filesystem(filters)
     def get_module_by_path_db(self, path: str) -> Optional[Dict]:
         """Get module by path from database"""
         if not self.sync_manager:

@@ -15,7 +15,7 @@ class Module(Scanner, Tcp_scanner_client):
             "server returns more data than declared. Supports direct TLS (e.g. HTTPS) and "
             "cleartext services that upgrade with STARTTLS/STLS/AUTH TLS."
         ),
-        "author": ["Jared Stafford", "Travis Lee", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2014-0160",
         "references": [

@@ -52,7 +52,6 @@ class Module(Scanner, Http_client):
             if not r or r.status_code not in (200, 302, 401):
                 continue
             body = (r.text or "").lower()
-            headers = {k.lower(): v for k, v in r.headers.items()}
             moveit_markers = (
                 "moveit" in body,
                 "progress moveit" in body,
@@ -68,7 +67,6 @@ class Module(Scanner, Http_client):
                 severity="medium",
                 reason="Progress MOVEit Transfer interface detected",
                 path=path,
-                server=headers.get("server", ""),
             )
             return True
         return False

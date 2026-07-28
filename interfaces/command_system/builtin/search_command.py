@@ -7,11 +7,27 @@ import argparse
 
 from core.module_search import ModuleSearchFilters, parse_date
 from interfaces.command_system.base_command import BaseCommand
-from core.output_handler import print_info, print_success, print_error, print_table, print_empty
+from core.output_handler import print_info, print_success, print_error, print_warning, print_table, print_empty
 
 
 def _one_line(s: str) -> str:
     return " ".join(str(s or "").split())
+
+
+def _fmt_search_date(value) -> str:
+    """Format module index timestamps as dd/mm/YYYY."""
+    if value is None or value == "":
+        return "—"
+    text = str(value).strip()
+    if not text:
+        return "—"
+    # ISO-like: 2026-07-28 or 2026-07-28T12:34:56
+    date_part = text[:10]
+    if len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-":
+        y, m, d = date_part.split("-", 2)
+        if y.isdigit() and m.isdigit() and d.isdigit():
+            return f"{d}/{m}/{y}"
+    return text
 
 
 class SearchCommand(BaseCommand):
@@ -155,6 +171,9 @@ Examples:
 
             if not matches and not msf_output.strip():
                 print_info(f"No modules found matching {display_query}")
+                print_info(
+                    "If you recently added modules, run 'sync now' then search again."
+                )
                 try:
                     sm = getattr(self.framework, "module_sync_manager", None)
                     if sm:
@@ -169,6 +188,19 @@ Examples:
                 return True
 
             if matches:
+                # Hint when results likely came from a stale-index filesystem fallback
+                try:
+                    sm = getattr(self.framework, "module_sync_manager", None)
+                    loader = getattr(self.framework, "module_loader", None)
+                    if sm and loader and getattr(loader, "sync_manager", None):
+                        db_only = sm.search_modules(filters=filters)
+                        if not db_only:
+                            print_warning(
+                                "Results from filesystem (module index outdated). "
+                                "Run 'sync now' to refresh the database index."
+                            )
+                except Exception:
+                    pass
                 print_success(f"KittySploit: found {len(matches)} module(s) matching {display_query}")
                 print_empty()
 
@@ -179,24 +211,24 @@ Examples:
                     cve = _one_line(module.get("cve") or "—")
                     protocol = _one_line(module.get("protocol") or "—")
                     reliability = _one_line(module.get("reliability") or "—")
-                    updated = _one_line((module.get("updated_at") or "")[:10] or "—")
+                    updated = _fmt_search_date(module.get("updated_at"))
                     desc = _one_line(module.get("description") or "")
                     rows.append([path, mtype, cve, protocol, reliability, updated, desc])
 
                 print_table(
                     ["Path", "Type", "CVE", "Proto", "Rel.", "Updated", "Description"],
                     rows,
-                    max_width=120,
+                    max_width=80,
                     expand_to_terminal=True,
                     column_min_widths={
-                        "Path": 36,
-                        "Type": 10,
-                        "CVE": 15,
+                        "Type": 8,
+                        "CVE": 12,
                         "Updated": 10,
-                        "Description": 24,
+                        "Description": 20,
                     },
-                    protect_full_width_headers=(),
-                    wrap_extra_headers=("path", "description"),
+                    protect_full_width_headers=("Path",),
+                    wrap_extra_headers=("description",),
+                    prefer_single_line=True,
                 )
                 print_empty()
                 print_info("KittySploit select with: use <Path>")

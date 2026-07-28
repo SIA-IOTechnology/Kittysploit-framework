@@ -13,6 +13,9 @@ from core.output_handler import (
     print_warning,
     print_table,
     print_empty,
+    print_progress,
+    end_progress,
+    print_status,
     set_thread_output_quiet,
     color_red,
     color_yellow,
@@ -22,19 +25,25 @@ from core.output_handler import (
 from urllib.parse import urlparse
 import threading
 import socket
+import time
 from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Set, Optional, Tuple
 import errno
+import re
 
 from core.scanner.result_dedup import (
     deduplicate_scanner_results,
     enrich_scanner_result,
     group_scanner_results,
-    reason_redundant_with_evidence,
 )
 from core.scanner.probe_failure import is_soft_probe_failure
 from core.framework.module_executor import ModuleExecutionRequest, ModuleExecutor
+
+
+_CVE_RE = re.compile(r"CVE-(\d{4})-(\d{3,7})", re.IGNORECASE)
+# Follow-up modules shown in the findings table (not the scanner detect itself).
+_FOLLOWUP_PREFIXES = ("exploit/", "exploits/", "auxiliary/")
 
 
 class ScannerCommand(BaseCommand):
@@ -91,19 +100,27 @@ Options:
     --scan-ports         Enable automatic port scanning (default: enabled if no filters)
     --no-scan-ports      Disable automatic port scanning
     --auto-exploit       Automatically launch exploit modules after vulnerability detection
-    --threads N          Number of concurrent threads (default: 5)
+    --threads N          Number of concurrent threads (default: 10)
     --module MODULE      Execute only a specific module (e.g., http/apache_version_check)
+    --all                Include panel/CVE/mass-detect modules (noisy/slow; off by default)
     --list               List all available scanner modules
     --verbose, -v        Show detailed output for each module
     --no-cache           Disable HTTP request caching
     --no-dedup           Disable grouping/deduplication of identical findings
+    --no-save            Do not auto-save vulnerable findings to the workspace DB
+
+By default only low-noise checks run (HTTP methods, security/headers, banners,
+non-HTTP services). Product/panel fingerprints are opt-in.
 
 Examples:
     scanner -u https://example.com
+    scanner -u https://example.com --tags panel
+    scanner -u https://example.com --all
     scanner -u http://192.168.1.100 --threads 10
     scanner -u https://example.com --module http/apache_version_check
     scanner -u example.com --protocol http
     scanner -u example.com --tags ssh --port 2222
+    scanner -u example.com --tags cve
     scanner -u example.com --scan-ports
     scanner --list
     # Cloud (AWS S3, Azure, GCP, K8s, metadata):
@@ -146,12 +163,14 @@ Examples:
                 print_error(f"Invalid target: {options['url']}")
                 return False
             
-            # Discover scanner modules
+            # Discover scanner modules (static metadata only — no import)
+            print_info("Discovering scanner modules...")
             modules = self._discover_modules()
             
             if not modules:
                 print_warning("No scanner modules found")
                 return False
+            print_info(f"Indexed {len(modules)} scanner module(s)")
             
             # Filter by module if specified
             if options['module']:
@@ -207,6 +226,9 @@ Examples:
                     if not modules:
                         print_warning(f"No modules available for port {target_info['port']}")
                         return False
+
+            # Mass CVE modules are opt-in (otherwise default scans take hours)
+            modules = self._apply_default_module_scope(modules, options)
             
             print_info(f"Found {len(modules)} scanner module(s)")
             print_info(f"Target: {target_info['hostname']}:{target_info.get('port', 'default')}")
@@ -233,15 +255,49 @@ Examples:
             
             print_empty()
             
-            # Execute modules
-            raw_results = self._execute_modules(modules, target_info, options['threads'], options['verbose'])
+            # Execute modules with shared HTTP pool + path prefetch (P0/P1)
+            from lib.scanner.http_pool import scan_http_session
+
+            try:
+                from lib.scanner.http.soft_404 import clear_baselines
+
+                clear_baselines()
+            except Exception:
+                pass
+
+            timing: Dict[str, float] = {}
+            scan_t0 = time.perf_counter()
+            with scan_http_session(pool_size=max(20, options["threads"] * 2)):
+                if not options.get("no_cache", False):
+                    prefetch_t0 = time.perf_counter()
+                    self._prefetch_http_probes(modules, target_info, options["threads"])
+                    timing["prefetch"] = time.perf_counter() - prefetch_t0
+                exec_t0 = time.perf_counter()
+                raw_results = self._execute_modules(
+                    modules, target_info, options["threads"], options["verbose"]
+                )
+                timing["execute"] = time.perf_counter() - exec_t0
+            timing["total"] = time.perf_counter() - scan_t0
+
             if options.get('no_dedup'):
                 results = raw_results
             else:
                 results = deduplicate_scanner_results(raw_results, target_info=target_info)
             
             # Display results
-            self._display_results(results, raw_results, options['verbose'], grouped=not options.get('no_dedup'))
+            self._display_results(
+                results,
+                raw_results,
+                options['verbose'],
+                grouped=not options.get('no_dedup'),
+                timing=timing,
+                target_info=target_info,
+            )
+
+            if not options.get("no_save", False):
+                self._persist_findings_to_workspace(
+                    getattr(self.framework, "last_scanner_findings", None) or []
+                )
             
             # Auto-exploit if enabled
             if options.get('auto_exploit'):
@@ -278,12 +334,14 @@ Examples:
             'port': None,
             'scan_ports': True,  # Default: auto-scan ports if no filters
             'auto_exploit': False,  # Auto-launch exploits after detection
-            'threads': 5,
+            'threads': 10,
             'module': None,
             'list': False,
             'verbose': False,
             'no_cache': False,
             'no_dedup': False,
+            'no_save': False,
+            'all': False,
         }
         
         i = 0
@@ -357,6 +415,15 @@ Examples:
                 i += 1
             elif arg == '--no-dedup':
                 options['no_dedup'] = True
+                i += 1
+            elif arg == '--no-save':
+                options['no_save'] = True
+                i += 1
+            elif arg == '--no-cache':
+                options['no_cache'] = True
+                i += 1
+            elif arg == '--all':
+                options['all'] = True
                 i += 1
             else:
                 # Try to interpret as URL if no URL set
@@ -568,32 +635,208 @@ Examples:
         }
     
     def _discover_modules(self) -> List[Dict[str, Any]]:
-        """Discover all scanner modules"""
-        modules = []
-        
+        """Discover scanner modules via persistent metadata index."""
         try:
+            from core.module_index import get_scanner_modules
+
             discovered = self.framework.module_loader.discover_modules()
-            
-            for module_path, file_path in discovered.items():
-                if module_path.startswith('scanner/'):
-                    try:
-                        # Get module info without loading
-                        module_info = self.framework.module_loader.get_module_info(module_path)
-                        modules.append({
-                            'path': module_path,
-                            'file_path': file_path,
-                            'name': module_info.get('name', module_path),
-                            'description': module_info.get('description', ''),
-                            'author': module_info.get('author', ''),
-                            'tags': module_info.get('tags', [])
-                        })
-                    except Exception as e:
-                        # Skip modules that can't be loaded
-                        continue
+
+            def _progress(done, total, rebuilt, reused):
+                print_progress(
+                    done,
+                    total,
+                    label="Indexing",
+                    extra=f"parsed={rebuilt} cached={reused}",
+                )
+
+            rows = get_scanner_modules(discovered, progress_cb=_progress)
+            end_progress()
+            return rows
         except Exception as e:
             print_error(f"Error discovering modules: {e}")
-        
-        return sorted(modules, key=lambda x: x['path'])
+            # Fallback: static AST parse without durable index
+            modules = []
+            try:
+                from core.utils.module_static_metadata import extract_module_search_metadata
+
+                discovered = self.framework.module_loader.discover_modules()
+                for module_path, file_path in discovered.items():
+                    if not module_path.startswith("scanner/"):
+                        continue
+                    try:
+                        module_info = extract_module_search_metadata(file_path) or {}
+                        modules.append(
+                            {
+                                "path": module_path,
+                                "file_path": file_path,
+                                "name": module_info.get("name") or module_path,
+                                "description": module_info.get("description") or "",
+                                "author": module_info.get("author") or "",
+                                "tags": module_info.get("tags") or [],
+                                "cve": module_info.get("cve") or "",
+                            }
+                        )
+                    except Exception:
+                        modules.append(
+                            {
+                                "path": module_path,
+                                "file_path": file_path,
+                                "name": module_path,
+                                "description": "",
+                                "author": "",
+                                "tags": [],
+                                "cve": "",
+                            }
+                        )
+            except Exception as inner:
+                print_error(f"Fallback discovery failed: {inner}")
+            return sorted(modules, key=lambda x: x["path"])
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        """Human-readable duration for scan timing output."""
+        if seconds < 0:
+            seconds = 0.0
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        minutes, sec = divmod(seconds, 60)
+        if minutes < 60:
+            return f"{int(minutes)}m {sec:.1f}s"
+        hours, minutes = divmod(int(minutes), 60)
+        return f"{hours}h {minutes}m {sec:.0f}s"
+
+    @staticmethod
+    def _is_mass_cve_module(module: Dict[str, Any]) -> bool:
+        """True for bulk CVE catalog modules that dominate default scan time."""
+        path = str(module.get("path") or "").lower()
+        name = path.rsplit("/", 1)[-1]
+        return name.startswith("cve_")
+
+    @staticmethod
+    def _is_default_skipped_http_module(module: Dict[str, Any]) -> bool:
+        """
+        Default HTTP surface scan keeps only low-noise checks.
+
+        Product/panel/tech fingerprints are skipped (high FP rate). Opt in with
+        ``--tags panel`` / ``--tags tech`` / ``--all``.
+        """
+        path = str(module.get("path") or "").lower()
+        if not path.startswith("scanner/http/"):
+            return False
+        name = path.rsplit("/", 1)[-1]
+        if name.startswith("cve_") or "_cve_" in name:
+            return True
+        tags = {str(t).lower() for t in (module.get("tags") or [])}
+
+        # Explicit allowlist of hand-written low-noise HTTP helpers
+        allowlist = {
+            "http_methods_detect",
+            "security_headers_detect",
+            "server_banner_detect",
+            "robots_txt_detect",
+            "deprecated_feature_policy_detect",
+        }
+        if name in allowlist:
+            return False
+
+        reliable = {
+            "headers",
+            "methods",
+            "options",
+            "allow",
+            "hardening",
+            "banner",
+            "security",
+        }
+        # Keep only modules explicitly tagged as reliable surface checks
+        if tags & reliable and not (
+            tags
+            & {
+                "panel",
+                "login",
+                "cve",
+                "vuln",
+                "vulnerability",
+                "xss",
+                "sqli",
+                "rce",
+            }
+        ):
+            return False
+
+        # Everything else under scanner/http is opt-in
+        return True
+
+    @staticmethod
+    def _is_reliable_http_module(module: Dict[str, Any]) -> bool:
+        tags = {str(t).lower() for t in (module.get("tags") or [])}
+        reliable = {
+            "headers",
+            "methods",
+            "options",
+            "allow",
+            "hardening",
+            "banner",
+            "security",
+        }
+        return bool(tags & reliable)
+
+    def _apply_default_module_scope(
+        self, modules: List[Dict[str, Any]], options: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Default ``scanner -u`` skips mass CVE/vuln modules unless explicitly requested.
+
+        Include them with ``--all``, ``--tags cve`` (or other tags), or ``--module ...``.
+        """
+        if options.get("all") or options.get("module") or options.get("tags"):
+            # --tags already filtered the set; still drop pure cve_* unless cve requested
+            tags = [str(t).lower() for t in (options.get("tags") or [])]
+            if options.get("all") or options.get("module") or "cve" in tags:
+                return modules
+            # Explicit --tags panel/tech: allow those; still drop CVE catalog unless asked
+            kept = [m for m in modules if not self._is_mass_cve_module(m)]
+            skipped = len(modules) - len(kept)
+            if skipped:
+                print_info(
+                    f"Skipping {skipped} CVE catalog module(s) "
+                    "(use --all or --tags cve to include them)"
+                )
+            return kept
+
+        kept = []
+        skipped = 0
+        for module in modules:
+            if self._is_default_skipped_http_module(module) or self._is_mass_cve_module(module):
+                skipped += 1
+                continue
+            kept.append(module)
+
+        # Soft cap so a plain ``scanner -u`` stays interactive
+        default_cap = 150
+        if len(kept) > default_cap:
+            def _priority(mod: Dict[str, Any]) -> tuple:
+                path = str(mod.get("path") or "")
+                family = path.split("/")[1] if "/" in path else ""
+                is_http = family == "http"
+                # Prefer non-http services, then header/method checks, then the rest
+                reliable = 0 if self._is_reliable_http_module(mod) else 1
+                return (1 if is_http else 0, reliable, path)
+
+            kept_sorted = sorted(kept, key=_priority)
+            capped = len(kept_sorted) - default_cap
+            kept = kept_sorted[:default_cap]
+            skipped += capped
+            print_info(
+                f"Capped surface scan to {default_cap} module(s) "
+                f"({capped} deferred; use --all for the full catalog)"
+            )
+        if skipped:
+            print_info(
+                f"Skipping {skipped} panel/CVE/vuln module(s) for a low-noise surface scan "
+                "(use --tags panel, --tags cve, or --all to widen)"
+            )
+        return kept
     
     def _choose_port_for_module(self, module_path: str, target_info: Dict[str, Any]) -> int:
         """
@@ -686,6 +929,80 @@ Examples:
             "management" in path or path.endswith("_detect")
         )
 
+    def _scheme_for_port(self, port: int, target_info: Dict[str, Any]) -> str:
+        """Match URL scheme used when modules run (cache key must align)."""
+        configured = target_info.get("port")
+        target_scheme = str(target_info.get("scheme") or "").lower()
+        if configured and int(port) == int(configured) and target_scheme in ("http", "https"):
+            return target_scheme
+        if int(port) == 443:
+            return "https"
+        if int(port) == 80:
+            return "http"
+        if target_scheme in ("http", "https"):
+            return target_scheme
+        return "https" if int(port) == 443 else "http"
+
+    def _prefetch_http_probes(
+        self,
+        modules: List[Dict[str, Any]],
+        target_info: Dict[str, Any],
+        threads: int,
+    ) -> None:
+        """P0/P1: seed ``/`` and prefetch unique GET paths into the response cache."""
+        try:
+            from lib.scanner.probe_prefetch import collect_module_probes, prefetch_probes
+        except ImportError:
+            return
+
+        hostname = target_info.get("hostname") or ""
+        if not hostname:
+            return
+
+        probes = collect_module_probes(
+            modules,
+            hostname=hostname,
+            port_for_module=lambda mp: self._choose_port_for_module(mp, target_info),
+            scheme_for_port=lambda port: self._scheme_for_port(port, target_info),
+        )
+        if not probes:
+            return
+
+        print_info(
+            f"Prefetching {len(probes)} unique HTTP path(s) "
+            f"(seed=/ + soft-404 canary + path grouping)..."
+        )
+
+        def _progress(done, total, stats):
+            print_progress(
+                done,
+                total,
+                label="Prefetch",
+                extra=(
+                    f"fetched={stats.get('prefetched', 0)} "
+                    f"cached={stats.get('skipped', 0)} "
+                    f"err={stats.get('errors', 0)}"
+                ),
+            )
+
+        t0 = time.perf_counter()
+        stats = prefetch_probes(
+            probes,
+            threads=threads,
+            timeout=10.0,
+            verify=False,
+            progress_cb=_progress if len(probes) > 40 else None,
+        )
+        end_progress()
+        elapsed = time.perf_counter() - t0
+        print_info(
+            f"Prefetch done: {stats.get('prefetched', 0)} network fetch(es), "
+            f"{stats.get('network_fetches', stats.get('prefetched', 0))} unique URL(s), "
+            f"{stats.get('skipped', 0)} already cached, "
+            f"{stats.get('errors', 0)} error(s) "
+            f"in {self._format_duration(elapsed)}"
+        )
+
     def _dedicated_port_for_module(self, module_path: str):
         path = str(module_path or "").lower()
         for marker, port in self._MODULE_DEDICATED_PORTS:
@@ -711,6 +1028,14 @@ Examples:
     def _execute_modules(self, modules: List[Dict], target_info: Dict[str, Any], threads: int, verbose: bool) -> List[Dict]:
         """Execute scanner modules against target"""
         results = []
+
+        # P1: keep modules that share the same primary path adjacent
+        try:
+            from lib.scanner.probe_prefetch import group_modules_by_primary_path
+
+            modules = group_modules_by_primary_path(modules)
+        except Exception:
+            pass
         
         def execute_module(module_info):
             """Execute a single module"""
@@ -736,21 +1061,27 @@ Examples:
                     print_info(f"[*] Executing: {module_path}")
                 set_thread_output_quiet(not verbose)
                 try:
-                    # Load module
+                    # Load module (fast=True skips contract/policy AST on bulk runs)
                     module_instance = self.framework.module_loader.load_module(
                         module_path,
                         load_only=False,
                         framework=self.framework,
+                        silent=True,
+                        fast=True,
                     )
 
                     if not module_instance:
                         result['message'] = 'Failed to load module'
                         return result
 
+                    # Reset dynamic state when reusing a cached instance
+                    if hasattr(module_instance, "vulnerability_info"):
+                        module_instance.vulnerability_info = {}
+
                     # Set target options
                     hostname = target_info['hostname']
                     port = self._choose_port_for_module(module_path, target_info)
-                    scheme = 'https' if port == 443 else 'http'
+                    scheme = self._scheme_for_port(port, target_info)
                     result['port'] = port
                     result['scheme'] = scheme
                     result['host'] = hostname
@@ -783,7 +1114,8 @@ Examples:
                             module=module_instance,
                             use_runtime_kernel=False,
                             use_exploit_wrapper=False,
-                            collect_metrics=True,
+                            collect_metrics=False,
+                            skip_scope_confirm=True,
                         ),
                     )
                     if execution.blocked:
@@ -809,32 +1141,40 @@ Examples:
                     if not isinstance(dynamic_info, dict):
                         dynamic_info = {}
 
-                    if isinstance(run_return, dict):
+                    # Prefer ModuleResult.success (scanner True = finding)
+                    if hasattr(run_return, "success") and not isinstance(run_return, dict):
+                        result["vulnerable"] = bool(getattr(run_return, "success"))
+                        nested = getattr(run_return, "data", None)
+                        if isinstance(nested, dict):
+                            for k, v in nested.items():
+                                if k in ("reason", "version", "severity", "client"):
+                                    continue
+                                dynamic_info.setdefault(k, v)
+                    elif isinstance(run_return, dict):
                         for k, v in run_return.items():
                             if k in ('reason', 'version', 'severity', 'client'):
                                 continue
                             dynamic_info.setdefault(k, v)
-                    else:
-                        # ModuleResult / other objects: surface nested data + session_id.
-                        nested = getattr(run_return, "data", None)
-                        if isinstance(nested, dict):
-                            for k, v in nested.items():
-                                if k in ('reason', 'version', 'severity', 'client'):
-                                    continue
-                                dynamic_info.setdefault(k, v)
-                        nested_session = (
-                            getattr(run_return, "session_id", None)
-                            or getattr(execution, "session_id", None)
-                        )
-                        if nested_session and not dynamic_info.get("session_id"):
-                            dynamic_info["session_id"] = str(nested_session)
-
-                    if isinstance(run_return, bool):
+                        result['vulnerable'] = bool(run_return.get('vulnerable') or run_return.get('vuln') or run_return.get('success'))
+                    elif isinstance(run_return, bool):
                         result['vulnerable'] = run_return
-                    elif isinstance(run_return, dict):
-                        result['vulnerable'] = bool(run_return.get('vulnerable') or run_return.get('vuln'))
                     else:
                         result['vulnerable'] = bool(run_return)
+
+                    # Soft-404 / SPA catch-all: path hit mirrored the index page.
+                    if result.get("vulnerable"):
+                        try:
+                            from lib.scanner.http.soft_404 import finding_looks_like_index_clone
+
+                            dyn_for_soft404 = getattr(module_instance, "vulnerability_info", {}) or {}
+                            if finding_looks_like_index_clone(module_instance, dyn_for_soft404):
+                                result["vulnerable"] = False
+                                result["status"] = "safe"
+                                result["message"] = "suppressed soft-404 (same as index)"
+                                result["suppressed_soft404"] = True
+                        except Exception:
+                            pass
+
                     result['status'] = 'vulnerable' if result['vulnerable'] else 'safe'
                     session_token = (
                         str(getattr(execution, "session_id", None) or "").strip()
@@ -847,7 +1187,9 @@ Examples:
                     # Reason: dynamic finding text; avoid static module description as output.
                     reason = dynamic_info.get("reason")
                     module_description = str(module_info.get("description") or "").strip()
-                    if reason:
+                    if result.get("suppressed_soft404"):
+                        pass  # keep soft-404 suppression message
+                    elif reason:
                         result["message"] = reason
                     elif result.get("vulnerable"):
                         label = str(module_info.get("name") or module_path).strip()
@@ -915,6 +1257,12 @@ Examples:
             return result
         
         # Execute modules with thread pool
+        total = len(modules)
+        done = 0
+        found = 0
+        lock = threading.Lock()
+        print_info(f"Executing {total} module(s) with {threads} thread(s)...")
+        exec_t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=threads) as executor:
             future_to_module = {
                 executor.submit(copy_context().run, execute_module, module): module
@@ -924,11 +1272,30 @@ Examples:
             for future in as_completed(future_to_module):
                 result = future.result()
                 results.append(result)
-                
+                with lock:
+                    done += 1
+                    current = done
+                    if result.get("vulnerable"):
+                        found += 1
+                    findings = found
                 if verbose:
+                    end_progress()
                     status_icon = "[+]" if result['vulnerable'] else "[-]"
                     print_info(f"{status_icon} {result['module']}: {result['message']}")
-        
+                else:
+                    # Update in-place (~every module); bar overwrites previous line
+                    if current == 1 or current == total or current % 5 == 0:
+                        print_progress(
+                            current,
+                            total,
+                            label="Scanning",
+                            extra=f"{findings} finding(s)",
+                        )
+
+        end_progress()
+        print_info(
+            f"Module execution finished in {self._format_duration(time.perf_counter() - exec_t0)}"
+        )
         return results
     
     def _display_results(
@@ -937,25 +1304,27 @@ Examples:
         raw_results: List[Dict],
         verbose: bool,
         grouped: bool = True,
+        timing: Optional[Dict[str, float]] = None,
+        target_info: Optional[Dict[str, Any]] = None,
     ):
-        """Display scan results, optionally grouped by vulnerability/host/service/evidence."""
+        """Display scan results as a numbered table (for `use <n>`)."""
         print_empty()
         print_info("=" * 70)
         print_success("Scanner Results")
         print_info("=" * 70)
         print_empty()
-        
-        # Count statistics
+
         total = len(raw_results)
-        raw_vulnerable = sum(1 for r in raw_results if r.get('vulnerable'))
-        unique_vulnerable = sum(1 for r in results if r.get('vulnerable'))
+        raw_vulnerable = sum(1 for r in raw_results if r.get("vulnerable"))
+        unique_vulnerable = sum(1 for r in results if r.get("vulnerable"))
         safe = sum(
-            1 for r in raw_results
-            if not r.get('vulnerable') and r.get('status') not in ('error',)
+            1
+            for r in raw_results
+            if not r.get("vulnerable") and r.get("status") not in ("error",)
         )
-        skipped = sum(1 for r in raw_results if r.get('status') == 'skipped')
-        errors = sum(1 for r in raw_results if r.get('status') == 'error')
-        
+        skipped = sum(1 for r in raw_results if r.get("status") == "skipped")
+        errors = sum(1 for r in raw_results if r.get("status") == "error")
+
         print_info(f"Total modules executed: {total}")
         if grouped and raw_vulnerable != unique_vulnerable:
             print_success(
@@ -969,80 +1338,426 @@ Examples:
             print_info(f"Skipped: {skipped}")
         if errors > 0:
             print_warning(f"Errors: {errors}")
+        if timing:
+            print_empty()
+            print_info("Timing:")
+            if "prefetch" in timing:
+                print_info(f"  Prefetch:  {self._format_duration(timing['prefetch'])}")
+            if "execute" in timing:
+                print_info(f"  Execute:   {self._format_duration(timing['execute'])}")
+            if "total" in timing:
+                print_info(f"  Total:     {self._format_duration(timing['total'])}")
         print_empty()
-        
-        vulnerable_results = [r for r in results if r.get('vulnerable')]
-        if vulnerable_results and grouped:
-            finding_groups = group_scanner_results(results)
-            print_success("VULNERABILITIES DETECTED (grouped by host/service/evidence):")
-            print_info("-" * 70)
-            for group in finding_groups:
-                self._print_finding_group(group)
-                print_info("-" * 30)
-        elif vulnerable_results:
-            print_success("VULNERABILITIES DETECTED:")
-            print_info("-" * 70)
-            for result in vulnerable_results:
-                self._print_vulnerable_result(result)
-                print_info("-" * 30)
 
-        
-        # Show safe results if verbose
+        entries = self._build_finding_entries(
+            results,
+            grouped=grouped,
+            target_info=target_info or {},
+        )
+        # Persist for `use <n>`
+        try:
+            self.framework.last_scanner_findings = entries
+        except Exception:
+            pass
+
+        if entries:
+            print_success("FINDINGS:")
+            headers = ["#", "Sev", "Finding", "Host", "Service", "Scanner", "Module", "Evidence"]
+            rows = []
+            for entry in entries:
+                def _cell(value, fallback="-"):
+                    text = " ".join(str(value or fallback).split())
+                    return text or fallback
+
+                rows.append(
+                    [
+                        str(entry["index"]),
+                        self._format_severity(entry.get("severity")) or "-",
+                        _cell(entry.get("title"), ""),
+                        _cell(entry.get("host")),
+                        _cell(entry.get("service")),
+                        _cell(entry.get("scanner_label") or entry.get("scanner_path")),
+                        _cell(entry.get("module_label")),
+                        _cell(entry.get("evidence")),
+                    ]
+                )
+            print_table(
+                headers,
+                rows,
+                expand_to_terminal=True,
+                prefer_single_line=True,
+                expand_headers=("Evidence",),
+                # Wrap instead of truncating — never ellipsize cell content.
+                wrap_extra_headers=(
+                    "Finding",
+                    "Host",
+                    "Service",
+                    "Scanner",
+                    "Module",
+                    "Evidence",
+                ),
+                column_min_widths={
+                    "#": 1,
+                    "Sev": 8,
+                    "Finding": 12,
+                    "Host": 10,
+                    "Service": 9,
+                    "Scanner": 12,
+                    "Module": 10,
+                },
+            )
+            print_empty()
+            print_info(
+                "Select a finding:  use <n>   "
+                "(loads Module/exploit-auxiliary if linked, else Scanner)"
+            )
+            usable = sum(1 for e in entries if e.get("module_path"))
+            if usable:
+                print_info(f"{usable}/{len(entries)} finding(s) have a loadable module path")
+            print_empty()
+        else:
+            try:
+                self.framework.last_scanner_findings = []
+            except Exception:
+                pass
+
         if verbose:
-            safe_results = [r for r in raw_results if not r.get('vulnerable') and r.get('status') != 'error']
+            safe_results = [
+                r
+                for r in raw_results
+                if not r.get("vulnerable") and r.get("status") != "error"
+            ]
             if safe_results:
                 print_info("SAFE (No vulnerabilities detected):")
                 print_info("-" * 70)
                 for result in safe_results:
                     print_status(f"{result['module']}: {result['message']}")
                 print_empty()
-        
-        # Show errors if any
-        error_results = [r for r in raw_results if r.get('status') == 'error']
+
+        error_results = [r for r in raw_results if r.get("status") == "error"]
         if error_results:
             print_warning("ERRORS:")
             print_info("-" * 70)
             for result in error_results:
                 print_warning(f"{result['module']}: {result['message']}")
             print_empty()
-        
+
         print_info("=" * 70)
 
+    @staticmethod
+    def _clip(text: str, width: int) -> str:
+        text = " ".join(str(text or "").split())
+        if width <= 3 or len(text) <= width:
+            return text
+        return text[: width - 3] + "..."
+
+    @staticmethod
+    def _normalize_cve(value: Any) -> str:
+        text = str(value or "").strip().upper()
+        match = _CVE_RE.search(text)
+        if not match:
+            return ""
+        return f"CVE-{match.group(1)}-{match.group(2)}"
+
+    @staticmethod
+    def _is_followup_path(path: str) -> bool:
+        """True for actionable follow-ups (exploit/auxiliary), not scanner detects."""
+        cleaned = str(path or "").strip()
+        if not cleaned or cleaned.startswith("scanner/"):
+            return False
+        return cleaned.startswith(_FOLLOWUP_PREFIXES)
+
+    @staticmethod
+    def _module_kind_for_path(path: str) -> str:
+        cleaned = str(path or "").strip().lower()
+        if cleaned.startswith(("exploit/", "exploits/")):
+            return "exploit"
+        if cleaned.startswith("auxiliary/"):
+            return "auxiliary"
+        if cleaned.startswith("scanner/"):
+            return "scanner"
+        return "module"
+
+    def _all_followup_paths(self) -> List[str]:
+        cached = getattr(self, "_followup_paths_cache", None)
+        if cached is not None:
+            return cached
+        paths: List[str] = []
+        try:
+            discovered = self.framework.module_loader.discover_modules() or {}
+            paths = sorted(
+                p for p in discovered.keys() if self._is_followup_path(p)
+            )
+        except Exception:
+            paths = []
+        self._followup_paths_cache = paths
+        return paths
+
+    def _followups_for_cve(self, cve: str) -> List[str]:
+        """Resolve exploit/auxiliary module paths for a CVE (DB + path heuristics)."""
+        normalized = self._normalize_cve(cve)
+        if not normalized:
+            return []
+
+        cache = getattr(self, "_followups_by_cve_cache", None)
+        if cache is None:
+            cache = {}
+            self._followups_by_cve_cache = cache
+        if normalized in cache:
+            return list(cache[normalized])
+
+        found: List[str] = []
+        seen: Set[str] = set()
+
+        def _add(path: Any) -> None:
+            cleaned = str(path or "").strip()
+            if not cleaned or cleaned in seen or not self._is_followup_path(cleaned):
+                return
+            seen.add(cleaned)
+            found.append(cleaned)
+
+        try:
+            rows = self.framework.module_loader.search_modules_db(
+                cve=normalized,
+                limit=50,
+            ) or []
+            for row in rows:
+                if isinstance(row, dict):
+                    _add(row.get("path"))
+        except Exception:
+            pass
+
+        year, num = normalized.split("-")[1], normalized.split("-")[2]
+        tokens = (
+            f"cve_{year}_{num}",
+            f"cve-{year}-{num}",
+            f"{year}_{num}",
+        )
+        for path in self._all_followup_paths():
+            low = path.lower()
+            if any(token in low for token in tokens):
+                _add(path)
+
+        # Prefer exploits before auxiliary when both match the same CVE.
+        found.sort(
+            key=lambda p: (
+                0 if p.startswith(("exploit/", "exploits/")) else 1,
+                p,
+            )
+        )
+        cache[normalized] = list(found)
+        return list(found)
+
+    def _collect_followup_modules(self, *sources: Any) -> List[str]:
+        """Collect linked exploit/auxiliary paths from result dicts / groups."""
+        found: List[str] = []
+        seen: Set[str] = set()
+
+        def _add(path: Any) -> None:
+            cleaned = str(path or "").strip()
+            if not cleaned or cleaned in seen or not self._is_followup_path(cleaned):
+                return
+            seen.add(cleaned)
+            found.append(cleaned)
+
+        for source in sources:
+            if source is None:
+                continue
+            if isinstance(source, dict):
+                items = [source]
+            elif isinstance(source, (list, tuple)):
+                items = list(source)
+            else:
+                items = []
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                _add(item.get("exploit_module"))
+                linked = item.get("linked_modules") or []
+                if isinstance(linked, str):
+                    linked = [linked]
+                if isinstance(linked, (list, tuple)):
+                    for entry in linked:
+                        _add(entry)
+                cve = self._normalize_cve(item.get("cve"))
+                if cve:
+                    for path in self._followups_for_cve(cve):
+                        _add(path)
+        return found
+
+    def _build_finding_entries(
+        self,
+        results: List[Dict],
+        *,
+        grouped: bool,
+        target_info: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Build numbered finding rows for display + `use <n>`."""
+        entries: List[Dict[str, Any]] = []
+        default_host = str(target_info.get("hostname") or "")
+        default_port = target_info.get("port")
+        default_scheme = str(target_info.get("scheme") or "")
+
+        def _port_from_service(service: str) -> Optional[int]:
+            if not service or ":" not in service:
+                return None
+            try:
+                return int(service.rsplit(":", 1)[-1])
+            except ValueError:
+                return None
+
+        def _label(modules: List[str]) -> str:
+            if not modules:
+                return "-"
+            if len(modules) == 1:
+                return modules[0]
+            return f"{modules[0]} (+{len(modules) - 1})"
+
+        if grouped:
+            for group in group_scanner_results(results):
+                rep = group.representative or {}
+                module_paths = list(group.module_paths or [])
+                scanner_path = module_paths[0] if module_paths else str(rep.get("path") or "").strip()
+                scanner_paths = [p for p in module_paths if str(p or "").strip()] or (
+                    [scanner_path] if scanner_path else []
+                )
+                followups = self._collect_followup_modules(rep, list(group.members or []))
+                if group.cve:
+                    for path in self._followups_for_cve(group.cve):
+                        if path not in followups:
+                            followups.append(path)
+                followup = followups[0] if followups else ""
+                # use <n>: prefer linked follow-up, fall back to scanner detection module
+                module_path = followup or scanner_path
+                kind = self._module_kind_for_path(module_path) if module_path else ""
+                host = (group.hosts[0] if group.hosts else "") or default_host
+                service = (group.services[0] if group.services else "") or ""
+                port = _port_from_service(service) or rep.get("port") or default_port
+                scheme = str(rep.get("scheme") or default_scheme or "")
+                evidence = ""
+                if group.evidence:
+                    evidence = group.evidence[0]
+                    if len(group.evidence) > 1:
+                        evidence = f"{evidence} (+{len(group.evidence) - 1})"
+                else:
+                    evidence = str(rep.get("evidence") or rep.get("message") or "")
+                title = group.title
+                if group.cve and group.cve not in title:
+                    title = f"[{group.cve}] {title}"
+                entries.append(
+                    {
+                        "index": len(entries) + 1,
+                        "title": title,
+                        "severity": group.severity or rep.get("severity") or "",
+                        "cve": group.cve or "",
+                        "host": host,
+                        "service": service,
+                        "port": port,
+                        "scheme": scheme,
+                        "evidence": evidence,
+                        "module_path": module_path,
+                        "scanner_path": scanner_path,
+                        "scanner_label": _label(scanner_paths),
+                        "exploit_module": followup if followup.startswith(("exploit/", "exploits/")) else "",
+                        "followup_modules": followups,
+                        "exploit_modules": followups,  # back-compat for use_command
+                        "module_kind": kind,
+                        "module_label": _label(followups),
+                        "occurrences": group.occurrences,
+                    }
+                )
+        else:
+            for result in results:
+                if not result.get("vulnerable"):
+                    continue
+                scanner_path = str(result.get("path") or "").strip()
+                followups = self._collect_followup_modules(result)
+                followup = followups[0] if followups else ""
+                module_path = followup or scanner_path
+                kind = self._module_kind_for_path(module_path) if module_path else ""
+                host = str(result.get("host") or default_host or "")
+                service = str(result.get("service") or "")
+                port = result.get("port") or _port_from_service(service) or default_port
+                scheme = str(result.get("scheme") or default_scheme or "")
+                evidence = str(result.get("evidence") or result.get("message") or "")
+                title = str(result.get("module") or scanner_path or "Finding").lstrip("[+]").strip()
+                cve = str(result.get("cve") or "")
+                if cve and cve not in title:
+                    title = f"[{cve}] {title}"
+                entries.append(
+                    {
+                        "index": len(entries) + 1,
+                        "title": title,
+                        "severity": result.get("severity") or "",
+                        "cve": cve,
+                        "host": host,
+                        "service": service,
+                        "port": port,
+                        "scheme": scheme,
+                        "evidence": evidence,
+                        "module_path": module_path,
+                        "scanner_path": scanner_path,
+                        "scanner_label": scanner_path or "-",
+                        "exploit_module": followup if followup.startswith(("exploit/", "exploits/")) else "",
+                        "followup_modules": followups,
+                        "exploit_modules": followups,
+                        "module_kind": kind,
+                        "module_label": _label(followups),
+                        "occurrences": int(result.get("duplicate_count") or 1),
+                    }
+                )
+        return entries
+
+    def _persist_findings_to_workspace(self, entries: List[Dict[str, Any]]) -> None:
+        """Auto-save numbered scanner findings into the active workspace DB."""
+        if not entries:
+            return
+        try:
+            from core.workspace_intel import WorkspaceIntelStore
+
+            stats = WorkspaceIntelStore(self.framework).record_scanner_findings(
+                entries,
+                source="scanner",
+            )
+        except Exception as exc:
+            print_warning(f"Could not save findings to workspace DB: {exc}")
+            return
+
+        saved = int(stats.get("saved") or 0)
+        updated = int(stats.get("updated") or 0)
+        failed = int(stats.get("failed") or 0)
+        if saved or updated:
+            print_success(
+                f"Workspace DB: {saved} new finding(s) saved"
+                + (f", {updated} updated" if updated else "")
+            )
+            print_info("View with: vuln --list  (alias: vulns --list)")
+        elif failed:
+            print_warning(f"Workspace DB: failed to save {failed} finding(s)")
+        else:
+            print_info("Workspace DB: no new findings to save")
+
     def _print_vulnerable_result(self, result: Dict[str, Any]):
-        module_name = str(result.get('module', '')).lstrip('[+]').strip()
+        # Kept for callers/tests; primary UI is the numbered table.
+        module_name = str(result.get("module", "")).lstrip("[+]").strip()
         print_success(module_name)
-        if result.get('host') or result.get('service'):
-            host = result.get('host') or 'unknown'
-            service = result.get('service') or 'unknown'
+        if result.get("host") or result.get("service"):
+            host = result.get("host") or "unknown"
+            service = result.get("service") or "unknown"
             print_info(f"    Target: {host} ({service})")
-        print_info(f"    Path: {result.get('path', '')}")
         message = str(result.get("message") or "").strip()
         evidence = str(result.get("evidence") or "").strip()
         if evidence:
             print_info(f"    Evidence: {evidence}")
         elif message:
             print_info(f"    Evidence: {message}")
-        if message and not reason_redundant_with_evidence(message, evidence or message):
-            print_info(f"    Reason: {message}")
-        if 'version' in result:
-            print_info(f"    Version: {result['version']}")
-        if result.get('cve'):
+        if result.get("cve"):
             print_info(f"    CVE: {result['cve']}")
-        if result.get('severity'):
+        if result.get("severity"):
             print_info(f"    Severity: {self._format_severity(result['severity'])}")
-        duplicate_count = int(result.get('duplicate_count') or 1)
-        if duplicate_count > 1:
-            sources = result.get('dedup_sources') or []
-            print_info(f"    Occurrences: {duplicate_count}")
-            if sources:
-                print_info(f"    Sources: {', '.join(sources)}")
-        details = result.get('details') or {}
-        if details:
-            for key, value in details.items():
-                print_info(f"    {key}: {value}")
-        if 'exploit_module' in result:
+        if result.get("exploit_module"):
             print_success(f"Exploit module: {result['exploit_module']}")
-            print_info(f"    Use: use {result['exploit_module']}")
 
     def _print_finding_group(self, group):
         title = group.title
@@ -1056,23 +1771,8 @@ Examples:
             print_info(f"    Hosts: {', '.join(group.hosts)}")
         if group.services:
             print_info(f"    Services: {', '.join(group.services)}")
-        if group.evidence:
-            preview = group.evidence[0]
-            if len(group.evidence) > 1:
-                preview = f"{preview} (+{len(group.evidence) - 1} variant(s))"
-            print_info(f"    Evidence: {preview}")
         if group.module_paths:
             print_info(f"    Modules: {', '.join(group.module_paths)}")
-        if group.occurrences > 1:
-            print_info(f"    Occurrences: {group.occurrences}")
-        representative = group.representative or {}
-        if representative.get('exploit_module'):
-            print_success(f"Exploit module: {representative['exploit_module']}")
-            print_info(f"    Use: use {representative['exploit_module']}")
-        rep_message = str(representative.get("message") or "").strip()
-        rep_evidence = str((group.evidence or [""])[0] or representative.get("evidence") or "").strip()
-        if rep_message and not reason_redundant_with_evidence(rep_message, rep_evidence):
-            print_info(f"    Reason: {rep_message}")
     
     def _auto_exploit(self, results: List[Dict], target_info: Dict[str, Any]):
         """Automatically launch exploit modules for detected vulnerabilities"""

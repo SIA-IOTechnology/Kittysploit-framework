@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD shadow credentials",
         "description": "Detects accounts with msDS-KeyCredentialLink set (PKINIT takeover possible).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "shadow credentials", "keycredential", "pkinit"],

@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD AS-REP Roastable accounts",
         "description": "Detects accounts with Kerberos pre-authentication disabled (AS-REP roasting).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "kerberos", "asrep", "preauth"],

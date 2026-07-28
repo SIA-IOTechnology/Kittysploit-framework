@@ -9,7 +9,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Flask Debug Mode detection',
         'description': 'Detects if Flask debug mode (Werkzeug) is enabled on the target, which may lead to RCE.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'high',
         'modules': ['exploits/http/flask_debug_rce'],
         'tags': ['web', 'scanner', 'flask', 'werkzeug', 'debug', 'rce'],

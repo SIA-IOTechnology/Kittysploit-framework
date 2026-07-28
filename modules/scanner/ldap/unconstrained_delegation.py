@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD unconstrained delegation",
         "description": "Detects computers and users trusted for unconstrained delegation.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "delegation", "unconstrained"],

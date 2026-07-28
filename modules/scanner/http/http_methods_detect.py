@@ -14,7 +14,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'HTTP methods detection',
         'description': 'Detects allowed HTTP methods (via Allow header or OPTIONS). Risky methods may indicate misconfiguration.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': [],
         'tags': ['web', 'scanner', 'http', 'methods', 'options', 'allow'],

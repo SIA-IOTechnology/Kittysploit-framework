@@ -11,7 +11,7 @@ class Module(Scanner, Ics_scanner_client):
     __info__ = {
         "name": "DNP3 unsolicited enabled",
         "description": "Checks whether a DNP3 outstation accepts unsolicited response configuration",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "tags": ["ics", "dnp3", "utilities", "unsolicited"],
     'agent': {

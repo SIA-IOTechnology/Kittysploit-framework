@@ -10,7 +10,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD Kerberoastable accounts",
         "description": "Detects user accounts with SPNs (Kerberoast targets).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "kerberos", "kerberoast", "spn"],

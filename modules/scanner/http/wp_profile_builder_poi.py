@@ -23,7 +23,7 @@ class Module(Scanner, Http_client, Wordpress):
             "via wppb_request_users_pins admin-ajax (args parameter). Optionally sends "
             "a safe stdClass probe; HTTP 500 indicates deserialization of attacker input."
         ),
-        "author": ["Mattia Brollo (0xbro)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "references": [
             "https://www.core-jmp.org/blog/exploiting-a-php-object-injection-in-profile-builder-pro-in-the-era-of-ai",

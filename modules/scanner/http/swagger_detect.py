@@ -27,7 +27,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Swagger/OpenAPI detection",
         "description": "Detects exposed Swagger or OpenAPI documentation (API disclosure).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "low",
         "modules": [],
         "tags": ["web", "scanner", "swagger", "openapi", "api", "disclosure"],

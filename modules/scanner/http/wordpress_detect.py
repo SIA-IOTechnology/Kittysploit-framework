@@ -56,7 +56,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'WordPress detection',
         'description': 'Detects if WordPress is installed on the target.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': [],
         'tags': ['web', 'scanner', 'wordpress', 'cms'],

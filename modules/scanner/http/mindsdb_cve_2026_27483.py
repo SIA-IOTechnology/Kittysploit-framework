@@ -15,7 +15,7 @@ class Module(Scanner, Http_client):
             "Detects MindsDB versions < 25.9.1.1 potentially affected by CVE-2026-27483 "
             "(path traversal in /api/files that can lead to RCE)."
         ),
-        "author": ["XlabAITeam", "Lohitya Pushkar (thewhiteh4t)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-27483",
         "references": [

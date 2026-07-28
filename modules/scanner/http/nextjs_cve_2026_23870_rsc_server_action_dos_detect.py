@@ -15,6 +15,9 @@ class Module(Scanner, Http_client):
         ),
         "author": ["KittySploit Team"],
         "severity": "high",
+        "modules": [
+            "auxiliary/dos/http/nextjs_rsc_cve_2026_23870_server_action_dos",
+        ],
         "cve": "CVE-2026-23870",
         "references": ["https://github.com/advisories/GHSA-8h8q-6873-q5fj"],
         "tags": ["scanner", "http", "nextjs", "dos", "rsc", "cve-2026-23870"],

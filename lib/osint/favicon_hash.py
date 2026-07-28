@@ -64,3 +64,10 @@ def favicon_hashes(data: bytes) -> Dict[str, str]:
             struct.pack("<i", mmh3_val)
         ).decode().strip(),
     }
+
+
+def shodan_mmh3(data: bytes) -> str:
+    """Shodan favicon hash: mmh3 of ``base64.encodebytes(content)``."""
+    if not data:
+        return ""
+    return str(_mmh3_x86_32(base64.encodebytes(data)))

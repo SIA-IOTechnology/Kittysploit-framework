@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
         "description": "Detects GUnet OpenEclass instances vulnerable to Remote Code Execution (CVE-2026-22241) "
                        "by checking the platform version. Versions prior to 4.2 are vulnerable to an unrestricted "
                        "file upload in the theme import functionality.",
-        "author": ["Kittysploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-22241",
         "references": [

@@ -25,7 +25,7 @@ class Module(Scanner, Http_client):
             "then confirms the customized-portal filesystem branch with firmware.json "
             "(and optionally web.xml via /login). Fixed in 10.1.89 / 10.2.97 / 9.0.118."
         ),
-        "author": ["Bishop Fox", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-22557",
         "references": [

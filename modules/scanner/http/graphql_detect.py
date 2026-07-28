@@ -14,7 +14,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "GraphQL detection",
         "description": "Detects GraphQL or GraphiQL endpoint (introspection risk).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "low",
         "modules": [],
         "tags": ["web", "scanner", "graphql", "api", "introspection"],

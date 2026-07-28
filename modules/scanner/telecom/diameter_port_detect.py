@@ -13,7 +13,7 @@ class Module(Scanner, Tcp_scanner_client):
     __info__ = {
         "name": "Diameter port detection",
         "description": "Detects open Diameter port (3868) - 3GPP LTE/5G S6a/S6d, authentication.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "diameter", "3gpp", "mobile"],

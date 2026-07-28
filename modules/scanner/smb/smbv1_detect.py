@@ -10,7 +10,7 @@ class Module(Scanner, Smb_scanner_client):
     __info__ = {
         "name": "SMBv1 detection",
         "description": "Detects if SMBv1 is enabled (EternalBlue, relay, deprecated).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["smb", "scanner", "smbv1", "eternalblue", "legacy"],

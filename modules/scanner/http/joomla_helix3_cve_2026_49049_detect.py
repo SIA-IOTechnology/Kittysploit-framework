@@ -19,7 +19,7 @@ class Module(Scanner, Http_client, Joomla):
             "unauthenticated arbitrary file write/delete and template parameter "
             "overwrite via the com_ajax helix3 plugin handler."
         ),
-        "author": ["Phil Taylor", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-49049",
         "references": [

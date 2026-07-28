@@ -30,7 +30,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Exposed .env file detection",
         "description": "Detects publicly accessible .env files containing application secrets or environment configuration.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["web", "scanner", "env", "secrets", "disclosure", "config"],

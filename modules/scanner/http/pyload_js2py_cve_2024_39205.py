@@ -25,11 +25,7 @@ class Module(Scanner, Http_client):
             "and a CVE-2024-28397 Js2Py sandbox-escape payload. Vulnerable hosts exhibit a delayed "
             "response consistent with command execution."
         ),
-        "author": [
-            "Marven11",
-            "Ali Sünbül (xeloxa)",
-            "KittySploit Team",
-        ],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2024-39205",
         "references": [

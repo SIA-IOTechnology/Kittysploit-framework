@@ -14,7 +14,7 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects vulnerable Highlight and Share plugin versions (<= 5.2.0) exposed to "
             "unauthenticated email share abuse via admin-ajax."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "cve": "CVE-2025-67586",
         "modules": [

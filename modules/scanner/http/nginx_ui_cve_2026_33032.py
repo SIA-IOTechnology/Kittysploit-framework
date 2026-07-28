@@ -26,7 +26,7 @@ class Module(Scanner, Http_client):
             "/mcp_message. Never invokes destructive MCP tools. Affected builds prior to "
             "the AuthRequired fix (commonly cited < 2.3.4; upgrade to 2.3.6+ recommended)."
         ),
-        "author": ["Yotam Perkal", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-33032",
         "references": [

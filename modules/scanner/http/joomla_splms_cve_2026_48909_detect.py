@@ -17,7 +17,7 @@ class Module(Scanner, Http_client, Joomla):
             "PHP object injection via the lmsOrders cookie (CVE-2026-48909). "
             "Full RCE requires Joomla < 5.2.2 (FormattedtextLogger gadget chain)."
         ),
-        "author": ["Amin İsayev", "Proxima Cyber Security", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-48909",
         "references": [

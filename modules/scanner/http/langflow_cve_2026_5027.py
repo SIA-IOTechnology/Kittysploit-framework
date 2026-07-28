@@ -20,7 +20,7 @@ class Module(Scanner, Http_client):
             "Checks /api/v1/version, probes auto-login, and optionally confirms "
             "with a benign write to /tmp. Fixed in 1.9.0+."
         ),
-        "author": ["Yahia Hamza", "Tenable", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-5027",
         "references": [

@@ -3,8 +3,7 @@ version: "1"
 name: Service & Panel Discovery
 description: >
   Multi-layer host discovery — TCP/UDP services (SSH, RDP, VNC, WinRM, databases,
-  cache, SNMP) followed by HTTP panel and misconfiguration scanners inspired by
-  Nuclei exposed-panels and technology templates.
+  cache, SNMP) followed by HTTP panel and misconfiguration scanners.
 tags: [discovery, scanner, network, panels, quick-win]
 policy:
   safe_only: true

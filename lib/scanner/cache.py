@@ -104,6 +104,19 @@ class ScannerCache:
         key_string = "|".join(str(p) for p in parts)
         return hashlib.md5(key_string.encode()).hexdigest()
     
+    def has(self, method: str, url: str, headers: Optional[Dict] = None,
+            data: Optional[Any] = None) -> bool:
+        """True if a non-expired entry exists (does not bump hit/miss counters)."""
+        key = self._make_key(method, url, headers, data)
+        with self._lock:
+            entry = self._cache.get(key)
+            if not entry:
+                return False
+            if time.time() - entry["timestamp"] >= self._ttl:
+                del self._cache[key]
+                return False
+            return True
+
     def get(self, method: str, url: str, headers: Optional[Dict] = None,
             data: Optional[Any] = None) -> Optional[Any]:
         """

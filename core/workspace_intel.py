@@ -345,6 +345,233 @@ class WorkspaceIntelStore:
             logger.warning("Could not record ICS asset for %s (%s)", host_address, exc)
             return False
 
+    def record_scanner_findings(
+        self,
+        findings: list,
+        *,
+        source: str = "scanner",
+    ) -> Dict[str, int]:
+        """
+        Persist vulnerable scanner findings into the active workspace.
+
+        Creates/updates Host + Service, then Vulnerability rows linked to both.
+        Severity ``info`` is stored as ``low`` (DB constraint has no ``info``).
+        """
+        stats = {"saved": 0, "updated": 0, "skipped": 0, "failed": 0}
+        if not findings:
+            return stats
+
+        session = self._db_session()
+        workspace_id = self._workspace_id()
+        if not session or workspace_id is None:
+            logger.warning("Cannot persist scanner findings: no workspace DB session")
+            return stats
+
+        from core.models.models import Host, Service, Vulnerability
+
+        for raw in findings:
+            if not isinstance(raw, dict):
+                stats["skipped"] += 1
+                continue
+            # Accept both table entries and raw vulnerable result dicts
+            if raw.get("vulnerable") is False:
+                stats["skipped"] += 1
+                continue
+
+            host_address = str(
+                raw.get("host") or raw.get("hostname") or raw.get("address") or ""
+            ).strip()
+            if not host_address:
+                stats["skipped"] += 1
+                continue
+
+            title = str(
+                raw.get("title")
+                or raw.get("module")
+                or raw.get("name")
+                or "Scanner finding"
+            ).strip()
+            title = title.lstrip("[+]").strip() or "Scanner finding"
+
+            severity = self._normalize_risk_level(raw.get("severity") or raw.get("risk_level"))
+            cve = self._normalize_cve(raw.get("cve"))
+            evidence = str(raw.get("evidence") or raw.get("message") or "").strip()
+            module_path = str(
+                raw.get("module_path")
+                or raw.get("scanner_path")
+                or raw.get("path")
+                or ""
+            ).strip()
+            service_label = str(raw.get("service") or "").strip()
+            port = raw.get("port")
+            if port is None and ":" in service_label:
+                try:
+                    port = int(service_label.rsplit(":", 1)[-1])
+                except ValueError:
+                    port = None
+            try:
+                port_i = int(port) if port is not None else None
+            except (TypeError, ValueError):
+                port_i = None
+
+            scheme = str(raw.get("scheme") or "").lower()
+            svc_name = None
+            if service_label and ":" in service_label:
+                svc_name = service_label.split(":", 1)[0].strip() or None
+            if not svc_name and scheme in ("http", "https"):
+                svc_name = scheme
+            if not svc_name and port_i:
+                svc_name = TCP_SERVICE_NAMES.get(port_i, f"tcp-{port_i}")
+
+            poc_parts = []
+            if evidence:
+                poc_parts.append(f"Evidence: {evidence}")
+            if module_path:
+                poc_parts.append(f"Module: {module_path}")
+            if service_label:
+                poc_parts.append(f"Service: {service_label}")
+            if source:
+                poc_parts.append(f"Source: {source}")
+            proof = "\n".join(poc_parts)
+
+            description = evidence or title
+            if module_path and module_path not in description:
+                description = f"{description}\nDetected by {module_path}".strip()
+
+            try:
+                host = (
+                    session.query(Host)
+                    .filter(Host.workspace_id == workspace_id, Host.address == host_address)
+                    .first()
+                )
+                if not host:
+                    host = Host(
+                        workspace_id=workspace_id,
+                        address=host_address,
+                        hostname=host_address if not self._looks_like_ip(host_address) else None,
+                        status="up",
+                    )
+                    session.add(host)
+                    session.flush()
+                else:
+                    host.status = "up"
+                    host.updated_at = datetime.utcnow()
+                    if not host.hostname and not self._looks_like_ip(host_address):
+                        host.hostname = host_address
+
+                service = None
+                if port_i:
+                    service = (
+                        session.query(Service)
+                        .filter(Service.port == port_i, Service.protocol == "tcp")
+                        .first()
+                    )
+                    if not service:
+                        service = Service(
+                            name=svc_name or f"tcp-{port_i}",
+                            port=port_i,
+                            protocol="tcp",
+                            state="open",
+                        )
+                        session.add(service)
+                        session.flush()
+                    else:
+                        service.state = "open"
+                        if svc_name and (not service.name or str(service.name).startswith("tcp-")):
+                            service.name = svc_name
+                        service.updated_at = datetime.utcnow()
+                    if service not in host.services:
+                        host.services.append(service)
+
+                # Dedup: same host + name + cve (+ service when present)
+                q = (
+                    session.query(Vulnerability)
+                    .join(Vulnerability.hosts)
+                    .filter(
+                        Host.id == host.id,
+                        Vulnerability.name == title[:255],
+                    )
+                )
+                if cve:
+                    q = q.filter(Vulnerability.cve == cve)
+                else:
+                    q = q.filter((Vulnerability.cve.is_(None)) | (Vulnerability.cve == ""))
+                if service is not None:
+                    q = q.filter(Vulnerability.service_id == service.id)
+                existing = q.first()
+
+                if existing:
+                    existing.risk_level = severity
+                    existing.description = description[:4000] if description else existing.description
+                    if proof:
+                        existing.proof_of_concept = proof[:8000]
+                    if service is not None:
+                        existing.service_id = service.id
+                    existing.updated_at = datetime.utcnow()
+                    if host not in existing.hosts:
+                        existing.hosts.append(host)
+                    stats["updated"] += 1
+                else:
+                    vuln = Vulnerability(
+                        name=title[:255],
+                        description=(description or "")[:4000],
+                        cve=cve or None,
+                        risk_level=severity,
+                        proof_of_concept=(proof or "")[:8000],
+                        remediation="",
+                        service_id=service.id if service is not None else None,
+                    )
+                    session.add(vuln)
+                    session.flush()
+                    vuln.hosts.append(host)
+                    stats["saved"] += 1
+
+                session.commit()
+            except Exception as exc:
+                session.rollback()
+                stats["failed"] += 1
+                logger.warning(
+                    "Could not persist scanner finding %r on %s (%s)",
+                    title,
+                    host_address,
+                    exc,
+                )
+
+        return stats
+
+    @staticmethod
+    def _normalize_risk_level(value: Any) -> str:
+        sev = str(value or "").strip().lower()
+        if sev in ("critical", "crit"):
+            return "critical"
+        if sev == "high":
+            return "high"
+        if sev in ("medium", "moderate"):
+            return "medium"
+        if sev == "low":
+            return "low"
+        # DB check constraint has no "info" — map informational findings to low
+        if sev in ("info", "informational"):
+            return "low"
+        return "unknown"
+
+    @staticmethod
+    def _normalize_cve(value: Any) -> Optional[str]:
+        cve = str(value or "").strip().upper()
+        if not cve:
+            return None
+        import re
+
+        if re.match(r"^CVE-\d{4}-\d{4,}$", cve):
+            return cve
+        return None
+
+    @staticmethod
+    def _looks_like_ip(value: str) -> bool:
+        import re
+
+        return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", value or ""))
+
     def _db_session(self):
         db = getattr(self.framework, "db_manager", None)
         if not db:

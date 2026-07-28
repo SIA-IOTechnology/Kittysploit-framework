@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Check for presence of Exchange Server using Outlook Web App path data."""
+
+import re
+
+from kittysploit import *
+from lib.protocols.http.http_client import Http_client
+
+
+class Module(Scanner, Http_client):
+    __info__ = {
+        'name': 'Microsoft Exchange Server Detect',
+        'description': 'Check for presence of Exchange Server using Outlook Web App path data.',
+        'author': ['KittySploit Team'],
+        'severity': 'info',
+        'tags': ['web', 'scanner', 'technology', 'microsoft', 'exchange', 'tech'],
+        'agent': {
+            'risk': 'active',
+            'effects': ['network_probe'],
+            'expected_requests': 1,
+            'reversible': True,
+            'approval_required': False,
+            'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+            'cost': 1.0,
+            'noise': 0.3,
+            'value': 1.0,
+            'requires': {
+                'min_endpoints': 0,
+                'min_params': 0,
+                'tech_hints_any': [],
+                'tech_hints_all': [],
+                'specializations_any': [],
+                'risk_signals_any': [],
+                'auth_session': False,
+                'capabilities_any': [],
+                'capabilities_all': [],
+                'confidence_min': {},
+                'confidence_min_any': {},
+                'endpoint_pattern_any': [],
+                'param_any': [],
+                'api_surface_ready': False,
+            },
+            'chain': {
+                'produces_capabilities': [
+                    {
+                        'capability': 'admin_surface',
+                        'from_detail': '',
+                    },
+                ],
+                'consumes_capabilities': [],
+                'option_bindings': {},
+                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+            },
+        },
+        'references': ['https://github.com/GossiTheDog/scanning/blob/main/http-vuln-exchange.nse'],
+    }
+
+    def run(self):
+        r = self.http_request(method="GET", path='/owa/auth/logon.aspx', allow_redirects=False)
+        if not r or r.status_code != 200:
+            return False
+        body = r.text or ""
+        body_markers = ('<title>Exchange Log In</title>', '<title>Microsoft Exchange - Outlook Web Access</title>',)
+        body_word_hit = any(m in body for m in body_markers)
+        body_regexes = ('/owa/auth/[0-9.]+/',)
+        body_re_hit = any(re.search(rx, body, 0) for rx in body_regexes)
+        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
+        header_regexes = ('(?i)(X-Owa-Version:)',)
+        header_re_hit = any(re.search(rx, headers, 0) for rx in header_regexes)
+        if body_word_hit or body_re_hit or header_re_hit:
+            self.set_info(
+                severity='info',
+                reason="Microsoft Exchange Server detected",
+                path='/owa/auth/logon.aspx',
+            )
+            return True
+        return False
+

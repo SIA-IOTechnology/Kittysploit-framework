@@ -16,7 +16,7 @@ class Module(Scanner, Http_client):
             "reported version is <= 0.16.3. Optionally confirms an unauthenticated exploit "
             "path when /api/config/raw is reachable without credentials."
         ),
-        "author": ["joshuavanderpoll", "jduardo2704", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-25643",
         "references": [

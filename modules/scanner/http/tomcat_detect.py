@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Apache Tomcat detection",
         "description": "Detects if Apache Tomcat is installed (default page or manager).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [],
         "tags": ["web", "scanner", "tomcat", "java", "manager"],

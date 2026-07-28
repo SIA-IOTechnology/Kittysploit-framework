@@ -19,13 +19,12 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects Ninja Forms File Uploads <= 3.3.26 with unauthenticated arbitrary "
             "file upload via nf_fu_upload admin-ajax action (CVE-2026-0740)."
         ),
-        "author": ["Sélim Lanouar (@whattheslime)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-0740",
         "references": [
             "https://blog.lexfo.fr/ninja-forms-uploads_rce.html",
             "https://www.cve.org/CVERecord?id=CVE-2026-0740",
-            "https://github.com/projectdiscovery/nuclei-templates/tree/main/http/cves/2026/CVE-2026-0740.yaml",
         ],
         "modules": [
             "exploits/multi/http/ninja_forms_uploads_cve_2026_0740_rce",

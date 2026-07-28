@@ -22,7 +22,7 @@ class Module(Scanner, Http_client):
             "authentication, that SITES_ENABLED appears true, and that the visible version "
             "is exactly 7.4.4. No SQL injection payloads are sent."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-21643",
         "modules": [

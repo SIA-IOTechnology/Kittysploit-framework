@@ -26,7 +26,7 @@ class Module(Scanner, Http_client, Wordpress):
             "bypass with a differential probe (disallowed host blocked, localhost not). "
             "Version/SSRF check only — no file:// LFI or content exfiltration."
         ),
-        "author": ["rodtvs (incogbyte)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-3576",
         "references": [

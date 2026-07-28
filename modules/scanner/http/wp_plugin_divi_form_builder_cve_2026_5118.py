@@ -20,7 +20,7 @@ class Module(Scanner, Http_client, Wordpress):
             "de_fb_ajax_submit_ajax_handler role=administrator). Looks for "
             "fb_nonce / de_fb_obj markers and plugin assets. Fixed in 5.1.3+."
         ),
-        "author": ["0xd4rk5id3", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-5118",
         "references": [

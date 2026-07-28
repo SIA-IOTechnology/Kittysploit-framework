@@ -14,7 +14,7 @@ class Module(Scanner, Ics_scanner_client):
             "Tests whether a DNP3 outstation accepts SELECT or Direct Operate CROB commands "
             "without authentication (group 12). Uses control code 0x00 (NULL)."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "tags": ["ics", "dnp3", "utilities", "misconfiguration", "operate", "write"],
     'agent': {

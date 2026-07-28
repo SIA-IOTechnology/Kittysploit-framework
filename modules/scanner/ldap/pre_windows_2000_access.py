@@ -14,7 +14,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD Pre-Windows 2000 access",
         "description": "Detects Pre-Windows 2000 group with Everyone/Anonymous (unauthenticated enumeration).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "pre-windows 2000", "enumeration"],

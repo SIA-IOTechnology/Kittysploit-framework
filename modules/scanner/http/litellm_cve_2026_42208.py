@@ -33,7 +33,7 @@ class Module(Scanner, Http_client):
             "POST /v1/chat/completions with Bearer ' OR (SELECT pg_sleep(N)) IS NULL -- "
             "(PostgreSQL). Does not dump database contents."
         ),
-        "author": ["Tencent YunDing Security Lab", "Bishop Fox", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-42208",
         "references": [

@@ -34,7 +34,7 @@ class Module(Scanner, Ad_client):
             "Flags probable AD honeytokens/decoys via empty auth history "
             "(lastLogon=0, logonCount=0) and feeds Guardian."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "honeypot", "honeytoken", "guardian"],

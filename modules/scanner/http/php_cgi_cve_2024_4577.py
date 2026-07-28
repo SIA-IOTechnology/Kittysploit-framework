@@ -17,7 +17,7 @@ class Module(Scanner, Http_client):
             "ranges on Windows (8.1 < 8.1.29, 8.2 < 8.2.20, 8.3 < 8.3.8). Confirm exploitation "
             "with exploits/linux/http/php_cgi_cve_2024_4577_rce."
         ),
-        "author": ["Orange Tsai", "watchTowr", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2024-4577",
         "references": [

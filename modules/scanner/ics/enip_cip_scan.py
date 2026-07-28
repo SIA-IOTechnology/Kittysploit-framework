@@ -11,7 +11,7 @@ class Module(Scanner, Ics_scanner_client):
     __info__ = {
         "name": "EtherNet/IP CIP scan",
         "description": "Combines List Identity with TCP CIP Register Session probing",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "tags": ["ics", "enip", "cip", "rockwell", "siemens"],
     'agent': {

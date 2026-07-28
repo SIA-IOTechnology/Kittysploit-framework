@@ -213,7 +213,13 @@ class ModuleSyncManager:
                     module_type = self._detect_module_type_from_path(module_path)
 
                     cve_raw = self._normalize_to_string(meta.get("cve", ""))
-                    cve_val = cve_raw if (cve_raw and re.match(r"^CVE-\d{4}-\d{4,}$", cve_raw)) else ""
+                    # Accept a single CVE or comma-separated list from __info__['cve'].
+                    cve_parts = []
+                    for part in re.split(r"[\s,;]+", cve_raw or ""):
+                        token = part.strip().upper()
+                        if re.match(r"^CVE-\d{4}-\d{4,}$", token):
+                            cve_parts.append(token)
+                    cve_val = ", ".join(cve_parts)
 
                     tags_list = meta.get("tags") or []
                     if not isinstance(tags_list, list):

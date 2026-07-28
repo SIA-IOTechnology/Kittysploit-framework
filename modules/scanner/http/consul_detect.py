@@ -51,9 +51,19 @@ class Module(Scanner, Http_client):
             r = self.http_request(method="GET", path=path, allow_redirects=False)
             if not r or r.status_code not in (200, 301, 302):
                 continue
+            if self.is_same_as_index(r, path=path):
+                continue
             body = (r.text or "").lower()
-            if "consul" in body or "raft" in body or "datacenter" in body and "config" in body:
-                severity = "high" if path.startswith("/v1/") and r.status_code == 200 else "info"
-                self.set_info(severity=severity, reason="Consul service detected", path=path)
+            if path.startswith("/v1/"):
+                # Agent API should be JSON, not the marketing homepage.
+                ctype = str((r.headers or {}).get("Content-Type") or "").lower()
+                if "json" not in ctype and not body.lstrip().startswith(("{", "[")):
+                    continue
+                if "consul" in body or '"datacenter"' in body or "raft" in body:
+                    self.set_info(severity="high", reason="Consul service detected", path=path)
+                    return True
+                continue
+            if "consul" in body and ("hashicorp" in body or "agent" in body or "/ui/" in body):
+                self.set_info(severity="info", reason="Consul UI detected", path=path)
                 return True
         return False

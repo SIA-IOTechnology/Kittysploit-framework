@@ -24,7 +24,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Cloud metadata path detection",
         "description": "Detects HTTP paths that may expose cloud metadata (AWS/Azure/GCP/OpenStack).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["cloud", "scanner", "metadata", "aws", "azure", "gcp", "ssrf", "imds"],

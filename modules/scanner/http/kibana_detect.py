@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Kibana detection",
         "description": "Detects if Kibana is installed on the target.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [],
         "tags": ["web", "scanner", "kibana", "elastic", "monitoring"],

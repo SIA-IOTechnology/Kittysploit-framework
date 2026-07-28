@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "AWS CloudFront detection",
         "description": "Detects AWS CloudFront CDN (X-Amz-Cf-* headers or CloudFront error pages).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [],
         "tags": ["cloud", "scanner", "aws", "cloudfront", "cdn"],

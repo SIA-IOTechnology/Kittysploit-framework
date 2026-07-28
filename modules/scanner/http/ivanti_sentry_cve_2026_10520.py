@@ -17,7 +17,7 @@ class Module(Scanner, Http_client):
             "commandexec (id) to /mics/api/v2/sentry/mics-config/handleMessage and "
             "checking for unauthenticated root-level command output."
         ),
-        "author": ["ErrorInside", "Blue DeviL", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-10520",
         "references": [

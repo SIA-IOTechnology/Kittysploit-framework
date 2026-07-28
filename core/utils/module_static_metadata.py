@@ -8,7 +8,19 @@ from __future__ import annotations
 import ast
 import os
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+# Memoize AST parses for unchanged sources (path + mtime/size)
+_PARSE_INFO_CACHE: Dict[Tuple[str, Optional[Tuple[int, int]]], Dict[str, Any]] = {}
+_CONTRACT_CACHE: Dict[Tuple[str, Optional[Tuple[int, int]], str], Dict[str, Any]] = {}
+
+
+def _file_stamp(file_path: str) -> Optional[Tuple[int, int]]:
+    try:
+        st = os.stat(file_path)
+        return int(st.st_mtime_ns), int(st.st_size)
+    except OSError:
+        return None
 
 
 SUPPORTED_MODULE_TYPES: Set[str] = {
@@ -334,9 +346,17 @@ def _parse_static_info_dict(dict_node: ast.Dict) -> Dict[str, Any]:
                         tags.append(s)
             r["tags"] = tags
         elif kl == "cve":
-            v = _string_ast_value(v_node)
-            if v is not None:
-                r["cve"] = v
+            if isinstance(v_node, (ast.List, ast.Tuple, ast.Set)):
+                parts: List[str] = []
+                for el in v_node.elts:
+                    s = _string_ast_value(el)
+                    if s:
+                        parts.append(s)
+                r["cve"] = ", ".join(parts)
+            else:
+                v = _string_ast_value(v_node)
+                if v is not None:
+                    r["cve"] = v
         elif kl == "platform":
             r["platform"] = _metadata_scalar(v_node)
         elif kl == "protocol":
@@ -421,6 +441,12 @@ def parse_static_module_info(file_path: str) -> Dict[str, Any]:
     if not file_path or not os.path.isfile(file_path):
         return out
 
+    stamp = _file_stamp(file_path)
+    cache_key = (os.path.abspath(file_path), stamp)
+    cached = _PARSE_INFO_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
             source = fh.read()
@@ -435,6 +461,7 @@ def parse_static_module_info(file_path: str) -> Dict[str, Any]:
             ev = ast.literal_eval(info_value)
         except Exception:
             merged = {**out, **_parse_static_info_dict(info_value)}
+            _PARSE_INFO_CACHE[cache_key] = dict(merged)
             return merged
 
         if isinstance(ev, dict):
@@ -448,7 +475,10 @@ def parse_static_module_info(file_path: str) -> Dict[str, Any]:
             ver = ev.get("version", "")
             out["version"] = str(ver) if ver is not None else ""
             cv = ev.get("cve", "")
-            out["cve"] = str(cv) if cv is not None else ""
+            if isinstance(cv, (list, tuple, set)):
+                out["cve"] = ", ".join(str(x).strip() for x in cv if str(x).strip())
+            else:
+                out["cve"] = str(cv) if cv is not None else ""
             tgs = ev.get("tags") or []
             if isinstance(tgs, (list, tuple, set)):
                 out["tags"] = [str(x) for x in tgs if str(x).strip()]
@@ -472,10 +502,13 @@ def parse_static_module_info(file_path: str) -> Dict[str, Any]:
             for key in ("platform", "protocol", "reliability"):
                 if not out.get(key) and merged_ast.get(key):
                     out[key] = merged_ast[key]
+            _PARSE_INFO_CACHE[cache_key] = dict(out)
             return out
+        _PARSE_INFO_CACHE[cache_key] = dict(out)
         return out
 
     _apply_class_module_string_fallback(tree, out)
+    _PARSE_INFO_CACHE[cache_key] = dict(out)
     return out
 
 
@@ -521,6 +554,17 @@ def validate_static_module_contract(module_path: str, file_path: str) -> Dict[st
     if not file_path or not os.path.isfile(file_path):
         errors.append("Module source file is missing")
         return {"valid": False, "errors": errors, "warnings": warnings, "metadata": metadata}
+
+    stamp = _file_stamp(file_path)
+    contract_key = (os.path.abspath(file_path), stamp, module_path)
+    cached_contract = _CONTRACT_CACHE.get(contract_key)
+    if cached_contract is not None:
+        return {
+            "valid": cached_contract.get("valid", True),
+            "errors": list(cached_contract.get("errors") or []),
+            "warnings": list(cached_contract.get("warnings") or []),
+            "metadata": dict(cached_contract.get("metadata") or metadata),
+        }
 
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:
@@ -636,12 +680,19 @@ def validate_static_module_contract(module_path: str, file_path: str) -> Dict[st
             if option_data.get("default") in {"", "None"}:
                 warnings.append(f"Required option {option_name!r} has an empty default")
 
-    return {
+    result = {
         "valid": not errors,
         "errors": errors,
         "warnings": warnings,
         "metadata": metadata,
     }
+    _CONTRACT_CACHE[contract_key] = {
+        "valid": result["valid"],
+        "errors": list(errors),
+        "warnings": list(warnings),
+        "metadata": dict(metadata),
+    }
+    return result
 
 
 def infer_module_type_from_path(module_path: str) -> str:

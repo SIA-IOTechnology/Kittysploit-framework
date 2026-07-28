@@ -20,7 +20,7 @@ class Module(Scanner, Http_client, Wordpress):
             "fetch_gravatar_from_remote / breeze_fetch_gravatar when local Gravatar hosting "
             "is enabled."
         ),
-        "author": ["Tausif Zaman", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-3844",
         "references": [

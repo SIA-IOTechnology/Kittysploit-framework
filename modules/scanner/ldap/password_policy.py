@@ -10,7 +10,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD password policy",
         "description": "Detects weak domain password policy (min length, lockout, history, reversible encryption).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "password", "policy"],

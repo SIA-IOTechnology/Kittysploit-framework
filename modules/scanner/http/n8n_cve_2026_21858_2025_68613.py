@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
             "Detects n8n instances with version < 1.121 potentially affected by CVE-2026-21858 "
             "and CVE-2025-68613 (arbitrary file read, token forgery, workflow RCE chain)."
         ),
-        "author": ["Chocapikk", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": ["CVE-2026-21858", "CVE-2025-68613"],
         "references": [

@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Docker Registry detection",
         "description": "Detects Docker Registry API v2 (image listing possible).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "low",
         "modules": [],
         "tags": ["web", "scanner", "docker", "registry", "container"],

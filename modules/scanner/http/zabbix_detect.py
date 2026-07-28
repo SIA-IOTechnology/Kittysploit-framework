@@ -57,7 +57,6 @@ class Module(Scanner, Http_client):
             method="POST",
             path="/api_jsonrpc.php",
             json=payload,
-            headers={"Content-Type": "application/json-rpc"},
             allow_redirects=False,
         )
         if rpc and rpc.status_code == 200:

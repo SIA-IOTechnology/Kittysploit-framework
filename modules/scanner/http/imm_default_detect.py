@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Integrated Management Module default login credentials were discovered."""
+
+from kittysploit import *
+from lib.protocols.http.http_client import Http_client
+
+
+class Module(Scanner, Http_client):
+    __info__ = {
+        'name': 'Integrated Management Module - Default Login Detection',
+        'description': 'Integrated Management Module default login credentials were discovered.',
+        'author': ['KittySploit Team'],
+        'severity': 'high',
+        'tags': ['web', 'scanner', 'default-login', 'imm', 'ibm', 'vuln'],
+        'agent': {
+            'risk': 'active',
+            'effects': ['network_probe'],
+            'expected_requests': 1,
+            'reversible': True,
+            'approval_required': False,
+            'produces': ['tech_hints', 'risk_signals', 'endpoints'],
+            'cost': 1.0,
+            'noise': 0.3,
+            'value': 1.0,
+            'requires': {
+                'min_endpoints': 0,
+                'min_params': 0,
+                'tech_hints_any': [],
+                'tech_hints_all': [],
+                'specializations_any': [],
+                'risk_signals_any': [],
+                'auth_session': False,
+                'capabilities_any': [],
+                'capabilities_all': [],
+                'confidence_min': {},
+                'confidence_min_any': {},
+                'endpoint_pattern_any': [],
+                'param_any': [],
+                'api_surface_ready': False,
+            },
+            'chain': {
+                'produces_capabilities': [
+                    {
+                        'capability': 'admin_surface',
+                        'from_detail': '',
+                    },
+                ],
+                'consumes_capabilities': [],
+                'option_bindings': {},
+                'suggested_followups': [],
+            },
+        },
+        'references': [
+            'https://pubs.lenovo.com/x3650-m4/t_logging_web_interface',
+            'https://www.ibm.com/docs/en/tcs-service?topic=oip-logging-imm-web-interface',
+        ],
+    }
+
+    def run(self):
+        path = '/data/login'
+        r = self.http_request(method='POST', path=path, allow_redirects=True, data='user=USERID&password=PASSW0RD')
+        if not r or r.status_code != 200:
+            return False
+        body = r.text or ""
+        body_any = ('<authResult>0</authResult>', 'authResult":"0',)
+        body_all = ('index-console.php', 'home.php',)
+        if (any(m in body for m in body_any)) and (all(m in body for m in body_all)):
+            self.set_info(
+                severity='high',
+                reason='Integrated Management Module - Default Login detected',
+                path=path,
+            )
+            return True
+        return False
+

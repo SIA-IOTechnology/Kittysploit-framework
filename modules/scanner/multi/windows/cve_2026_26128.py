@@ -18,7 +18,7 @@ class Module(Scanner, Http_client, Ad_client):
             "for SMB improper-authentication privesc abuse: LDAP/ADIDNS reachability, AD CS "
             "HTTP enrollment, and SMB signing posture on coercion targets."
         ),
-        "author": ["Guillaume André / Synacktiv", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-26128",
         "references": [

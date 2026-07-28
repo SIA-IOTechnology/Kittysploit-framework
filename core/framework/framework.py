@@ -41,6 +41,8 @@ class Framework:
         self.modules: Dict[str, Any] = {}
         self.current_module: Optional[Any] = None
         self.current_workflow: Optional[Any] = None
+        # Numbered findings from the last `scanner` run (for `use <n>`).
+        self.last_scanner_findings: List[Dict[str, Any]] = []
         self.version = Config.VERSION
         self.session = Session()
         self.module_loader = ModuleLoader()

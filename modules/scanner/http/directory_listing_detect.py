@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Directory listing detection',
         'description': 'Detects if directory listing is enabled on the server.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'low',
         'modules': [],
         'tags': ['web', 'scanner', 'directory', 'listing', 'disclosure'],

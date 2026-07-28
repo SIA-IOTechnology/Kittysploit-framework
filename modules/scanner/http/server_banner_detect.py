@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Server banner detection",
         "description": "Detects revealing Server or X-Powered-By headers (version disclosure).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [],
         "tags": ["web", "scanner", "banner", "version", "disclosure", "headers"],

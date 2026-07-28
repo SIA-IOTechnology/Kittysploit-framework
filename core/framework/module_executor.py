@@ -593,7 +593,16 @@ class ModuleExecutor:
                 raw_result = module.run()
             duration = time.time() - start_time
             raw_result = ModuleExecutor._apply_browser_auxiliary_auto_return(module, raw_result)
-            normalized = ModuleExecutor._coerce_module_result(raw_result)
+
+            if ModuleExecutor.is_scanner(module):
+                # Scanner run() returns True/False for detection. Implicit None must
+                # not be treated as a positive finding (legacy coerce maps None→success).
+                if raw_result is None:
+                    normalized = ModuleResult(success=False)
+                else:
+                    normalized = ModuleExecutor._coerce_module_result(raw_result)
+            else:
+                normalized = ModuleExecutor._coerce_module_result(raw_result)
 
             if request.collect_metrics:
                 ModuleExecutor._record_metrics(

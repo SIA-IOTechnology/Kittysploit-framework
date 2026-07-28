@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Elasticsearch detection",
         "description": "Detects exposed Elasticsearch REST API (often unauthenticated).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["web", "scanner", "elasticsearch", "elastic", "database", "disclosure"],

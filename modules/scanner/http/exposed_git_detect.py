@@ -17,7 +17,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Exposed Git repository detection",
         "description": "Detects publicly accessible Git metadata such as /.git/HEAD or /.git/config.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["web", "scanner", "git", "disclosure", "source-code"],

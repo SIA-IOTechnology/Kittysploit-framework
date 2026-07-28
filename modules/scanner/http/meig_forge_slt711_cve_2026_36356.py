@@ -17,7 +17,7 @@ class Module(Scanner, Http_client, Meig):
             "(Ortel 4G LTE CPE) and related MDM9607 GoAhead firmware. Fingerprints the "
             "web UI, then sends a timed sleep payload to POST /action/SetRemoteAccessCfg."
         ),
-        "author": ["Daniil Gordeev", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-36356",
         "references": [

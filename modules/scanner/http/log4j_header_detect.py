@@ -83,7 +83,6 @@ class Module(Scanner, Http_client):
             r = self.http_request(
                 method="GET",
                 path=path,
-                headers=self._probe_headers(),
                 allow_redirects=False,
             )
             if not r:

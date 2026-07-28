@@ -26,7 +26,7 @@ class Module(Scanner, Http_client):
             "(CAS) attached and a PAN-OS build below the advisory hotfix cutoff. "
             "No authentication is attempted and no firewall state is modified."
         ),
-        "author": ["Bishop Fox Team X", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-0265",
         "references": [
@@ -112,7 +112,9 @@ class Module(Scanner, Http_client):
     _UNAFFECTED_TRAINS = {(8, 1), (9, 1)}
 
     port = OptPort(443, "GlobalProtect HTTPS port", True)
-    ssl = OptBool(True, "Use HTTPS", True, advanced=True)
+    # Do not redefine `ssl` here: it would shadow the stdlib `ssl` import in
+    # class scope (breaking `ssl.SSLContext` annotations) and Http_client already
+    # provides the HTTPS OptBool.
     prelogin_path = OptString(
         _PRELOGIN_PATH,
         "GlobalProtect prelogin endpoint path",
@@ -288,77 +290,96 @@ class Module(Scanner, Http_client):
         return verdict, panos_version, pre_msg, None
 
     def run(self):
-        self._configure_legacy_tls()
+        # Avoid mutating a shared scan session's TLS stack (bulk scanner pool).
+        owns_session = bool(getattr(self, "_owns_session", True))
+        previous_adapter = None
+        try:
+            if owns_session:
+                self._configure_legacy_tls()
+            else:
+                # Private one-off session for legacy TLS probe
+                import requests as _requests
 
-        verdict, panos_version, pre_msg, error = self._scan()
-        version_label = panos_version or "-"
+                previous_adapter = self.session
+                self.session = _requests.Session()
+                self._owns_session = True
+                self._configure_legacy_tls()
 
-        if verdict == "VULNERABLE":
-            self.set_info(
-                severity="high",
-                cve="CVE-2026-0265",
-                reason=(
-                    f"CAS attached and PAN-OS {version_label} is below the "
-                    "advisory patched hotfix cutoff"
-                ),
-            )
-            print_success(f"Verdict: {verdict} (PAN-OS {version_label})")
-            return True
+            verdict, panos_version, pre_msg, error = self._scan()
+            version_label = panos_version or "-"
 
-        if verdict == "PATCHED":
-            self.set_info(
-                severity="info",
-                reason=f"CAS attached but PAN-OS {version_label} is patched for CVE-2026-0265",
-            )
-            print_info(f"Verdict: {verdict} (PAN-OS {version_label})")
+            if verdict == "VULNERABLE":
+                self.set_info(
+                    severity="high",
+                    cve="CVE-2026-0265",
+                    reason=(
+                        f"CAS attached and PAN-OS {version_label} is below the "
+                        "advisory patched hotfix cutoff"
+                    ),
+                )
+                print_success(f"Verdict: {verdict} (PAN-OS {version_label})")
+                return True
+
+            if verdict == "PATCHED":
+                self.set_info(
+                    severity="info",
+                    reason=f"CAS attached but PAN-OS {version_label} is patched for CVE-2026-0265",
+                )
+                print_info(f"Verdict: {verdict} (PAN-OS {version_label})")
+                return False
+
+            if verdict == "NOT-AFFECTED-SAAS":
+                self.set_info(
+                    severity="info",
+                    reason=(
+                        f"PAN-OS {version_label} is a .saas build; not affected per "
+                        "Palo Alto (2026-05-21)"
+                    ),
+                )
+                print_info(f"Verdict: {verdict} (PAN-OS {version_label})")
+                return False
+
+            if verdict == "NOT-AFFECTED-NO-CAS":
+                self.set_info(
+                    severity="info",
+                    reason="prelogin succeeded but CAS is not attached (CVE does not apply)",
+                )
+                print_info(f"Verdict: {verdict}")
+                return False
+
+            if verdict == "NOT-AFFECTED-NOT-GLOBALPROTECT":
+                # Soft miss on non-GP targets — not a scanner error
+                return False
+
+            if verdict == "UNDETERMINED-VERSION-GATED":
+                print_warning(
+                    "Verdict: UNDETERMINED-VERSION-GATED — CAS attached but User-Agent "
+                    "was version-gated; retry with a real GP-client User-Agent"
+                )
+                if pre_msg:
+                    print_info(f"prelogin msg: {pre_msg}")
+                return False
+
+            if verdict == "UNDETERMINED-MTLS-GATED":
+                print_warning(
+                    "Verdict: UNDETERMINED-MTLS-GATED — client certificate required; "
+                    "verdict needs a cert-backed probe or inventory version"
+                )
+                return False
+
+            # Undetermined / transport errors on random sites: silent miss
+            if verdict.startswith("UNDETERMINED") or verdict.endswith("ERROR"):
+                return False
+
             return False
-
-        if verdict == "NOT-AFFECTED-SAAS":
-            self.set_info(
-                severity="info",
-                reason=(
-                    f"PAN-OS {version_label} is a .saas build; not affected per "
-                    "Palo Alto (2026-05-21)"
-                ),
-            )
-            print_info(f"Verdict: {verdict} (PAN-OS {version_label})")
+        except Exception:
+            # Never surface TLS/transport noise as a module failure during bulk scans
             return False
-
-        if verdict == "NOT-AFFECTED-NO-CAS":
-            self.set_info(
-                severity="info",
-                reason="prelogin succeeded but CAS is not attached (CVE does not apply)",
-            )
-            print_info(f"Verdict: {verdict}")
-            return False
-
-        if verdict == "NOT-AFFECTED-NOT-GLOBALPROTECT":
-            self.set_info(
-                severity="info",
-                reason="response is not a GlobalProtect portal",
-            )
-            print_info(f"Verdict: {verdict}")
-            return False
-
-        if verdict == "UNDETERMINED-VERSION-GATED":
-            print_warning(
-                "Verdict: UNDETERMINED-VERSION-GATED — CAS attached but User-Agent "
-                "was version-gated; retry with a real GP-client User-Agent"
-            )
-            if pre_msg:
-                print_info(f"prelogin msg: {pre_msg}")
-            return False
-
-        if verdict == "UNDETERMINED-MTLS-GATED":
-            print_warning(
-                "Verdict: UNDETERMINED-MTLS-GATED — client certificate required; "
-                "verdict needs a cert-backed probe or inventory version"
-            )
-            return False
-
-        print_error(f"Verdict: {verdict}")
-        if error:
-            print_error(error)
-        if pre_msg:
-            print_info(f"prelogin msg: {pre_msg}")
-        return False
+        finally:
+            if previous_adapter is not None:
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
+                self.session = previous_adapter
+                self._owns_session = False

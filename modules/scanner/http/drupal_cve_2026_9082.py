@@ -28,7 +28,7 @@ class Module(Scanner, Http_client):
             "branches (10.4.10 / 10.5.10 / 10.6.9 / 11.1.10 / 11.2.12 / 11.3.10). "
             "MySQL/MariaDB/SQLite not affected."
         ),
-        "author": ["Michael Maturi", "7h30th3r0n3", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-9082",
         "references": [

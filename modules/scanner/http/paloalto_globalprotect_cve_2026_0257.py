@@ -189,7 +189,6 @@ class Module(Scanner, Http_client):
                 break
 
         if not detected:
-            print_error("GlobalProtect was not detected on the target")
             return False
 
         patched: Optional[bool] = self._panos_version_patched(version) if version else None
@@ -201,16 +200,12 @@ class Module(Scanner, Http_client):
             )
             return False
 
-        reason = f"GlobalProtect detected at {evidence_path or 'HTTPS service'}"
-        if version:
-            reason = f"GlobalProtect / PAN-OS {version} detected at {evidence_path}"
-            if patched is False:
-                reason += "; version within CVE-2026-0257 affected range"
-            else:
-                reason += "; PAN-OS version not mapped to a fixed release"
-        else:
-            reason += "; PAN-OS version not exposed (active cookie test required)"
+        # Without a mapped vulnerable version, do not claim a finding
+        if patched is not False:
+            return False
 
+        reason = f"GlobalProtect / PAN-OS {version} detected at {evidence_path}"
+        reason += "; version within CVE-2026-0257 affected range"
         self.set_info(
             severity="critical",
             reason=reason + "; requires auth override cookies + certificate reuse",

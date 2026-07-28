@@ -18,7 +18,7 @@ class Module(Scanner, Http_client):
             "Detects exposed OpenClaw (formerly Clawdbot/Moltbot) AI agent gateways "
             "and flags versions likely affected by CVE-2026-25253 token exfiltration."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": ["CVE-2026-25253"],
         "references": [

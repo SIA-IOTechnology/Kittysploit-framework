@@ -14,7 +14,7 @@ class Module(Scanner, Ics_scanner_client):
             "Checks whether Modbus TCP writes (FC6) are accepted without authentication "
             "by writing a test value and verifying the register change."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "tags": ["ics", "modbus", "scada", "misconfiguration", "write"],
         "agent": {

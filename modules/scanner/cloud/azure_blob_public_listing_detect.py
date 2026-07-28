@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Azure Blob public listing detect",
         "description": "Checks if Azure Blob container listing is anonymously accessible (no exploitation).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/azure/blob_acl_misconfig_hint",

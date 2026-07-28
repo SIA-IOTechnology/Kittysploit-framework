@@ -34,7 +34,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Sensitive files detection',
         'description': 'Detects exposed sensitive files (.env, .git, backups, config, etc.).',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'low',
         'modules': [],
         'tags': ['web', 'scanner', 'sensitive', 'disclosure', 'backup', '.env', '.git'],
@@ -84,7 +84,25 @@ class Module(Scanner, Http_client):
             r = self.http_request(method="GET", path=path, allow_redirects=False)
             if not r or r.status_code != 200:
                 continue
-            if validator is None or validator(r):
+            # Catch-all / SPA hosts often return the homepage for every path.
+            if self.is_same_as_index(r, path=path):
+                continue
+            if validator is None:
+                # Without a content validator, require body to differ from empty/HTML index.
+                body = (r.text or "").strip()
+                if not body or self.is_same_as_index(r, path=path):
+                    continue
+                # Generic 200 with no validator: only keep non-HTML binary/text clues
+                low = body[:200].lower()
+                if "<html" in low or "<!doctype" in low:
+                    continue
+                found.append(path.lstrip("/"))
+                continue
+            if validator(r) and not self.is_same_as_index(r, path=path):
+                # Validators must still reject HTML clones of the index.
+                body = (r.text or "").lower()
+                if path.endswith(".git/config") and "[core]" not in body and "[credentials]" not in body:
+                    continue
                 found.append(path.lstrip("/"))
         if found:
             self.set_info(severity="low", reason=f"Exposed: {', '.join(found)}")

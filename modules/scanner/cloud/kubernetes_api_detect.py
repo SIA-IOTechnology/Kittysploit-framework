@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Kubernetes API detection",
         "description": "Detects exposed Kubernetes API (version, namespaces, healthz).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["cloud", "scanner", "kubernetes", "k8s", "api", "cluster"],

@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Admin panel detection',
         'description': 'Detects exposed admin or login panels.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': ['auxiliary/scanner/http/login/admin_login_bruteforce'],
         'tags': ['web', 'scanner', 'admin', 'login', 'panel'],

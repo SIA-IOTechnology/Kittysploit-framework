@@ -21,7 +21,7 @@ class Module(Scanner, Tcp_scanner_client):
             "Checks Android adbd over TCP for the STLS/TLS authentication bypass path "
             "and confirms command execution with a harmless id probe."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-0073",
         "modules": [

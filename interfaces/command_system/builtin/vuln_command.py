@@ -17,6 +17,11 @@ class VulnCommand(BaseCommand):
     @property
     def name(self) -> str:
         return "vuln"
+
+    @property
+    def aliases(self) -> list:
+        # Docs / scanner hint historically say "vulns" (Metasploit-style).
+        return ["vulns"]
     
     @property
     def description(self) -> str:
@@ -65,6 +70,55 @@ Examples:
     def __init__(self, framework, session, output_handler):
         super().__init__(framework, session, output_handler)
         self.parser = self._create_parser()
+
+    @staticmethod
+    def _fmt_date(dt, with_time: bool = False) -> str:
+        if not dt:
+            return "Unknown"
+        if with_time:
+            return dt.strftime("%d/%m/%Y %H:%M:%S")
+        return dt.strftime("%d/%m/%Y")
+
+    @staticmethod
+    def _cvss_str(score) -> str:
+        if score is None or score == "":
+            return "N/A"
+        try:
+            return f"{float(score):.1f}"
+        except (TypeError, ValueError):
+            return str(score)
+
+    @staticmethod
+    def _host_label(vuln) -> str:
+        """Human-readable host(s) linked to a vulnerability."""
+        hosts = list(getattr(vuln, "hosts", None) or [])
+        if not hosts:
+            return "N/A"
+        labels = []
+        for host in hosts:
+            addr = (getattr(host, "address", None) or "").strip()
+            hostname = (getattr(host, "hostname", None) or "").strip()
+            if hostname and addr and hostname != addr:
+                labels.append(f"{hostname} ({addr})")
+            else:
+                labels.append(hostname or addr or f"#{getattr(host, 'id', '?')}")
+        return ", ".join(labels) if labels else "N/A"
+
+    def _vuln_table_row(self, vuln, *, include_host: bool = True):
+        name = vuln.name or ""
+        if len(name) > 40:
+            name = name[:37] + "..."
+        row = [
+            str(vuln.id),
+            name,
+            vuln.cve or "N/A",
+            (vuln.risk_level or "unknown").upper(),
+            self._cvss_str(vuln.cvss_score),
+        ]
+        if include_host:
+            row.append(self._host_label(vuln))
+        row.append(self._fmt_date(vuln.created_at))
+        return row
     
     def _create_parser(self) -> argparse.ArgumentParser:
         """Create command parser"""
@@ -249,29 +303,23 @@ Examples:
                         'cve': vuln.cve,
                         'risk_level': vuln.risk_level,
                         'cvss_score': vuln.cvss_score,
-                        'id': vuln.id,
-                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None
+                        'host': self._host_label(vuln),
+                        'hosts': [
+                            {
+                                'id': h.id,
+                                'address': h.address,
+                                'hostname': h.hostname,
+                            }
+                            for h in (getattr(vuln, 'hosts', None) or [])
+                        ],
+                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None,
+                        'discovered': self._fmt_date(vuln.created_at),
                     })
                 print(json.dumps(vulns_data, indent=2))
             else:
                 # Table output
-                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Host ID", "Status", "Discovered"]
-                rows = []
-                
-                for vuln in vulnerabilities:
-                    discovered = vuln.created_at.strftime("%Y-%m-%d") if vuln.created_at else "Unknown"
-                    cvss_str = f"{vuln.cvss_score:.1f}" if vuln.cvss_score else "N/A"
-                    
-                    rows.append([
-                        str(vuln.id),
-                        vuln.name[:30] + "..." if len(vuln.name) > 30 else vuln.name,
-                        vuln.cve or "N/A",
-                        vuln.risk_level.upper(),
-                        cvss_str,
-                        str(vuln.id),
-                        vuln.risk_level,
-                        discovered
-                    ])
+                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Host", "Discovered"]
+                rows = [self._vuln_table_row(vuln, include_host=True) for vuln in vulnerabilities]
                 
                 print_table(headers, rows)
                 print_info(f"Found {len(vulnerabilities)} vulnerabilities")
@@ -305,25 +353,23 @@ Examples:
     def _show_vulnerability_info(self, session, vuln_id):
         """Show detailed information about a vulnerability"""
         try:
-            from core.models.models import Vulnerability, Host
+            from core.models.models import Vulnerability
             
             vuln = session.query(Vulnerability).filter(Vulnerability.id == vuln_id).first()
             if not vuln:
                 print_error(f"Vulnerability with ID {vuln_id} not found")
                 return False
             
-            # Get host information
-            host = session.query(Host).filter(Host.id == vuln.id).first()
+            host_label = self._host_label(vuln)
             
             print_info(f"Vulnerability Information - ID: {vuln_id}")
             print_info("=" * 60)
             print_info(f"Name: {vuln.name}")
             print_info(f"CVE: {vuln.cve or 'N/A'}")
-            print_info(f"Severity: {vuln.risk_level.upper()}")
-            print_info(f"CVSS Score: {vuln.cvss_score if vuln.cvss_score else 'N/A'}")
-            print_info(f"Status: {vuln.risk_level}")
-            print_info(f"Host: {host.ip_address if host else 'Unknown'} (ID: {vuln.id})")
-            print_info(f"Discovered: {vuln.created_at.strftime('%Y-%m-%d %H:%M:%S') if vuln.created_at else 'Unknown'}")
+            print_info(f"Severity: {(vuln.risk_level or 'unknown').upper()}")
+            print_info(f"CVSS Score: {self._cvss_str(vuln.cvss_score)}")
+            print_info(f"Host: {host_label}")
+            print_info(f"Discovered: {self._fmt_date(vuln.created_at, with_time=True)}")
             
             if vuln.description:
                 print_info(f"\nDescription:")
@@ -394,29 +440,23 @@ Examples:
                         'cve': vuln.cve,
                         'risk_level': vuln.risk_level,
                         'cvss_score': vuln.cvss_score,
-                        'id': vuln.id,
-                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None
+                        'host': self._host_label(vuln),
+                        'hosts': [
+                            {
+                                'id': h.id,
+                                'address': h.address,
+                                'hostname': h.hostname,
+                            }
+                            for h in (getattr(vuln, 'hosts', None) or [])
+                        ],
+                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None,
+                        'discovered': self._fmt_date(vuln.created_at),
                     })
                 print(json.dumps(vulns_data, indent=2))
             else:
                 # Table output
-                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Host ID", "Status", "Discovered"]
-                rows = []
-                
-                for vuln in vulnerabilities:
-                    discovered = vuln.created_at.strftime("%Y-%m-%d") if vuln.created_at else "Unknown"
-                    cvss_str = f"{vuln.cvss_score:.1f}" if vuln.cvss_score else "N/A"
-                    
-                    rows.append([
-                        str(vuln.id),
-                        vuln.name[:30] + "..." if len(vuln.name) > 30 else vuln.name,
-                        vuln.cve or "N/A",
-                        vuln.risk_level.upper(),
-                        cvss_str,
-                        str(vuln.id),
-                        vuln.risk_level,
-                        discovered
-                    ])
+                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Host", "Discovered"]
+                rows = [self._vuln_table_row(vuln, include_host=True) for vuln in vulnerabilities]
                 
                 print_table(headers, rows)
                 print_info(f"Found {len(vulnerabilities)} vulnerabilities matching '{parsed_args.search_term}'")
@@ -484,7 +524,7 @@ Examples:
     def _show_host_vulnerabilities(self, session, id, parsed_args):
         """Show vulnerabilities for a specific host"""
         try:
-            from core.models.models import Host, Vulnerability, Workspace
+            from core.models.models import Host, Workspace
             
             # Check if host exists
             workspace = session.query(Workspace).filter(Workspace.name == "default").first()
@@ -494,29 +534,32 @@ Examples:
             
             host = session.query(Host).filter(
                 Host.id == id,
-                Host.service_id == workspace.id
+                Host.workspace_id == workspace.id,
             ).first()
+            if not host:
+                # Fallback: host id alone (workspace name may differ from "default")
+                host = session.query(Host).filter(Host.id == id).first()
             if not host:
                 print_error(f"Host with ID {id} not found")
                 return False
-            
-            # Get vulnerabilities for this host
-            query = session.query(Vulnerability).filter(Vulnerability.id == id)
-            
+
+            host_display = (host.hostname or host.address or f"#{id}")
+            vulnerabilities = list(getattr(host, "vulnerabilities", None) or [])
             if parsed_args.risk_level:
-                query = query.filter(Vulnerability.risk_level == parsed_args.risk_level)
-            
-            vulnerabilities = query.limit(parsed_args.limit).all()
+                vulnerabilities = [
+                    v for v in vulnerabilities
+                    if (v.risk_level or "") == parsed_args.risk_level
+                ]
+            vulnerabilities = vulnerabilities[: parsed_args.limit]
             
             if not vulnerabilities:
-                print_info(f"No vulnerabilities found for host {host.ip_address} (ID: {id})")
+                print_info(f"No vulnerabilities found for host {host_display} (ID: {id})")
                 return True
             
-            print_info(f"Vulnerabilities for {host.ip_address} (ID: {id})")
+            print_info(f"Vulnerabilities for {host_display} (ID: {id})")
             print_info("=" * 50)
             
             if parsed_args.json:
-                # JSON output
                 vulns_data = []
                 for vuln in vulnerabilities:
                     vulns_data.append({
@@ -525,31 +568,16 @@ Examples:
                         'cve': vuln.cve,
                         'risk_level': vuln.risk_level,
                         'cvss_score': vuln.cvss_score,
-                        'risk_level': vuln.risk_level,
-                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None
+                        'host': host_display,
+                        'created_at': vuln.created_at.isoformat() if vuln.created_at else None,
+                        'discovered': self._fmt_date(vuln.created_at),
                     })
                 print(json.dumps(vulns_data, indent=2))
             else:
-                # Table output
-                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Status", "Discovered"]
-                rows = []
-                
-                for vuln in vulnerabilities:
-                    discovered = vuln.created_at.strftime("%Y-%m-%d") if vuln.created_at else "Unknown"
-                    cvss_str = f"{vuln.cvss_score:.1f}" if vuln.cvss_score else "N/A"
-                    
-                    rows.append([
-                        str(vuln.id),
-                        vuln.name[:30] + "..." if len(vuln.name) > 30 else vuln.name,
-                        vuln.cve or "N/A",
-                        vuln.risk_level.upper(),
-                        cvss_str,
-                        vuln.risk_level,
-                        discovered
-                    ])
-                
+                headers = ["ID", "Name", "CVE", "Severity", "CVSS", "Discovered"]
+                rows = [self._vuln_table_row(vuln, include_host=False) for vuln in vulnerabilities]
                 print_table(headers, rows)
-                print_info(f"Found {len(vulnerabilities)} vulnerabilities for host {host.ip_address}")
+                print_info(f"Found {len(vulnerabilities)} vulnerabilities for host {host_display}")
             
             return True
             

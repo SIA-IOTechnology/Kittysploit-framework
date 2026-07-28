@@ -18,7 +18,6 @@ class Module(Scanner, Http_client):
         "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-48282",
-        "references": [],
         "modules": [
             "exploits/multi/http/adobe_coldfusion_cve_2026_48282_rce",
         ],

@@ -16,7 +16,7 @@ class Module(Scanner, Http_client, Moodle):
             "Detects a Moodle installation and reports the version from "
             "lib/upgrade.txt when available."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [
             "exploits/multi/http/moodle_cve_2021_21809_spellcheck_rce",

@@ -22,7 +22,7 @@ class Module(Scanner, Http_client):
             "command injection in EXE notification settings (CVE-2018-9276). Fingerprints the "
             "Server header and optionally confirms administrator credentials."
         ),
-        "author": ["wildkindcc", "M4LVO", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2018-9276",
         "references": [

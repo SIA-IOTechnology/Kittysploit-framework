@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Drupal detection',
         'description': 'Detects if Drupal is installed on the target.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': ['auxiliary/scanner/http/login/drupal_login_bruteforce'],
         'tags': ['web', 'scanner', 'drupal', 'cms'],

@@ -10,7 +10,7 @@ class Module(Scanner, Smb_scanner_client):
     __info__ = {
         "name": "SMB null session",
         "description": "Detects if anonymous (null) SMB session is accepted.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["smb", "scanner", "null session", "anonymous", "enumeration"],

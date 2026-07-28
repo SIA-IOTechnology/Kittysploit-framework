@@ -14,7 +14,7 @@ class Module(Scanner, Http_client):
             "used in CVE-2026-45504 (authenticated SSRF arbitrary file read via reference "
             "attachments and GetAttachmentPreview)."
         ),
-        "author": ["Batuhan Er (@int20z)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-45504",
         "references": [

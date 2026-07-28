@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Django Debug Mode detection',
         'description': 'Detects if Django debug mode is enabled on the target, which may lead to information disclosure or RCE.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'high',
         'modules': ['exploits/http/django_debug_rce'],
         'tags': ['web', 'scanner', 'django', 'debug', 'rce'],

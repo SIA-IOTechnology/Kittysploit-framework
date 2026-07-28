@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
             "Detects Langflow instances affected by CVE-2026-27966 by checking version "
             "(< 1.8.0) and optionally validating API key access."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-27966",
         "references": [

@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "AWS S3 public listing detect",
         "description": "Checks if S3 ListBucket is anonymously accessible (no exploitation).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/aws/s3_bucket_access_check",

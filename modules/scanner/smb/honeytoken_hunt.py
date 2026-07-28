@@ -25,7 +25,7 @@ class Module(Scanner, Smb_scanner_client):
             "Enumerates AD accounts via native SAMR/NetAPI (port 445) and flags "
             "probable honeytokens from empty auth history; feeds Guardian."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["ad", "smb", "samr", "scanner", "honeypot", "honeytoken", "guardian"],

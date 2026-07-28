@@ -19,7 +19,7 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects WordPress Bricks theme <= 1.9.6 affected by CVE-2024-25600 "
             "(unauthenticated render_element RCE)."
         ),
-        "author": ["watchTowr", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2024-25600",
         "references": [

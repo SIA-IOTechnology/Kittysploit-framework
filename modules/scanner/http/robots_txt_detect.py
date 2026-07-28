@@ -10,7 +10,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'robots.txt / sitemap detection',
         'description': 'Detects exposed robots.txt and sitemap references; reports interesting paths.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': [],
         'tags': ['web', 'scanner', 'robots', 'sitemap', 'disclosure', 'enumeration'],

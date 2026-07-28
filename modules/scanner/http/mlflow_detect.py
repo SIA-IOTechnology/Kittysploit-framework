@@ -57,7 +57,6 @@ class Module(Scanner, Http_client):
                 method="POST" if "search" in path else "GET",
                 path=path,
                 data='{"max_results": 1}' if "search" in path else None,
-                headers={"Content-Type": "application/json"} if "search" in path else None,
                 allow_redirects=False,
             )
             if not r:

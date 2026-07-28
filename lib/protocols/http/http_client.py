@@ -33,10 +33,20 @@ class Http_client(BaseModule):
         Options are defined as class attributes and can be set via set_option().
         """
         super().__init__(framework)
-        self.session = requests.Session()
+        # Prefer scan-scoped shared session (bulk scanner) to avoid Session-per-module
+        shared = None
+        try:
+            from lib.scanner.http_pool import get_scan_session
+
+            shared = get_scan_session()
+        except ImportError:
+            shared = None
+        self._owns_session = shared is None
+        self.session = shared if shared is not None else requests.Session()
         self.logger = logger  # Initialize logger
         # Initialize session configuration (will be updated in _configure_session)
-        self._configure_session()
+        if self._owns_session:
+            self._configure_session()
     
     def _configure_session(self):
         """Configure the HTTP session using current option values"""
@@ -252,6 +262,14 @@ class Http_client(BaseModule):
             path_str = "/" + path_str
 
         url = f"{protocol}://{target}:{port}{path_str}"
+
+        def _finalize(response):
+            return self._annotate_scanner_http_response(
+                response,
+                url=url,
+                path=path_str,
+                method=str(method or "GET").upper(),
+            )
         
         # Prepare request parameters
         request_kwargs = kwargs.copy()
@@ -299,8 +317,8 @@ class Http_client(BaseModule):
                                     except:
                                         pass
                             self.session = session_obj
-                    return ResponseWithSession(cached_response, self.session)
-                return cached_response
+                    return _finalize(ResponseWithSession(cached_response, self.session))
+                return _finalize(cached_response)
         
         # Make the request
         response = self._request(method, url, **request_kwargs)
@@ -324,9 +342,46 @@ class Http_client(BaseModule):
                     # Add session attribute
                     self.session = session_obj
             
-            return ResponseWithSession(response, self.session)
+            return _finalize(ResponseWithSession(response, self.session))
         
+        return _finalize(response)
+
+    def _annotate_scanner_http_response(self, response, *, url: str, path: str, method: str = "GET"):
+        """Track last HTTP hit and mark soft-404 / same-as-index clones."""
+        if response is None:
+            return response
+        try:
+            from lib.scanner.http.soft_404 import (
+                annotate_response,
+                origin_key_from_url,
+                register_baseline_from_response,
+            )
+
+            origin = origin_key_from_url(url)
+            self._ks_http_origin = origin
+            self._ks_last_http_path = path
+            self._ks_last_http_method = method
+            if path in ("/", "") and str(method).upper() == "GET":
+                register_baseline_from_response(origin, response)
+            annotate_response(response, origin=origin, path=path or "/")
+            self._ks_last_http_response = response
+        except Exception:
+            pass
         return response
+
+    def is_same_as_index(self, response=None, path: str = "") -> bool:
+        """True when response mirrors the site index (catch-all / SPA soft-404)."""
+        try:
+            from lib.scanner.http.soft_404 import is_same_as_index
+
+            resp = response if response is not None else getattr(self, "_ks_last_http_response", None)
+            path_s = path or getattr(self, "_ks_last_http_path", "") or "/"
+            origin = getattr(self, "_ks_http_origin", "") or ""
+            if resp is not None and getattr(resp, "ks_same_as_index", None) is not None and not path:
+                return bool(resp.ks_same_as_index)
+            return bool(is_same_as_index(resp, origin=origin, path=path_s))
+        except Exception:
+            return False
     
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         """Internal request method"""
@@ -341,60 +396,94 @@ class Http_client(BaseModule):
             except ImportError:
                 pass
 
-            # Reconfigure session in case options changed
-            self._configure_session()
-            
-            # Merge headers
-            headers = kwargs.pop('headers', {})
-            if headers:
-                self.session.headers.update(headers)
-            
-            # Get timeout and verify_ssl from options
+            # Prefer scan-scoped shared session (connection pool) when active
+            shared = None
+            try:
+                from lib.scanner.http_pool import get_scan_session
+
+                shared = get_scan_session()
+            except ImportError:
+                shared = None
+
+            session = shared if shared is not None else self.session
+
             def get_option_value(option):
                 if hasattr(option, 'value'):
                     return option.value
                 elif hasattr(option, '__get__'):
                     try:
                         return option.__get__(self, type(self))
-                    except:
+                    except Exception:
                         return option
                 return option
-            
+
+            # Merge headers for this request only (avoid racing on shared session.headers)
+            req_headers = dict(session.headers)
+            if shared is None:
+                # Private session: keep legacy configure + mutate behavior
+                self._configure_session()
+                req_headers = dict(self.session.headers)
+            else:
+                # Shared pool: apply per-module options without mutating the pool session
+                user_agent = (
+                    get_option_value(self.user_agent)
+                    if hasattr(self, "user_agent")
+                    else req_headers.get("User-Agent")
+                )
+                if user_agent:
+                    req_headers["User-Agent"] = user_agent
+                proxy = get_option_value(self.proxy) if hasattr(self, "proxy") else ""
+                if proxy:
+                    kwargs.setdefault(
+                        "proxies",
+                        {"http": proxy, "https": proxy},
+                    )
+                elif self.framework and hasattr(self.framework, "is_tor_enabled") and self.framework.is_tor_enabled():
+                    tor_proxies = self.framework.tor_manager.get_tor_proxy_dict()
+                    if tor_proxies:
+                        kwargs.setdefault("proxies", tor_proxies)
+                elif self.framework and hasattr(self.framework, "is_proxy_enabled") and self.framework.is_proxy_enabled():
+                    proxy_url = self.framework.get_proxy_url()
+                    if proxy_url:
+                        kwargs.setdefault(
+                            "proxies",
+                            {"http": proxy_url, "https": proxy_url, "all": proxy_url},
+                        )
+
+            extra_headers = kwargs.pop("headers", None) or {}
+            if extra_headers:
+                req_headers.update(extra_headers)
+            kwargs["headers"] = req_headers
+
             timeout = get_option_value(self.timeout) if hasattr(self, 'timeout') else 30
             verify_ssl = get_option_value(self.verify_ssl) if hasattr(self, 'verify_ssl') else False
-            
-            # Convert verify_ssl to boolean if it's a string
+
             if isinstance(verify_ssl, str):
                 verify_ssl = verify_ssl.lower() in ('true', 'yes', 'y', '1')
             elif not isinstance(verify_ssl, bool):
                 verify_ssl = bool(verify_ssl)
-            
-            # Set timeout and verify
+
             kwargs.setdefault('timeout', timeout)
-            # Agent runs use their explicit TLS policy. Outside agent mode, retain
-            # the module's verify_ssl behavior for backward compatibility.
             if agent_policy is not None:
                 kwargs["verify"] = agent_policy.tls_verify_value()
             else:
                 kwargs["verify"] = verify_ssl
-            
-            # Debug logging (only if logger is configured for debug)
+
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(f"Request: {method} {url}")
                 if 'cookies' in kwargs:
                     self.logger.debug(f"Cookies: {kwargs['cookies']}")
-                self.logger.debug(f"Headers: {dict(self.session.headers)}")
-                        
-            response = self.session.request(method, url, **kwargs)
+                self.logger.debug(f"Headers: {req_headers}")
 
-            # Non-2xx (404, 301, 403, …) is normal during probing; never spam WARNING to the console.
+            response = session.request(method, url, **kwargs)
+
             if response.status_code != 200:
                 self.logger.debug(
                     "HTTP %s %s returned status %s", method, url, response.status_code
                 )
 
             return response
-            
+
         except requests.exceptions.RequestException as e:
             self.logger.error(f"Request failed: {method} {url} - {e}")
             raise

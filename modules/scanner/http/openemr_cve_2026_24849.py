@@ -22,7 +22,7 @@ class Module(Scanner, Http_client):
             "Fingerprints OpenEMR and flags versions < 7.0.4 affected by CVE-2026-24849 "
             "(authenticated arbitrary file read in Fax/SMS EtherFax)."
         ),
-        "author": ["doany1", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-24849",
         "references": [

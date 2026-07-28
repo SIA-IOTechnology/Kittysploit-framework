@@ -9,7 +9,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD foreign security principals in privileged groups",
         "description": "Detects FSPs from trusted domains in sensitive local groups.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "fsp", "trust", "privileged"],

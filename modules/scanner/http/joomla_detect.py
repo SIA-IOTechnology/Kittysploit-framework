@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Joomla detection',
         'description': 'Detects if Joomla is installed on the target.',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'info',
         'modules': [],
         'tags': ['web', 'scanner', 'joomla', 'cms'],

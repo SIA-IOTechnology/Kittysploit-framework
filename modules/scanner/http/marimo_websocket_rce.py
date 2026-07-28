@@ -20,7 +20,7 @@ class Module(Scanner, Websocket_client):
             "Marimo terminal WebSocket endpoint can be reached pre-authentication and "
             "returns command execution output."
         ),
-        "author": "ritikchaddha, KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "modules": [],
         "references": [

@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "AWS S3 bucket detection",
         "description": "Detects S3 bucket or S3-style API (ListBucketResult, NoSuchKey, AccessDenied XML).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/aws/s3_bucket_access_check",

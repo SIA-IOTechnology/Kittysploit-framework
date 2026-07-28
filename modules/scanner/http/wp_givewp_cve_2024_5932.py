@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "WordPress GiveWP CVE-2024-5932 detection",
         "description": "Detects exposed GiveWP plugin versions affected by PHP object injection RCE.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "cve": "CVE-2024-5932",
         "severity": "critical",
         "tags": ["web", "scanner", "wordpress", "givewp", "rce", "cve-2024-5932"],

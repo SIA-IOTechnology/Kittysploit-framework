@@ -1,0 +1,1 @@
+# WireGuard scanner helpers

@@ -12,7 +12,7 @@ class Module(Scanner, Tcp_scanner_client):
     __info__ = {
         "name": "Redis Info - Detect",
         "description": "Retrieves information such as version number, architecture, role, and resource usage from a Redis server.",
-        "author": "DhiyaneshDK / KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "references": [
             "https://nmap.org/nsedoc/scripts/redis-info.html",

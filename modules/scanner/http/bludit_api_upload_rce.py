@@ -14,7 +14,7 @@ class Module(Scanner, Http_client):
             "Detects CVE-2026-25099 on Bludit when a valid API token is provided. "
             "Optional active probe uploads a harmless .txt file to confirm unrestricted upload behavior."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-25099",
         "modules": [

@@ -1,0 +1,1 @@
+# FortiManager scanner helpers

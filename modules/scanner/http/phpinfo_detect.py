@@ -20,7 +20,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "PHPInfo exposure detection",
         "description": "Detects exposed phpinfo pages that disclose PHP configuration, modules, paths, and environment details.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["web", "scanner", "php", "phpinfo", "disclosure", "misconfiguration"],

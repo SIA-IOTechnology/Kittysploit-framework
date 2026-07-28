@@ -17,10 +17,22 @@ class HostCommand(BaseCommand):
     @property
     def name(self) -> str:
         return "host"
+
+    @property
+    def aliases(self) -> list:
+        return ["hosts"]
     
     @property
     def description(self) -> str:
         return "Manage hosts in the database"
+
+    @staticmethod
+    def _fmt_date(dt, with_time: bool = False) -> str:
+        if not dt:
+            return "Never"
+        if with_time:
+            return dt.strftime("%d/%m/%Y %H:%M:%S")
+        return dt.strftime("%d/%m/%Y")
     
     @property
     def usage(self) -> str:
@@ -216,7 +228,7 @@ Examples:
                 
                 for host in hosts:
                     os_info = f"{host.os} {host.os_version}".strip()
-                    created_at = host.created_at.strftime("%Y-%m-%d %H:%M") if host.created_at else "Never"
+                    last_seen = self._fmt_date(getattr(host, "updated_at", None) or host.created_at)
                     
                     rows.append([
                         str(host.id),
@@ -224,7 +236,7 @@ Examples:
                         host.hostname or "Unknown",
                         os_info or "Unknown",
                         host.status,
-                        created_at
+                        last_seen
                     ])
                 
                 print_table(headers, rows)
@@ -273,8 +285,8 @@ Examples:
             print_info(f"OS: {host.os} {host.os_version}".strip() or "Unknown")
             print_info(f"MAC Address: {host.mac or 'Unknown'}")
             print_info(f"Status: {host.status}")
-            print_info(f"Last Seen: {host.created_at.strftime('%Y-%m-%d %H:%M:%S') if host.created_at else 'Never'}")
-            print_info(f"Created: {host.created_at.strftime('%Y-%m-%d %H:%M:%S') if host.created_at else 'Unknown'}")
+            print_info(f"Last Seen: {self._fmt_date(getattr(host, 'updated_at', None) or host.created_at, with_time=True)}")
+            print_info(f"Created: {self._fmt_date(host.created_at, with_time=True) if host.created_at else 'Unknown'}")
             
             # Show services
             services = session.query(Service).filter(Service.host_id == host_id).all()
@@ -347,7 +359,7 @@ Examples:
                 
                 for host in hosts:
                     os_info = f"{host.os} {host.os_version}".strip()
-                    created_at = host.created_at.strftime("%Y-%m-%d %H:%M") if host.created_at else "Never"
+                    last_seen = self._fmt_date(getattr(host, "updated_at", None) or host.created_at)
                     
                     rows.append([
                         str(host.id),
@@ -355,7 +367,7 @@ Examples:
                         host.hostname or "Unknown",
                         os_info or "Unknown",
                         host.status,
-                        created_at
+                        last_seen
                     ])
                 
                 print_table(headers, rows)

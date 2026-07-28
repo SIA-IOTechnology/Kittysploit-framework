@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Telecom management interface detection",
         "description": "Detects telecom / 5G management UIs (eNodeB, gNodeB, OSS, vendor panels).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "management", "oss", "ran", "huawei", "ericsson", "nokia"],

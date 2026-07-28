@@ -22,7 +22,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Security headers detection',
         'description': 'Detects missing HTTP security headers (X-Frame-Options, CSP, HSTS, etc.).',
-        'author': 'KittySploit Team',
+        'author': ['KittySploit Team'],
         'severity': 'low',
         'modules': [],
         'tags': ['web', 'scanner', 'security', 'headers', 'hardening'],

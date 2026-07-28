@@ -11,7 +11,7 @@ class Module(Scanner, Ics_scanner_client):
     __info__ = {
         "name": "OPC UA anonymous access",
         "description": "Checks whether an OPC UA server allows anonymous browsing on port 4840",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "tags": ["ics", "opcua", "scada", "gateway", "anonymous"],
     'agent': {

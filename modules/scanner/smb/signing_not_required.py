@@ -10,7 +10,7 @@ class Module(Scanner, Smb_scanner_client):
     __info__ = {
         "name": "SMB signing not required",
         "description": "Detects SMB signing disabled or not required (NTLM relay possible).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["smb", "scanner", "signing", "relay", "ntlm"],

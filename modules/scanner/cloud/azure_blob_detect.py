@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
     __info__ = {
         "name": "Azure Blob Storage detection",
         "description": "Detects Azure Blob Storage REST API (x-ms-* headers or Azure error body).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [
             "auxiliary/azure/blob_acl_misconfig_hint",

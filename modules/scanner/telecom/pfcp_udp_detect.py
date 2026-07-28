@@ -28,7 +28,7 @@ class Module(Scanner, Tcp_scanner_client):
     __info__ = {
         "name": "PFCP UDP detection",
         "description": "Detects PFCP port 8805 (5G N4 - SMF/UPF control plane).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "pfcp", "3gpp", "n4", "upf", "smf"],

@@ -19,7 +19,7 @@ class Module(Scanner, Tcp_scanner_client):
             "and sending a CHALLENGE_ACK claiming device_type=2 (vHub). A CHALLENGE_ACK_ACK "
             "response indicates the authentication bypass is present. No SSH key is injected."
         ),
-        "author": ["Stephen Fewer", "Jonah Burgess (Rapid7)", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-20182",
         "references": [

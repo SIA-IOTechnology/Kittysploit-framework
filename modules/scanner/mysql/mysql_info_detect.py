@@ -12,7 +12,7 @@ class Module(Scanner, Tcp_scanner_client):
     __info__ = {
         "name": "MySQL Info - Enumeration",
         "description": "Connects to a MySQL server and prints information such as protocol, version, TLS support, and transport.",
-        "author": "pussycat0x / KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "info",
         "references": [
             "https://nmap.org/nsedoc/scripts/mysql-info.html",

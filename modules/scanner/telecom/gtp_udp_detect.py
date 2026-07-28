@@ -29,7 +29,7 @@ class Module(Scanner, Tcp_scanner_client):
     __info__ = {
         "name": "GTP-U/GTP-C UDP detection",
         "description": "Detects GTP-U (2152) or GTP-C (2123) - 3GPP 4G/5G data/control plane.",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "medium",
         "modules": [],
         "tags": ["telecom", "scanner", "5g", "lte", "gtp", "3gpp", "mobile", "ran"],

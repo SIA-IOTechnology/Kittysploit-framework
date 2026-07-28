@@ -25,7 +25,7 @@ class Module(Scanner, Http_client, Wordpress):
             "Detects CVE-2026-49772 in The Events Calendar 6.15.12–6.16.2: unauthenticated "
             "blind SQL injection via the order parameter on /wp-json/tec/v1/events."
         ),
-        "author": ["Joshua van der Poll", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-49772",
         "references": [

@@ -10,7 +10,7 @@ class Module(Scanner, Ad_client):
     __info__ = {
         "name": "AD SID History abuse",
         "description": "Detects accounts with privileged SIDs in sIDHistory (persistence/backdoor).",
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "modules": [],
         "tags": ["ad", "ldap", "scanner", "sid history", "persistence"],

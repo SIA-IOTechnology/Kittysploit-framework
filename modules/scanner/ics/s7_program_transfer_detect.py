@@ -14,7 +14,7 @@ class Module(Scanner, Ics_scanner_client):
             "Actively probes whether Siemens S7 program-transfer jobs appear reachable "
             "(upload/download channel). Complements passive sniffer detections."
         ),
-        "author": "KittySploit Team",
+        "author": ["KittySploit Team"],
         "severity": "high",
         "tags": ["ics", "siemens", "s7comm", "program", "upload", "download"],
     'agent': {

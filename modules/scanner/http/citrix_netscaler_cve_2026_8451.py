@@ -19,7 +19,7 @@ class Module(Scanner, Http_client):
             "crafted SAML requests to /saml/login and checking the NSC_TASS cookie for "
             "memory overread artifacts."
         ),
-        "author": ["Aliz (@alizTheHax0r)", "watchTowr", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "high",
         "cve": "CVE-2026-8451",
         "references": [

@@ -20,7 +20,7 @@ class Module(Scanner, Http_client, Wordpress):
             "email on POST /wp-json/KirkiComponentLibrary/v1/kirki-forgot-password, "
             "redirecting password-reset links. Fixed in 6.0.7+."
         ),
-        "author": ["Wordfence", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-8206",
         "references": [

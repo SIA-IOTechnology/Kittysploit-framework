@@ -27,7 +27,7 @@ class Module(Scanner, Http_client):
             "extracting the log path and Laravel version, and optionally confirming RCE with a "
             "harmless marker command via PHPGGC."
         ),
-        "author": ["joshuavanderpoll", "KittySploit Team"],
+        "author": ["KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2021-3129",
         "references": [

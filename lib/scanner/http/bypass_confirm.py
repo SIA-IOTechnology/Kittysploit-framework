@@ -86,6 +86,15 @@ def is_confirmed_bypass(
         if status < 200 or status >= 500:
             return False
 
+    # Empty redirect bodies (len=0) are almost always generic slash-normalization,
+    # not a successful unlock of the protected resource.
+    try:
+        length = int(sig.get("length") or 0)
+    except (TypeError, ValueError):
+        length = 0
+    if status in {301, 302, 303, 307, 308} and length <= 0:
+        return False
+
     # Still the same blocked page (soft-404 / soft-403).
     if blocked_sig and signatures_similar(sig, blocked_sig):
         return False

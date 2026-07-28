@@ -181,11 +181,14 @@ class Module(Auxiliary, Http_client):
         if home_sig:
             print_info(f"Homepage control: status={home_sig['status']} len={home_sig['length']}")
 
-        if baseline_sig and int(baseline_sig.get("status") or 0) != 403:
+        baseline_status = int((baseline_sig or {}).get("status") or 0)
+        if baseline_status != 403:
             print_warning(
-                f"Path {target_path} is not 403 (got {baseline_sig.get('status')}); "
-                "bypass results may be less meaningful."
+                f"Path {target_path} is not 403 (got {baseline_status or 'n/a'}); "
+                "skipping 403 bypass probes. Use bypass_404 for missing paths."
             )
+            print_info("No confirmed 403 bypass.")
+            return True
 
         variants = self._base_variations(target_path)
         for extra in self._load_extra_paths():

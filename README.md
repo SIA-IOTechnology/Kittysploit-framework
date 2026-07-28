@@ -24,12 +24,12 @@ Security testing often requires separate tools for scanning, exploitation, traff
 
 KittySploit brings these workflows together in an extensible, Metasploit-inspired console built for modern security assessments.
 
-* **Modular console** — search, configure and execute security modules.
-* **Scanner and workflows** — automate repeatable reconnaissance and testing tasks.
-* **Workspaces and scopes** — keep hosts, vulnerabilities and engagement boundaries organized.
-* **AI-assisted planning** — use local Ollama models to analyze targets and prepare testing plans.
-* **Extension ecosystem** — add proxy, OSINT, GUI and protocol-analysis capabilities.
-* **Automation ready** — interactive console, one-shot commands, RPC and API modes.
+* **Modular console** : search, configure and execute security modules.
+* **Scanner and workflows** : automate repeatable reconnaissance and testing tasks.
+* **Workspaces and scopes** : keep hosts, vulnerabilities and engagement boundaries organized.
+* **AI-assisted planning** : use local Ollama models to analyze targets and prepare testing plans.
+* **Extension ecosystem** : add proxy, OSINT, GUI and protocol-analysis capabilities.
+* **Automation ready** : interactive console, one-shot commands, RPC and API modes.
 
 ## Quick Start
 

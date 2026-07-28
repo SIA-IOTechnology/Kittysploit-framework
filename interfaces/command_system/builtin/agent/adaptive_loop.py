@@ -767,6 +767,36 @@ class AdaptiveLoopEngine:
         except Exception:
             pass
 
+        # End-of-run console debrief (stack, panels, findings) even without a shell.
+        try:
+            core = getattr(self.services, "core", None)
+            if core is None:
+                return
+            results = [row for row in (getattr(state, "results", None) or []) if isinstance(row, dict)]
+            kb = getattr(state, "knowledge_base", None)
+            if results and isinstance(kb, dict):
+                paths = [str(row.get("path") or "") for row in results if str(row.get("path") or "").strip()]
+                core._update_knowledge_base_from_results(
+                    kb,
+                    results,
+                    paths,
+                    list(kb.get("tech_hints") or []),
+                    list(kb.get("specializations") or []),
+                    phase="report",
+                )
+                try:
+                    core._promote_corroborated_web_apps(kb)
+                except Exception:
+                    pass
+                state.knowledge_base = kb
+            try:
+                core._print_timeline_preview(state)
+            except Exception:
+                pass
+            core._print_session_discoveries_debrief(state)
+        except Exception:
+            pass
+
 
 def adaptive_loop_enabled(state: Any) -> bool:
     """

@@ -143,6 +143,20 @@ SAFE_PROBE_PATHS: Tuple[str, ...] = (
     "/mutillidae/",
 )
 
+# Co-located admin/mail panels — always reserve a few active-probe slots even when
+# WordPress/CMS already dominates the campaign (common on shared hosting).
+COLOCATED_PANEL_PROBE_PATHS: Tuple[str, ...] = (
+    "/phpmyadmin/",
+    "/phpMyAdmin/",
+    "/pma/",
+    "/mysql/",
+    "/db/",
+    "/webmail/",
+    "/roundcube/",
+    "/mail/",
+    "/rc/",
+)
+
 # Config leak / admin / debug paths — only with obtain-shell or --shell-hunter
 # and explicit ``--approve-risk intrusive``.
 SENSITIVE_SHELL_PROBE_PATHS: Tuple[str, ...] = (
@@ -185,33 +199,45 @@ def resolve_active_probe_paths(
     Build ordered GET probe paths and a tier label (``safe`` or ``shell``).
 
     Sensitive paths are appended only when ``shell_mode`` and ``intrusive_approved``.
+    Co-located panel paths always keep reserved slots so CMS lock does not starve them.
     """
     ordered: List[str] = []
     seen: set = set()
     cap = max(1, int(limit or 1))
+    # Keep room for panel probes even when extras/safe fill the budget.
+    panel_reserve = min(8, max(4, cap // 2))
+    soft_cap = max(1, cap - panel_reserve)
 
-    def _add(raw: Any) -> None:
+    def _add(raw: Any, *, hard_cap: Optional[int] = None) -> None:
         path = _normalize_probe_path(raw)
         if not path or path in seen:
+            return
+        limit_n = hard_cap if hard_cap is not None else cap
+        if len(ordered) >= limit_n:
             return
         seen.add(path)
         ordered.append(path)
 
     for raw in extra_paths or []:
-        _add(raw)
-        if len(ordered) >= cap:
-            return ordered[:cap], "safe"
+        _add(raw, hard_cap=soft_cap)
+        if len(ordered) >= soft_cap:
+            break
 
     for raw in SAFE_PROBE_PATHS:
-        _add(raw)
+        _add(raw, hard_cap=soft_cap)
+        if len(ordered) >= soft_cap:
+            break
+
+    for raw in COLOCATED_PANEL_PROBE_PATHS:
+        _add(raw, hard_cap=cap)
         if len(ordered) >= cap:
-            return ordered[:cap], "safe"
+            break
 
     tier = "safe"
     if shell_mode and intrusive_approved:
         tier = "shell"
         for raw in SENSITIVE_SHELL_PROBE_PATHS:
-            _add(raw)
+            _add(raw, hard_cap=cap)
             if len(ordered) >= cap:
                 break
 
@@ -553,7 +579,9 @@ class HttpRequestIntelligence:
             })
             if item.get("endpoint"):
                 summary["discovered_endpoints"].append(item["endpoint"])
-            summary["discovered_endpoints"].extend(item.get("discovered_endpoints", []) or [])
+            for ep in item.get("discovered_endpoints", []) or []:
+                if not self._is_junk_harvested_endpoint(str(ep)):
+                    summary["discovered_endpoints"].append(ep)
             summary["discovered_params"].extend(item.get("param_names", []) or [])
             summary["login_paths"].extend(item.get("login_paths", []) or [])
             summary["tech_hints"] = sorted(set(summary["tech_hints"]) | set(item.get("tech_hints", []) or []))
@@ -596,7 +624,13 @@ class HttpRequestIntelligence:
         duration_ms: int = 0,
     ) -> Dict[str, Any]:
         endpoint = path or "/"
-        tech_hints = list(self._infer_tech_hints(url, {}, response_headers, "", response_body))
+        dead = self._is_dead_http_probe(
+            status_code,
+            response_body,
+            response_content_type=_header_value(response_headers, "Content-Type"),
+            response_headers=response_headers,
+        )
+        tech_hints = [] if dead else list(self._infer_tech_hints(url, {}, response_headers, "", response_body))
         risk_signals, reasons = self._classify_request(
             method="GET",
             endpoint=endpoint,
@@ -609,15 +643,50 @@ class HttpRequestIntelligence:
             request_body="",
             response_body=response_body,
         )
-        discovered_endpoints = self._endpoint_hints_from_body(response_body)
-        interesting_score = self._score_reasons(reasons, "GET")
-        if status_code in (200, 301, 302, 401, 403, 500):
+        # Never harvest links/secrets from miss pages (WP 404 HTML is huge and noisy).
+        discovered_endpoints = [] if dead else self._endpoint_hints_from_body(response_body)
+        interesting_score = 0 if dead else self._score_reasons(reasons, "GET")
+        if (
+            not dead
+            and status_code in (200, 301, 302, 401, 403, 500)
+        ):
             interesting_score += 1
-        secrets = self.extract_secrets(response_body)
-        if secrets:
-            risk_signals = set(risk_signals)
-            risk_signals.add("leaked_secrets_detected")
-            reasons.append("secrets in response body")
+        secrets: List[Dict[str, str]] = []
+        if not dead:
+            secrets = self.extract_secrets(response_body)
+            if secrets:
+                risk_signals = set(risk_signals)
+                risk_signals.add("leaked_secrets_detected")
+                reasons.append("secrets in response body")
+                interesting_score += 3
+            else:
+                # Path-only GET bonus without other signals is noise.
+                if interesting_score <= 2 and not reasons:
+                    interesting_score = 0
+        # Homepage / // are never "interesting traffic" by themselves.
+        if self._is_trivial_http_path(endpoint):
+            keep_reasons = {
+                "authentication surface",
+                "auth boundary status 401",
+                "auth boundary status 403",
+                "directory listing",
+                "blocking/WAF signal",
+            }
+            if not any(r in keep_reasons or r.startswith("auth boundary") for r in reasons):
+                # Real cloud keys on `/` can stay; generic HTML secrets must not.
+                secret_types = {
+                    str((s or {}).get("type") or "")
+                    for s in secrets
+                    if isinstance(s, dict)
+                }
+                if not secret_types.intersection({"jwt", "aws_key", "google_api", "bearer_token"}):
+                    interesting_score = 0
+                    secrets = []
+                    reasons = [r for r in reasons if r != "secrets in response body"]
+                    risk_signals = [
+                        s for s in risk_signals
+                        if str(s) != "leaked_secrets_detected"
+                    ]
         return {
             "flow_id": f"active:{endpoint}",
             "method": "GET",
@@ -651,11 +720,11 @@ class HttpRequestIntelligence:
                 endpoints.add(marker.rstrip("/") or "/")
         for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", body, flags=re.IGNORECASE):
             endpoint = self._endpoint_from_url_or_path(src)
-            if endpoint:
+            if endpoint and not self._is_junk_harvested_endpoint(endpoint):
                 endpoints.add(endpoint.split("?", 1)[0])
         for href in re.findall(r"""href=["']([^"'#]+)["']""", body, flags=re.IGNORECASE)[:80]:
             endpoint = self._endpoint_from_url_or_path(href)
-            if endpoint:
+            if endpoint and not self._is_junk_harvested_endpoint(endpoint):
                 endpoints.add(endpoint.split("?", 1)[0])
         return sorted(endpoints)[:80]
 
@@ -874,6 +943,12 @@ class HttpRequestIntelligence:
         content_type = _header_value(res_headers, "Content-Type").split(";", 1)[0].strip().lower()
         request_content_type = _header_value(req_headers, "Content-Type").split(";", 1)[0].strip().lower()
         response_length = self._safe_int(res.get("content_length") or flow.get("response_size"))
+        dead = self._is_dead_http_probe(
+            status_code,
+            response_body,
+            response_content_type=content_type,
+            response_headers=res_headers,
+        )
 
         params = self._extract_params(url, method, req_headers, body_b64, response_b64)
         param_names = sorted({
@@ -881,8 +956,8 @@ class HttpRequestIntelligence:
             for p in params
             if str(p.get("name") or "").strip()
         })
-        discovered_endpoints = self._endpoint_hints_from_flow(flow, response_body)
-        tech_hints = self._infer_tech_hints(url, req_headers, res_headers, request_body, response_body)
+        discovered_endpoints = [] if dead else self._endpoint_hints_from_flow(flow, response_body)
+        tech_hints = [] if dead else self._infer_tech_hints(url, req_headers, res_headers, request_body, response_body)
         risk_signals, reasons = self._classify_request(
             method=method,
             endpoint=endpoint,
@@ -896,7 +971,28 @@ class HttpRequestIntelligence:
             response_body=response_body,
         )
         login_paths = self._login_paths_from_request(endpoint, param_names, reasons)
-        interesting_score = self._score_reasons(reasons, method)
+        interesting_score = 0 if dead else self._score_reasons(reasons, method)
+        secrets: List[Dict[str, str]] = []
+        if not dead:
+            secrets = self.extract_secrets(response_body)
+            if secrets:
+                risk_signals = set(risk_signals)
+                risk_signals.add("leaked_secrets_detected")
+                reasons.append("secrets in response body")
+                interesting_score += 3
+            elif interesting_score <= 2 and not reasons:
+                interesting_score = 0
+        if self._is_trivial_http_path(endpoint):
+            secret_types = {
+                str((s or {}).get("type") or "")
+                for s in secrets
+                if isinstance(s, dict)
+            }
+            if not secret_types.intersection({"jwt", "aws_key", "google_api", "bearer_token"}):
+                if "authentication surface" not in reasons and not any(
+                    str(r).startswith("auth boundary") for r in reasons
+                ):
+                    interesting_score = 0
 
         return {
             "flow_id": str(flow.get("id") or ""),
@@ -927,7 +1023,7 @@ class HttpRequestIntelligence:
             "has_authorization": bool(_header_value(req_headers, "Authorization")),
             "dom_xss_potential": self._detect_dom_xss_potential(params, response_body),
             "login_fidelity": self._assess_login_page_fidelity(endpoint, status_code, res_headers, response_body) if "authentication surface" in reasons else {},
-            "extracted_secrets": self.extract_secrets(response_body),
+            "extracted_secrets": secrets,
             "duration_anomaly": duration_ms > 1500, # Initial simplistic check
         }
 
@@ -971,11 +1067,11 @@ class HttpRequestIntelligence:
                 endpoints.add(marker.rstrip("/") or "/")
         for src in re.findall(r"""<script[^>]+src=["']([^"']+)["']""", response_body, flags=re.IGNORECASE):
             endpoint = self._endpoint_from_url_or_path(src)
-            if endpoint:
+            if endpoint and not self._is_junk_harvested_endpoint(endpoint):
                 endpoints.add(endpoint.split("?", 1)[0])
         for href in re.findall(r"""href=["']([^"'#]+)["']""", response_body, flags=re.IGNORECASE)[:80]:
             endpoint = self._endpoint_from_url_or_path(href)
-            if endpoint:
+            if endpoint and not self._is_junk_harvested_endpoint(endpoint):
                 endpoints.add(endpoint.split("?", 1)[0])
         return sorted(endpoints)[:80]
 
@@ -986,12 +1082,16 @@ class HttpRequestIntelligence:
         low = raw.lower()
         if low.startswith(("#", "javascript:", "mailto:", "data:", "tel:")):
             return ""
+        # Relative PMA/theme/doc links must not become site-root probes (/./themes/...).
+        if low.startswith("./") or low.startswith("../"):
+            return ""
         try:
             parsed = urlparse(raw)
             if parsed.scheme or parsed.netloc:
                 path = parsed.path or "/"
                 query = f"?{parsed.query}" if parsed.query else ""
-                return (path + query)[:260]
+                endpoint = (path + query)[:260]
+                return "" if self._is_junk_harvested_endpoint(endpoint) else endpoint
         except Exception:
             pass
         if raw.startswith("/"):
@@ -999,9 +1099,10 @@ class HttpRequestIntelligence:
         else:
             # Apache "Index of /" and relative HTML links (e.g. payroll_app.php).
             path = "/" + raw.lstrip("/")
-        if ".." in path.split("/"):
+        if ".." in path.split("/") or "/./" in path or path.startswith("/./"):
             return ""
-        return path.split("#", 1)[0][:260]
+        endpoint = path.split("#", 1)[0][:260]
+        return "" if self._is_junk_harvested_endpoint(endpoint) else endpoint
 
     def _infer_tech_hints(
         self,
@@ -1046,7 +1147,8 @@ class HttpRequestIntelligence:
                 "x-middleware-next",
             ),
             "php": ("phpsessid", "x-powered-by': 'php", "x-powered-by: php"),
-            "phpmyadmin": ("phpmyadmin",),
+            "phpmyadmin": ("phpmyadmin", "pmahomme", "pma_username", "pma_password", "db_structure.php"),
+            "roundcube": ("roundcube", "rcversion", "roundcubemail", "_task=mail", "rcmloginuser"),
             "swagger": ("swagger", "openapi"),
             "wordpress": ("wp-content", "wp-includes", "wp-json", "wordpress", "wp-login.php"),
         }
@@ -1086,6 +1188,142 @@ class HttpRequestIntelligence:
             hints.add("vue")
         return hints
 
+    @staticmethod
+    def _is_hard_missing_status(status_code: int) -> bool:
+        return int(status_code or 0) in {404, 410}
+
+    @classmethod
+    def _looks_like_soft_404(cls, status_code: int, response_body: str) -> bool:
+        """Detect WordPress/custom miss pages that still return 200."""
+        code = int(status_code or 0)
+        # Soft-404 only when the status is success-ish; real 401/403 login walls stay live.
+        if code not in {200, 204}:
+            return False
+        body = (response_body or "")[:12000]
+        if not body:
+            return True
+        low = body.lower()
+        strong = (
+            "404 not found",
+            "page not found",
+            "error 404",
+            "<title>404",
+            "http error 404",
+            "oops! that page can",
+            "n'existe pas",
+            "page introuvable",
+            "no route matched",
+            "cannot be found",
+            "can't be found",
+            "nothing found for",
+        )
+        return any(marker in low for marker in strong)
+
+    @staticmethod
+    def _is_trivial_http_path(endpoint: str) -> bool:
+        path = str(endpoint or "").split("?", 1)[0].strip() or "/"
+        # Collapse repeated slashes for comparison (//, /// -> /).
+        collapsed = "/" + "/".join(part for part in path.split("/") if part)
+        return collapsed in {"/", ""}
+
+    @classmethod
+    def _is_empty_redirect_noise(
+        cls,
+        status_code: int,
+        response_body: str = "",
+        *,
+        response_headers: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """301/302 with empty body are usually slash-normalization, not a live surface."""
+        if int(status_code or 0) not in {301, 302, 303, 307, 308}:
+            return False
+        body = (response_body or "").strip()
+        if len(body) > 64:
+            return False
+        headers = response_headers or {}
+        location = _header_value(headers, "Location").lower()
+        # Keep redirects that clearly land on auth/panel surfaces.
+        if any(
+            tok in location
+            for tok in (
+                "login",
+                "wp-login",
+                "phpmyadmin",
+                "roundcube",
+                "webmail",
+                "/mail",
+                "signin",
+                "auth",
+            )
+        ):
+            return False
+        return True
+
+    @classmethod
+    def _is_dead_http_probe(
+        cls,
+        status_code: int,
+        response_body: str = "",
+        *,
+        response_content_type: str = "",
+        response_headers: Optional[Dict[str, str]] = None,
+    ) -> bool:
+        """True when a path probe missed (hard 404/410, soft-404, or empty redirect noise)."""
+        if cls._is_hard_missing_status(status_code):
+            return True
+        if cls._looks_like_soft_404(status_code, response_body):
+            return True
+        if cls._is_empty_redirect_noise(
+            status_code,
+            response_body,
+            response_headers=response_headers,
+        ):
+            return True
+        return False
+
+    @staticmethod
+    def _is_junk_harvested_endpoint(endpoint: str) -> bool:
+        """Drop relative/doc asset paths that pollute probes when scraped from HTML."""
+        low = str(endpoint or "").lower().split("?", 1)[0]
+        if not low or low == "/":
+            return False
+        if low.startswith("/./") or "/./" in low:
+            return True
+        if low.startswith("./") or low.startswith("../"):
+            return True
+        junk_markers = (
+            "/themes/pmahomme/",
+            "/themes/original/",
+            "/doc/html/",
+            "/favicon.ico",
+            ".css",
+            ".woff",
+            ".woff2",
+            ".map",
+        )
+        # Keep real login/panel roots; reject static assets + PMA doc trees at site root.
+        if any(low.endswith(ext) for ext in (".css", ".js", ".map", ".woff", ".woff2", ".png", ".jpg", ".gif", ".svg", ".ico")):
+            return True
+        if any(marker in low for marker in ("/themes/pmahomme/", "/themes/original/", "/doc/html/")):
+            return True
+        return False
+
+    @staticmethod
+    def _endpoint_has_auth_token(endpoint: str) -> bool:
+        """Path/auth token match without phpMyAdmin substring FP on token ``admin``."""
+        low = (endpoint or "").lower().split("?", 1)[0]
+        if not low:
+            return False
+        # Explicit admin segment only (avoid matching inside phpmyadmin / myadmin).
+        if re.search(r"(?:^|/)admin(?:/|$|\.|-)", low) and "phpmyadmin" not in low:
+            return True
+        for token in AUTH_TOKENS:
+            if token == "admin":
+                continue
+            if token in low:
+                return True
+        return False
+
     def _classify_request(
         self,
         *,
@@ -1105,6 +1343,12 @@ class HttpRequestIntelligence:
         blob = f"{low_endpoint} {request_body[:2000].lower()} {response_body[:4000].lower()}"
         reasons: List[str] = []
         signals = set()
+        dead = self._is_dead_http_probe(
+            status_code,
+            response_body,
+            response_content_type=response_content_type,
+            response_headers=response_headers,
+        )
 
         if method not in SAFE_REPLAY_METHODS:
             reasons.append("state-changing request")
@@ -1112,37 +1356,74 @@ class HttpRequestIntelligence:
         if param_names:
             reasons.append(f"{len(param_names)} parameter(s)")
             signals.add("parameterized_request")
-        if any(token in low_endpoint for token in AUTH_TOKENS) or param_set.intersection(AUTH_TOKENS):
-            reasons.append("authentication surface")
-            signals.add("login_surface_detected")
-        if any(p in IDOR_PARAM_TOKENS or p.endswith("_id") or p.endswith("id") for p in param_set):
-            reasons.append("object-id parameter")
-            signals.add("idor_candidate_params")
-        if param_set.intersection(REDIRECT_PARAM_TOKENS):
-            reasons.append("redirect/url parameter")
-            signals.add("redirect_or_ssrf_params")
-        if param_set.intersection(FILE_PARAM_TOKENS):
-            reasons.append("file/path parameter")
-            signals.add("file_path_params")
-        if (
-            param_set.intersection(CMD_PARAM_TOKENS)
-            or any(token in low_endpoint for token in ("cmd", "exec", "ping", "shell"))
-        ):
-            reasons.append("command injection candidate")
-            signals.add("rce_candidate_params")
-        if "/api" in low_endpoint or "json" in response_content_type or "json" in request_content_type:
-            reasons.append("API/JSON surface")
-            signals.add("api_surface_detected")
-        if "graphql" in low_endpoint or "graphql" in blob:
-            reasons.append("GraphQL surface")
-            signals.add("graphql_surface_detected")
-        if "swagger" in low_endpoint or "openapi" in blob:
-            reasons.append("Swagger/OpenAPI surface")
-            signals.add("swagger_surface_detected")
-        if "upload" in low_endpoint or "multipart/form-data" in request_content_type:
-            reasons.append("upload surface")
-            signals.add("upload_surface_detected")
-        if status_code in (301, 302, 303, 307, 308):
+        # Path-only surfaces require a live response. Blind /api /swagger /admin probes
+        # that return 404 must not pollute interesting_requests or risk_signals.
+        if not dead:
+            if self._endpoint_has_auth_token(low_endpoint) or param_set.intersection(AUTH_TOKENS):
+                reasons.append("authentication surface")
+                signals.add("login_surface_detected")
+            # Also mark live phpMyAdmin / Roundcube panel roots as auth surfaces.
+            if any(
+                tok in low_endpoint.split("?", 1)[0]
+                for tok in (
+                    "/phpmyadmin",
+                    "/pma/",
+                    "/roundcube",
+                    "/webmail/",
+                    "/mail/",
+                    "/wp-login.php",
+                )
+            ):
+                if "authentication surface" not in reasons:
+                    reasons.append("authentication surface")
+                    signals.add("login_surface_detected")
+            if any(p in IDOR_PARAM_TOKENS or p.endswith("_id") or p.endswith("id") for p in param_set):
+                reasons.append("object-id parameter")
+                signals.add("idor_candidate_params")
+            if param_set.intersection(REDIRECT_PARAM_TOKENS):
+                reasons.append("redirect/url parameter")
+                signals.add("redirect_or_ssrf_params")
+            if param_set.intersection(FILE_PARAM_TOKENS):
+                reasons.append("file/path parameter")
+                signals.add("file_path_params")
+            if (
+                param_set.intersection(CMD_PARAM_TOKENS)
+                or any(token in low_endpoint for token in ("cmd", "exec", "ping", "shell"))
+            ):
+                reasons.append("command injection candidate")
+                signals.add("rce_candidate_params")
+            json_ct = "json" in (response_content_type or "") or "json" in (request_content_type or "")
+            api_path = bool(re.search(r"(?:^|/)api(?:/|$|\.|-|\?)", low_endpoint.split("?", 1)[0]))
+            # Path-only /api/... without JSON and without a real 2xx/401/403 is noise
+            # (WordPress pretty-permalink 301s to soft misses, cover-upload links, etc.).
+            live_api_status = int(status_code or 0) in {200, 201, 202, 204, 401, 403}
+            if json_ct or (api_path and live_api_status):
+                reasons.append("API/JSON surface")
+                signals.add("api_surface_detected")
+            body_l = (response_body or "")[:8000].lower()
+            if "graphql" in low_endpoint or (
+                json_ct and ("graphql" in body_l or "__schema" in body_l)
+            ):
+                reasons.append("GraphQL surface")
+                signals.add("graphql_surface_detected")
+            swagger_path = "swagger" in low_endpoint or "openapi" in low_endpoint
+            swagger_body = any(
+                token in body_l
+                for token in ('"openapi"', '"swagger"', "swagger-ui", "openapi.json")
+            )
+            if (swagger_path and live_api_status) or swagger_body:
+                reasons.append("Swagger/OpenAPI surface")
+                signals.add("swagger_surface_detected")
+            upload_path = bool(
+                re.search(
+                    r"(?:^|/)(?:upload|uploads|file-upload|uploader)(?:/|$|\?)",
+                    low_endpoint.split("?", 1)[0],
+                )
+            )
+            if upload_path or "multipart/form-data" in (request_content_type or ""):
+                reasons.append("upload surface")
+                signals.add("upload_surface_detected")
+        if status_code in (301, 302, 303, 307, 308) and not dead:
             reasons.append(f"redirect status {status_code}")
             signals.add("redirect_observed")
         if status_code in (401, 403):
@@ -1151,7 +1432,7 @@ class HttpRequestIntelligence:
         if status_code >= 500:
             reasons.append(f"server error status {status_code}")
             signals.add("server_error_observed")
-        if self._looks_like_directory_listing(response_body):
+        if not dead and self._looks_like_directory_listing(response_body):
             reasons.append("directory listing")
             signals.add("directory_listing_detected")
         if is_actionable_waf_signal(
@@ -1691,21 +1972,39 @@ class HttpRequestIntelligence:
 
     def extract_secrets(self, body: str) -> List[Dict[str, str]]:
         """Extract JWT, API keys, and other secrets from the response body."""
+        text = body or ""
+        if not text:
+            return []
+        # Skip generic HTML form noise (password fields, CSRF tokens, theme assets).
+        low = text[:2000].lower()
+        looks_html = "<html" in low or "<!doctype" in low or "<body" in low
         patterns = {
             "jwt": r"eyJh[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*",
             "aws_key": r"AKIA[0-9A-Z]{16}",
             "google_api": r"AIza[0-9A-Za-z-_]{35}",
             "bearer_token": r"Bearer\s+([A-Za-z0-9\-._~+/]+=*)",
-            "generic_secret": r"(?i)(key|secret|password|token|auth)\s*[:=]\s*[\"']([A-Za-z0-9\-._~+/]{8,})[\"']"
         }
-        
+        if not looks_html:
+            patterns["generic_secret"] = (
+                r"(?i)(api[_-]?key|secret|access[_-]?token|private[_-]?key)\s*[:=]\s*"
+                r"[\"']([A-Za-z0-9\-._~+/]{12,})[\"']"
+            )
+
         found = []
+        seen = set()
         for name, pattern in patterns.items():
-            matches = re.findall(pattern, body)
+            matches = re.findall(pattern, text)
             for m in matches:
                 if isinstance(m, tuple):
-                    m = m[1]
-                found.append({"type": name, "value": m})
+                    m = m[-1]
+                value = str(m or "").strip()
+                if not value or value.lower() in {"password", "username", "null", "undefined", "example"}:
+                    continue
+                key = (name, value[:64])
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append({"type": name, "value": value})
         return found
 
     def _safe_int(self, value: Any) -> int:

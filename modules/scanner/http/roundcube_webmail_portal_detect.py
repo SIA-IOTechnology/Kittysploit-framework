@@ -56,17 +56,49 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/', '/webmail/'):
+        # Prefer concrete panel paths first. Matching the homepage with a bare
+        # "roundcube" string is a common false positive on WordPress blogs.
+        panel_paths = (
+            "/webmail/",
+            "/webmail",
+            "/roundcube/",
+            "/roundcube",
+            "/mail/",
+            "/mail",
+            "/rc/",
+            "/roundcubemail/",
+        )
+        strong_regexes = (
+            r'"rcversion":\d{3,}',
+            r"(?i)rcmloginuser",
+            r"(?i)roundcubemail",
+            r"(?i)_task=login",
+            r"(?i)_task=mail",
+        )
+        weak_name = re.compile(r"(?i)\broundcube\b")
+
+        for path in panel_paths:
             r = self.http_request(method="GET", path=path, allow_redirects=True)
-            if not r or r.status_code != 200:
+            if not r or int(getattr(r, "status_code", 0) or 0) >= 400:
                 continue
             body = r.text or ""
-            body_regexes = ('"rcversion":\\d\\d\\d\\d', '(?i)roundcube',)
-            if any(re.search(rx, body, 0) for rx in body_regexes):
+            if any(re.search(rx, body) for rx in strong_regexes) or weak_name.search(body):
                 self.set_info(
                     severity='info',
                     reason="Roundcube webmail detected",
                     path=path,
+                )
+                return True
+
+        # Root only with strong markers (never a lone "roundcube" word).
+        r = self.http_request(method="GET", path="/", allow_redirects=True)
+        if r and int(getattr(r, "status_code", 0) or 0) < 400:
+            body = r.text or ""
+            if any(re.search(rx, body) for rx in strong_regexes):
+                self.set_info(
+                    severity='info',
+                    reason="Roundcube webmail detected",
+                    path="/",
                 )
                 return True
         return False

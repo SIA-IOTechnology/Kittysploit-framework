@@ -226,16 +226,26 @@ class Module(Auxiliary, Http_client):
                     pass
 
             # Check for error messages that might reveal information
-            error_indicators = ['error', 'exception', 'stack trace', 'sql', 'database', 'mysql', 'postgresql']
+            error_indicators = ['stack trace', 'sql syntax', 'mysql_', 'postgresql', 'traceback (most recent']
             if any(indicator in response.text.lower() for indicator in error_indicators):
                 is_interesting = True
                 indicators.append('Error message detected')
 
-            # Check for API documentation
-            doc_indicators = ['swagger', 'openapi', 'api', 'endpoint', 'method', 'parameter']
+            # Check for API documentation (require stronger markers than the word "api")
+            doc_indicators = ['swagger-ui', '"openapi"', '"swagger"', 'openapi.json', 'graphql playground']
             if any(indicator in response.text.lower() for indicator in doc_indicators):
                 is_interesting = True
                 indicators.append('API documentation detected')
+
+            # Soft-404 / generic HTML miss pages are never "discovered" APIs.
+            body_l = (response.text or "")[:4000].lower()
+            if status_code in (404, 410) or (
+                status_code == 200
+                and any(tok in body_l for tok in ("404 not found", "page not found", "error 404", "<title>404"))
+                and "json" not in content_type.lower()
+            ):
+                is_interesting = False
+                indicators = []
 
             return {
                 'endpoint': endpoint,
@@ -349,15 +359,35 @@ class Module(Auxiliary, Http_client):
         self.discovered_endpoints = self.discover_endpoints()
         print_info("")
 
-        # If no endpoints discovered, try root API paths
+        # If no endpoints discovered, try root API paths — but only keep live hits.
         if not self.discovered_endpoints:
             print_status("No common endpoints found, testing root API paths...")
             root_paths = ['/api', '/rest', '/v1', '/graphql']
+            live_statuses = {200, 201, 202, 401, 403, 500, 502, 503}
             for path in root_paths:
                 result = self.fuzz_endpoint(path, method='GET')
-                if result.get('status_code') != 404:
+                status = result.get('status_code')
+                print_info(f"  Testing: {path} (Status: {status})")
+                if status is None:
+                    continue
+                if status == 404 or status == 410:
+                    continue
+                if status not in live_statuses and not result.get('found'):
+                    continue
+                # HTML miss pages often match the word "api" — require JSON/auth/error signal.
+                indicators = [str(x).lower() for x in (result.get('indicators') or [])]
+                preview = str(result.get('response_preview') or '').lower()
+                ctype = str(result.get('content_type') or '').lower()
+                if status in live_statuses and (
+                    'json' in ctype
+                    or any('auth' in ind or 'json' in ind or 'server error' in ind for ind in indicators)
+                    or '"openapi"' in preview
+                    or '"swagger"' in preview
+                    or '__schema' in preview
+                ):
                     self.discovered_endpoints.append(result)
-                    print_info(f"  Testing: {path} (Status: {result.get('status_code')})")
+                elif status in {401, 403}:
+                    self.discovered_endpoints.append(result)
         print_info("")
 
         # Test HTTP methods on discovered endpoints

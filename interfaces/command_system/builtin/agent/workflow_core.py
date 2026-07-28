@@ -1277,12 +1277,41 @@ class AgentWorkflowCore:
             elif "dvwa" in hints:
                 self._floor_tech_confidence(knowledge_base, "dvwa", 0.45)
 
-        if self._endpoint_matches_app_prefix(endpoints, ("/phpmyadmin",)) or "phpmyadmin" in hints:
-            if self._endpoint_matches_app_prefix(endpoints, ("/phpmyadmin",)):
+        if self._endpoint_matches_app_prefix(
+            endpoints,
+            ("/phpmyadmin", "/phpMyAdmin", "/pma", "/mysql"),
+        ) or "phpmyadmin" in hints:
+            if self._endpoint_matches_app_prefix(
+                endpoints,
+                ("/phpmyadmin", "/phpMyAdmin", "/pma", "/mysql"),
+            ):
                 hints.add("phpmyadmin")
                 self._floor_tech_confidence(knowledge_base, "phpmyadmin", 0.75)
-                login_paths.add("/phpMyAdmin/")
-                endpoint_set.update({"/phpMyAdmin/", "/phpmyadmin/"})
+                login_paths.update({"/phpMyAdmin/", "/phpmyadmin/", "/pma/"})
+                endpoint_set.update({"/phpMyAdmin/", "/phpmyadmin/", "/pma/"})
+                risk = set(knowledge_base.get("risk_signals", []) or [])
+                risk.add("admin_panel_detected")
+                knowledge_base["risk_signals"] = sorted(risk)
+            elif "phpmyadmin" in hints:
+                self._floor_tech_confidence(knowledge_base, "phpmyadmin", 0.45)
+
+        if self._endpoint_matches_app_prefix(
+            endpoints,
+            ("/roundcube", "/webmail", "/mail", "/rc"),
+        ) or "roundcube" in hints:
+            if self._endpoint_matches_app_prefix(
+                endpoints,
+                ("/roundcube", "/webmail", "/mail", "/rc"),
+            ):
+                hints.add("roundcube")
+                self._floor_tech_confidence(knowledge_base, "roundcube", 0.75)
+                login_paths.update({"/webmail/", "/roundcube/", "/mail/"})
+                endpoint_set.update({"/webmail/", "/roundcube/", "/mail/"})
+                risk = set(knowledge_base.get("risk_signals", []) or [])
+                risk.add("login_surface_detected")
+                knowledge_base["risk_signals"] = sorted(risk)
+            elif "roundcube" in hints:
+                self._floor_tech_confidence(knowledge_base, "roundcube", 0.45)
 
         if self._endpoint_matches_app_prefix(endpoints, ("/mutillidae",)):
             hints.add("mutillidae")
@@ -1679,11 +1708,12 @@ class AgentWorkflowCore:
                 else:
                     print_info("HTTP intelligence: no KittyProxy flows; sending safe GET surface probes.")
             if shell_mode and self._shell_sensitive_probes_allowed(state):
-                probe_limit = 14
+                probe_limit = 18
             elif shell_mode:
-                probe_limit = 10
+                probe_limit = 14
             else:
-                probe_limit = 8
+                # Reserve slots for colocated panels (phpMyAdmin/Roundcube/…) even on CMS sites.
+                probe_limit = 16
             active_summary, active_results = self._run_active_web_surface_probe(
                 state,
                 max_requests=probe_limit,
@@ -4862,7 +4892,7 @@ class AgentWorkflowCore:
             state,
             tech_hints,
             executed_paths,
-            min(3, max_modules),
+            min(6, max_modules),
         )
         if cms_probe_modules:
             self._append_timeline_event(
@@ -5936,6 +5966,9 @@ class AgentWorkflowCore:
             "admin_panel_detect", "debug_info_leak",
             # Auth surfaces must stay available under CMS lock (generic login != wrong CMS).
             "login_page_detector", "admin_login_bruteforce",
+            # Co-located panels often share the same vhost as WordPress/Drupal.
+            "phpmyadmin", "roundcube", "webmail_portal", "mysql_config",
+            "exposed_mysql", "mysqld_exporter",
         )
         generic_fuzz_tokens = (
             "xss_scanner", "sqli_engine", "sql_injection", "sqli", "lfi_fuzzer", "ssrf_scanner",
@@ -7390,7 +7423,11 @@ class AgentWorkflowCore:
             ),
             "phpmyadmin": (
                 "scanner/http/phpmyadmin_detect",
-                "auxiliary/scanner/http/lfi_fuzzer",
+                "scanner/http/phpmyadmin_setup_detect",
+            ),
+            "roundcube": (
+                "scanner/http/roundcube_webmail_portal_detect",
+                "scanner/http/roundcube_installer_detect",
             ),
             "apache": (
                 "auxiliary/scanner/http/apache_vuln_scanner",
@@ -8086,6 +8123,12 @@ class AgentWorkflowCore:
     def _pick_recon_modules(self, modules, state: Optional[AgentState] = None):
         recon = []
         cms_detect_tokens = ("wordpress_detect", "drupal_detect", "joomla_detect")
+        panel_detect_tokens = (
+            "phpmyadmin_detect",
+            "phpmyadmin_setup_detect",
+            "roundcube_webmail_portal_detect",
+            "roundcube_installer_detect",
+        )
         expanded = bool(state and getattr(state, "expanded_surface", False))
         for module in modules:
             path = module_path_lower(module)
@@ -8100,18 +8143,22 @@ class AgentWorkflowCore:
                 and any(token in path for token in ("_detect", "server_banner", "robots_txt", "security_headers"))
                 and "http_methods_detect" not in path
             )
+            is_panel_detect = any(token in path for token in panel_detect_tokens)
             is_auth_recon = any(token in path for token in ("login_page_detector", "simple_login_scanner"))
             is_discovery_aux = any(token in blob for token in ("robots", "swagger", "graphql"))
             is_heavy_scanner = (
                 path.startswith("auxiliary/scanner/")
                 and any(token in path for token in ("wordpress_scanner", "drupal_scanner", "joomla_scanner"))
             )
-            if (is_light_detect or is_discovery_aux or is_auth_recon or is_surface_recon) and not is_heavy_scanner:
+            if (
+                is_light_detect or is_discovery_aux or is_auth_recon or is_surface_recon or is_panel_detect
+            ) and not is_heavy_scanner:
                 recon.append(module)
-        # Favor quick CMS detectors first so campaign pivots earlier; then expanded-surface modules.
+        # Favor quick CMS detectors + colocated panel detectors first.
         recon.sort(
             key=lambda m: (
                 0 if any(t in module_path_lower(m) for t in cms_detect_tokens) else 1,
+                0 if any(t in module_path_lower(m) for t in panel_detect_tokens) else 1,
                 0 if (
                     expanded
                     and self._is_expanded_surface_module_path(str(m.get("path", "")))
@@ -8123,11 +8170,27 @@ class AgentWorkflowCore:
 
     def _pick_cms_detector_modules(self, modules):
         picked = []
-        wanted = ("wordpress_detect", "drupal_detect", "joomla_detect")
+        wanted = (
+            "wordpress_detect",
+            "drupal_detect",
+            "joomla_detect",
+            "phpmyadmin_detect",
+            "phpmyadmin_setup_detect",
+            "roundcube_webmail_portal_detect",
+            "roundcube_installer_detect",
+        )
         for module in modules:
             path = module_path_lower(module)
             if any(token in path for token in wanted):
                 picked.append(module)
+        # Prefer CMS fingerprint first, then colocated panels.
+        cms_first = ("wordpress_detect", "drupal_detect", "joomla_detect")
+        picked.sort(
+            key=lambda m: (
+                0 if any(t in module_path_lower(m) for t in cms_first) else 1,
+                str(m.get("path", "")),
+            )
+        )
         return picked
 
     def _extract_tech_hints(self, recon_results):
@@ -8789,6 +8852,288 @@ class AgentWorkflowCore:
     def _deduplicate_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Deduplicate repeated findings by vulnerability, host, service and evidence."""
         return deduplicate_scanner_results(findings)
+
+    _DEBRIEF_NOISE_SIGNALS = frozenset({
+        "vulnerability_detected",
+        "scanner_errors",
+        "active_web_probe_completed",
+    })
+    _DEBRIEF_ENDPOINT_MARKERS: Tuple[Tuple[str, int], ...] = (
+        ("phpmyadmin", 50),
+        ("/pma", 45),
+        ("roundcube", 45),
+        ("/webmail", 40),
+        ("wp-login", 40),
+        ("wp-admin", 38),
+        ("/admin", 35),
+        ("/login", 32),
+        ("/signin", 30),
+        ("/auth", 28),
+        ("graphql", 28),
+        ("swagger", 28),
+        ("/api/", 24),
+        ("xmlrpc", 22),
+        ("/.env", 50),
+        ("phpinfo", 40),
+        ("/backup", 30),
+        ("/debug", 28),
+        ("actuator", 30),
+        ("manager/html", 40),
+    )
+
+    def _shell_obtained_for_debrief(self, state: AgentState) -> bool:
+        sessions = list(getattr(state, "new_sessions", None) or [])
+        verified = list(getattr(state, "verified_sessions", None) or [])
+        if sessions or verified:
+            return True
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        signals = {str(s).lower() for s in (kb.get("risk_signals") or [])}
+        return bool(signals.intersection({"interactive_shell", "shell_obtained"}))
+
+    def _interesting_endpoints_for_debrief(
+        self,
+        endpoints: List[Any],
+        *,
+        limit: int = 8,
+    ) -> List[str]:
+        scored: List[Tuple[int, str]] = []
+        seen = set()
+        for raw in endpoints or []:
+            path = str(raw or "").strip()
+            if not path:
+                continue
+            key = path.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            # Drop relative/theme/doc junk harvested from HTML (often 404 at site root).
+            if key.startswith("/./") or "/./" in key or key.startswith("./"):
+                continue
+            if any(
+                marker in key
+                for marker in (
+                    "/themes/pmahomme/",
+                    "/themes/original/",
+                    "/doc/html/",
+                )
+            ):
+                continue
+            if any(key.endswith(ext) for ext in (".css", ".js", ".map", ".woff", ".woff2", ".png", ".jpg", ".gif", ".svg", ".ico")):
+                continue
+            score = 0
+            for marker, weight in self._DEBRIEF_ENDPOINT_MARKERS:
+                if marker in key:
+                    score = max(score, weight)
+            for marker in AUTH_PATH_MARKERS:
+                if marker in key:
+                    score = max(score, 26)
+            if score > 0:
+                scored.append((score, path))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return [path for _score, path in scored[:limit]]
+
+    def _debrief_findings_rows(self, state: AgentState) -> List[Dict[str, Any]]:
+        findings = [
+            row for row in (state.contextual_findings or [])
+            if isinstance(row, dict)
+        ]
+        if findings:
+            return self._deduplicate_findings(findings)
+        rows: List[Dict[str, Any]] = []
+        for row in (state.results or []):
+            if not isinstance(row, dict):
+                continue
+            severity = str(row.get("severity") or row.get("importance") or "").lower()
+            if row.get("vulnerable") or severity in {"critical", "high", "medium"}:
+                rows.append(row)
+        return self._deduplicate_findings(rows)
+
+    def _print_session_discoveries_debrief(self, state: AgentState) -> None:
+        """End-of-run highlight of useful discoveries, even when no shell was obtained."""
+        if getattr(state, "target_reachable", None) is False:
+            print_warning(
+                f"Session discoveries: target unreachable "
+                f"({getattr(state, 'reachability_reason', None) or 'no reason'})"
+            )
+            return
+
+        kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
+        shell = self._shell_obtained_for_debrief(state)
+        tech_hints = self._display_tech_hints(kb, limit=8)
+        stack_confidence = self._stack_confidence_rows(kb)
+        login_paths = [str(x) for x in (kb.get("login_paths") or []) if str(x).strip()]
+        endpoints = list(kb.get("discovered_endpoints") or [])
+        interesting_endpoints = self._interesting_endpoints_for_debrief(endpoints)
+        risk_signals = [
+            str(x)
+            for x in (kb.get("risk_signals") or [])
+            if str(x).strip() and str(x).strip().lower() not in self._DEBRIEF_NOISE_SIGNALS
+        ]
+        request_intel = kb.get("request_intel") if isinstance(kb.get("request_intel"), dict) else {}
+        interesting_requests = []
+        seen_traffic_paths = set()
+        for row in (request_intel.get("interesting_requests") or []):
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("path") or row.get("endpoint") or "")
+            status = int(row.get("status_code") or 0)
+            collapsed = "/" + "/".join(p for p in path.split("/") if p)
+            if collapsed in {"/", ""} or path.strip() in {"/", "//"}:
+                continue
+            if status in {404, 410}:
+                continue
+            if status in {301, 302, 303, 307, 308} and int(row.get("interesting_score") or 0) < 8:
+                # Empty/normalization redirects without strong auth signal.
+                reasons = " ".join(str(r) for r in (row.get("reasons") or [])).lower()
+                if "authentication" not in reasons and "auth boundary" not in reasons:
+                    continue
+            if path.lower().startswith("/./") or "/./" in path.lower():
+                continue
+            if any(
+                marker in path.lower()
+                for marker in ("/themes/pmahomme/", "/doc/html/", "cover-upload")
+            ):
+                continue
+            interesting_requests.append(row)
+            seen_traffic_paths.add(collapsed.lower())
+            if len(interesting_requests) >= 5:
+                break
+
+        # Surface confirmed panels from detectors even if active HTTP intel missed them.
+        finding_blob = " ".join(
+            f"{row.get('path', '')} {row.get('module', '')} {row.get('message', '')}".lower()
+            for row in (getattr(state, "contextual_findings", None) or [])
+            if isinstance(row, dict)
+        )
+        confirmed_roundcube = "roundcube" in finding_blob
+        confirmed_pma = "phpmyadmin" in finding_blob
+        for path in login_paths:
+            low = path.lower()
+            collapsed = "/" + "/".join(p for p in low.split("/") if p)
+            if collapsed in seen_traffic_paths or collapsed in {"/", ""}:
+                continue
+            label = ""
+            if confirmed_roundcube and any(
+                tok in low for tok in ("/roundcube", "/webmail", "/mail", "/rc")
+            ):
+                label = "Roundcube webmail"
+            elif confirmed_pma and any(
+                tok in low for tok in ("/phpmyadmin", "/pma", "/mysql")
+            ):
+                label = "phpMyAdmin panel"
+            if not label:
+                continue
+            interesting_requests.insert(
+                0,
+                {
+                    "method": "GET",
+                    "path": path,
+                    "interesting_score": 12,
+                    "reasons": ["authentication surface", f"confirmed {label}"],
+                    "status_code": 200,
+                },
+            )
+            seen_traffic_paths.add(collapsed)
+            if len(interesting_requests) >= 6:
+                break
+        interesting_requests = interesting_requests[:5]
+        findings = self._debrief_findings_rows(state)
+        important = [
+            row for row in findings
+            if str(row.get("importance") or row.get("severity") or "").lower()
+            in {"critical", "high", "medium"}
+            or str(row.get("decision_class") or "").lower() in {"exploit", "followup"}
+            or bool(row.get("vulnerable"))
+        ]
+        potential = [
+            row for row in (getattr(state, "potential_findings", None) or [])
+            if isinstance(row, dict)
+        ][:5]
+        auth_bits = []
+        if any(tok in {s.lower() for s in risk_signals} for tok in (
+            "credentials_obtained",
+            "auth_obtained",
+            "session_cookie",
+            "login_success",
+        )):
+            auth_bits.append("authenticated context available")
+        if kb.get("captured_cookies") or kb.get("cookie_header"):
+            auth_bits.append("cookie context captured")
+        if kb.get("credentials") or kb.get("discovered_credentials"):
+            auth_bits.append("credential material recorded")
+
+        print_status("Session discoveries")
+        if shell:
+            session_count = len(list(getattr(state, "new_sessions", None) or []) or list(getattr(state, "verified_sessions", None) or []))
+            print_success(f"Shell/session obtained ({session_count or 1})")
+        else:
+            print_info("No shell obtained - useful discoveries from this run:")
+
+        if tech_hints:
+            print_info(f"Stack: {', '.join(tech_hints)}")
+        elif stack_confidence:
+            print_info(
+                "Stack confidence: "
+                + ", ".join(f"{name}={score:.2f}" for name, score in stack_confidence[:5])
+            )
+        if login_paths:
+            print_info(f"Login / panel paths: {', '.join(login_paths[:6])}")
+        if interesting_endpoints:
+            print_info(f"Interesting endpoints: {', '.join(interesting_endpoints)}")
+        if risk_signals:
+            print_info(f"Signals: {', '.join(risk_signals[:8])}")
+        if auth_bits:
+            print_info(f"Auth context: {', '.join(auth_bits)}")
+
+        if important:
+            print_status("Notable findings")
+            for row in important[:6]:
+                severity = str(
+                    row.get("importance") or row.get("severity") or "info"
+                ).upper()
+                badge = str(row.get("decision_class") or ("hit" if row.get("vulnerable") else "info")).upper()
+                path = str(row.get("path") or row.get("module") or "").strip()
+                message = self._shorten_text(row.get("message", ""), 140)
+                print_info(f"[{severity}/{badge}] {path}")
+                if message:
+                    print_info(f"  -> {message}")
+        elif potential:
+            print_status("Potential leads")
+            for row in potential:
+                path = str(row.get("path") or row.get("module") or "").strip()
+                message = self._shorten_text(row.get("message", ""), 140)
+                print_info(f"- {path}" + (f" | {message}" if message else ""))
+        elif not shell and not login_paths and not interesting_endpoints and not tech_hints:
+            print_warning("No high-signal surface discoveries beyond baseline recon.")
+
+        if interesting_requests:
+            print_status("Interesting HTTP traffic")
+            for row in interesting_requests:
+                method = str(row.get("method") or "GET").upper()
+                url = self._shorten_text(row.get("url") or row.get("path") or "", 100)
+                score = int(row.get("interesting_score") or 0)
+                reasons = ", ".join(str(r) for r in (row.get("reasons") or [])[:3])
+                suffix = f" | {reasons}" if reasons else ""
+                print_info(f"- {method} {url} (score={score}){suffix}")
+
+        stop_reason = str(getattr(state, "campaign_stop_reason", "") or "").strip()
+        if stop_reason and not shell:
+            print_info(f"Stop reason: {self._shorten_text(stop_reason, 160)}")
+
+        if not shell:
+            next_steps: List[str] = []
+            if login_paths or any("login" in s.lower() or "admin_panel" in s.lower() for s in risk_signals):
+                next_steps.append("pursue login/panel auth (credential spray or session replay)")
+            if any(tok in " ".join(risk_signals).lower() for tok in ("sql", "sqli")):
+                next_steps.append("deepen SQLi confirmation / data extraction")
+            if any(tok in " ".join(risk_signals).lower() for tok in ("xss",)):
+                next_steps.append("confirm XSS impact in authenticated context")
+            if interesting_endpoints and not important:
+                next_steps.append("manually review interesting endpoints / panels above")
+            if not next_steps and (tech_hints or endpoints):
+                next_steps.append("expand surface or re-run with a tighter goal (obtain-auth / shell)")
+            if next_steps:
+                print_info(f"Suggested next: {'; '.join(next_steps[:3])}")
 
     def _print_detection_summary(self, state: AgentState) -> None:
         kb = state.knowledge_base if isinstance(state.knowledge_base, dict) else {}
@@ -11238,6 +11583,7 @@ class AgentWorkflowCore:
         )
         self._update_host_profile_cache(state)
         self._print_timeline_preview(state)
+        self._print_session_discoveries_debrief(state)
         return state
 
     def _print_scoreboard(self, state: AgentState) -> None:

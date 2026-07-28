@@ -101,6 +101,14 @@ def infer_stack_gate_for_path(module_path: str) -> Dict[str, Any]:
         return {
             "requires": {"tech_hints_any": ["apache", "httpd"]},
         }
+    if "citrix" in low or "netscaler" in low:
+        return {
+            "requires": {"tech_hints_any": ["citrix", "netscaler", "adc"]},
+        }
+    if "bypass_403" in low:
+        return {
+            "requires": {"risk_signals_any": ["http_403", "forbidden_surface", "auth_forbidden"]},
+        }
 
     for cms, tokens in CMS_PATH_TOKENS.items():
         if any(token in low for token in tokens):
@@ -240,6 +248,12 @@ def is_hard_stack_skip_reason(reason: str, module_path: str = "") -> bool:
         leaf = path.rsplit("/", 1)[-1]
         if "_detect" in leaf or leaf.endswith("detect"):
             return False
+        return True
+    if "requires risk signal" in text:
+        return True
+    if "requires endpoint matching" in text and any(
+        token in path for token in ("citrix", "netscaler", "saml", "bypass_403")
+    ):
         return True
     if path.startswith(("exploit/", "exploits/")) and "confidence" in text:
         return True

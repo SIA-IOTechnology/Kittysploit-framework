@@ -7,7 +7,10 @@ class Module(Post, LdapPostClient):
 
 	__info__ = {
 		"name": "LDAP AS-REP Roastable Users",
-		"description": "List accounts with Kerberos pre-authentication disabled",
+		"description": (
+			"Native LDAP enum of accounts with Kerberos pre-authentication disabled. "
+			"For live $krb5asrep$ hashes use post/ldap/gather/asrep_roast."
+		),
 		"author": "KittySploit Team",
 		"session_type": SessionType.LDAP,
 		"tags": ["ad", "ldap", "kerberos", "asrep", "preauth"],
@@ -18,9 +21,13 @@ class Module(Post, LdapPostClient):
 			"reversible": False,
 			"approval_required": True,
 			"produces": ["risk_signals"],
+			"cost": 0.6,
+			"noise": 0.25,
+			"value": 1.3,
 			"chain": {
 				"consumes_capabilities": ["ldap_access"],
 				"produces_capabilities": ["asrep_targets"],
+				"suggested_followups": ["post/ldap/gather/asrep_roast"],
 			},
 		},
 	}

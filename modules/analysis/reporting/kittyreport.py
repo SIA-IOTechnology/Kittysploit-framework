@@ -18,6 +18,16 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+def _c2_timeline_rows(framework, limit: int = 40):
+    """Best-effort C2 ops timeline for the PDF report."""
+    try:
+        from lib.c2.ops_log import get_ops_log
+
+        return get_ops_log(framework).timeline(limit=limit)
+    except Exception:
+        return []
+
+
 class Module(Analysis):
     """KittyReport Generator - Professional PDF reporting engine."""
     
@@ -202,6 +212,20 @@ class Module(Analysis):
                         elements.append(Paragraph("<b>Description:</b>", normal_style))
                         elements.append(Paragraph(v.description or "No description provided.", normal_style))
                         elements.append(Spacer(1, 0.1*inch))
+
+                        if v.proof_of_concept:
+                            elements.append(Paragraph("<b>Evidence / Proof of Concept:</b>", normal_style))
+                            poc_text = str(v.proof_of_concept).replace("\n", "<br/>")
+                            # Escape XML-sensitive chars for ReportLab Paragraph
+                            poc_text = (
+                                poc_text.replace("&", "&amp;")
+                                .replace("<br/>", "___BR___")
+                                .replace("<", "&lt;")
+                                .replace(">", "&gt;")
+                                .replace("___BR___", "<br/>")
+                            )
+                            elements.append(Paragraph(poc_text[:3500], normal_style))
+                            elements.append(Spacer(1, 0.1*inch))
                         
                         if v.remediation:
                             elements.append(Paragraph("<b>Recommendation:</b>", normal_style))
@@ -252,6 +276,71 @@ class Module(Analysis):
                         ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7'))
                     ]))
                     elements.append(lt)
+
+                    evidence_loots = [l for l in loots if str(l.loot_type or "").lower() == "evidence"]
+                    if evidence_loots:
+                        elements.append(Spacer(1, 0.3*inch))
+                        elements.append(Paragraph("4.1 Scanner Evidence Details", heading2_style))
+                        for el in evidence_loots[:25]:
+                            elements.append(Paragraph(f"<b>{el.name}</b>", normal_style))
+                            if el.file_path:
+                                elements.append(Paragraph(f"Path: {el.file_path}", normal_style))
+                            preview = ""
+                            if el.content:
+                                preview = str(el.content)[:1200]
+                            if preview:
+                                safe = (
+                                    preview.replace("&", "&amp;")
+                                    .replace("<", "&lt;")
+                                    .replace(">", "&gt;")
+                                    .replace("\n", "<br/>")
+                                )
+                                elements.append(Paragraph(safe, normal_style))
+                            elements.append(Spacer(1, 0.15*inch))
+
+                # --- Section 5: C2 Activity Timeline ---
+                elements.append(Spacer(1, 0.5*inch))
+                elements.append(Paragraph("5. C2 Activity Timeline", heading1_style))
+                c2_rows = _c2_timeline_rows(self.framework, limit=40)
+                if not c2_rows:
+                    elements.append(Paragraph(
+                        "No C2 implant tasks were recorded for this workspace "
+                        "(HTTP polling ops log empty).",
+                        normal_style,
+                    ))
+                else:
+                    elements.append(Paragraph(
+                        f"Recent implant task activity ({len(c2_rows)} entries).",
+                        normal_style,
+                    ))
+                    elements.append(Spacer(1, 0.15*inch))
+                    c2_data = [["When", "Status", "Implant", "Operator", "Command"]]
+                    for r in c2_rows:
+                        when = str(r.get("created_at") or "")[:19].replace("T", " ")
+                        cmd = str(r.get("command") or "").replace("\n", " ")
+                        if len(cmd) > 60:
+                            cmd = cmd[:57] + "..."
+                        implant = str(r.get("implant_id") or r.get("session_id") or "")
+                        if len(implant) > 18:
+                            implant = implant[:16] + ".."
+                        c2_data.append([
+                            when,
+                            str(r.get("status") or ""),
+                            implant,
+                            str(r.get("operator") or ""),
+                            cmd,
+                        ])
+                    c2t = Table(c2_data, colWidths=[1.3*inch, 0.8*inch, 1.2*inch, 0.9*inch, 2.0*inch], repeatRows=1)
+                    c2t.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 8),
+                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f2f2f2')]),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#bdc3c7')),
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ]))
+                    elements.append(c2t)
 
                 # Finalize
                 doc.build(elements)

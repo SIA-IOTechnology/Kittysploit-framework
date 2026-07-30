@@ -5,8 +5,8 @@ class Auxiliary(BaseModule):
     
     TYPE_MODULE = "auxiliary"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
     
     def check(self):
         raise NotImplementedError("Auxiliary modules must implement the check() method")

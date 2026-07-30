@@ -357,7 +357,7 @@ class WorkspaceIntelStore:
         Creates/updates Host + Service, then Vulnerability rows linked to both.
         Severity ``info`` is stored as ``low`` (DB constraint has no ``info``).
         """
-        stats = {"saved": 0, "updated": 0, "skipped": 0, "failed": 0}
+        stats = {"saved": 0, "updated": 0, "skipped": 0, "failed": 0, "evidence": 0}
         if not findings:
             return stats
 
@@ -387,6 +387,7 @@ class WorkspaceIntelStore:
 
             title = str(
                 raw.get("title")
+                or raw.get("finding")
                 or raw.get("module")
                 or raw.get("name")
                 or "Scanner finding"
@@ -423,20 +424,65 @@ class WorkspaceIntelStore:
             if not svc_name and port_i:
                 svc_name = TCP_SERVICE_NAMES.get(port_i, f"tcp-{port_i}")
 
-            poc_parts = []
-            if evidence:
-                poc_parts.append(f"Evidence: {evidence}")
-            if module_path:
-                poc_parts.append(f"Module: {module_path}")
-            if service_label:
-                poc_parts.append(f"Service: {service_label}")
-            if source:
-                poc_parts.append(f"Source: {source}")
-            proof = "\n".join(poc_parts)
+            evidence_paths = [
+                str(p).strip()
+                for p in (raw.get("evidence_paths") or [])
+                if str(p or "").strip()
+            ]
+            schema_evidence = [
+                item
+                for item in (raw.get("schema_evidence") or [])
+                if isinstance(item, dict)
+            ]
 
-            description = evidence or title
-            if module_path and module_path not in description:
-                description = f"{description}\nDetected by {module_path}".strip()
+            structured = None
+            try:
+                from core.scanner.finding_report import (
+                    extract_finding_report,
+                    report_to_vulnerability_fields,
+                )
+
+                structured = extract_finding_report(raw)
+            except Exception:
+                structured = None
+
+            rem_text = ""
+            if structured:
+                mapped = report_to_vulnerability_fields(structured)
+                title = mapped["name"]
+                severity = mapped["risk_level"]
+                description = mapped["description"] or title
+                rem_text = mapped.get("remediation") or ""
+                proof = mapped.get("proof_of_concept") or ""
+                if evidence_paths:
+                    proof = (proof + "\nEvidence files:\n" + "\n".join(f"  - {p}" for p in evidence_paths[:8]))[:8000]
+            else:
+                poc_parts = []
+                if evidence:
+                    poc_parts.append(f"Evidence: {evidence}")
+                if module_path:
+                    poc_parts.append(f"Module: {module_path}")
+                if service_label:
+                    poc_parts.append(f"Service: {service_label}")
+                if source:
+                    poc_parts.append(f"Source: {source}")
+                if evidence_paths:
+                    poc_parts.append("Evidence files:")
+                    for path in evidence_paths[:8]:
+                        poc_parts.append(f"  - {path}")
+                if schema_evidence:
+                    try:
+                        import json
+
+                        preview = json.dumps(schema_evidence[:2], ensure_ascii=False, default=str)
+                        poc_parts.append(f"Evidence JSON: {preview[:1500]}")
+                    except Exception:
+                        pass
+                proof = "\n".join(poc_parts)
+
+                description = evidence or title
+                if module_path and module_path not in description:
+                    description = f"{description}\nDetected by {module_path}".strip()
 
             try:
                 host = (
@@ -505,6 +551,8 @@ class WorkspaceIntelStore:
                     existing.description = description[:4000] if description else existing.description
                     if proof:
                         existing.proof_of_concept = proof[:8000]
+                    if rem_text:
+                        existing.remediation = rem_text[:4000]
                     if service is not None:
                         existing.service_id = service.id
                     existing.updated_at = datetime.utcnow()
@@ -518,13 +566,27 @@ class WorkspaceIntelStore:
                         cve=cve or None,
                         risk_level=severity,
                         proof_of_concept=(proof or "")[:8000],
-                        remediation="",
+                        remediation=(rem_text or "")[:4000],
                         service_id=service.id if service is not None else None,
                     )
                     session.add(vuln)
                     session.flush()
                     vuln.hosts.append(host)
                     stats["saved"] += 1
+
+                # Prefer full structured report as loot when available
+                loot_schema = schema_evidence
+                if structured and not loot_schema:
+                    loot_schema = [structured]
+                loot_saved = self._persist_evidence_loot(
+                    session,
+                    workspace_id=workspace_id,
+                    host=host,
+                    title=title,
+                    evidence_paths=evidence_paths,
+                    schema_evidence=loot_schema,
+                )
+                stats["evidence"] = int(stats.get("evidence") or 0) + loot_saved
 
                 session.commit()
             except Exception as exc:
@@ -538,6 +600,126 @@ class WorkspaceIntelStore:
                 )
 
         return stats
+
+    def _persist_evidence_loot(
+        self,
+        session,
+        *,
+        workspace_id: int,
+        host,
+        title: str,
+        evidence_paths: list,
+        schema_evidence: list,
+    ) -> int:
+        """Store evidence JSON as Loot rows linked to the host. Returns count saved."""
+        import json
+        import os
+
+        from core.models.models import Loot
+
+        saved = 0
+        paths = list(evidence_paths or [])
+        if not paths and schema_evidence:
+            # Inline fallback when files were not written (still keep a loot row)
+            try:
+                content = json.dumps(schema_evidence, ensure_ascii=False, default=str)
+            except Exception:
+                content = str(schema_evidence)
+            name = f"evidence:{title}"[:255]
+            existing = (
+                session.query(Loot)
+                .filter(
+                    Loot.workspace_id == workspace_id,
+                    Loot.host_id == host.id,
+                    Loot.name == name,
+                    Loot.loot_type == "evidence",
+                )
+                .first()
+            )
+            if existing:
+                existing.content = content[:50000]
+                existing.file_size = len(content.encode("utf-8", errors="replace"))
+            else:
+                session.add(
+                    Loot(
+                        workspace_id=workspace_id,
+                        host_id=host.id,
+                        name=name,
+                        loot_type="evidence",
+                        content=content[:50000],
+                        file_path=None,
+                        file_size=len(content.encode("utf-8", errors="replace")),
+                    )
+                )
+                saved += 1
+            return saved
+
+        for path in paths:
+            abs_path = path
+            if not os.path.isabs(abs_path):
+                abs_path = os.path.join(os.getcwd(), path)
+            content = ""
+            size = 0
+            is_binary = str(path).lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+            try:
+                if os.path.isfile(abs_path):
+                    size = int(os.path.getsize(abs_path))
+                    if is_binary:
+                        content = json.dumps(
+                            {
+                                "kind": "screenshot",
+                                "file_path": path,
+                                "file_size": size,
+                                "content_type": "image/png"
+                                if str(path).lower().endswith(".png")
+                                else "image/*",
+                            },
+                            ensure_ascii=False,
+                        )
+                    else:
+                        with open(abs_path, "r", encoding="utf-8", errors="replace") as handle:
+                            content = handle.read(50000)
+            except Exception:
+                content = ""
+            if not content and schema_evidence:
+                try:
+                    content = json.dumps(schema_evidence, ensure_ascii=False, default=str)[:50000]
+                    size = len(content.encode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+            base = os.path.basename(path) or "evidence.json"
+            loot_type = "screenshot" if is_binary else "evidence"
+            name = f"{loot_type}:{base}"[:255]
+            existing = (
+                session.query(Loot)
+                .filter(
+                    Loot.workspace_id == workspace_id,
+                    Loot.host_id == host.id,
+                    Loot.file_path == path,
+                    Loot.loot_type == loot_type,
+                )
+                .first()
+            )
+            if existing:
+                existing.content = content or existing.content
+                existing.file_size = size or existing.file_size
+                existing.name = name
+                continue
+
+            session.add(
+                Loot(
+                    workspace_id=workspace_id,
+                    host_id=host.id,
+                    name=name,
+                    loot_type=loot_type,
+                    content=content or None,
+                    file_path=path,
+                    file_size=size or None,
+                )
+            )
+            saved += 1
+        return saved
 
     @staticmethod
     def _normalize_risk_level(value: Any) -> str:

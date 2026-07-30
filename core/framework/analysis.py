@@ -22,8 +22,8 @@ class Analysis(BaseModule):
 
     TYPE_MODULE = "analysis"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
 
     def run(self):
         raise NotImplementedError("Analysis modules must implement the run() method")

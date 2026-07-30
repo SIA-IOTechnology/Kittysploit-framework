@@ -48,6 +48,7 @@ pymysql
 psycopg2-binary
 redis
 ldap3
+pyasn1
 pymongo
 elasticsearch
 pymssql
@@ -75,3 +76,4 @@ reportlab
 pypdf>=5.0.0
 capstone>=5.0.0
 yara-python>=4.5.0
+playwright>=1.40.0

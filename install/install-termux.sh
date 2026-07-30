@@ -228,6 +228,14 @@ install_or_skip "pyserial"          pyserial
 install_or_skip "docker"            docker
 install_or_skip "boto3"             boto3
 install_or_skip "reportlab"         reportlab
+install_or_skip "playwright"        "playwright>=1.40.0"
+echo -e "${YELLOW}[*]${NC} Installing Playwright Chromium (optional on Termux)..."
+if python -m playwright install chromium >/dev/null 2>&1; then
+    echo -e "    ${GREEN}[+]${NC} Playwright Chromium installed"
+else
+    echo -e "    ${YELLOW}[!]${NC} Playwright Chromium skipped (common on Termux)"
+    SKIPPED+=("playwright-chromium")
+fi
 echo
 
 # -- Group F: Database clients ----------------------------------------------

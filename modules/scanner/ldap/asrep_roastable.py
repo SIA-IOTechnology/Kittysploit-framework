@@ -22,7 +22,7 @@ class Module(Scanner, Ad_client):
         'produces': ['tech_hints', 'risk_signals', 'endpoints'],
         'chain': {
             'produces_capabilities': ['asrep_targets'],
-            'suggested_followups': ['post/ldap/gather/asrep_roastable'],
+            'suggested_followups': ['post/ldap/gather/asrep_roastable', 'post/ldap/gather/asrep_roast'],
         },
     },
     }

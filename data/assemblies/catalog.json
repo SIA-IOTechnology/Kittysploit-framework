@@ -1,0 +1,46 @@
+{
+  "assemblies": [
+    {
+      "name": "Seatbelt",
+      "file": "Seatbelt.exe",
+      "description": "Host situational awareness (GhostPack). Example args: -group=system",
+      "default_args": "-group=system",
+      "method_name": "Main"
+    },
+    {
+      "name": "SharpHound",
+      "file": "SharpHound.exe",
+      "description": "BloodHound collector (AD graph).",
+      "default_args": "-c All",
+      "method_name": "Main"
+    },
+    {
+      "name": "Rubeus",
+      "file": "Rubeus.exe",
+      "description": "Kerberos abuse toolkit. Example: triage / kerberoast",
+      "default_args": "triage",
+      "method_name": "Main"
+    },
+    {
+      "name": "SharpView",
+      "file": "SharpView.exe",
+      "description": "PowerView port — AD enumeration.",
+      "default_args": "",
+      "method_name": "Main"
+    },
+    {
+      "name": "SharpUp",
+      "file": "SharpUp.exe",
+      "description": "Privilege escalation checks (GhostPack).",
+      "default_args": "",
+      "method_name": "Main"
+    },
+    {
+      "name": "Watson",
+      "file": "Watson.exe",
+      "description": "Windows privilege escalation CVE enumeration.",
+      "default_args": "",
+      "method_name": "Main"
+    }
+  ]
+}

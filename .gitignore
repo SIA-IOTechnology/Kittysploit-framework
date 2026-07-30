@@ -8,6 +8,9 @@ __pycache__/
 venv/*
 .venv/*
 docs/*
+!docs/academy/
+!docs/academy/**
+docs/academy/secrets/
 artifacts/*
 
 # Python package files
@@ -91,4 +94,4 @@ TODO.md
 
 tests/*
 !tests/test_market_create.py
-docs/ROADMAP-AGENT-100X.md
+docs/academy/*

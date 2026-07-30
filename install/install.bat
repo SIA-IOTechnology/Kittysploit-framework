@@ -87,6 +87,25 @@ if !HAS_VENV!==1 (
 echo [+] Requirements installed successfully
 echo.
 
+REM Install Playwright Chromium (scanner --screenshots)
+echo [*] Installing Playwright Chromium browser...
+if !HAS_VENV!==1 (
+    "venv\Scripts\python.exe" -m playwright install chromium
+) else (
+    python -m playwright install chromium
+)
+if !errorlevel! neq 0 (
+    echo [!] Warning: Playwright Chromium installation failed, but continuing...
+    if !HAS_VENV!==1 (
+        echo [!] You can install it later with: venv\Scripts\python.exe -m playwright install chromium
+    ) else (
+        echo [!] You can install it later with: python -m playwright install chromium
+    )
+) else (
+    echo [+] Playwright Chromium installed successfully
+)
+echo.
+
 REM Install Zig compiler
 echo [*] Installing Zig compiler...
 if !HAS_VENV!==1 (

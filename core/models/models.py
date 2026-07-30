@@ -812,3 +812,54 @@ class WorkflowExecution(Base):
             'logs': self.logs,
             'error_message': self.error_message
         }
+
+class C2Task(Base):
+    """C2 implant task/response audit log (HTTP polling and similar beacons)."""
+    __tablename__ = 'c2_tasks'
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(String(64), unique=True, nullable=False, index=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=True)
+    session_id = Column(String(100), index=True)
+    implant_id = Column(String(255), index=True)
+    operator = Column(String(100), default='console')
+    command = Column(Text)
+    status = Column(String(32), default='queued', index=True)  # queued, sent, completed, failed, killed
+    output_preview = Column(Text)
+    client_ip = Column(String(255))
+    listener_type = Column(String(100), default='reverse_http_polling')
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    sent_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint(
+            'status IN ("queued", "sent", "completed", "failed", "killed")',
+            name='check_c2_task_status',
+        ),
+        Index('idx_c2_tasks_session_created', 'session_id', 'created_at'),
+    )
+
+    workspace = relationship("Workspace", backref="c2_tasks")
+
+    def __repr__(self):
+        return f"<C2Task(task_id={self.task_id!r}, status={self.status!r})>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'workspace_id': self.workspace_id,
+            'session_id': self.session_id,
+            'implant_id': self.implant_id,
+            'operator': self.operator,
+            'command': self.command,
+            'status': self.status,
+            'output_preview': self.output_preview,
+            'client_ip': self.client_ip,
+            'listener_type': self.listener_type,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+

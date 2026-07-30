@@ -149,6 +149,16 @@ fi
 echo -e "${GREEN}[+]${NC} Requirements installed successfully"
 echo
 
+# Install Playwright Chromium (scanner --screenshots)
+echo -e "${YELLOW}[*]${NC} Installing Playwright Chromium browser..."
+if $PYTHON_CMD -m playwright install chromium; then
+    echo -e "${GREEN}[+]${NC} Playwright Chromium installed successfully"
+else
+    echo -e "${YELLOW}[!]${NC} Warning: Playwright Chromium installation failed, but continuing..."
+    echo -e "${YELLOW}[!]${NC} You can install it later with: $PYTHON_CMD -m playwright install chromium"
+fi
+echo
+
 # Install Zig compiler
 echo -e "${YELLOW}[*]${NC} Installing Zig compiler..."
 $PYTHON_CMD -c "
@@ -378,6 +388,7 @@ if [ -n "$VENV_PATH" ]; then
     echo -e "  ✓ Virtual environment (venv/)"
 fi
 echo -e "  ✓ Python requirements"
+echo -e "  ✓ Playwright Chromium (scanner screenshots)"
 echo -e "  ✓ Zig compiler (in core/lib/compiler/zig_executable/)"
 echo -e "  ✓ Start script (start_kittysploit.sh)"
 echo -e "  ✓ Uninstall script (uninstall.sh)"

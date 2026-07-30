@@ -31,7 +31,7 @@ class ReportCommand(BaseCommand):
     def usage(self) -> str:
         return (
             "report [--tuto] [--api-key <key>] [--list] [--use <n>] [--project <id>] "
-            "[--push|--push-hosts|--push-vulns|--push-all] [--yes] [--status] [--config]"
+            "[--push|--push-hosts|--push-vulns|--push-evidence|--push-all] [--yes] [--status] [--config]"
         )
 
     @property
@@ -54,7 +54,8 @@ Options:
     --push              Interactive push (or push to saved --project)
     --push-hosts        Push hosts only
     --push-vulns        Push vulnerabilities only
-    --push-all          Same as --push
+    --push-evidence     Push scanner evidence loot (HTTP/request artifacts)
+    --push-all          Same as --push (hosts + vulns + evidence)
     --yes               Skip confirmation prompt
     --status            Check connection / API key
     --config            Show current configuration
@@ -64,6 +65,7 @@ Examples:
     report --list
     report --use 2
     report --push
+    report --push-evidence --yes
     report --project abc123 --push --yes
         """
 
@@ -100,7 +102,8 @@ Examples:
         parser.add_argument('--push', action='store_true', help='Push all hosts and vulnerabilities')
         parser.add_argument('--push-hosts', action='store_true', help='Push all hosts to Reports')
         parser.add_argument('--push-vulns', action='store_true', help='Push all vulnerabilities')
-        parser.add_argument('--push-all', action='store_true', help='Push all hosts and vulnerabilities')
+        parser.add_argument('--push-evidence', action='store_true', help='Push scanner evidence loot')
+        parser.add_argument('--push-all', action='store_true', help='Push all hosts, vulnerabilities, and evidence')
         parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
         parser.add_argument('--status', action='store_true', help='Check connection status and API key')
         parser.add_argument('--config', action='store_true', help='Show current configuration')
@@ -167,6 +170,7 @@ Examples:
             want_push = (
                 parsed_args.push or parsed_args.push_all
                 or parsed_args.push_hosts or parsed_args.push_vulns
+                or parsed_args.push_evidence
             )
             want_list = parsed_args.list or parsed_args.use_index is not None
 
@@ -199,11 +203,11 @@ Examples:
                 return self._show_config()
 
             if want_push:
+                push_all = parsed_args.push or parsed_args.push_all
                 return self._interactive_or_direct_push(
-                    push_hosts=parsed_args.push_hosts or parsed_args.push
-                    or parsed_args.push_all,
-                    push_vulns=parsed_args.push_vulns or parsed_args.push
-                    or parsed_args.push_all,
+                    push_hosts=parsed_args.push_hosts or push_all,
+                    push_vulns=parsed_args.push_vulns or push_all,
+                    push_evidence=parsed_args.push_evidence or push_all,
                     skip_confirm=parsed_args.yes,
                     prefer_index=parsed_args.use_index,
                 )
@@ -501,6 +505,7 @@ Examples:
         self,
         push_hosts: bool,
         push_vulns: bool,
+        push_evidence: bool = False,
         skip_confirm: bool = False,
         prefer_index: Optional[int] = None,
     ) -> bool:
@@ -526,9 +531,18 @@ Examples:
             print_warning("Push cancelled")
             return False
 
-        return self._push_selected(push_hosts=push_hosts, push_vulns=push_vulns)
+        return self._push_selected(
+            push_hosts=push_hosts,
+            push_vulns=push_vulns,
+            push_evidence=push_evidence,
+        )
 
-    def _push_selected(self, push_hosts: bool, push_vulns: bool) -> bool:
+    def _push_selected(
+        self,
+        push_hosts: bool,
+        push_vulns: bool,
+        push_evidence: bool = False,
+    ) -> bool:
         print_info(f"Pushing to report: {self.project_name or self.project_id}")
         print_info("")
         ok = True
@@ -537,6 +551,9 @@ Examples:
             print_info("")
         if push_vulns:
             ok = self._push_vulnerabilities() and ok
+            print_info("")
+        if push_evidence:
+            ok = self._push_evidence() and ok
         if ok:
             print_success("Push completed")
         else:
@@ -636,13 +653,18 @@ Examples:
                 return True
 
             print_info(f"Found {len(hosts)} hosts to push...")
+            from core.scanner.finding_report import vulnerability_to_kittyreport_finding
+
             hosts_data = []
             for host in hosts:
                 host_dict = host.to_dict()
                 if hasattr(host, 'services'):
                     host_dict['services'] = [s.to_dict() for s in host.services]
                 if hasattr(host, 'vulnerabilities'):
-                    host_dict['vulnerabilities'] = [v.to_dict() for v in host.vulnerabilities]
+                    host_dict['vulnerabilities'] = [
+                        vulnerability_to_kittyreport_finding(v)
+                        for v in host.vulnerabilities
+                    ]
                 hosts_data.append(host_dict)
 
             return self._send_to_reports('hosts', hosts_data)
@@ -686,9 +708,11 @@ Examples:
                 return True
 
             print_info(f"Found {len(vulnerabilities)} vulnerabilities to push...")
+            from core.scanner.finding_report import vulnerability_to_kittyreport_finding
+
             vulns_data = []
             for vuln in vulnerabilities:
-                vuln_dict = vuln.to_dict()
+                vuln_dict = vulnerability_to_kittyreport_finding(vuln)
                 if hasattr(vuln, 'hosts'):
                     vuln_dict['hosts'] = [h.to_dict() for h in vuln.hosts]
                 vulns_data.append(vuln_dict)
@@ -697,6 +721,98 @@ Examples:
 
         except Exception as e:
             print_error(f"Error pushing vulnerabilities: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _push_evidence(self) -> bool:
+        """Push scanner evidence loot (schema Evidence JSON) to Reports."""
+        if not self._require_api_key():
+            return False
+        if not self.project_id:
+            print_error("No target report selected")
+            return False
+
+        session = self._get_db_session()
+        if not session:
+            print_error("Database not available")
+            return False
+
+        try:
+            from core.models.models import Loot, Host
+
+            current_workspace = (
+                self.framework.workspace_manager.get_current_workspace()
+                if hasattr(self.framework, "workspace_manager")
+                else None
+            )
+            if not current_workspace:
+                print_error("No workspace found")
+                return False
+
+            loots = (
+                session.query(Loot)
+                .filter(
+                    Loot.workspace_id == current_workspace.id,
+                    Loot.loot_type.in_(("evidence", "screenshot")),
+                )
+                .all()
+            )
+            if not loots:
+                print_warning("No evidence loot found in current workspace")
+                return True
+
+            print_info(f"Found {len(loots)} evidence item(s) to push...")
+            evidence_data: List[Dict[str, Any]] = []
+            for loot in loots:
+                item = loot.to_dict()
+                host = None
+                if loot.host_id:
+                    host = session.query(Host).filter(Host.id == loot.host_id).first()
+                if host is not None:
+                    item["host"] = host.to_dict()
+
+                payload = None
+                raw = loot.content
+                if raw:
+                    try:
+                        payload = json.loads(raw) if isinstance(raw, str) else raw
+                    except Exception:
+                        payload = raw
+                if loot.file_path and str(loot.loot_type or "").lower() == "screenshot":
+                    try:
+                        from core.scanner.screenshot import screenshot_to_data_url
+
+                        data_url = screenshot_to_data_url(loot.file_path)
+                        payload = {
+                            "kind": "screenshot",
+                            "screenshot": loot.file_path,
+                            "file_path": loot.file_path,
+                            "file_size": loot.file_size,
+                        }
+                        if data_url:
+                            payload["screenshot_data_url"] = data_url
+                    except Exception:
+                        payload = {"kind": "screenshot", "screenshot": loot.file_path}
+                elif payload is None and loot.file_path:
+                    path = loot.file_path
+                    if not os.path.isabs(path):
+                        path = os.path.join(os.getcwd(), path)
+                    try:
+                        if os.path.isfile(path):
+                            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                                payload = json.load(handle)
+                    except Exception:
+                        payload = None
+
+                item["evidence"] = payload
+                item["workspace"] = current_workspace.name
+                evidence_data.append(item)
+
+            return self._send_to_reports("evidence", evidence_data)
+
+        except Exception as e:
+            print_error(f"Error pushing evidence: {e}")
             import traceback
             traceback.print_exc()
             return False

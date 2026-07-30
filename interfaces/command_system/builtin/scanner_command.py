@@ -80,7 +80,11 @@ class ScannerCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "scanner -u <URL|HOSTNAME:PORT> [--protocol PROTO] [--tags TAG1,TAG2] [--port PORT] [--threads N] [--module MODULE] [--scan-ports] [--auto-exploit]"
+        return (
+            "scanner -u <URL|HOSTNAME:PORT> [--protocol PROTO] [--tags TAG1,TAG2] "
+            "[--port PORT] [--threads N] [--module MODULE] [--scan-ports] "
+            "[--auto-exploit] [--evidence] [--screenshots]"
+        )
     
     @property
     def help_text(self) -> str:
@@ -109,6 +113,8 @@ Options:
     --no-dedup           Disable grouping/deduplication of identical findings
     --no-save            Do not auto-save vulnerable findings to the workspace DB
     --no-stack-gate      Disable stack fingerprint gating (run CMS/SPA modules blindly)
+    --evidence           Capture HTTP/request evidence for vulnerable hits (disk + DB loot)
+    --screenshots        Capture headless page screenshots for hits (implies --evidence; needs Playwright)
 
 By default only low-noise checks run (HTTP methods, security/headers, banners,
 non-HTTP services). Product/panel fingerprints are opt-in.
@@ -118,6 +124,8 @@ to disable).
 
 Examples:
     scanner -u https://example.com
+    scanner -u https://example.com --evidence
+    scanner -u https://example.com --evidence --screenshots
     scanner -u https://example.com --tags panel
     scanner -u https://example.com --all
     scanner -u http://192.168.1.100 --threads 10
@@ -256,6 +264,35 @@ Examples:
                     print_info(f"Cache enabled (TTL: {cache._ttl}s)")
             except ImportError:
                 pass
+
+            if options.get("screenshots"):
+                options["evidence"] = True
+
+            if options.get("evidence"):
+                try:
+                    from core.scanner.evidence_capture import evidence_dir_for_scan
+
+                    ws_name = "default"
+                    try:
+                        if hasattr(self.framework, "get_current_workspace_name"):
+                            ws_name = self.framework.get_current_workspace_name() or "default"
+                        elif hasattr(self.framework, "workspace_manager"):
+                            current = self.framework.workspace_manager.get_current_workspace()
+                            if current is not None:
+                                ws_name = getattr(current, "name", None) or "default"
+                    except Exception:
+                        ws_name = "default"
+                    scan_id, evidence_path = evidence_dir_for_scan(workspace=ws_name)
+                    options["evidence_scan_id"] = scan_id
+                    options["evidence_dir"] = evidence_path
+                    options["evidence_workspace"] = ws_name
+                    print_info(f"Evidence capture enabled → {evidence_path}")
+                    if options.get("screenshots"):
+                        print_info("Screenshots enabled (Playwright/Chromium, post-hit capture)")
+                except Exception as exc:
+                    print_warning(f"Could not initialize evidence directory: {exc}")
+                    options["evidence"] = False
+                    options["screenshots"] = False
             
             print_empty()
             
@@ -300,7 +337,13 @@ Examples:
                     timing["prefetch"] = time.perf_counter() - prefetch_t0
                 exec_t0 = time.perf_counter()
                 raw_results = self._execute_modules(
-                    modules, target_info, options["threads"], options["verbose"]
+                    modules,
+                    target_info,
+                    options["threads"],
+                    options["verbose"],
+                    capture_evidence=bool(options.get("evidence")),
+                    evidence_dir=options.get("evidence_dir"),
+                    evidence_workspace=options.get("evidence_workspace"),
                 )
                 timing["execute"] = time.perf_counter() - exec_t0
             timing["total"] = time.perf_counter() - scan_t0
@@ -309,6 +352,31 @@ Examples:
                 results = raw_results
             else:
                 results = deduplicate_scanner_results(raw_results, target_info=target_info)
+
+            if options.get("screenshots") and options.get("evidence_dir"):
+                try:
+                    from core.scanner.screenshot import attach_screenshots_to_results
+
+                    shot_count, shot_warning = attach_screenshots_to_results(
+                        raw_results,
+                        evidence_dir=options["evidence_dir"],
+                        target_info=target_info,
+                    )
+                    if shot_warning:
+                        print_warning(shot_warning)
+                    elif shot_count:
+                        print_success(f"Screenshots captured: {shot_count}")
+                        # Refresh deduped view so table/entries see screenshot fields
+                        if options.get("no_dedup"):
+                            results = raw_results
+                        else:
+                            results = deduplicate_scanner_results(
+                                raw_results, target_info=target_info
+                            )
+                    else:
+                        print_info("Screenshots: no capturable HTTP findings")
+                except Exception as exc:
+                    print_warning(f"Screenshot capture failed: {exc}")
             
             # Display results
             self._display_results(
@@ -319,6 +387,24 @@ Examples:
                 timing=timing,
                 target_info=target_info,
             )
+
+            if options.get("evidence"):
+                evidence_count = sum(
+                    1
+                    for r in raw_results
+                    if r.get("vulnerable") and (r.get("schema_evidence") or r.get("evidence_paths"))
+                )
+                if evidence_count:
+                    print_success(
+                        f"Evidence captured for {evidence_count} finding(s)"
+                        + (
+                            f" → {options.get('evidence_dir')}"
+                            if options.get("evidence_dir")
+                            else ""
+                        )
+                    )
+                else:
+                    print_info("Evidence mode on: no vulnerable hits to capture")
 
             if not options.get("no_save", False):
                 self._persist_findings_to_workspace(
@@ -369,6 +455,11 @@ Examples:
             'no_save': False,
             'no_stack_gate': False,
             'all': False,
+            'evidence': False,
+            'screenshots': False,
+            'evidence_dir': None,
+            'evidence_scan_id': None,
+            'evidence_workspace': None,
         }
         
         i = 0
@@ -454,6 +545,13 @@ Examples:
                 i += 1
             elif arg == '--all':
                 options['all'] = True
+                i += 1
+            elif arg == '--evidence':
+                options['evidence'] = True
+                i += 1
+            elif arg == '--screenshots':
+                options['screenshots'] = True
+                options['evidence'] = True
                 i += 1
             else:
                 # Try to interpret as URL if no URL set
@@ -1203,7 +1301,17 @@ Examples:
             )
         return ""
 
-    def _execute_modules(self, modules: List[Dict], target_info: Dict[str, Any], threads: int, verbose: bool) -> List[Dict]:
+    def _execute_modules(
+        self,
+        modules: List[Dict],
+        target_info: Dict[str, Any],
+        threads: int,
+        verbose: bool,
+        *,
+        capture_evidence: bool = False,
+        evidence_dir: Optional[str] = None,
+        evidence_workspace: Optional[str] = None,
+    ) -> List[Dict]:
         """Execute scanner modules against target"""
         results = []
 
@@ -1255,6 +1363,17 @@ Examples:
                     # Reset dynamic state when reusing a cached instance
                     if hasattr(module_instance, "vulnerability_info"):
                         module_instance.vulnerability_info = {}
+                    # Clear prior HTTP evidence buffer when reusing instances
+                    for attr in (
+                        "_ks_last_http_response",
+                        "_ks_last_http_path",
+                        "_ks_last_http_method",
+                    ):
+                        if hasattr(module_instance, attr):
+                            try:
+                                setattr(module_instance, attr, None)
+                            except Exception:
+                                pass
 
                     # Set target options
                     hostname = target_info['hostname']
@@ -1362,10 +1481,35 @@ Examples:
                         result["session_id"] = session_token
                         dynamic_info.setdefault("session_id", session_token)
 
-                    # Reason: dynamic finding text; avoid static module description as output.
+                    # Reason: prefer structured report_finding(); avoid static module blurb.
                     reason = dynamic_info.get("reason")
                     module_description = str(module_info.get("description") or "").strip()
-                    if result.get("suppressed_soft404"):
+                    report = None
+                    if result.get("vulnerable") and not result.get("suppressed_soft404"):
+                        try:
+                            from core.scanner.finding_report import (
+                                evidence_preview_from_report,
+                                extract_finding_report,
+                            )
+
+                            report = extract_finding_report(dynamic_info)
+                        except Exception:
+                            report = None
+
+                    if report:
+                        result["report"] = report
+                        result["finding"] = report.get("finding")
+                        result["impact"] = report.get("impact") or {}
+                        result["remediation"] = report.get("remediation") or {}
+                        if report.get("severity"):
+                            result["severity"] = report.get("severity")
+                        result["message"] = str(report.get("finding") or reason or "")
+                        preview = evidence_preview_from_report(report)
+                        if preview:
+                            result["evidence"] = preview
+                        if isinstance(report.get("evidence"), dict):
+                            result["report_evidence"] = dict(report["evidence"])
+                    elif result.get("suppressed_soft404"):
                         pass  # keep soft-404 suppression message
                     elif reason:
                         result["message"] = reason
@@ -1380,8 +1524,9 @@ Examples:
                         result["message"] = module_description
                     result["module_description"] = module_description
 
-                    # Severity: from __info__ or dynamic (for detection/vuln level)
-                    result['severity'] = dynamic_info.get('severity') or module_info.get('severity')
+                    # Severity: structured report > dynamic > __info__
+                    if not result.get("severity"):
+                        result["severity"] = dynamic_info.get("severity") or module_info.get("severity")
 
                     if module_info.get('cve'):
                         result['cve'] = module_info.get('cve')
@@ -1414,12 +1559,60 @@ Examples:
                         if linked:
                             result['linked_modules'] = linked
 
-                    # Other dynamic details (excluding reason, version, severity)
+                    # Other dynamic details (excluding structured report fields)
                     result['details'] = {
                         k: v for k, v in dynamic_info.items()
-                        if k not in ['reason', 'version', 'severity']
+                        if k not in [
+                            'reason', 'version', 'severity', 'report', 'finding',
+                            'evidence', 'impact', 'remediation',
+                        ]
                     }
                     enrich_scanner_result(result, target_info, port=port)
+
+                    # Prefer structured finding title / evidence preview after enrich.
+                    if result.get("finding"):
+                        result["module"] = result["finding"]
+                    if result.get("report"):
+                        try:
+                            from core.scanner.finding_report import evidence_preview_from_report
+
+                            preview = evidence_preview_from_report(result["report"])
+                            if preview:
+                                result["evidence"] = preview
+                        except Exception:
+                            pass
+
+                    if capture_evidence and result.get("vulnerable"):
+                        try:
+                            from core.scanner.evidence_capture import (
+                                collect_module_evidence,
+                                evidence_preview,
+                                write_evidence_records,
+                            )
+
+                            records = collect_module_evidence(
+                                module=module_instance,
+                                module_path=module_path,
+                                result=result,
+                                workspace=evidence_workspace,
+                                existing_schema=result.get("schema_evidence"),
+                            )
+                            if records:
+                                result["schema_evidence"] = records
+                                preview = evidence_preview(records)
+                                if preview:
+                                    # Keep short table evidence, but prefer HTTP preview.
+                                    result["evidence"] = preview
+                                if evidence_dir:
+                                    paths = write_evidence_records(
+                                        records,
+                                        directory=evidence_dir,
+                                        module_path=module_path,
+                                    )
+                                    if paths:
+                                        result["evidence_paths"] = paths
+                        except Exception:
+                            pass
                 finally:
                     set_thread_output_quiet(False)
 
@@ -1822,11 +2015,31 @@ Examples:
                         evidence = f"{evidence} (+{len(group.evidence) - 1})"
                 else:
                     evidence = str(rep.get("evidence") or rep.get("message") or "")
-                title = group.title
+                title = (
+                    str(rep.get("finding") or "").strip()
+                    or str(group.title or "").strip()
+                    or str(rep.get("module") or scanner_path or "Finding").strip()
+                )
                 if group.cve and group.cve not in title:
                     title = f"[{group.cve}] {title}"
-                entries.append(
-                    {
+                schema_evidence: List[Dict[str, Any]] = []
+                evidence_paths: List[str] = []
+                report = None
+                if isinstance(rep.get("report"), dict):
+                    report = dict(rep["report"])
+                for member in list(group.members or []) or [rep]:
+                    if not isinstance(member, dict):
+                        continue
+                    for item in member.get("schema_evidence") or []:
+                        if isinstance(item, dict):
+                            schema_evidence.append(item)
+                    for path in member.get("evidence_paths") or []:
+                        text = str(path or "").strip()
+                        if text and text not in evidence_paths:
+                            evidence_paths.append(text)
+                    if report is None and isinstance(member.get("report"), dict):
+                        report = dict(member["report"])
+                entry = {
                         "index": len(entries) + 1,
                         "title": title,
                         "severity": group.severity or rep.get("severity") or "",
@@ -1845,8 +2058,17 @@ Examples:
                         "module_kind": kind,
                         "module_label": _label(followups),
                         "occurrences": group.occurrences,
+                        "schema_evidence": schema_evidence,
+                        "evidence_paths": evidence_paths,
                     }
-                )
+                if report:
+                    entry["report"] = report
+                    entry["finding"] = report.get("finding") or title
+                    entry["impact"] = report.get("impact") or {}
+                    entry["remediation"] = report.get("remediation") or {}
+                    if isinstance(report.get("evidence"), dict):
+                        entry["report_evidence"] = dict(report["evidence"])
+                entries.append(entry)
         else:
             for result in results:
                 if not result.get("vulnerable"):
@@ -1861,12 +2083,24 @@ Examples:
                 port = result.get("port") or _port_from_service(service) or default_port
                 scheme = str(result.get("scheme") or default_scheme or "")
                 evidence = str(result.get("evidence") or result.get("message") or "")
-                title = str(result.get("module") or scanner_path or "Finding").lstrip("[+]").strip()
+                title = (
+                    str(result.get("finding") or "").strip()
+                    or str(result.get("module") or scanner_path or "Finding").lstrip("[+]").strip()
+                )
                 cve = str(result.get("cve") or "")
                 if cve and cve not in title:
                     title = f"[{cve}] {title}"
-                entries.append(
-                    {
+                schema_evidence = [
+                    item
+                    for item in (result.get("schema_evidence") or [])
+                    if isinstance(item, dict)
+                ]
+                evidence_paths = [
+                    str(p).strip()
+                    for p in (result.get("evidence_paths") or [])
+                    if str(p or "").strip()
+                ]
+                entry = {
                         "index": len(entries) + 1,
                         "title": title,
                         "severity": result.get("severity") or "",
@@ -1885,8 +2119,19 @@ Examples:
                         "module_kind": kind,
                         "module_label": _label(followups),
                         "occurrences": int(result.get("duplicate_count") or 1),
+                        "schema_evidence": schema_evidence,
+                        "evidence_paths": evidence_paths,
                     }
-                )
+                if isinstance(result.get("report"), dict):
+                    entry["report"] = dict(result["report"])
+                    entry["finding"] = result.get("finding") or title
+                    entry["impact"] = result.get("impact") or {}
+                    entry["remediation"] = result.get("remediation") or {}
+                    if isinstance(result.get("report_evidence"), dict):
+                        entry["report_evidence"] = dict(result["report_evidence"])
+                    elif isinstance(result["report"].get("evidence"), dict):
+                        entry["report_evidence"] = dict(result["report"]["evidence"])
+                entries.append(entry)
         return entries
 
     def _persist_findings_to_workspace(self, entries: List[Dict[str, Any]]) -> None:
@@ -1907,16 +2152,21 @@ Examples:
         saved = int(stats.get("saved") or 0)
         updated = int(stats.get("updated") or 0)
         failed = int(stats.get("failed") or 0)
+        evidence = int(stats.get("evidence") or 0)
         if saved or updated:
             print_success(
                 f"Workspace DB: {saved} new finding(s) saved"
                 + (f", {updated} updated" if updated else "")
             )
+            if evidence:
+                print_info(f"Workspace DB: {evidence} evidence loot item(s) saved")
             print_info("View with: vuln --list  (alias: vulns --list)")
         elif failed:
             print_warning(f"Workspace DB: failed to save {failed} finding(s)")
         else:
             print_info("Workspace DB: no new findings to save")
+            if evidence:
+                print_info(f"Workspace DB: {evidence} evidence loot item(s) saved")
 
     def _print_vulnerable_result(self, result: Dict[str, Any]):
         # Kept for callers/tests; primary UI is the numbered table.

@@ -41,15 +41,83 @@ class Scanner(BaseModule):
     def set_info(self, **details):
         """
         Set dynamic vulnerability information (optional).
-        
+
         Use this only for dynamic data (detected version, etc.).
-        Static info should be in __info__.
-        
+        Prefer ``report_finding()`` for structured KittyReport findings.
+
         Args:
             **details: Dynamic details to store (version, cves, etc.)
         """
         self.vulnerability_info.update(details)
-    
+
+    def report_finding(
+        self,
+        finding: str,
+        *,
+        severity: str = "medium",
+        evidence: Optional[dict] = None,
+        impact: Optional[object] = None,
+        remediation: Optional[object] = None,
+        **extra,
+    ) -> dict:
+        """
+        Record a structured finding for DB / KittyReport.
+
+        Example::
+
+            self.report_finding(
+                "Exposed Git repository",
+                severity="high",
+                evidence={
+                    "url": "https://example.com/.git/",
+                    "status_code": 200,
+                    "files_found": ["HEAD", "config", "index"],
+                },
+                impact={
+                    "summary": "An attacker may retrieve source code and sensitive information.",
+                    "business_risk": "Source code disclosure",
+                },
+                remediation={
+                    "summary": "Block access to .git directories.",
+                    "actions": [
+                        "Configure web server rules",
+                        "Remove exposed repository",
+                        "Rotate leaked secrets",
+                    ],
+                },
+            )
+            return True
+        """
+        from core.scanner.finding_report import build_finding_report
+
+        report = build_finding_report(
+            finding,
+            severity=severity,
+            evidence=evidence,
+            impact=impact,
+            remediation=remediation,
+            **extra,
+        )
+        # Flat keys keep legacy scanner/agent readers working.
+        self.vulnerability_info.update(
+            {
+                "report": report,
+                "finding": report["finding"],
+                "severity": report["severity"],
+                "reason": report["finding"],
+                "evidence": report.get("evidence") or {},
+                "impact": report.get("impact") or {},
+                "remediation": report.get("remediation") or {},
+            }
+        )
+        if isinstance(report.get("evidence"), dict):
+            ev = report["evidence"]
+            if ev.get("path") and "path" not in self.vulnerability_info:
+                self.vulnerability_info["path"] = ev.get("path")
+            if ev.get("url") and "url" not in self.vulnerability_info:
+                self.vulnerability_info["url"] = ev.get("url")
+        return report
+
     def _get_detector(self, name: str):
         """
         Charge dynamiquement un détecteur depuis les modules organisés.
@@ -164,15 +232,15 @@ class Scanner(BaseModule):
             detected = bool(raw) if raw is not None else False
 
             if detected:
-                print_success(f"{label}: positive match (indicators detected).")
+                # Console stays brief; structured report is for DB / KittyReport push.
+                title = None
+                vi = getattr(self, 'vulnerability_info', None) or {}
+                if isinstance(vi, dict):
+                    title = vi.get("finding") or (vi.get("report") or {}).get("finding")
+                print_success(f"{title or label}: positive match (indicators detected).")
             else:
                 print_error(f"{label}: no match")
                 return False
-
-            vi = getattr(self, 'vulnerability_info', None) or {}
-            if vi:
-                parts = [f"{k}={v}" for k, v in vi.items()]
-                print_info("Details: " + ", ".join(parts))
 
             if raw is None:
                 return False

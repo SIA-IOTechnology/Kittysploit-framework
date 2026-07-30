@@ -272,7 +272,13 @@ def group_scanner_results(
         if key not in buckets:
             buckets[key] = ScannerFindingGroup(
                 vulnerability_key=key,
-                title=str(item.get("module") or item.get("path") or key),
+                title=str(
+                    item.get("finding")
+                    or item.get("title")
+                    or item.get("module")
+                    or item.get("path")
+                    or key
+                ),
                 severity=str(item.get("severity") or "unknown"),
                 cve=str(item.get("cve") or ""),
                 representative=dict(item),
@@ -316,6 +322,9 @@ def vulnerability_key(result: Dict[str, Any]) -> str:
     if cve:
         return f"cve:{cve.lower()}"
     path = str(result.get("path") or "").strip().lower()
+    finding = normalize_text(result.get("finding") or "")
+    if finding:
+        return f"finding:{path}:{finding[:120]}"
     message = normalize_text(result.get("message") or "")
     if message:
         return f"finding:{path}:{message[:120]}"

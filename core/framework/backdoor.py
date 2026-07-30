@@ -6,8 +6,8 @@ class Backdoor(BaseModule):
     
     TYPE_MODULE = "backdoor"
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
     
     def check(self):
         raise NotImplementedError("Backdoor modules must implement the check() method")

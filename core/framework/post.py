@@ -10,8 +10,8 @@ class Post(BaseModule):
 
     session_id = OptString("", "Session ID", required=True)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
 
     def run(self):
         raise NotImplementedError("Post modules must implement the run() method")

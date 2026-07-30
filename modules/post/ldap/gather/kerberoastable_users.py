@@ -7,7 +7,10 @@ class Module(Post, LdapPostClient):
 
 	__info__ = {
 		"name": "LDAP Kerberoastable Users",
-		"description": "Extract user accounts with servicePrincipalName values from an LDAP session",
+		"description": (
+			"Native LDAP enum of users with servicePrincipalName (kerberoast targets). "
+			"For live $krb5tgs$ hashes use post/ldap/gather/kerberoast."
+		),
 		"author": "KittySploit Team",
 		"session_type": SessionType.LDAP,
 		"tags": ["ad", "ldap", "kerberos", "kerberoast", "spn"],
@@ -18,16 +21,19 @@ class Module(Post, LdapPostClient):
 			"reversible": False,
 			"approval_required": True,
 			"produces": ["risk_signals"],
+			"cost": 0.6,
+			"noise": 0.25,
+			"value": 1.3,
 			"chain": {
 				"consumes_capabilities": ["ldap_access"],
 				"produces_capabilities": ["kerberoast_targets"],
+				"suggested_followups": ["post/ldap/gather/kerberoast"],
 			},
 		},
 	}
 
 	include_disabled = OptBool(False, "Include disabled accounts", False)
 	admin_only = OptBool(False, "Only show adminCount=1 accounts", False)
-	export_hashes = OptBool(False, "Print hashcat-ready TGS lines (requires offline cracking)", False)
 
 	def run(self):
 		try:
@@ -76,12 +82,10 @@ class Module(Post, LdapPostClient):
 					print_info("    password: does not expire")
 				for spn in spns:
 					print_info(f"    SPN: {spn}")
-					if self.export_hashes:
-						target = upn or f"{sam}@{self.domain}" if self.domain else sam
-						print_info(f"      hashcat: $krb5tgs$23$*{sam}${self.domain or 'DOMAIN'}${target}*")
 
 			print_info("=" * 80)
 			print_success(f"Found {len(rows)} Kerberoastable account(s)")
+			print_info("Next: use post/ldap/gather/kerberoast (request_hashes=true)")
 			return True
 		except ProcedureError:
 			raise

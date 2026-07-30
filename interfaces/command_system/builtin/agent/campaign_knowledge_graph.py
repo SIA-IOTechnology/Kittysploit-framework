@@ -257,28 +257,57 @@ def sync_attack_graph_from_kb(
         return 0
 
     export_path = str(kb.get("bloodhound_export_path") or "").strip()
+    bh_overlay = None
     if export_path:
         try:
-            from lib.protocols.ldap.ad_graph_import import merge_bloodhound_into_kb
-            merge_bloodhound_into_kb(
-                kb,
-                export_path,
-                domain=str(kb.get("target_hostname") or hostname or ""),
+            from lib.protocols.ldap.ad_graph_import import (
+                bloodhound_to_attack_graph,
+                load_bloodhound_export,
             )
+
+            nodes, edges = load_bloodhound_export(export_path)
+            if nodes or edges:
+                bh_overlay = bloodhound_to_attack_graph(
+                    nodes,
+                    edges,
+                    domain=str(kb.get("target_hostname") or hostname or ""),
+                )
+                kb["bloodhound_stats"] = {
+                    "nodes": len(nodes),
+                    "edges": len(edges),
+                    "path": export_path,
+                }
         except Exception:
-            pass
+            bh_overlay = None
+
+    # Preserve previously imported BH overlay stored separately
+    stored_bh = kb.get("bloodhound_graph") if isinstance(kb.get("bloodhound_graph"), dict) else None
+    if bh_overlay:
+        kb["bloodhound_graph"] = bh_overlay
+        stored_bh = bh_overlay
 
     prev_stats = kb.get("attack_graph_stats") if isinstance(kb.get("attack_graph_stats"), dict) else {}
     prev_total = int(prev_stats.get("nodes", 0) or 0) + int(prev_stats.get("edges", 0) or 0)
 
     graph = build_attack_graph_from_kb(kb, hostname=hostname, results=results)
-    new_total = len(graph.nodes) + len(graph.edges)
+    graph_dict = graph.to_dict()
+
+    # Re-apply BloodHound overlay AFTER rebuild so AD nodes/edges survive agent sync
+    if stored_bh:
+        try:
+            from lib.protocols.ldap.ad_graph_import import overlay_bloodhound_graph
+
+            graph_dict = overlay_bloodhound_graph(graph_dict, stored_bh)
+        except Exception:
+            pass
+
+    new_total = len(graph_dict.get("nodes") or []) + len(graph_dict.get("edges") or [])
     delta = max(0, new_total - prev_total)
 
-    kb["attack_graph"] = graph.to_dict()
+    kb["attack_graph"] = graph_dict
     kb["attack_graph_stats"] = {
-        "nodes": len(graph.nodes),
-        "edges": len(graph.edges),
+        "nodes": len(graph_dict.get("nodes") or []),
+        "edges": len(graph_dict.get("edges") or []),
     }
     kb["attack_graph_last_delta"] = delta
 

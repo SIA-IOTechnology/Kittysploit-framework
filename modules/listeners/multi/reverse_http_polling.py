@@ -191,6 +191,136 @@ class Module(Listener):
         except Exception:
             return False
 
+    def _listener_module_name(self) -> str:
+        # Prefer filesystem path over display __info__ name for durable rebind
+        for attr in ("path", "module_path", "fullname"):
+            val = getattr(self, attr, None)
+            if val and "listener" in str(val).lower().replace("\\", "/"):
+                return str(val).replace("\\", "/")
+        name = str(getattr(self, "name", "") or "")
+        if "poll" in name.lower():
+            return "listeners/multi/reverse_http_polling"
+        return name or "listeners/multi/reverse_http_polling"
+
+    def _bind_client_maps(self, client_id: str, session_id: str) -> None:
+        self._client_id_to_session[client_id] = session_id
+        self._session_to_client_id[session_id] = client_id
+        self._pending_commands.setdefault(session_id, [])
+        self._in_flight_tasks.setdefault(session_id, [])
+        self._received_output.setdefault(session_id, [])
+        self._last_seen[session_id] = time.time()
+
+    def _restore_pending_queue(self, session_id: str) -> int:
+        """Rebuild RAM queue from durable C2Task rows (queued/sent)."""
+        if self._pending_commands.get(session_id):
+            return 0
+        try:
+            pending = self._ops().list_pending_for_session(session_id, include_sent=True)
+        except Exception:
+            pending = []
+        restored = 0
+        for rec in pending:
+            cmd = str(rec.get("command") or "")
+            tid = str(rec.get("task_id") or "")
+            if not cmd and not tid:
+                continue
+            # Typed tasks were logged as "cmd {json}"; keep as shell string for MVP restore
+            self._pending_commands.setdefault(session_id, []).append(
+                {"task_id": tid, "command": cmd}
+            )
+            restored += 1
+        return restored
+
+    def _reattach_session(
+        self,
+        session_id: str,
+        client_id: str,
+        client_ip: str,
+        *,
+        chained: bool = False,
+        chain_via: str = "",
+        announce: bool = True,
+    ) -> str:
+        """Rebind an existing durable session to this listener instance."""
+        sm = getattr(self.framework, "session_manager", None) if self.framework else None
+        updates = {
+            "listener_id": self.listener_id,
+            "listener_module": self._listener_module_name(),
+            "listener_type": "reverse_http_polling",
+            "protocol": "http_polling",
+            "client_id": client_id,
+            "implant_id": client_id,
+            "client_ip": client_ip,
+            "transport_state": "connected",
+            "pending_rebind": False,
+            "durable": True,
+            "chained": bool(chained),
+            "chain_via": str(chain_via or ""),
+        }
+        if sm:
+            sm.update_session_data(session_id, updates)
+            # Keep host fresh
+            try:
+                sess = sm.get_session(session_id)
+                if sess and client_ip:
+                    sess.host = client_ip
+            except Exception:
+                pass
+        if self.framework and hasattr(self.framework, "active_listeners"):
+            self.framework.active_listeners[self.listener_id] = self
+        self._bind_client_maps(client_id, session_id)
+        n = self._restore_pending_queue(session_id)
+        if announce:
+            print_success(
+                f"HTTP polling agent {client_id} reconnected -> session {session_id}"
+                + (f" ({n} queued task(s) restored)" if n else "")
+            )
+            if self.framework and hasattr(self.framework, "notify_session_reconnected"):
+                self.framework.notify_session_reconnected(session_id, label=str(client_id))
+        return session_id
+
+    def _rehydrate_from_session_manager(self) -> int:
+        """On listener start, map restored beacon sessions to this listener."""
+        sm = getattr(self.framework, "session_manager", None) if self.framework else None
+        if not sm:
+            return 0
+        bound = 0
+        for session in list(sm.get_sessions() or []):
+            data = session.data or {}
+            if not sm._is_durable_beacon_session(session.session_type, data):
+                continue
+            client_id = str(data.get("implant_id") or data.get("client_id") or "").strip()
+            if not client_id:
+                continue
+            # Skip if another active map already owns this implant on this listener
+            if client_id in self._client_id_to_session:
+                continue
+            sid = session.id
+            # Point session at this listener UUID without announcing reconnect yet
+            sm.update_session_data(
+                sid,
+                {
+                    "listener_id": self.listener_id,
+                    "listener_module": self._listener_module_name(),
+                    "listener_type": "reverse_http_polling",
+                    "transport_state": "disconnected",
+                    "pending_rebind": True,
+                    "durable": True,
+                },
+            )
+            if self.framework and hasattr(self.framework, "active_listeners"):
+                self.framework.active_listeners[self.listener_id] = self
+            self._client_id_to_session[client_id] = sid
+            self._session_to_client_id[sid] = client_id
+            self._pending_commands.setdefault(sid, [])
+            self._in_flight_tasks.setdefault(sid, [])
+            self._received_output.setdefault(sid, [])
+            n = self._restore_pending_queue(sid)
+            bound += 1
+            if n:
+                print_info(f"Restored {n} pending task(s) for implant {client_id} ({sid[:8]})")
+        return bound
+
     def _ensure_session(self, client_id, client_ip, sig: str = "", *, chained: bool = False, chain_via: str = ""):
         pub = str(getattr(getattr(self, "implant_public_key", None), "value", self.implant_public_key) or "").strip()
         if not pub:
@@ -201,7 +331,39 @@ class Module(Listener):
         if client_id in self._client_id_to_session:
             sid = self._client_id_to_session[client_id]
             self._last_seen[sid] = time.time()
+            # First poll after rehydrate: flip disconnected -> connected
+            sm = getattr(self.framework, "session_manager", None) if self.framework else None
+            if sm:
+                sess = sm.get_session(sid)
+                data = (sess.data if sess else {}) or {}
+                if data.get("transport_state") == "disconnected" or data.get("pending_rebind"):
+                    return self._reattach_session(
+                        sid, client_id, client_ip, chained=chained, chain_via=chain_via
+                    )
+                sm.update_session_data(
+                    sid,
+                    {
+                        "transport_state": "connected",
+                        "client_ip": client_ip,
+                        "listener_id": self.listener_id,
+                    },
+                )
             return sid
+
+        sm = getattr(self.framework, "session_manager", None) if self.framework else None
+        if sm:
+            # Prefer in-memory durable session, then revive from DB
+            sid = sm.find_beacon_session_by_implant(
+                client_id, listener_module=self._listener_module_name()
+            )
+            if not sid:
+                sid = sm.revive_beacon_session_from_db(
+                    client_id, listener_module=self._listener_module_name()
+                )
+            if sid:
+                return self._reattach_session(
+                    sid, client_id, client_ip, chained=chained, chain_via=chain_via
+                )
 
         data = {
             "protocol": "http_polling",
@@ -214,15 +376,12 @@ class Module(Listener):
             "pty_mode": False,
             "chained": bool(chained),
             "chain_via": str(chain_via or ""),
+            "transport_state": "connected",
+            "durable": True,
         }
         sid = self._create_session("reverse", client_ip, 0, data)
         if sid:
-            self._client_id_to_session[client_id] = sid
-            self._session_to_client_id[sid] = client_id
-            self._pending_commands[sid] = []
-            self._in_flight_tasks[sid] = []
-            self._received_output[sid] = []
-            self._last_seen[sid] = time.time()
+            self._bind_client_maps(client_id, sid)
             chain_note = f" via={chain_via}" if chained else ""
             print_success(f"HTTP polling agent {client_id} ({client_ip}) -> session {sid}{chain_note}")
             self._notify_new_implant(client_id, client_ip, sid, chained, chain_via)
@@ -347,85 +506,106 @@ class Module(Listener):
 
             def _send(self, status, body, ctype="text/plain"):
                 data = body.encode("utf-8") if isinstance(body, str) else body
-                self.send_response(status)
-                self.send_header("Content-Type", ctype)
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.send_response(status)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    try:
+                        self.wfile.flush()
+                    except Exception:
+                        pass
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    # Client gone mid-response (common with short-lived poll implants on Windows)
+                    return
+
+            def handle_one_request(self):
+                try:
+                    super().handle_one_request()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    pass
 
             def do_GET(self):
-                parsed = urlparse(self.path)
-                path = parsed.path
+                try:
+                    parsed = urlparse(self.path)
+                    path = parsed.path
 
-                if listener.cover_traffic and path in listener._decoy_paths:
-                    decoys = ["OK", "healthy", "200", "<!-- static -->"]
-                    self._send(200, random.choice(decoys))
-                    return
+                    if listener.cover_traffic and path in listener._decoy_paths:
+                        decoys = ["OK", "healthy", "200", "<!-- static -->"]
+                        self._send(200, random.choice(decoys))
+                        return
 
-                if path != f"{prefix}/poll":
-                    self._send(404, "not found")
-                    return
+                    if path != f"{prefix}/poll":
+                        self._send(404, "not found")
+                        return
 
-                qs = parse_qs(parsed.query)
-                cid = (qs.get("id") or [""])[0]
-                sig = (qs.get("sig") or [""])[0]
-                if not cid:
-                    self._send(400, "missing id")
+                    qs = parse_qs(parsed.query)
+                    cid = (qs.get("id") or [""])[0]
+                    sig = (qs.get("sig") or [""])[0]
+                    if not cid:
+                        self._send(400, "missing id")
+                        return
+                    ok_chain, chained, _tok, via = listener._check_chain_headers(self.headers)
+                    if not ok_chain:
+                        self._send(403, "chain not allowed")
+                        return
+                    sid = listener._ensure_session(
+                        cid, self.client_address[0], sig=sig, chained=chained, chain_via=via
+                    )
+                    if not sid:
+                        self._send(403, "invalid implant signature")
+                        return
+                    body = listener._build_poll_response(sid)
+                    self._send(200, body, "application/json")
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     return
-                ok_chain, chained, _tok, via = listener._check_chain_headers(self.headers)
-                if not ok_chain:
-                    self._send(403, "chain not allowed")
-                    return
-                sid = listener._ensure_session(
-                    cid, self.client_address[0], sig=sig, chained=chained, chain_via=via
-                )
-                if not sid:
-                    self._send(403, "invalid implant signature")
-                    return
-                body = listener._build_poll_response(sid)
-                self._send(200, body, "application/json")
 
             def do_POST(self):
-                parsed = urlparse(self.path)
-                if parsed.path != f"{prefix}/result":
-                    self._send(404, "not found")
-                    return
-                length = int(self.headers.get("Content-Length", "0") or 0)
-                raw = self.rfile.read(length).decode("utf-8", errors="replace")
-                qs = parse_qs(parsed.query)
-                cid = (qs.get("id") or [""])[0]
-                sig = (qs.get("sig") or [""])[0]
-                if not cid:
-                    self._send(400, "missing id")
-                    return
-                ok_chain, chained, _tok, via = listener._check_chain_headers(self.headers)
-                if not ok_chain:
-                    self._send(403, "chain not allowed")
-                    return
-                sid = listener._ensure_session(
-                    cid, self.client_address[0], sig=sig, chained=chained, chain_via=via
-                )
-                if not sid:
-                    self._send(403, "invalid implant signature")
-                    return
                 try:
-                    data = json.loads(raw) if raw else {}
-                    output = data.get("output", "")
-                    if data.get("encoding") == "base64":
-                        output = base64.b64decode(output).decode("utf-8", errors="replace")
-                except Exception:
-                    output = raw
-                    data = {}
-                listener._append_output(sid, output)
-                # Persist downloaded files from typed agent
-                try:
-                    files = data.get("files") if isinstance(data, dict) else None
-                    if files:
-                        listener._save_agent_files(sid, files)
-                except Exception:
-                    pass
-                listener._complete_inflight_task(sid, output)
-                self._send(200, "ok")
+                    parsed = urlparse(self.path)
+                    if parsed.path != f"{prefix}/result":
+                        self._send(404, "not found")
+                        return
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                    raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                    qs = parse_qs(parsed.query)
+                    cid = (qs.get("id") or [""])[0]
+                    sig = (qs.get("sig") or [""])[0]
+                    if not cid:
+                        self._send(400, "missing id")
+                        return
+                    ok_chain, chained, _tok, via = listener._check_chain_headers(self.headers)
+                    if not ok_chain:
+                        self._send(403, "chain not allowed")
+                        return
+                    sid = listener._ensure_session(
+                        cid, self.client_address[0], sig=sig, chained=chained, chain_via=via
+                    )
+                    if not sid:
+                        self._send(403, "invalid implant signature")
+                        return
+                    try:
+                        data = json.loads(raw) if raw else {}
+                        output = data.get("output", "")
+                        if data.get("encoding") == "base64":
+                            output = base64.b64decode(output).decode("utf-8", errors="replace")
+                    except Exception:
+                        output = raw
+                        data = {}
+                    listener._append_output(sid, output)
+                    # Persist downloaded files from typed agent
+                    try:
+                        files = data.get("files") if isinstance(data, dict) else None
+                        if files:
+                            listener._save_agent_files(sid, files)
+                    except Exception:
+                        pass
+                    listener._complete_inflight_task(sid, output)
+                    self._send(200, "ok")
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                    return
 
         return Handler
 
@@ -434,11 +614,17 @@ class Module(Listener):
         port = int(self.lport or 8088)
         self.httpd = ThreadingHTTPServer((host, port), self._handler_class())
         self.running = True
+        rebound = self._rehydrate_from_session_manager()
         self.listener_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.listener_thread.start()
         threading.Thread(target=self._stale_watch_loop, daemon=True).start()
         profile = self._base_profile()
         print_success(f"Reverse HTTP polling listener on http://{host}:{port}{self.url_prefix}")
+        if rebound:
+            print_info(
+                f"Durable C2: bound {rebound} restored beacon session(s) "
+                f"(waiting for check-in)"
+            )
         print_info("Agent: GET /c2/poll?id=<implant_id>&sig=<b64url>, POST /c2/result?id=<implant_id>&sig=...")
         if profile.kill_date:
             print_info(f"Beacon kill_date={profile.kill_date} tz={profile.timezone}")

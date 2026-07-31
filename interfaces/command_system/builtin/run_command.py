@@ -29,7 +29,7 @@ class RunCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "run [--preview] [--background]"
+        return "run [--preview] [--background] [--foreground]"
     
     @property
     def help_text(self) -> str:
@@ -43,13 +43,15 @@ all required options before running.
 
 Options:
     --preview                 Show execution preview without running
-    --background              Run module in background (for listeners)
+    --background              Run in background (default for listeners)
+    --foreground              Keep the console blocked (listeners only)
     --yes, -y                 Skip destructive-action confirmation (scope)
 
 Examples:
-    run                       # Execute the current module
+    run                       # Execute module (listeners auto-background)
     run --preview             # Show execution preview
-    run --background          # Run listener in background
+    run --background          # Force background job
+    run --foreground          # Block console until Ctrl+C (listener)
         """
     
     def __init__(self, framework, session, output_handler):
@@ -72,7 +74,13 @@ Examples:
         parser.add_argument(
             '--background',
             action='store_true',
-            help='Run module in background (for listeners)'
+            help='Run module in background (default for listeners)'
+        )
+
+        parser.add_argument(
+            '--foreground',
+            action='store_true',
+            help='Run listener in foreground (block until Ctrl+C)'
         )
 
         parser.add_argument(
@@ -82,6 +90,14 @@ Examples:
         )
         
         return parser
+
+    def _want_background(self, module, parsed_args) -> bool:
+        """Listeners default to background so the console stays usable."""
+        if getattr(parsed_args, "foreground", False):
+            return False
+        if getattr(parsed_args, "background", False):
+            return True
+        return bool(ModuleExecutor.is_listener(module))
     
     def execute(self, args, **kwargs) -> bool:
         """Execute the run command"""
@@ -104,23 +120,24 @@ Examples:
         # Preview is a pre-flight view: it must work even when required options
         # are missing, because reporting those gaps is part of the feature.
         if parsed_args.preview:
-            self._show_execution_preview(module, background=parsed_args.background)
+            self._show_execution_preview(module, background=self._want_background(module, parsed_args))
             return True
         
         try:
             module = self.framework.current_module
+            background = self._want_background(module, parsed_args)
             guardian = getattr(self.framework, "guardian_manager", None)
             verbose_guardian = bool(
                 guardian and guardian.enabled and getattr(guardian, "verbose", False)
             )
             request = ModuleExecutionRequest(
                 module=module,
-                background=parsed_args.background,
+                background=background,
                 skip_scope_confirm=parsed_args.yes,
                 use_runtime_kernel=False,
                 use_exploit_wrapper=True,
                 collect_metrics=True,
-                register_background_job=parsed_args.background,
+                register_background_job=background,
                 verbose_guardian_debug=verbose_guardian,
             )
 
@@ -130,7 +147,7 @@ Examples:
             print_info(f"Executing module: {module.name}")
             print_info("=" * 50)
 
-            if ModuleExecutor.is_listener(module) and not parsed_args.background:
+            if ModuleExecutor.is_listener(module) and not background:
                 print_info("Listener module detected. Press Ctrl+C to stop.")
                 try:
                     execution = ModuleExecutor.execute(self.framework, request)
@@ -156,14 +173,14 @@ Examples:
             if ModuleExecutor.is_payload(module):
                 print_info("Payload module detected. Generating payload...")
 
-            if ModuleExecutor.is_listener(module) and parsed_args.background:
+            if ModuleExecutor.is_listener(module) and background:
                 print_info("Listener module detected. Running in background mode.")
-            elif parsed_args.background:
+            elif background:
                 print_info("Running module in background mode.")
 
             execution = ModuleExecutor.execute(self.framework, request)
             if (
-                not parsed_args.background
+                not background
                 and execution.success
                 and execution.session_id
                 and ModuleExecutor.get_module_type(module) == "exploit"
@@ -176,7 +193,7 @@ Examples:
             return self._report_execution_result(
                 execution,
                 module,
-                background=parsed_args.background,
+                background=background,
             )
 
         except KeyboardInterrupt:
@@ -188,7 +205,7 @@ Examples:
                 except Exception:
                     session_id = None
             if (
-                not parsed_args.background
+                not background
                 and session_id
                 and ModuleExecutor.get_module_type(module) == "exploit"
             ):

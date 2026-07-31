@@ -327,6 +327,54 @@ class C2OpsLog:
         out.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return out[: max(1, int(limit or 100))]
 
+    def list_pending_for_session(
+        self,
+        session_id: str,
+        *,
+        include_sent: bool = True,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """Return queued (and optionally in-flight ``sent``) tasks for a session.
+
+        Used to rebuild the HTTP polling command queue after a framework restart.
+        Prefers DB rows when available so completed history does not crowd them out.
+        """
+        if not session_id:
+            return []
+        statuses = ["queued"]
+        if include_sent:
+            statuses.append("sent")
+
+        db_rows: List[Dict[str, Any]] = []
+        db = getattr(self.framework, "db_manager", None) if self.framework else None
+        if db:
+            try:
+                from core.models.models import C2Task
+
+                ws_name = self.workspace or "default"
+                with db.get_db_session(ws_name) as session:
+                    q = (
+                        session.query(C2Task)
+                        .filter(
+                            C2Task.session_id == str(session_id),
+                            C2Task.status.in_(statuses),
+                        )
+                        .order_by(C2Task.created_at.asc())
+                        .limit(max(1, int(limit or 200)))
+                    )
+                    for row in q.all():
+                        db_rows.append(row.to_dict())
+            except Exception:
+                db_rows = []
+
+        if db_rows:
+            return db_rows
+
+        rows = self.list_tasks(session_id=str(session_id), limit=max(1, int(limit or 200) * 5))
+        pending = [r for r in rows if str(r.get("status") or "") in set(statuses)]
+        pending.sort(key=lambda r: str(r.get("created_at") or ""))
+        return pending[: max(1, int(limit or 200))]
+
     def timeline(self, *, limit: int = 50, since: Optional[str] = None) -> List[Dict[str, Any]]:
         return self.list_tasks(limit=limit, since=since)
 

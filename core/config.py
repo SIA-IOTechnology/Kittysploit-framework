@@ -155,6 +155,10 @@ class Config:
                 f.write("[FRAMEWORK]\n")
                 f.write('prompt = "kittysploit"\n')
                 f.write('api_key = ""\n')
+                f.write("\n[sessions]\n")
+                f.write("# Restore HTTP polling beacon sessions after restart\n")
+                f.write("durable = true\n")
+                f.write("clean_startup = false\n")
         except Exception as e:
             print(f"Warning: Could not create default configuration at {config_path}: {e}")
     
@@ -164,6 +168,11 @@ class Config:
                 'version': self.VERSION,
                 'workspaces_dir': self.DEFAULT_WORKSPACES_DIR,
                 'default_workspace': self.DEFAULT_WORKSPACE,
+            },
+            'sessions': {
+                # Restore HTTP-polling beacon sessions across framework restarts
+                'durable': True,
+                'clean_startup': False,
             },
             'proxy': self.DEFAULT_PROXY_CONFIG.copy(),
             'tor': self.DEFAULT_TOR_CONFIG.copy(),

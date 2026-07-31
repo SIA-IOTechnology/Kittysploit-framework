@@ -27,6 +27,16 @@ def parse_arguments():
     parser.add_argument('command', nargs='?', help='Optional command (e.g. agent)')
     parser.add_argument('command_args', nargs='*', help='Optional command arguments')
     parser.add_argument('-q', '--quiet', action='store_true', help='Start without banner')
+    parser.add_argument(
+        '--durable-sessions',
+        action='store_true',
+        help='Restore HTTP polling beacon sessions from DB on startup (default)',
+    )
+    parser.add_argument(
+        '--clean-sessions',
+        action='store_true',
+        help='Do not restore sessions from DB (fresh session list)',
+    )
     parser.add_argument('-m', '--module', help='Specify a module to use directly')
     parser.add_argument('-o', '--options', help='Module options in format "option1=value1,option2=value2"')
     parser.add_argument('-e', '--execute', action='store_true', help='Execute the module and exit')
@@ -134,7 +144,12 @@ def main():
     args = parse_arguments()
 
     # Initialize the framework.
-    framework = Framework()
+    clean_sessions = None
+    if getattr(args, "clean_sessions", False):
+        clean_sessions = True
+    elif getattr(args, "durable_sessions", False):
+        clean_sessions = False
+    framework = Framework(clean_sessions=clean_sessions)
 
     # Display the version and exit if requested
     if args.version:

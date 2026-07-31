@@ -251,8 +251,78 @@ class SessionManager:
             print_error(f"Error syncing browser session {session_id} to database: {e}")
             return False
     
-    def _load_sessions_from_db(self) -> None:
-        """Load sessions from database on startup"""
+    @staticmethod
+    def _parse_session_data_field(raw: Any) -> Dict[str, Any]:
+        """Normalize DB session_data which may be dict, JSON str, or encrypted text."""
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, (bytes, bytearray)):
+            try:
+                raw = raw.decode("utf-8", errors="replace")
+            except Exception:
+                return {}
+        if not isinstance(raw, str):
+            # Some encryptors return already-decoded objects
+            try:
+                if hasattr(raw, "items"):
+                    return dict(raw)
+            except Exception:
+                pass
+            return {}
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return {}
+
+    @staticmethod
+    def _decrypt_host_value(host: str, db_manager=None) -> str:
+        host = host or ""
+        if not host:
+            return host
+        # EncryptedString leftover / Fernet-like blob
+        if host.startswith("Z0FBQUFBQ") or (len(host) > 50 and "://" not in host and " " not in host):
+            try:
+                if db_manager and hasattr(db_manager, "encryption_manager"):
+                    em = db_manager.encryption_manager
+                    if em and getattr(em, "_is_initialized", False):
+                        return em.decrypt_data(host)
+            except Exception:
+                pass
+        return host
+
+    @staticmethod
+    def _is_durable_beacon_session(session_type: str, session_data: Optional[Dict[str, Any]]) -> bool:
+        """True for HTTP-polling / beacon sessions that can rebind after restart."""
+        st = str(session_type or "").lower()
+        data = session_data or {}
+        protocol = str(data.get("protocol") or "").lower()
+        listener_type = str(data.get("listener_type") or data.get("listener_module") or "").lower()
+        if st in ("polling", "http_polling", "beacon"):
+            return True
+        if protocol in ("http_polling", "polling"):
+            return True
+        if "reverse_http_polling" in listener_type or listener_type.endswith("http_polling"):
+            return True
+        if "poll" in listener_type.replace(" ", "_"):
+            return True
+        if data.get("implant_id") or data.get("client_id"):
+            if "poll" in protocol or "poll" in listener_type:
+                return True
+        return False
+
+    def _load_sessions_from_db(self, *, durable_beacons_only: bool = True) -> None:
+        """Load sessions from database on startup.
+
+        By default only durable beacon/polling sessions are restored (socket
+        shells cannot be revived). Restored beacons are marked disconnected
+        until the implant checks in again.
+        """
         if not self.db_manager:
             return
         
@@ -261,19 +331,23 @@ class SessionManager:
             if not db_session:
                 return
             
-            # Only load sessions that are active and recent (created in last 7 days)
+            # Prefer last_seen so long-lived implants still reload
             from datetime import datetime, timedelta
             cutoff_date = datetime.utcnow() - timedelta(days=7)
 
             workspace_id = self._get_workspace_id()
             query = db_session.query(DBSession).filter(
                 DBSession.is_active == True,
-                DBSession.created_at >= cutoff_date
+            )
+            # last_seen recent OR created recent (legacy rows)
+            query = query.filter(
+                (DBSession.last_seen >= cutoff_date) | (DBSession.created_at >= cutoff_date)
             )
             if workspace_id is not None:
                 query = query.filter(DBSession.workspace_id == workspace_id)
 
             db_sessions = query.all()
+            restored = 0
             
             for db_session_obj in db_sessions:
                 session_id = db_session_obj.session_id
@@ -285,20 +359,10 @@ class SessionManager:
                 }
                 
                 if db_session_obj.session_type == 'browser':
-                    # Load browser session
-                    # Safely parse JSON, handling empty or invalid strings
-                    session_data_str = (db_session_obj.session_data or '').strip()
-                    session_info_str = (db_session_obj.session_info or '').strip()
-                    
-                    try:
-                        session_data = json.loads(session_data_str) if session_data_str else {}
-                    except (json.JSONDecodeError, ValueError):
-                        session_data = {}
-                    
-                    try:
-                        session_info = json.loads(session_info_str) if session_info_str else {}
-                    except (json.JSONDecodeError, ValueError):
-                        session_info = {}
+                    if durable_beacons_only:
+                        continue
+                    session_data = self._parse_session_data_field(db_session_obj.session_data)
+                    session_info = self._parse_session_data_field(db_session_obj.session_info)
                     
                     self.browser_sessions[session_id] = {
                         'id': session_id,
@@ -311,29 +375,24 @@ class SessionManager:
                         'active': session_data.get('active', True)
                     }
                 else:
-                    # Load standard session
-                    # Safely parse JSON, handling empty or invalid strings
-                    session_data_str = (db_session_obj.session_data or '').strip()
+                    session_data = self._parse_session_data_field(db_session_obj.session_data)
+
+                    if durable_beacons_only and not self._is_durable_beacon_session(
+                        db_session_obj.session_type, session_data
+                    ):
+                        continue
                     
-                    try:
-                        session_data = json.loads(session_data_str) if session_data_str else {}
-                    except (json.JSONDecodeError, ValueError):
-                        session_data = {}
-                    
-                    # Get host - should be automatically decrypted by EncryptedString
-                    host = db_session_obj.target_host or ''
-                    
-                    # If host looks encrypted (base64-like), try to decrypt manually
-                    if host and (host.startswith('Z0FBQUFBQ') or len(host) > 50):
-                        try:
-                            if self.db_manager and hasattr(self.db_manager, 'encryption_manager'):
-                                encryption_manager = self.db_manager.encryption_manager
-                                if encryption_manager and encryption_manager._is_initialized:
-                                    host = encryption_manager.decrypt_data(host)
-                        except Exception:
-                            # If decryption fails, keep the encrypted value
-                            # This might be an old session with different encryption key
-                            pass
+                    host = self._decrypt_host_value(
+                        db_session_obj.target_host or "",
+                        self.db_manager,
+                    )
+
+                    # Beacons wait for check-in; sockets are not restored
+                    if self._is_durable_beacon_session(db_session_obj.session_type, session_data):
+                        session_data = dict(session_data)
+                        session_data["transport_state"] = "disconnected"
+                        session_data["pending_rebind"] = True
+                        session_data["durable"] = True
                     
                     self.sessions[session_id] = SessionData(
                         id=session_id,
@@ -342,6 +401,14 @@ class SessionManager:
                         session_type=db_session_obj.session_type,
                         data=session_data
                     )
+                    restored += 1
+
+            if restored:
+                from core.output_handler import print_info
+                print_info(
+                    f"Restored {restored} durable beacon session(s) "
+                    f"(waiting for implant check-in)"
+                )
                         
         except Exception as e:
             print_error(f"Error loading sessions from database: {e}")
@@ -414,6 +481,132 @@ class SessionManager:
             existing = str(data.get("implant_id") or data.get("client_id") or "").strip()
             if existing == identity:
                 return session_id
+        return None
+
+    def find_beacon_session_by_implant(
+        self,
+        implant_id: str,
+        *,
+        listener_module: str = "",
+        prefer_disconnected: bool = True,
+    ) -> Optional[str]:
+        """Find an in-memory beacon/polling session by stable implant/client id.
+
+        Unlike ``find_disconnected_session_by_identity``, this does **not** require
+        the same ``listener_id`` (listener UUIDs change across restarts).
+        """
+        identity = str(implant_id or "").strip()
+        if not identity:
+            return None
+
+        def _norm(s: str) -> str:
+            return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+        hint = _norm(listener_module)
+        candidates: List[tuple] = []
+        for session_id, session in self.sessions.items():
+            data = session.data or {}
+            if not isinstance(data, dict):
+                data = self._parse_session_data_field(data)
+            if not self._is_durable_beacon_session(session.session_type, data):
+                continue
+            existing = str(data.get("implant_id") or data.get("client_id") or "").strip()
+            if existing != identity:
+                continue
+            # Optional soft filter: only skip when both sides look like polling
+            # families but clearly differ (e.g. mqtt vs http). Matching human
+            # names ("Reverse HTTP Polling Listener") vs paths is allowed.
+            if hint:
+                lm = _norm(
+                    data.get("listener_module")
+                    or data.get("listener_type")
+                    or data.get("protocol")
+                    or ""
+                )
+                if lm and hint:
+                    related = (
+                        hint in lm
+                        or lm in hint
+                        or ("poll" in hint and "poll" in lm)
+                        or ("http" in hint and "http" in lm)
+                    )
+                    if not related and "poll" in lm:
+                        # Different polling family — skip
+                        if not ("poll" in hint):
+                            continue
+            disconnected = data.get("transport_state") == "disconnected" or data.get(
+                "pending_rebind"
+            )
+            score = 0 if (prefer_disconnected and disconnected) else 1
+            candidates.append((score, session_id))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
+
+    def revive_beacon_session_from_db(
+        self,
+        implant_id: str,
+        *,
+        listener_module: str = "",
+    ) -> Optional[str]:
+        """Load a durable beacon session from DB into memory by implant id."""
+        identity = str(implant_id or "").strip()
+        if not identity or not self.db_manager:
+            return None
+        # Already in memory?
+        existing = self.find_beacon_session_by_implant(
+            identity, listener_module=listener_module
+        )
+        if existing:
+            return existing
+        try:
+            db_session = self._get_db_session()
+            if not db_session:
+                return None
+            from datetime import timedelta
+
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            workspace_id = self._get_workspace_id()
+            query = db_session.query(DBSession).filter(DBSession.is_active == True)
+            if workspace_id is not None:
+                query = query.filter(DBSession.workspace_id == workspace_id)
+            rows = (
+                query.order_by(DBSession.last_seen.desc())
+                .limit(200)
+                .all()
+            )
+            for row in rows:
+                data = self._parse_session_data_field(row.session_data)
+                if not self._is_durable_beacon_session(row.session_type, data):
+                    continue
+                existing_id = str(data.get("implant_id") or data.get("client_id") or "").strip()
+                if existing_id != identity:
+                    continue
+                # Skip very old inactive beacons
+                ls = row.last_seen or row.created_at
+                if ls and ls < cutoff:
+                    continue
+                host = self._decrypt_host_value(row.target_host or "", self.db_manager)
+                data = dict(data)
+                data["transport_state"] = "disconnected"
+                data["pending_rebind"] = True
+                data["durable"] = True
+                sid = row.session_id
+                self.sessions[sid] = SessionData(
+                    id=sid,
+                    host=host,
+                    port=row.target_port or 0,
+                    session_type=row.session_type,
+                    data=data,
+                )
+                self._session_metadata[sid] = {
+                    "created_at": row.created_at.timestamp() if row.created_at else time.time(),
+                    "category": "standard",
+                }
+                return sid
+        except Exception as exc:
+            print_error(f"Error reviving beacon session from DB: {exc}")
         return None
     
     def _play_session_sound(self):

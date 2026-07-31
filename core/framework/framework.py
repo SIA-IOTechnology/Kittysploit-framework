@@ -37,7 +37,39 @@ from pathlib import Path
 
 
 class Framework:
-    def __init__(self, clean_sessions: bool = True):
+    @staticmethod
+    def _resolve_clean_sessions(config_instance: Optional[Config] = None) -> bool:
+        """Decide whether to wipe/skip session reload on startup.
+
+        Durable beacon sessions are restored when clean_sessions is False.
+        Precedence: env KITTYSPLOIT_CLEAN_SESSIONS / KITTYSPLOIT_DURABLE_SESSIONS,
+        then config ``sessions.durable`` / ``sessions.clean_startup``,
+        then default durable=True (clean_sessions=False).
+        """
+        env_clean = os.environ.get("KITTYSPLOIT_CLEAN_SESSIONS", "").strip().lower()
+        if env_clean in ("1", "true", "yes", "on"):
+            return True
+        if env_clean in ("0", "false", "no", "off"):
+            return False
+        env_durable = os.environ.get("KITTYSPLOIT_DURABLE_SESSIONS", "").strip().lower()
+        if env_durable in ("1", "true", "yes", "on"):
+            return False
+        if env_durable in ("0", "false", "no", "off"):
+            return True
+        cfg = config_instance or Config.get_instance()
+        sessions_cfg = cfg.get_config_value("sessions") or {}
+        if isinstance(sessions_cfg, dict):
+            if "clean_startup" in sessions_cfg:
+                return bool(sessions_cfg.get("clean_startup"))
+            if "durable" in sessions_cfg:
+                return not bool(sessions_cfg.get("durable"))
+        durable_path = cfg.get_config_value_by_path("sessions.durable")
+        if durable_path is not None:
+            return not bool(durable_path)
+        # Default: durable C2 beacons survive framework restart
+        return False
+
+    def __init__(self, clean_sessions: Optional[bool] = None):
         self.modules: Dict[str, Any] = {}
         self.current_module: Optional[Any] = None
         self.current_workflow: Optional[Any] = None
@@ -75,6 +107,11 @@ class Framework:
         else:
             # Use default if not found
             self.proxy_config = Config.PROXY_CONFIG.copy()
+
+        if clean_sessions is None:
+            clean_sessions = self._resolve_clean_sessions(config_instance)
+        self.clean_sessions = bool(clean_sessions)
+        self.durable_sessions = not self.clean_sessions
         
         # Initialize Tor Manager
         self.tor_manager = TorManager(framework=self)

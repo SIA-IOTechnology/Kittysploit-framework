@@ -18,6 +18,8 @@ TASK_WHOAMI = "whoami"
 TASK_CAT = "cat"
 TASK_DOWNLOAD = "download"
 TASK_UPLOAD = "upload"
+TASK_SOCKS_START = "socks_start"
+TASK_SOCKS_STOP = "socks_stop"
 TASK_EXIT = "exit"
 
 SUPPORTED_TASKS = frozenset(
@@ -29,6 +31,8 @@ SUPPORTED_TASKS = frozenset(
         TASK_CAT,
         TASK_DOWNLOAD,
         TASK_UPLOAD,
+        TASK_SOCKS_START,
+        TASK_SOCKS_STOP,
         TASK_EXIT,
     }
 )

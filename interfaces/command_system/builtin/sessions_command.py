@@ -121,17 +121,33 @@ Session Types:
             if standard_sessions:
                 print_info(f"\n[STANDARD SESSIONS] ({len(standard_sessions)} sessions)")
                 print_info("-" * 80)
-                print_info(f"{'ID':<36} {'Host':<20} {'Port':<8} {'Type':<15} {'Status'}")
+                print_info(f"{'ID':<36} {'Host':<18} {'Type':<12} {'Implant':<16} {'Status'}")
                 print_info("-" * 80)
                 
                 for session in standard_sessions:
-                    transport_state = ""
-                    try:
-                        transport_state = str((getattr(session, "data", {}) or {}).get("transport_state") or "").lower()
-                    except Exception:
-                        transport_state = ""
-                    status = "Disconnected" if transport_state == "disconnected" else "Active"
-                    print_info(f"{session.id:<36} {session.host:<20} {session.port:<8} {session.session_type:<15} {status}")
+                    data = getattr(session, "data", {}) or {}
+                    if not isinstance(data, dict):
+                        data = {}
+                    transport_state = str(data.get("transport_state") or "").lower()
+                    pending = bool(data.get("pending_rebind") or data.get("durable"))
+                    if transport_state == "disconnected":
+                        status = "Waiting" if pending or str(session.session_type).lower() in (
+                            "polling",
+                            "http_polling",
+                            "beacon",
+                        ) else "Disconnected"
+                    else:
+                        status = "Active"
+                    implant = str(data.get("implant_id") or data.get("client_id") or "-")[:16]
+                    host = str(data.get("client_ip") or session.host or "")
+                    # Avoid dumping encrypted blobs in the table
+                    if host.startswith("Z0FBQUFBQ") or len(host) > 40:
+                        host = str(data.get("client_ip") or "(encrypted)")[:18]
+                    if len(host) > 18:
+                        host = host[:15] + "..."
+                    print_info(
+                        f"{session.id:<36} {host:<18} {session.session_type:<12} {implant:<16} {status}"
+                    )
             
             # Display browser sessions
             if browser_sessions:

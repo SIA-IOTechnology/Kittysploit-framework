@@ -387,7 +387,8 @@ class ZigCompiler:
                     cmd.append('-fstrip')
                     cmd.append('-fno-stack-check')
                     cmd.append('-fno-unwind-tables')
-                    cmd.append('-fsingle-threaded')
+                    # Do NOT force -fsingle-threaded: implants may use std.Thread
+                    # (e.g. Zig Kitty SOCKS). Pass it via extra_args if needed.
 
                 if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
                     cmd.extend(['--subsystem', 'windows'])

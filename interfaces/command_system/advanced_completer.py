@@ -126,6 +126,13 @@ class AdvancedCompleter(Completer):
             yield from self._iter_sessions_completions(args, current_word, ends_with_space)
             return
 
+        if command == "beacon":
+            args = tokens[1:]
+            if ends_with_space:
+                args.append("")
+            yield from self._iter_beacon_completions(args, current_word, ends_with_space)
+            return
+
         # Generic subcommand support -----------------------------------------
         subcommands = self._get_subcommands(command)
         if subcommands:
@@ -336,6 +343,93 @@ class AdvancedCompleter(Completer):
         # For 'kill all', no further completions needed
         if subcommand == 'kill' and len(args) >= 2 and args[1].lower() == 'all':
             return
+
+    def _iter_beacon_completions(self, args: List[str], partial: str, ends_with_space: bool) -> Iterable[Completion]:
+        """Handle completions for the beacon command (show/set + session IDs)."""
+        subcommands = ["show", "set", "help"]
+        profile_keys = [
+            "sleep",
+            "poll_interval",
+            "jitter",
+            "jitter_percent",
+            "kill_date",
+            "working_hours",
+            "timezone",
+            "sleep_outside_hours",
+            "user_agent",
+        ]
+
+        args = [arg for arg in args if arg]
+
+        if not args or (len(args) == 1 and not ends_with_space):
+            for item in self._filter_items(subcommands, partial):
+                yield Completion(item, start_position=-len(partial), display_meta="Beacon Subcommand")
+            return
+
+        subcommand = args[0].lower()
+        if subcommand == "help":
+            return
+
+        if subcommand in ("show", "set"):
+            if len(args) == 1 and ends_with_space:
+                session_ids = self._collect_beacon_session_identifiers()
+                for session_id in self._filter_items(session_ids, ""):
+                    yield Completion(session_id, start_position=0, display_meta="Beacon Session")
+                return
+            if len(args) == 2 and not ends_with_space:
+                session_ids = self._collect_beacon_session_identifiers()
+                for session_id in self._filter_items(session_ids, partial):
+                    yield Completion(session_id, start_position=-len(partial), display_meta="Beacon Session")
+                return
+
+        if subcommand == "set":
+            if len(args) == 2 and ends_with_space:
+                for key in self._filter_items(profile_keys, ""):
+                    yield Completion(key, start_position=0, display_meta="Beacon Key")
+                return
+            if len(args) == 3 and not ends_with_space:
+                for key in self._filter_items(profile_keys, partial):
+                    yield Completion(key, start_position=-len(partial), display_meta="Beacon Key")
+                return
+
+    def _collect_beacon_session_identifiers(self) -> List[str]:
+        """Prefer HTTP-polling / durable beacon sessions; fall back to all sessions."""
+        identifiers: List[str] = []
+        session_manager = getattr(self.framework, "session_manager", None)
+        if not session_manager:
+            return self._collect_session_identifiers()
+
+        try:
+            for session in session_manager.get_sessions() or []:
+                sid = getattr(session, "id", None) or getattr(session, "session_id", None)
+                if not sid:
+                    continue
+                stype = str(getattr(session, "type", "") or "").lower()
+                data = getattr(session, "data", None) or {}
+                if not isinstance(data, dict):
+                    data = {}
+                module = str(data.get("module") or data.get("listener_module") or "").lower()
+                is_beacon = (
+                    "polling" in stype
+                    or "beacon" in stype
+                    or "http" in stype
+                    or "polling" in module
+                    or "beacon" in module
+                    or bool(data.get("implant_id"))
+                    or bool(data.get("client_id"))
+                )
+                if is_beacon:
+                    identifiers.append(str(sid))
+        except Exception:
+            self._log_completion_error(
+                "beacon-session-identifiers",
+                "Failed to collect beacon session identifiers for completion",
+                level=logging.WARNING,
+            )
+
+        if identifiers:
+            return identifiers
+        return self._collect_session_identifiers()
 
     # ------------------------------------------------------------------ #
     # Helpers

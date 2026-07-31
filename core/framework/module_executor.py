@@ -309,15 +309,32 @@ class ModuleExecutor:
             return False
 
     @staticmethod
+    def _option_value(module: Any, name: str, default: Any = None) -> Any:
+        attr = getattr(module, name, default)
+        if attr is None:
+            return default
+        if hasattr(attr, "value"):
+            return attr.value
+        return attr
+
+    @staticmethod
     def register_background_job(module: Any, framework: Any) -> Optional[int]:
         try:
             from core.job_manager import global_job_manager
 
             job_name = f"{module.type} {module.name}"
             if hasattr(module, "lhost") and hasattr(module, "lport"):
-                host = str(module.lhost.value)
-                port = int(module.lport.value)
-                job_name = f"{module.type} {module.name} on {host}:{port}"
+                host = str(ModuleExecutor._option_value(module, "lhost", "") or "")
+                try:
+                    port = int(ModuleExecutor._option_value(module, "lport", 0) or 0)
+                except (TypeError, ValueError):
+                    port = 0
+                if host:
+                    job_name = (
+                        f"{module.type} {module.name} on {host}:{port}"
+                        if port
+                        else f"{module.type} {module.name} on {host}"
+                    )
 
             job_id = global_job_manager.add_job(
                 name=job_name,

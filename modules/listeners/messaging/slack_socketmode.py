@@ -71,10 +71,13 @@ class Module(Listener):
         prefix = str(self.command_prefix or "!ks")
         if not text.startswith(prefix):
             return
-        # Format: !ks <client_id> <output>
         parts = text.split(None, 2)
         if len(parts) < 3:
             return
+        # Ignore our own command messages: "!ks cmd <client_id> <command>"
+        if parts[1] == "cmd":
+            return
+        # Agent output format: "!ks <client_id> <output>"
         client_id, output = parts[1], parts[2]
         sid = self._ensure_session(client_id)
         self._append_output(sid, output)
@@ -105,7 +108,12 @@ class Module(Listener):
         client_id = self._session_to_client_id.get(session_id)
         if not client_id or not self.app:
             return
-        self.app.client.chat_postMessage(channel=str(self.channel_id), text=f"{self.command_prefix}cmd {client_id} {cmd}")
+        # Must match agent parser: "!ks cmd <client_id> <command>"
+        prefix = str(self.command_prefix or "!ks").strip() or "!ks"
+        self.app.client.chat_postMessage(
+            channel=str(self.channel_id),
+            text=f"{prefix} cmd {client_id} {cmd}",
+        )
 
     def _append_output(self, session_id, text):
         self._received_output.setdefault(session_id, []).append(text)

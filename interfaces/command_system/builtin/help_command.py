@@ -26,6 +26,9 @@ class HelpCommand(BaseCommand):
         'Sessions & Shells': [
             'sessions', 'shell', 'listen', 'msf', 'route'
         ],
+        'C2 & Implants': [
+            'beacon', 'c2log', 'redirector', 'agent_task', 'bloodhound'
+        ],
         'Docker Environments': [
             'environments'
         ],
@@ -45,7 +48,7 @@ class HelpCommand(BaseCommand):
         ],
         'Advanced Features': [
             'debug', 'browser_server', 'demo', 'guardian', 'scope', 'market',
-            'plugin', 'reset', 'sound'
+            'plugin', 'reset', 'sound', 'mcp'
         ]
     }
 

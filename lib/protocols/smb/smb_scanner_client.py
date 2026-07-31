@@ -11,6 +11,10 @@ from lib.protocols.smb.smb_probes import (
     smb1_negotiate,
     check_smb_signing,
     check_null_session,
+    check_ms17_010,
+    smb2_negotiate_info,
+    probe_smb_os_discovery,
+    check_samba_cve_2017_7494,
 )
 
 
@@ -57,3 +61,19 @@ class Smb_scanner_client(BaseModule):
     def null_session_accepted(self) -> bool:
         """True si null session (anonyme) est acceptée."""
         return check_null_session(self._host(), self._port(), self._timeout())
+
+    def smb2_info(self):
+        """(signing_status, dialect_name, dialect_code)."""
+        return smb2_negotiate_info(self._host(), self._port(), self._timeout())
+
+    def ms17_010(self) -> dict:
+        """Probe MS17-010 / EternalBlue."""
+        return check_ms17_010(self._host(), self._port(), self._timeout())
+
+    def os_discovery(self) -> dict:
+        """SMB OS / domain discovery."""
+        return probe_smb_os_discovery(self._host(), self._port(), self._timeout())
+
+    def samba_cve_2017_7494(self) -> dict:
+        """SambaCry version likelihood check."""
+        return check_samba_cve_2017_7494(self._host(), self._port(), self._timeout())

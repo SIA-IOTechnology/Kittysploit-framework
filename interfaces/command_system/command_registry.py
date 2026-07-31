@@ -133,6 +133,7 @@ class CommandRegistry:
             'beacon',
             'bloodhound',
             'agent_task',
+            'mcp',
             'scope',
             'campaign',
             'workflows'

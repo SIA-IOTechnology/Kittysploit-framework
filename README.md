@@ -3,10 +3,10 @@
 
 # KittySploit
 
-**A modular offensive security framework for pentesters, researchers and red teams.**
+**A modular offensive security framework and C2 platform for pentesters, researchers and red teams.**
 
-Scan targets, organize engagements, run security modules and build
-AI-assisted testing plans from a single console.
+Scan targets, organize engagements, run security modules, operate C2
+listeners and sessions, and build AI-assisted testing plans from a single console.
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
@@ -25,6 +25,7 @@ Security testing often requires separate tools for scanning, exploitation, traff
 KittySploit brings these workflows together in an extensible, Metasploit-inspired console built for modern security assessments.
 
 * **Modular console** : search, configure and execute security modules.
+* **Built-in C2** : listeners, payloads, session management and post-exploitation from the same console.
 * **Scanner and workflows** : automate repeatable reconnaissance and testing tasks.
 * **Workspaces and scopes** : keep hosts, vulnerabilities and engagement boundaries organized.
 * **AI-assisted planning** : use local Ollama models to analyze targets and prepare testing plans.

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""C2 operations log — task queue audit for polling implants."""
+"""C2 operations log — encrypted DB audit for polling implants.
+
+Sensitive task data (commands, output, implant id, client IP) lives in the
+workspace database via ``C2Task`` encrypted columns. Plaintext JSONL is
+disabled by default and only used for unit tests / explicit opt-in.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_OUTPUT_PREVIEW_MAX = 4000
 _STATUSES = frozenset({"queued", "sent", "completed", "failed", "killed"})
 
 _lock = threading.RLock()
@@ -67,13 +71,6 @@ def default_jsonl_path(workspace: Optional[str] = None) -> Path:
     return base / "default.jsonl"
 
 
-def _truncate(text: Optional[str], limit: int = _OUTPUT_PREVIEW_MAX) -> str:
-    raw = str(text or "")
-    if len(raw) <= limit:
-        return raw
-    return raw[: limit - 3] + "..."
-
-
 def _record_dict(
     *,
     task_id: str,
@@ -91,6 +88,7 @@ def _record_dict(
     workspace: str = "default",
 ) -> Dict[str, Any]:
     created = created_at or _utc_now()
+    output = str(output_preview or "")
     return {
         "task_id": task_id,
         "session_id": str(session_id or ""),
@@ -98,7 +96,8 @@ def _record_dict(
         "operator": str(operator or "console"),
         "command": str(command or ""),
         "status": status if status in _STATUSES else "queued",
-        "output_preview": _truncate(output_preview),
+        "output_preview": output,
+        "output": output,
         "client_ip": str(client_ip or ""),
         "listener_type": str(listener_type or "reverse_http_polling"),
         "workspace": str(workspace or "default"),
@@ -109,7 +108,7 @@ def _record_dict(
 
 
 class C2OpsLog:
-    """Persist C2 task lifecycle events (queued → sent → completed)."""
+    """Persist C2 task lifecycle events (queued → sent → completed) in encrypted DB."""
 
     def __init__(
         self,
@@ -117,10 +116,16 @@ class C2OpsLog:
         *,
         workspace: Optional[str] = None,
         jsonl_path: Optional[Path] = None,
+        enable_jsonl: Optional[bool] = None,
     ):
         self.framework = framework
         self.workspace = workspace or self._detect_workspace() or "default"
         self.jsonl_path = Path(jsonl_path) if jsonl_path else default_jsonl_path(self.workspace)
+        # Plaintext JSONL is opt-in only (tests). Production uses encrypted DB.
+        if enable_jsonl is None:
+            enable_jsonl = jsonl_path is not None and framework is None
+        self.enable_jsonl = bool(enable_jsonl)
+        self._jsonl_migrated = False
 
     def _detect_workspace(self) -> Optional[str]:
         try:
@@ -142,6 +147,15 @@ class C2OpsLog:
         except Exception:
             return None
 
+    def storage_label(self) -> str:
+        """Human-readable storage location for CLI banners."""
+        db = getattr(self.framework, "db_manager", None) if self.framework else None
+        if db:
+            return f"workspace DB ({self.workspace}) — table c2_tasks"
+        if self.enable_jsonl:
+            return str(self.jsonl_path)
+        return "memory (no framework DB)"
+
     def _append_memory(self, record: Dict[str, Any]) -> None:
         with _lock:
             _memory.append(dict(record))
@@ -149,6 +163,8 @@ class C2OpsLog:
                 del _memory[: len(_memory) - _MEMORY_CAP]
 
     def _append_jsonl(self, record: Dict[str, Any]) -> None:
+        if not self.enable_jsonl:
+            return
         try:
             self.jsonl_path.parent.mkdir(parents=True, exist_ok=True)
             with _lock:
@@ -187,9 +203,15 @@ class C2OpsLog:
                     session.add(row)
                 else:
                     row.status = record.get("status") or row.status
-                    row.command = record.get("command") if record.get("command") is not None else row.command
-                    row.output_preview = record.get("output_preview") or row.output_preview
+                    if record.get("command") is not None:
+                        row.command = record.get("command")
+                    if record.get("output_preview") is not None:
+                        row.output_preview = record.get("output_preview")
                     row.operator = record.get("operator") or row.operator
+                    if record.get("implant_id"):
+                        row.implant_id = record.get("implant_id")
+                    if record.get("client_ip"):
+                        row.client_ip = record.get("client_ip")
 
                 def _parse_iso(val: Optional[str]) -> Optional[datetime]:
                     if not val:
@@ -244,7 +266,7 @@ class C2OpsLog:
             task_id,
             "completed",
             completed_at=_utc_now(),
-            output_preview=_truncate(output),
+            output_preview=str(output or ""),
         )
 
     def mark_failed(self, task_id: str, output: str = "") -> bool:
@@ -252,11 +274,25 @@ class C2OpsLog:
             task_id,
             "failed",
             completed_at=_utc_now(),
-            output_preview=_truncate(output),
+            output_preview=str(output or ""),
         )
 
     def mark_killed(self, task_id: str) -> bool:
         return self._update_status(task_id, "killed", completed_at=_utc_now())
+
+    def kill_pending_for_session(self, session_id: str) -> int:
+        """Mark all queued/sent tasks for a session as killed. Returns count."""
+        if not session_id:
+            return 0
+        pending = self.list_pending_for_session(str(session_id), include_sent=True, limit=500)
+        n = 0
+        for rec in pending:
+            tid = str(rec.get("task_id") or "")
+            if not tid:
+                continue
+            if self.mark_killed(tid):
+                n += 1
+        return n
 
     def _update_status(
         self,
@@ -280,6 +316,7 @@ class C2OpsLog:
                         rec["completed_at"] = _iso(completed_at)
                     if output_preview is not None:
                         rec["output_preview"] = output_preview
+                        rec["output"] = output_preview
                     updated = dict(rec)
                     break
         if updated is None:
@@ -309,9 +346,14 @@ class C2OpsLog:
         out: List[Dict[str, Any]] = []
         for rec in rows:
             if session_id and str(rec.get("session_id") or "") != str(session_id):
-                continue
+                # also allow prefix match (short ids shown in UI)
+                sid = str(rec.get("session_id") or "")
+                if not (sid.startswith(str(session_id)) or str(session_id).startswith(sid[:8])):
+                    continue
             if implant_id and str(rec.get("implant_id") or "") != str(implant_id):
-                continue
+                iid = str(rec.get("implant_id") or "")
+                if not (iid.startswith(str(implant_id)) or str(implant_id).startswith(iid[:8])):
+                    continue
             if status and str(rec.get("status") or "") != str(status):
                 continue
             if since_dt:
@@ -323,7 +365,6 @@ class C2OpsLog:
                 if cdt < since_dt:
                     continue
             out.append(rec)
-        # Prefer latest by created_at
         out.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return out[: max(1, int(limit or 100))]
 
@@ -334,11 +375,7 @@ class C2OpsLog:
         include_sent: bool = True,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        """Return queued (and optionally in-flight ``sent``) tasks for a session.
-
-        Used to rebuild the HTTP polling command queue after a framework restart.
-        Prefers DB rows when available so completed history does not crowd them out.
-        """
+        """Return queued (and optionally in-flight ``sent``) tasks for a session."""
         if not session_id:
             return []
         statuses = ["queued"]
@@ -378,31 +415,97 @@ class C2OpsLog:
     def timeline(self, *, limit: int = 50, since: Optional[str] = None) -> List[Dict[str, Any]]:
         return self.list_tasks(limit=limit, since=since)
 
-    def _load_all(self) -> List[Dict[str, Any]]:
-        """Merge memory + JSONL (latest status wins per task_id)."""
-        by_id: Dict[str, Dict[str, Any]] = {}
-
-        # JSONL first (durable), then memory overlays
+    def _migrate_jsonl_into_db(self) -> None:
+        """One-shot import of legacy plaintext JSONL into encrypted DB, then archive file."""
+        if self._jsonl_migrated:
+            return
+        self._jsonl_migrated = True
+        db = getattr(self.framework, "db_manager", None) if self.framework else None
+        if not db or not self.jsonl_path.is_file():
+            return
         try:
-            if self.jsonl_path.is_file():
-                with open(self.jsonl_path, "r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        tid = rec.get("task_id")
-                        if not tid:
-                            continue
-                        prev = by_id.get(tid, {})
-                        merged = dict(prev)
-                        merged.update({k: v for k, v in rec.items() if k != "event" and v is not None})
-                        by_id[tid] = merged
+            imported = 0
+            with open(self.jsonl_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    tid = rec.get("task_id")
+                    if not tid:
+                        continue
+                    payload = {
+                        "task_id": str(tid),
+                        "session_id": str(rec.get("session_id") or ""),
+                        "implant_id": str(rec.get("implant_id") or ""),
+                        "operator": str(rec.get("operator") or "console"),
+                        "command": str(rec.get("command") or ""),
+                        "status": str(rec.get("status") or "queued"),
+                        "output_preview": str(
+                            rec.get("output_preview") or rec.get("output") or ""
+                        ),
+                        "client_ip": str(rec.get("client_ip") or ""),
+                        "listener_type": str(
+                            rec.get("listener_type") or "reverse_http_polling"
+                        ),
+                        "sent_at": rec.get("sent_at"),
+                        "completed_at": rec.get("completed_at"),
+                    }
+                    self._upsert_db(payload)
+                    imported += 1
+            if imported:
+                archived = self.jsonl_path.with_suffix(self.jsonl_path.suffix + ".migrated")
+                try:
+                    self.jsonl_path.replace(archived)
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    def _load_all(self) -> List[Dict[str, Any]]:
+        """Load tasks: encrypted DB is authoritative; memory overlays; JSONL only if enabled."""
+        by_id: Dict[str, Dict[str, Any]] = {}
+
+        db = getattr(self.framework, "db_manager", None) if self.framework else None
+        if db:
+            self._migrate_jsonl_into_db()
+            try:
+                from core.models.models import C2Task
+
+                with db.get_db_session(self.workspace or "default") as session:
+                    for row in session.query(C2Task).all():
+                        d = row.to_dict()
+                        tid = d.get("task_id")
+                        if not tid:
+                            continue
+                        by_id[tid] = d
+            except Exception:
+                pass
+
+        if self.enable_jsonl:
+            try:
+                if self.jsonl_path.is_file():
+                    with open(self.jsonl_path, "r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            tid = rec.get("task_id")
+                            if not tid:
+                                continue
+                            prev = by_id.get(tid, {})
+                            merged = dict(prev)
+                            merged.update({k: v for k, v in rec.items() if k != "event" and v is not None})
+                            by_id[tid] = merged
+            except Exception:
+                pass
 
         with _lock:
             for rec in _memory:
@@ -413,27 +516,6 @@ class C2OpsLog:
                 merged = dict(prev)
                 merged.update(rec)
                 by_id[tid] = merged
-
-        # Optional DB enrich
-        db = getattr(self.framework, "db_manager", None) if self.framework else None
-        if db:
-            try:
-                from core.models.models import C2Task
-
-                with db.get_db_session(self.workspace or "default") as session:
-                    for row in session.query(C2Task).all():
-                        d = row.to_dict()
-                        tid = d.get("task_id")
-                        if not tid:
-                            continue
-                        prev = by_id.get(tid, {})
-                        merged = dict(prev)
-                        for k, v in d.items():
-                            if v is not None:
-                                merged[k] = v
-                        by_id[tid] = merged
-            except Exception:
-                pass
 
         return list(by_id.values())
 

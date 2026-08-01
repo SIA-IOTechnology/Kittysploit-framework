@@ -203,7 +203,7 @@ def main():
     if not skip_zig_startup_check:
         try:
             from core.lib.compiler.zig_installer import install_zig_if_needed
-            print_info("Checking Zig compiler installation...")
+            print_status("Checking Zig compiler installation...")
             if install_zig_if_needed():
                 print_success("Zig compiler is ready!")
             else:

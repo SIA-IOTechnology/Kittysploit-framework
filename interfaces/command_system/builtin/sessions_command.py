@@ -657,6 +657,20 @@ Session Types:
             # Try to kill standard session
             self._cleanup_session_transport(session_id)
             self._cleanup_ics_session(session_id)
+            # Beacon: clear pending C2 tasks so they don't resurrect on restart
+            active = getattr(self.framework, "active_listeners", None) or {}
+            for listener in active.values():
+                if hasattr(listener, "retire_beacon_session"):
+                    try:
+                        listener.retire_beacon_session(session_id, remove=False)
+                    except Exception:
+                        pass
+            try:
+                from lib.c2.ops_log import get_ops_log
+
+                get_ops_log(self.framework).kill_pending_for_session(session_id)
+            except Exception:
+                pass
             if session_manager.remove_session(session_id):
                 print_success(f"Standard session killed: {session_id}")
                 return True

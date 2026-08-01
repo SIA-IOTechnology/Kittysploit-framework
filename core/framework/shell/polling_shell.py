@@ -147,17 +147,15 @@ class PollingShell(BaseShell):
             return self._queue_shell(args, wait=True)
         if cmd == "queue":
             return self._queue_shell(args, wait=False)
-        if cmd in ("pwd", "whoami", "exit", "quit"):
-            if cmd in ("exit", "quit") and not args.strip():
-                # Prefer local shell exit unless "exit agent"
-                if cmd == "exit" and args.strip().lower() in ("agent", "implant"):
-                    return self._queue_task("exit", {}, wait=True)
-                self.is_active = False
-                return {"output": "Bye!", "status": 0, "error": ""}
+        if cmd in ("pwd", "whoami"):
             if cmd == "whoami":
                 return self._queue_task("whoami", {}, wait=True)
-            if cmd == "pwd":
-                return self._queue_task("pwd", {}, wait=True)
+            return self._queue_task("pwd", {}, wait=True)
+        if cmd in ("exit", "quit"):
+            if args.strip().lower() in ("agent", "implant"):
+                return self._kill_agent()
+            self.is_active = False
+            return {"output": "Bye!", "status": 0, "error": ""}
         if cmd == "ls":
             path = args.strip() or "."
             return self._queue_task("ls", {"path": path}, wait=True)
@@ -172,7 +170,7 @@ class PollingShell(BaseShell):
         if cmd == "upload":
             return self._upload(args)
         if cmd == "kill_agent":
-            return self._queue_task("exit", {}, wait=True)
+            return self._kill_agent()
         if cmd == "socks":
             sub = (args.strip().split(None, 1) + [""])[0].lower()
             rest = args.strip()[len(sub):].strip() if args.strip() else ""
@@ -217,12 +215,13 @@ class PollingShell(BaseShell):
   upload <local> <remote>   Push file to agent
   socks start [port] Start SOCKS5 on implant (default 1080)
   socks stop         Stop implant SOCKS5
-  kill_agent         Tell implant to exit
+  kill_agent         Tell implant to exit and drop durable session
   output [N]         Show last N output chunks
   clear_output       Clear buffered output
   info               Show transport/session info
   help               This help
   exit / quit        Leave shell (agent keeps polling)
+  exit agent         Same as kill_agent
 
 Tip: wait time ≈ agent poll_interval (default ~10s)."""
 
@@ -434,6 +433,42 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
             {"path": remote_path, "data": b64, "encoding": "base64"},
             wait=True,
         )
+
+    def _kill_agent(self) -> Dict[str, Any]:
+        """Instruct implant to die (if it still polls) and drop the durable session."""
+        sid = self._queue_session_id()
+        err = self._ensure_listener()
+        if not err and self.listener and hasattr(self.listener, "retire_beacon_session"):
+            try:
+                self.listener.retire_beacon_session(sid, remove=True)
+            except Exception as exc:
+                return {
+                    "output": "",
+                    "status": 1,
+                    "error": f"Failed to retire beacon session: {exc}",
+                }
+        else:
+            try:
+                from lib.c2.ops_log import get_ops_log
+
+                get_ops_log(self.framework).kill_pending_for_session(sid)
+            except Exception:
+                pass
+            if self.framework and hasattr(self.framework, "session_manager"):
+                try:
+                    self.framework.session_manager.remove_session(self.session_id)
+                except Exception:
+                    pass
+
+        self.is_active = False
+        return {
+            "output": (
+                "Beacon retired: durable session removed and pending tasks cleared. "
+                "If the implant still polls once, it will receive die=true."
+            ),
+            "status": 0,
+            "error": "",
+        }
 
     def _output(self, args: str) -> Dict[str, Any]:
         err = self._ensure_listener()

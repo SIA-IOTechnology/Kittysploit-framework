@@ -477,8 +477,26 @@ Function Find-RDPClientConnection
         return base64.b64encode(script.encode("utf-16le")).decode("ascii")
 
     def _run_powershell(self, script: str) -> str:
+        """Run a PowerShell snippet without exceeding Windows ~8191 cmdline limit.
+
+        Polling Zig agents wrap in ``cmd.exe /c``, so large ``-EncodedCommand``
+        payloads fail with "La ligne de commande est trop longue".
+        """
+        script = (script or "").strip()
+        if not script:
+            return ""
+        esc = script.replace("'", "''")
+        command_form = f"powershell -NoP -NonI -Command '{esc}'"
+        if len(command_form) <= 7000:
+            return self._execute_cmd(command_form)
         encoded = self._encode_powershell(script)
-        return self._execute_cmd(f"powershell -NoP -NonI -EncodedCommand {encoded}")
+        encoded_form = f"powershell -NoP -NonI -EncodedCommand {encoded}"
+        if len(encoded_form) > 7000:
+            raise ProcedureError(
+                FailureType.Unknown,
+                "PowerShell command too long for this session transport",
+            )
+        return self._execute_cmd(encoded_form)
 
     def _remote_temp_dir(self) -> str:
         output = self._execute_cmd("echo %TEMP%")
@@ -486,23 +504,58 @@ Function Find-RDPClientConnection
             return output.splitlines()[0].strip().rstrip("\\")
         return "C:\\Windows\\Temp"
 
+    def _upload_script(self, remote_path: str) -> bool:
+        """Push the full .ps1 via shell upload when available (polling/meterpreter)."""
+        import os
+        import tempfile
+        from pathlib import Path
+
+        fd, local_path = tempfile.mkstemp(prefix="ks_computer_detail_", suffix=".ps1")
+        try:
+            os.close(fd)
+            Path(local_path).write_text(self._powershell_script(), encoding="utf-8")
+            out = self.cmd_execute(f"upload {local_path} {remote_path}") or ""
+            if re.search(r"(error|failed|usage:|cannot|not found|no such)", out, re.I):
+                return False
+            if re.search(r"(ok wrote|uploaded|success|\d+\s*bytes)", out, re.I):
+                return True
+            check = self._execute_cmd(f'if exist "{remote_path}" (echo EXISTS)')
+            return "EXISTS" in (check or "").upper()
+        except Exception:
+            return False
+        finally:
+            try:
+                os.unlink(local_path)
+            except OSError:
+                pass
+
     def _write_remote_script(self, temp_dir: str) -> tuple[str, str]:
         script_path = f"{temp_dir}\\computer_detail.ps1"
         blob_path = f"{temp_dir}\\computer_detail.b64"
+
+        # Prefer typed upload — avoids CreateProcess cmdline limits entirely
+        if self._upload_script(script_path):
+            print_status(f"Uploaded script to {script_path}")
+            return script_path, ""
+
+        print_status("Upload unavailable; writing script in small chunks...")
         payload = base64.b64encode(self._powershell_script().encode("utf-8")).decode("ascii")
-        chunks = [payload[i:i + 3500] for i in range(0, len(payload), 3500)]
+        # Stay well under 8191 even with cmd.exe /c + powershell -Command wrapper
+        chunk_size = 1200
+        chunks = [payload[i : i + chunk_size] for i in range(0, len(payload), chunk_size)]
 
         for index, chunk in enumerate(chunks):
-            method = "WriteAllText" if index == 0 else "AppendAllText"
-            ps = (
-                f"[IO.File]::{method}('{blob_path}','{chunk}');"
-            )
+            chunk_esc = chunk.replace("'", "''")
+            if index == 0:
+                ps = f"[IO.File]::WriteAllText('{blob_path}','{chunk_esc}')"
+            else:
+                ps = f"[IO.File]::AppendAllText('{blob_path}','{chunk_esc}')"
             self._run_powershell(ps)
 
         decode_script = (
             f"$b=[IO.File]::ReadAllText('{blob_path}');"
             f"[IO.File]::WriteAllText('{script_path}',"
-            "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)));"
+            "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)))"
         )
         self._run_powershell(decode_script)
         return script_path, blob_path
@@ -531,6 +584,8 @@ Function Find-RDPClientConnection
 
     def _cleanup_remote(self, paths):
         for path in paths:
+            if not path:
+                continue
             self._execute_cmd(f'del /f /q "{path}"')
 
     def check(self):

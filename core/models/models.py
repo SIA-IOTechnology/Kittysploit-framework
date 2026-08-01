@@ -813,20 +813,24 @@ class WorkflowExecution(Base):
             'error_message': self.error_message
         }
 
-class C2Task(Base):
-    """C2 implant task/response audit log (HTTP polling and similar beacons)."""
+class C2Task(Base, EncryptedFieldMixin):
+    """C2 implant task/response audit log (HTTP polling and similar beacons).
+
+    Sensitive fields (command, output, implant identity, client IP) are stored
+    encrypted at rest via the workspace encryption manager.
+    """
     __tablename__ = 'c2_tasks'
 
     id = Column(Integer, primary_key=True)
     task_id = Column(String(64), unique=True, nullable=False, index=True)
     workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=True)
-    session_id = Column(String(100), index=True)
-    implant_id = Column(String(255), index=True)
+    session_id = Column(String(100), index=True)  # plaintext for restore/filter
+    implant_id = Column(EncryptedString(255))
     operator = Column(String(100), default='console')
-    command = Column(Text)
+    command = Column(EncryptedText)
     status = Column(String(32), default='queued', index=True)  # queued, sent, completed, failed, killed
-    output_preview = Column(Text)
-    client_ip = Column(String(255))
+    output_preview = Column(EncryptedText)  # full task output (legacy column name)
+    client_ip = Column(EncryptedString(255))
     listener_type = Column(String(100), default='reverse_http_polling')
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     sent_at = Column(DateTime)
@@ -856,6 +860,7 @@ class C2Task(Base):
             'command': self.command,
             'status': self.status,
             'output_preview': self.output_preview,
+            'output': self.output_preview,
             'client_ip': self.client_ip,
             'listener_type': self.listener_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,

@@ -24,6 +24,7 @@ from interfaces.command_system.command_parser import split_command_line
 
 
 READ_ONLY_COMMANDS = {
+    "academy",
     "compatible_payloads",
     "doctor",
     "help",

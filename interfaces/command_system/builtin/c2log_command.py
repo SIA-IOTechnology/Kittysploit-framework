@@ -31,15 +31,20 @@ class C2LogCommand(BaseCommand):
 
     @property
     def usage(self) -> str:
-        return "c2log [list|timeline] [--session ID] [--since 1h] [--status queued] [--limit N] [--json]"
+        return (
+            "c2log [list|timeline|show] [--session ID] [--since 1h] "
+            "[--status queued] [--limit N] [--json] [task_id]"
+        )
 
     @property
     def help_text(self) -> str:
         return """
 Show the C2 operations log for HTTP polling beacons (queued -> sent -> completed).
+Stored in the framework workspace database (same DB unlocked by the master password).
 
 Subcommands:
     list / timeline   Show recent tasks (default)
+    show <task_id>    Full record including complete command and output
     help              Show this help
 
 Options:
@@ -54,11 +59,12 @@ Examples:
     c2log
     c2log --since 1h
     c2log --session abc123 --status completed
+    c2log show 4ec588c5
     c2log timeline --limit 20 --json
         """
 
     def get_subcommands(self) -> List[str]:
-        return ["list", "timeline", "help"]
+        return ["list", "timeline", "show", "help"]
 
     def execute(self, args: List[str], **kwargs) -> bool:
         if args and args[0] in ("-h", "--help", "help"):
@@ -66,8 +72,13 @@ Examples:
             return True
 
         rest = list(args or [])
-        if rest and rest[0].lower() in ("list", "timeline"):
+        action = "list"
+        if rest and rest[0].lower() in ("list", "timeline", "show"):
+            action = rest[0].lower()
             rest = rest[1:]
+
+        if action == "show":
+            return self._show(rest)
 
         parser = argparse.ArgumentParser(prog="c2log", add_help=True)
         parser.add_argument("--session", default=None)
@@ -109,30 +120,68 @@ Examples:
         headers = ["When", "Status", "Session", "Implant", "Operator", "Command"]
         table = []
         for r in rows:
-            when = str(r.get("created_at") or "")[:19].replace("T", " ")
+            when = str(r.get("created_at") or "").replace("T", " ").rstrip("Z")
             cmd = str(r.get("command") or "").replace("\n", " ")
-            if len(cmd) > 48:
-                cmd = cmd[:45] + "..."
-            sid = str(r.get("session_id") or "")
-            if len(sid) > 10:
-                sid = sid[:8] + ".."
-            implant = str(r.get("implant_id") or "")
-            if len(implant) > 14:
-                implant = implant[:12] + ".."
             table.append(
                 [
                     when,
                     str(r.get("status") or ""),
-                    sid,
-                    implant,
+                    str(r.get("session_id") or ""),
+                    str(r.get("implant_id") or ""),
                     str(r.get("operator") or ""),
                     cmd,
                 ]
             )
 
-        print_table(headers, table)
-        print_info(f"{len(rows)} task(s)  log={log.jsonl_path}")
+        print_table(
+            headers,
+            table,
+            wrap_extra_headers=["Command", "Session", "Implant", "When", "Status"],
+            prefer_single_line=True,
+            expand_headers=["Command"],
+        )
+        print_info(f"{len(rows)} task(s)  store={log.storage_label()}")
         completed = sum(1 for r in rows if r.get("status") == "completed")
         if completed:
             print_success(f"{completed} completed")
+        print_info("Full output: c2log show <task_id>")
+        return True
+
+    def _show(self, args: List[str]) -> bool:
+        if not args:
+            print_error("Usage: c2log show <task_id>")
+            return False
+        needle = str(args[0]).strip()
+        try:
+            log = get_ops_log(self.framework)
+            rows = log.list_tasks(limit=500)
+        except Exception as exc:
+            print_error(f"Failed to read C2 ops log: {exc}")
+            return False
+
+        match = None
+        for r in rows:
+            tid = str(r.get("task_id") or "")
+            if tid == needle or tid.startswith(needle):
+                match = r
+                break
+        if not match:
+            print_warning(f"No task matching {needle!r}")
+            return False
+
+        print_info(f"task_id:     {match.get('task_id')}")
+        print_info(f"status:      {match.get('status')}")
+        print_info(f"when:        {match.get('created_at')}")
+        print_info(f"sent_at:     {match.get('sent_at')}")
+        print_info(f"completed:   {match.get('completed_at')}")
+        print_info(f"session:     {match.get('session_id')}")
+        print_info(f"implant:     {match.get('implant_id')}")
+        print_info(f"operator:    {match.get('operator')}")
+        print_info(f"listener:    {match.get('listener_type')}")
+        print_info(f"client_ip:   {match.get('client_ip')}")
+        print_info("command:")
+        print(str(match.get("command") or ""))
+        out = match.get("output") or match.get("output_preview") or ""
+        print_info("output:")
+        print(str(out) if out else "(empty)")
         return True

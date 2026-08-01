@@ -70,7 +70,7 @@ dependencies = [
     "toml>=0.10.2",
     "tomli>=2.0.0; python_version < '3.11'",
     "pyyaml>=6.0",
-    "bcrypt==4.0.1",
+    "bcrypt==5.0.0",
     "pyserial>=3.5",
     "pychromecast>=13.0.0",
     "python-can>=4.0.0",

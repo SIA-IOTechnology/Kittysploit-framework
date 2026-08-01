@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/vbulletin_runmaths_rce_cve_2026_61511_detect',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': ['https://www.vbulletin.com/'],

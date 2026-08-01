@@ -33,6 +33,11 @@ class Module(Post, WindowsSessionMixin):
             "chain": {
                 "consumes_capabilities": ["shell"],
                 "produces_capabilities": [],
+                "suggested_followups": [
+                    "post/shell/windows/manage/amsi_bypass",
+                    "post/shell/windows/manage/disable_ps_logging",
+                    "post/shell/windows/manage/clm_bypass",
+                ],
             },
         },
     }

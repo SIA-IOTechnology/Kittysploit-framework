@@ -375,6 +375,13 @@ Session Types:
                                 "Session disconnected — wait for implant reconnect or kill this session."
                             )
                             return False
+                # Polling shells must rebind to the live listener (UUID changes on restart)
+                if getattr(existing_shell, "shell_name", "") == "polling":
+                    if hasattr(existing_shell, "rebind_listener"):
+                        if not existing_shell.rebind_listener():
+                            print_warning(
+                                "No live HTTP polling listener bound — start/run the listener, then retry."
+                            )
                 # Switch to existing shell
                 success = self.framework.shell_manager.switch_shell(session_id)
                 if success:

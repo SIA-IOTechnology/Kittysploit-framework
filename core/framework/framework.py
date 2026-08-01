@@ -211,7 +211,42 @@ class Framework:
             self.output_handler.print_warning(f"Observability setup skipped: {exc}")
         
         self.current_collab: Optional[Any] = None
+        self._sensitive_startup_done = False
+        # Durable sessions + listener auto-start run in complete_sensitive_startup()
+        # after the master password unlocks Fernet (see CLI / RPC entrypoints).
     
+    def complete_sensitive_startup(self) -> None:
+        """Restore durable beacon sessions and auto-start listeners after encryption unlock.
+
+        Call this once the master key is loaded (or when encryption is unavailable).
+        Safe to call multiple times.
+        """
+        if not getattr(self, "durable_sessions", False):
+            return
+        if getattr(self, "_sensitive_startup_done", False):
+            return
+        sm = getattr(self, "session_manager", None)
+        if sm and hasattr(sm, "load_deferred_sessions"):
+            try:
+                sm.load_deferred_sessions()
+            except Exception as exc:
+                try:
+                    self.output_handler.print_warning(f"Durable session restore failed: {exc}")
+                except Exception:
+                    pass
+        try:
+            from lib.c2.durable_listeners import start_durable_listeners
+
+            start_durable_listeners(self)
+        except Exception as exc:
+            try:
+                self.output_handler.print_warning(
+                    f"Durable listener auto-start skipped: {exc}"
+                )
+            except Exception:
+                pass
+        self._sensitive_startup_done = True
+
     def notify_session_disconnected(
         self,
         session_id: str,
@@ -428,7 +463,13 @@ class Framework:
         Returns:
             True if initialization successful, False otherwise
         """
-        return self.encryption_manager.initialize_encryption(password)
+        success = self.encryption_manager.initialize_encryption(password)
+        if success:
+            # First-time setup already derived the key into _fernet — mark ready
+            if getattr(self.encryption_manager, "_fernet", None) is not None:
+                self.encryption_manager._is_initialized = True
+            self.db_manager.set_encryption_manager(self.encryption_manager)
+        return success
     
     def load_encryption(self, password: str = None) -> bool:
         """

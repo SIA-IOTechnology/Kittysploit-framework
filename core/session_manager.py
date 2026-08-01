@@ -107,11 +107,29 @@ class SessionManager:
         self.db_manager = db_manager
         self.framework = framework
         self.clean_startup = clean_startup
-        
-        # Load sessions from database on startup (only if clean_startup is False)
-        if not clean_startup:
-            self._load_sessions_from_db()
+        # Defer durable session restore until master key is unlocked (hosts / session_data
+        # may be Fernet-encrypted). Framework.complete_sensitive_startup() loads them.
+        self._deferred_durable_load = not clean_startup
+        self._durable_sessions_loaded = False
     
+    def load_deferred_sessions(self, *, force: bool = False) -> int:
+        """Load durable beacon sessions after encryption is ready.
+
+        Returns the number of sessions currently in memory after load.
+        """
+        if self.clean_startup and not force:
+            return 0
+        if self._durable_sessions_loaded and not force:
+            return len(self.sessions)
+        if force:
+            self.sessions.clear()
+            self.browser_sessions.clear()
+            self._session_metadata.clear()
+        self._load_sessions_from_db()
+        self._deferred_durable_load = False
+        self._durable_sessions_loaded = True
+        return len(self.sessions)
+
     def _get_workspace_id(self) -> Optional[int]:
         """Return the current workspace ID from the framework, if available."""
         if not self.framework:
@@ -137,7 +155,12 @@ class SessionManager:
         self.sessions.clear()
         self.browser_sessions.clear()
         self._session_metadata.clear()
-        self._load_sessions_from_db()
+        self._durable_sessions_loaded = False
+        if not self.clean_startup:
+            self.load_deferred_sessions(force=True)
+        else:
+            self._load_sessions_from_db()
+            self._durable_sessions_loaded = True
     
     def _sync_session_to_db(self, session_id: str, session_data: SessionData) -> bool:
         """Sync a session to the database"""

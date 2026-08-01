@@ -140,6 +140,30 @@ def _serve_until_stopped(server, label):
         server.stop()
 
 
+def _ensure_encryption_unlocked(framework) -> bool:
+    """Prompt for / load master key before touching encrypted session data."""
+    if framework.is_encryption_loaded():
+        return True
+    from core.encryption_manager import HAS_CRYPTOGRAPHY
+
+    if not HAS_CRYPTOGRAPHY:
+        print_warning(
+            "The 'cryptography' package is not installed. "
+            "Encryption is disabled — sensitive data will be stored in plaintext."
+        )
+        return True
+    if not framework.is_encryption_initialized():
+        print_info("Setting up encryption for sensitive data protection...")
+        if not framework.initialize_encryption():
+            print_error("Failed to initialize encryption. Stopping framework.")
+            return False
+        return True
+    if not framework.load_encryption():
+        print_error("Failed to load encryption. Stopping framework.")
+        return False
+    return True
+
+
 def main():
     args = parse_arguments()
 
@@ -163,6 +187,15 @@ def main():
             print_error("[!] Charter not accepted. Stopping framework.")
             return
 
+    # Unlock master key BEFORE restoring durable sessions / auto-starting listeners
+    # (and before Zig install noise), so encrypted host/session fields decrypt cleanly.
+    if not _ensure_encryption_unlocked(framework):
+        return
+    try:
+        framework.complete_sensitive_startup()
+    except Exception as exc:
+        print_warning(f"Post-encryption session restore skipped: {exc}")
+
     # Avoid startup overhead for autonomous scanning commands: Zig is only
     # required for specific payload compilation paths and can be checked on-demand.
     command_name = str(getattr(args, "command", "") or "").lower()
@@ -179,25 +212,6 @@ def main():
         except Exception as e:
             print_warning(f"Could not check Zig compiler installation: {e}")
             print_info("Zig will be automatically installed when needed.")
-
-    # Handle encryption setup/loading for RPC and API modes only
-    # CLI mode handles encryption in interfaces/cli.py
-    if args.rpc or args.api:
-        from core.encryption_manager import HAS_CRYPTOGRAPHY
-        if not HAS_CRYPTOGRAPHY:
-            print_warning(
-                "The 'cryptography' package is not installed. "
-                "Encryption is disabled — sensitive data will be stored in plaintext."
-            )
-        elif not framework.is_encryption_initialized():
-            print_info("Setting up encryption for sensitive data protection...")
-            if not framework.initialize_encryption():
-                print_error("Failed to initialize encryption. Stopping framework.")
-                return
-        else:
-            if not framework.load_encryption():
-                print_error("Failed to load encryption. Stopping framework.")
-                return
 
     # Start the RPC server if requested
     if args.rpc:

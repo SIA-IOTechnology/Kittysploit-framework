@@ -172,6 +172,13 @@ class Module(Listener):
             self._session_profiles[session_id] = current
         else:
             self._session_profiles.pop(session_id, None)
+        # Persist so Waiting sessions keep overrides across restart
+        sm = getattr(self.framework, "session_manager", None) if self.framework else None
+        if sm:
+            try:
+                sm.update_session_data(str(session_id), {"beacon_overrides": dict(current)})
+            except Exception:
+                pass
 
     def _verify_client(self, client_id: str, sig_b64: str) -> bool:
         pub = str(getattr(getattr(self, "implant_public_key", None), "value", self.implant_public_key) or "").strip()
@@ -259,6 +266,9 @@ class Module(Listener):
             "chained": bool(chained),
             "chain_via": str(chain_via or ""),
         }
+        bind = getattr(self, "_listener_bind_snapshot", None)
+        if isinstance(bind, dict):
+            updates["listener_bind"] = bind
         if sm:
             sm.update_session_data(session_id, updates)
             # Keep host fresh
@@ -299,17 +309,18 @@ class Module(Listener):
                 continue
             sid = session.id
             # Point session at this listener UUID without announcing reconnect yet
-            sm.update_session_data(
-                sid,
-                {
-                    "listener_id": self.listener_id,
-                    "listener_module": self._listener_module_name(),
-                    "listener_type": "reverse_http_polling",
-                    "transport_state": "disconnected",
-                    "pending_rebind": True,
-                    "durable": True,
-                },
-            )
+            rehydrate_updates = {
+                "listener_id": self.listener_id,
+                "listener_module": self._listener_module_name(),
+                "listener_type": "reverse_http_polling",
+                "transport_state": "disconnected",
+                "pending_rebind": True,
+                "durable": True,
+            }
+            bind = getattr(self, "_listener_bind_snapshot", None)
+            if isinstance(bind, dict):
+                rehydrate_updates["listener_bind"] = bind
+            sm.update_session_data(sid, rehydrate_updates)
             if self.framework and hasattr(self.framework, "active_listeners"):
                 self.framework.active_listeners[self.listener_id] = self
             self._client_id_to_session[client_id] = sid
@@ -317,6 +328,10 @@ class Module(Listener):
             self._pending_commands.setdefault(sid, [])
             self._in_flight_tasks.setdefault(sid, [])
             self._received_output.setdefault(sid, [])
+            # Restore durable per-session beacon overrides into RAM
+            stored = (session.data or {}).get("beacon_overrides") if session.data else None
+            if isinstance(stored, dict) and stored:
+                self._session_profiles[sid] = dict(stored)
             n = self._restore_pending_queue(sid)
             bound += 1
             if n:
@@ -381,6 +396,16 @@ class Module(Listener):
             "transport_state": "connected",
             "durable": True,
         }
+        bind = getattr(self, "_listener_bind_snapshot", None)
+        if isinstance(bind, dict):
+            data["listener_bind"] = bind
+        else:
+            try:
+                from lib.c2.durable_listeners import snapshot_from_module
+
+                data["listener_bind"] = snapshot_from_module(self)
+            except Exception:
+                pass
         sid = self._create_session("reverse", client_ip, 0, data)
         if sid:
             self._bind_client_maps(client_id, sid)
@@ -500,11 +525,13 @@ class Module(Listener):
 
     def _handler_class(self):
         listener = self
-        prefix = "/" + str(self.url_prefix or "/c2").strip("/")
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, fmt, *args):
                 return
+
+            def _prefix(self) -> str:
+                return "/" + str(listener._opt_str("url_prefix", "/c2") or "/c2").strip("/")
 
             def _send(self, status, body, ctype="text/plain"):
                 data = body.encode("utf-8") if isinstance(body, str) else body
@@ -533,6 +560,7 @@ class Module(Listener):
                 try:
                     parsed = urlparse(self.path)
                     path = parsed.path
+                    prefix = self._prefix()
 
                     if listener.cover_traffic and path in listener._decoy_paths:
                         decoys = ["OK", "healthy", "200", "<!-- static -->"]
@@ -567,11 +595,18 @@ class Module(Listener):
             def do_POST(self):
                 try:
                     parsed = urlparse(self.path)
+                    prefix = self._prefix()
                     if parsed.path != f"{prefix}/result":
                         self._send(404, "not found")
                         return
                     length = int(self.headers.get("Content-Length", "0") or 0)
-                    raw = self.rfile.read(length).decode("utf-8", errors="replace")
+                    raw_bytes = self.rfile.read(length) if length > 0 else b""
+                    # If Content-Length lied / connection truncated, still try what we got
+                    if length > 0 and len(raw_bytes) < length:
+                        extra = self.rfile.read(length - len(raw_bytes))
+                        if extra:
+                            raw_bytes += extra
+                    raw = raw_bytes.decode("utf-8", errors="replace")
                     qs = parse_qs(parsed.query)
                     cid = (qs.get("id") or [""])[0]
                     sig = (qs.get("sig") or [""])[0]
@@ -588,16 +623,21 @@ class Module(Listener):
                     if not sid:
                         self._send(403, "invalid implant signature")
                         return
+                    data = {}
+                    output = ""
                     try:
                         data = json.loads(raw) if raw else {}
                         output = data.get("output", "")
                         if data.get("encoding") == "base64":
-                            output = base64.b64decode(output).decode("utf-8", errors="replace")
+                            try:
+                                output = base64.b64decode(output).decode("utf-8", errors="replace")
+                            except Exception:
+                                output = str(output)
                     except Exception:
                         output = raw
                         data = {}
-                    listener._append_output(sid, output)
-                    # Persist downloaded files from typed agent
+                    # Always append (even empty) so polling-shell wait can unblock
+                    listener._append_output(sid, output if output != "" else "(command returned no output)")
                     try:
                         files = data.get("files") if isinstance(data, dict) else None
                         if files:
@@ -632,6 +672,15 @@ class Module(Listener):
                 return False
 
         self.running = True
+        # Snapshot bind options before rehydrate so Waiting sessions get listener_bind
+        try:
+            from lib.c2.durable_listeners import save_module_listener, snapshot_from_module
+
+            self._listener_bind_snapshot = snapshot_from_module(self)
+            save_module_listener(self.framework, self)
+        except Exception:
+            self._listener_bind_snapshot = None
+
         rebound = self._rehydrate_from_session_manager()
         self.listener_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.listener_thread.start()
@@ -661,6 +710,7 @@ class Module(Listener):
         notify = self._opt_str("callback_notify_url", "")
         if notify:
             print_info(f"Callback notify webhook: {notify}")
+
         if background:
             return True
         try:

@@ -217,9 +217,11 @@ class CLI:
                 return
             print_info("\n" + "="*80)
         
-        # Handle encryption setup/loading
+        # Handle encryption setup/loading (may already be done in entry_console)
         from core.encryption_manager import HAS_CRYPTOGRAPHY
-        if not HAS_CRYPTOGRAPHY:
+        if self.framework.is_encryption_loaded():
+            pass
+        elif not HAS_CRYPTOGRAPHY:
             print_warning(
                 "The 'cryptography' package is not installed. "
                 "Encryption is disabled — sensitive data will be stored in plaintext."
@@ -238,6 +240,12 @@ class CLI:
             if not self.framework.load_encryption():
                 print_error("Failed to load encryption. Stopping framework.")
                 return
+
+        # Idempotent: no-op if entry_console already restored sessions
+        try:
+            self.framework.complete_sensitive_startup()
+        except Exception as exc:
+            print_warning(f"Post-encryption session restore skipped: {exc}")
 
         if not self.quiet:
             self.handle_command("banner")

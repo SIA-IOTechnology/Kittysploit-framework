@@ -2,7 +2,11 @@ from core.framework.base_module import BaseModule, ModuleResult, normalize_modul
 from core.framework.failure import ProcedureError, FailureType
 from core.framework.option.option_string import OptString
 from core.output_handler import print_error, print_info, print_status, print_success, print_warning
+import base64
+import re
 import time
+import uuid
+
 
 class Post(BaseModule):
 
@@ -26,7 +30,74 @@ class Post(BaseModule):
             raise e
         except Exception as e:
             raise ProcedureError(FailureType.Unknown, e)
-    
+
+    def _session_id_value(self) -> str:
+        raw = self.session_id.value if hasattr(self.session_id, "value") else self.session_id
+        return str(raw or "").strip()
+
+    def _is_polling_session(self, session_id: str = "") -> bool:
+        sid = session_id or self._session_id_value()
+        if not sid or not self.framework or not hasattr(self.framework, "session_manager"):
+            return False
+        session = self.framework.session_manager.get_session(sid)
+        if not session:
+            return False
+        st = str(getattr(session, "session_type", "") or "").lower()
+        data = getattr(session, "data", None) or {}
+        if not isinstance(data, dict):
+            data = {}
+        module = str(data.get("listener_module") or data.get("module") or "").lower()
+        return st == "polling" or "polling" in st or "http_polling" in module
+
+    def _adapt_command_for_polling(self, command: str) -> str:
+        """Rewrite oversized PowerShell EncodedCommand into upload + -File.
+
+        Classic sessions never call this — keeps their behavior unchanged.
+        """
+        text = str(command or "")
+        if len(text) <= 7000:
+            return text
+        match = re.search(
+            r"(?is)^(.*?powershell(?:\.exe)?(?:\s+\S+)*\s+-EncodedCommand\s+)([A-Za-z0-9+/=]+)(\s.*)?$",
+            text.strip(),
+        )
+        if not match:
+            return text
+        b64 = match.group(2)
+        try:
+            script = base64.b64decode(b64).decode("utf-16le")
+        except Exception:
+            return text
+
+        sm = getattr(self.framework, "shell_manager", None)
+        sid = self._session_id_value()
+        if not sm:
+            return text
+        shell = sm.get_shell(sid)
+        if not shell:
+            sm.execute_command(sid, "echo.", framework=self.framework)
+            shell = sm.get_shell(sid)
+        if not shell or not hasattr(shell, "_queue_task"):
+            return text
+
+        # Resolve %TEMP% via a short shell task
+        temp_out = sm.execute_command(sid, "echo %TEMP%", framework=self.framework) or {}
+        temp = str(temp_out.get("output") or "").strip().splitlines()
+        temp_dir = (temp[0].strip().rstrip("\\") if temp else "") or "C:\\Windows\\Temp"
+        remote = f"{temp_dir}\\ks_post_{uuid.uuid4().hex[:10]}.ps1"
+        payload = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        result = shell._queue_task(
+            "upload",
+            {"path": remote, "data": payload, "encoding": "base64"},
+            wait=True,
+        ) or {}
+        reply = str(result.get("output") or result.get("error") or "")
+        if not re.search(r"ok wrote|uploaded|\d+\s*bytes", reply, re.I):
+            print_warning("Polling: could not stage oversized PowerShell payload via upload")
+            return text
+        print_status(f"Polling: staged oversized PowerShell script → {remote}")
+        return f'powershell -NoP -NonI -ExecutionPolicy Bypass -File "{remote}"'
+
     def cmd_execute(self, command: str, **kwargs) -> str:
         """
         Execute a command on the session.
@@ -44,7 +115,7 @@ class Post(BaseModule):
             raise ProcedureError(FailureType.ConfigurationError, "Framework not available")
         
         # Check if session_id is set
-        session_id_value = self.session_id.value if hasattr(self.session_id, 'value') else str(self.session_id)
+        session_id_value = self._session_id_value()
         if not session_id_value:
             raise ProcedureError(FailureType.ConfigurationError, "Session ID not set")
         
@@ -78,12 +149,19 @@ class Post(BaseModule):
                 str(getattr(item, "value", item) or "").lower()
                 for item in expected_values
             }
+            # tolerate polling beacon sessions for shell/meterpreter Windows post modules
+            if actual_type == "polling":
+                expected_values.update({"shell", "meterpreter", "polling", ""})
             platform_value = str(getattr(info.get("platform"), "value", info.get("platform")) or "").lower()
             shell_like = bool(expected_values.intersection({"shell", "ssh", "meterpreter"}))
             if actual_type in {"php", "webshell"} and shell_like and platform_value == "linux":
                 stripped = command.lstrip().lower()
                 if not stripped.startswith(("system ", "exec ", "shell_exec ")):
                     command = f"system {command}"
+
+        # Polling only: rewrite oversized EncodedCommand → typed upload + -File
+        if self._is_polling_session(session_id_value):
+            command = self._adapt_command_for_polling(command)
         
         # Pass framework to execute_command so it can auto-create shell if needed
         result = self.framework.shell_manager.execute_command(

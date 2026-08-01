@@ -276,39 +276,20 @@ class SecurityASTVisitor(ast.NodeVisitor):
     def _extract_info_dict(self, node: ast.Dict):
         """Extrait les informations du dictionnaire __info__"""
         for key_node, value_node in zip(node.keys, node.values):
-                if isinstance(key_node, ast.Str):
-                    key = key_node.s
-                elif isinstance(key_node, ast.Constant):
+                if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
                     key = key_node.value
                 else:
                     continue
                 
                 if key == "capabilities" and isinstance(value_node, (ast.List, ast.Tuple)):
                     for item in value_node.elts:
-                        if isinstance(item, ast.Str):
-                            cap = item.s
-                            self.declared_capabilities.append(str(cap))
-                        elif isinstance(item, ast.Constant):
-                            cap = item.value
-                            self.declared_capabilities.append(str(cap))
-                
-                elif key == "dependencies" and isinstance(value_node, (ast.List, ast.Tuple)):
-                    for item in value_node.elts:
-                        if isinstance(item, ast.Str):
-                            dep = item.s
-                            # Déjà géré par visit_Import
-                        elif isinstance(item, ast.Constant):
-                            dep = item.value
-                            # Déjà géré par visit_Import
+                        if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                            self.declared_capabilities.append(item.value)
                 
                 elif key == "restrictions" and isinstance(value_node, (ast.List, ast.Tuple)):
                     for item in value_node.elts:
-                        if isinstance(item, ast.Str):
-                            restriction = item.s
-                            self.declared_restrictions.append(str(restriction))
-                        elif isinstance(item, ast.Constant):
-                            restriction = item.value
-                            self.declared_restrictions.append(str(restriction))
+                        if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                            self.declared_restrictions.append(item.value)
     
     def _check_dangerous_calls(self, node: ast.FunctionDef):
         for child in ast.walk(node):

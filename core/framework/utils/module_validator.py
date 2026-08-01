@@ -95,9 +95,7 @@ class ModuleValidator:
                             required_keys = ["name", "description"]
                             keys = []
                             for k in node.value.keys:
-                                if isinstance(k, ast.Str):
-                                    keys.append(k.s)
-                                elif isinstance(k, ast.Constant):
+                                if isinstance(k, ast.Constant) and isinstance(k.value, str):
                                     keys.append(k.value)
                             for req_key in required_keys:
                                 if req_key not in keys:

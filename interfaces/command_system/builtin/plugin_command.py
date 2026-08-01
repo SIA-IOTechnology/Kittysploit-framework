@@ -172,21 +172,14 @@ Note: Plugins are automatically loaded from the plugins/ directory.
                                         keys = item.value.keys
                                         values = item.value.values
                                         for key, value in zip(keys, values):
-                                            if isinstance(key, ast.Constant):
-                                                key_str = key.value
-                                            elif isinstance(key, ast.Str):  # Python < 3.8
-                                                key_str = key.s
-                                            else:
+                                            if not (
+                                                isinstance(key, ast.Constant)
+                                                and isinstance(key.value, str)
+                                            ):
                                                 continue
-                                            
-                                            if isinstance(value, ast.Constant):
-                                                val = value.value
-                                            elif isinstance(value, ast.Str):  # Python < 3.8
-                                                val = value.s
-                                            else:
+                                            if not isinstance(value, ast.Constant):
                                                 continue
-                                            
-                                            info_dict[key_str] = val
+                                            info_dict[key.value] = value.value
                                         return info_dict
         except Exception as e:
             # If parsing fails, return default info

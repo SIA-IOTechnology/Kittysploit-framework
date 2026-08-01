@@ -251,15 +251,13 @@ fn execShell(allocator: mem.Allocator, cmd: []const u8) ![]u8 {
         return process.getCwdAlloc(allocator) catch try allocator.dupe(u8, ".");
     }
 
-    var cmdline_owned: ?[]u8 = null;
-    defer if (cmdline_owned) |c| allocator.free(c);
-
     var argv_buf: [4][]const u8 = undefined;
     const argv: []const []const u8 = blk: {
         if (builtin.os.tag == .windows) {
-            // Ask cmd for UTF-8; normalizeShellOutput still fixes OEM if chcp is ignored
-            cmdline_owned = try std.fmt.allocPrint(allocator, "chcp 65001>nul & {s}", .{trimmed});
-            argv_buf = .{ "cmd.exe", "/d", "/c", cmdline_owned.? };
+            // Do NOT prefix with `chcp … &` — CreateProcess re-quotes the /c argument, and
+            // nested quotes + `&` break type/del/if (ERROR_INVALID_NAME). OEM→UTF-8 is
+            // handled in normalizeShellOutput instead.
+            argv_buf = .{ "cmd.exe", "/d", "/c", trimmed };
             break :blk argv_buf[0..];
         } else {
             argv_buf = .{ "/bin/sh", "-c", trimmed, "" };

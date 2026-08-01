@@ -640,11 +640,10 @@ Examples:
             # Parse the AST
             tree = ast.parse(source, filename=file_path)
             
-            # Helper to extract string value from AST node
+            # Helper to extract string value from AST node (ast.Constant since Python 3.8;
+            # ast.Str was removed in Python 3.14)
             def get_string_value(node):
-                if isinstance(node, ast.Str):
-                    return node.s
-                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
                     return node.value
                 return None
             

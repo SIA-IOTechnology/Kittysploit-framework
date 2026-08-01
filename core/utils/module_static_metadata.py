@@ -103,8 +103,6 @@ CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 def _string_ast_value(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
-    if isinstance(node, ast.Str):  # pragma: no cover - py<3.8
-        return node.s
     return None
 
 
@@ -201,8 +199,6 @@ def _literal_strings(node: ast.AST) -> List[str]:
 
 def _literal_bool(node: ast.AST) -> Optional[bool]:
     if isinstance(node, ast.Constant) and isinstance(node.value, bool):
-        return node.value
-    if isinstance(node, ast.NameConstant) and isinstance(node.value, bool):  # pragma: no cover - py<3.8
         return node.value
     return None
 

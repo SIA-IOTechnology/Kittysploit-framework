@@ -410,7 +410,10 @@ Tip: wait time ≈ agent poll_interval (default ~10s)."""
 
     def _upload(self, args: str) -> Dict[str, Any]:
         try:
-            parts = shlex.split(args)
+            # Windows paths use backslashes; posix shlex treats \ as escape and breaks them
+            import sys
+
+            parts = shlex.split(args, posix=(sys.platform != "win32"))
         except ValueError:
             parts = args.split()
         if len(parts) < 2:

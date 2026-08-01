@@ -2019,6 +2019,169 @@ class NaturalLanguagePlanner:
 
         return calls[:4]
 
+    def _audit_auto_execute(
+        self,
+        *,
+        command: str,
+        status: str,
+        allow_dangerous: bool,
+        confirm_auto_execute: bool,
+        safety: Dict[str, Any],
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist a prominent audit record for LLM-driven auto-execution attempts."""
+        try:
+            from interfaces.api_security import MCPExecutionJournal
+
+            payload = {
+                "command": command,
+                "confirm_auto_execute": bool(confirm_auto_execute),
+                "safety": safety,
+                "auto_execute": True,
+                "event": "llm_recommended_auto_execute",
+            }
+            if details:
+                payload.update(details)
+            MCPExecutionJournal().record(
+                tool="plan_request.auto_execute",
+                permission="commands:execute",
+                status=status,
+                subject="natural_language_planner",
+                roles=["planner"],
+                allow_dangerous=bool(allow_dangerous),
+                details=payload,
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to write MCP auto-execute audit for command=%r status=%s",
+                command,
+                status,
+                exc_info=True,
+            )
+
+    def _resolve_recommended_execution(
+        self,
+        first_command: str,
+        *,
+        confirm_auto_execute: bool,
+        allow_dangerous: bool,
+    ) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Gate LLM-recommended auto-exec behind explicit consent and a dry-run preview.
+
+        ``execute_recommended`` alone never runs a command. Dangerous commands also need
+        ``allow_dangerous=True`` after the dry-run preview is produced.
+        """
+        safety = (
+            self.command_bridge.classify_command(first_command)
+            if self.command_bridge
+            else _classify_command(first_command)
+        )
+        is_safe = bool(safety.get("allowed_without_dangerous", False))
+        dry_run = {
+            "status": "dry_run",
+            "command": first_command,
+            "safety": safety,
+            "would_allow_without_dangerous": is_safe,
+            "requires_confirm_auto_execute": not bool(confirm_auto_execute),
+            "requires_allow_dangerous": (not is_safe) and (not bool(allow_dangerous)),
+        }
+
+        if safety.get("safety") == "blocked":
+            result = {
+                "status": "blocked",
+                "command": first_command,
+                "safety": safety,
+                "dry_run": dry_run,
+                "state": self.command_bridge.get_state() if self.command_bridge else None,
+            }
+            self._audit_auto_execute(
+                command=first_command,
+                status="blocked",
+                allow_dangerous=allow_dangerous,
+                confirm_auto_execute=confirm_auto_execute,
+                safety=safety,
+                details={"dry_run": dry_run},
+            )
+            return result, dry_run
+
+        if not confirm_auto_execute:
+            result = {
+                "status": "requires_confirm_auto_execute",
+                "command": first_command,
+                "safety": safety,
+                "dry_run": dry_run,
+                "reason": (
+                    "Auto-executing LLM-recommended commands requires "
+                    "confirm_auto_execute=true (separate from allow_dangerous). "
+                    "Review dry_run before confirming."
+                ),
+                "state": self.command_bridge.get_state() if self.command_bridge else None,
+            }
+            self._audit_auto_execute(
+                command=first_command,
+                status="consent_required",
+                allow_dangerous=allow_dangerous,
+                confirm_auto_execute=False,
+                safety=safety,
+                details={"dry_run": dry_run},
+            )
+            return result, dry_run
+
+        if not is_safe and not allow_dangerous:
+            result = {
+                "status": "requires_allow_dangerous",
+                "command": first_command,
+                "safety": safety,
+                "dry_run": dry_run,
+                "reason": (
+                    "Recommended command is classified as dangerous. "
+                    "Dry-run preview is available; set allow_dangerous=true only after review."
+                ),
+                "state": self.command_bridge.get_state() if self.command_bridge else None,
+            }
+            self._audit_auto_execute(
+                command=first_command,
+                status="requires_allow_dangerous",
+                allow_dangerous=False,
+                confirm_auto_execute=True,
+                safety=safety,
+                details={"dry_run": dry_run},
+            )
+            return result, dry_run
+
+        if self.command_bridge is None:
+            result = {
+                "status": "error",
+                "command": first_command,
+                "error": "Command bridge unavailable.",
+                "dry_run": dry_run,
+            }
+            return result, dry_run
+
+        executed = self.command_bridge.execute_command(
+            first_command,
+            allow_dangerous=allow_dangerous,
+        )
+        executed = dict(executed)
+        executed["dry_run"] = dry_run
+        executed["auto_executed"] = True
+        self._audit_auto_execute(
+            command=first_command,
+            status=f"auto_executed:{executed.get('status')}",
+            allow_dangerous=allow_dangerous,
+            confirm_auto_execute=True,
+            safety=safety,
+            details={
+                "dry_run": dry_run,
+                "elapsed_ms": executed.get("elapsed_ms"),
+                "success": executed.get("success"),
+            },
+        )
+        return executed, dry_run
+
     def plan_request(
         self,
         request: str,
@@ -2027,6 +2190,7 @@ class NaturalLanguagePlanner:
         prefer_ollama: bool = True,
         execute_recommended: bool = False,
         allow_dangerous: bool = False,
+        confirm_auto_execute: bool = False,
     ) -> Dict[str, Any]:
         parsed = self.parse_request(request)
         if parsed.intent == "framework_info":
@@ -2071,6 +2235,7 @@ class NaturalLanguagePlanner:
                 "ollama": self.ollama_status(),
                 "ollama_search_assist": None,
                 "ollama_plan": ollama_plan,
+                "auto_execute_dry_run": None,
                 "executed_command": None,
                 "state": self.command_bridge.get_state() if self.command_bridge else None,
             }
@@ -2110,10 +2275,12 @@ class NaturalLanguagePlanner:
         mcp_calls = self._recommend_mcp_calls(parsed, enriched_candidates)
 
         executed_command = None
+        auto_execute_dry_run = None
         if execute_recommended and recommended_commands and self.command_bridge:
             first_command = recommended_commands[0]["command"]
-            executed_command = self.command_bridge.execute_command(
+            executed_command, auto_execute_dry_run = self._resolve_recommended_execution(
                 first_command,
+                confirm_auto_execute=confirm_auto_execute,
                 allow_dangerous=allow_dangerous,
             )
         elif execute_safe_command and recommended_commands and self.command_bridge:
@@ -2133,6 +2300,7 @@ class NaturalLanguagePlanner:
             "ollama": self.ollama_status(),
             "ollama_search_assist": search_assist,
             "ollama_plan": ollama_plan,
+            "auto_execute_dry_run": auto_execute_dry_run,
             "executed_command": executed_command,
             "state": self.command_bridge.get_state() if self.command_bridge else None,
         }

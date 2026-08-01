@@ -273,10 +273,29 @@ def _print_plan(plan: Dict[str, Any]) -> None:
             print_success("Required options are filled.")
 
     executed = plan.get("executed_command")
+    dry_run = plan.get("auto_execute_dry_run")
+    if dry_run and (not executed or executed.get("status") in (
+        "requires_confirm_auto_execute",
+        "requires_allow_dangerous",
+        "blocked",
+    )):
+        print_info("")
+        print_warning("Auto-execute dry-run (not executed)")
+        print_info(f"Command: {dry_run.get('command')}")
+        safety = dry_run.get("safety") or {}
+        print_info(f"Safety: {safety.get('safety')} — {safety.get('reason')}")
+        if dry_run.get("requires_confirm_auto_execute"):
+            print_warning("Set confirm_auto_execute=true (or use /run) after reviewing.")
+        if dry_run.get("requires_allow_dangerous"):
+            print_warning("Command is dangerous; also requires --allow-dangerous.")
     if executed:
         print_info("")
         print_info("Execution")
         print_info(f"Status: {executed.get('status')}")
+        if executed.get("reason"):
+            print_warning(str(executed["reason"]))
+        if executed.get("auto_executed"):
+            print_warning(f"AUTO-EXECUTED (audited): {executed.get('command')}")
         if executed.get("stdout"):
             print(executed["stdout"], end="" if executed["stdout"].endswith("\n") else "\n")
         if executed.get("stderr"):
@@ -336,6 +355,7 @@ def _handle_request(
         print_info("/state              Show workspace/module/session state")
         print_info("/plan <request>     Plan only")
         print_info("/run <request>      Plan then execute the first recommended command")
+        print_info("                    (requires human /run; dangerous cmds need --allow-dangerous)")
         print_info("/exit               Quit")
         return
     if request.strip() in ("/exit", "/quit"):
@@ -358,6 +378,8 @@ def _handle_request(
             effective_request,
             max_candidates=max_candidates,
             execute_recommended=effective_execute,
+            # /run and --run are explicit human consent, separate from allow_dangerous.
+            confirm_auto_execute=effective_execute,
             allow_dangerous=allow_dangerous,
             prefer_ollama=True,
         )

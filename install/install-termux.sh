@@ -263,7 +263,7 @@ echo
 
 # -- Group G: Misc / optional -----------------------------------------------
 echo -e "${YELLOW}[*]${NC} [7/8] Optional packages..."
-install_or_skip "bs4"              bs4
+install_or_skip "beautifulsoup4"   "beautifulsoup4>=4.12.0"
 install_or_skip "pure-python-adb"  pure-python-adb
 install_or_skip "pyftpdlib"        pyftpdlib
 install_or_skip "pyngrok"          pyngrok

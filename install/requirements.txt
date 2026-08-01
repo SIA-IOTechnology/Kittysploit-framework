@@ -39,7 +39,7 @@ winshell>=0.6; sys_platform == "win32"
 pyreadline3>=3.4.0; sys_platform == "win32"
 
 pyngrok>=5.0.0
-bleak>=0.20.0
+bleak>=3.0.2
 nava>=0.5
 six>=1.16.0
 docker>=6.0.0

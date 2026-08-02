@@ -183,12 +183,252 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         None,
     ),
     (
-        re.compile(r"(^|/)dnp3_identify$|(^|/)dnp3_master_probe"),
+        re.compile(r"(^|/)dnp3_identify$|(^|/)dnp3_master_probe$|(^|/)dnp3_client$"),
         {
             "produces_capabilities": ["dnp3_access", "dnp3_dest", "ot_assets"],
-            "suggested_followups": ["post/ics/dnp3/gather/read_points"],
+            "suggested_followups": [
+                "post/ics/dnp3/gather/read_points",
+                "post/ics/dnp3/gather/integrity_dump",
+            ],
         },
         None,
+    ),
+    (
+        re.compile(r"(^|/)bacnet_whois$|(^|/)bacnet_client$"),
+        {
+            "produces_capabilities": ["ot_assets", "bacnet"],
+            "suggested_followups": [
+                "post/ics/bacnet/gather/object_inventory",
+                "post/ics/bacnet/gather/read_property",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)iec104_interrogate$|(^|/)iec104_client$"),
+        {
+            "produces_capabilities": ["ot_assets", "iec104"],
+            "suggested_followups": [
+                "post/ics/iec104/gather/interrogation_dump",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)iec61850_mms_identify$|(^|/)iec61850_client$|"
+            r"(^|/)iec61850/gather/(identify|directory_dump)$"
+        ),
+        {
+            "produces_capabilities": ["ot_assets", "iec61850"],
+            "suggested_followups": [
+                "listeners/ics/iec61850_client",
+                "post/ics/iec61850/gather/identify",
+                "post/ics/iec61850/gather/directory_dump",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mqtt_broker_identify$|(^|/)mqtt$"),
+        {
+            "produces_capabilities": ["mqtt_access", "ot_assets"],
+            "suggested_followups": [
+                "post/mqtt/gather/broker_audit",
+                "post/mqtt/gather/topic_dump",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)coap_client$|(^|/)resource_enum$"),
+        {
+            "produces_capabilities": ["coap_access", "ot_assets"],
+            "suggested_followups": [
+                "post/coap/gather/resource_enum",
+                "post/coap/gather/config_dump",
+                "post/coap/gather/observe_dump",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)onvif_client$|(^|/)onvif_device_info$"),
+        {
+            "produces_capabilities": ["onvif_access", "ot_assets"],
+            "suggested_followups": [
+                "post/onvif/gather/media_streams",
+                "post/onvif/gather/ptz_status",
+                "post/onvif/gather/events_probe",
+                "auxiliary/admin/http/camera/onvif_snapshot",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ssdp_detect$|(^|/)upnp_client$|(^|/)upnp_device_detect$"),
+        {
+            "produces_capabilities": ["upnp_access", "ot_assets"],
+            "suggested_followups": [
+                "listeners/iot/upnp_client",
+                "post/upnp/gather/device_inventory",
+                "post/upnp/gather/igd_portmap",
+                "workflow/iot-discovery",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ble_scan$|(^|/)ble_gatt_client$|(^|/)bleedingtooth"),
+        {
+            "produces_capabilities": ["ble_discover", "ble_gatt_map", "ot_assets"],
+            "suggested_followups": [
+                "listeners/iot/ble_gatt_client",
+                "post/ble/gather/services",
+                "post/ble/gather/uart_probe",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ble/.*/(uart_probe|uart_exec|services|characteristics)$"),
+        {
+            "produces_capabilities": ["ble_uart_pivot", "ble_gatt_map", "ot_assets"],
+            "suggested_followups": [
+                "post/ble/gather/uart_probe",
+                "post/ble/manage/uart_exec",
+                "post/ble/manage/write_characteristic",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mdns_detect$|(^|/)mdns_enum$"),
+        {
+            "produces_capabilities": ["ot_assets", "mdns_map"],
+            "suggested_followups": [
+                "scanner/udp/mdns_enum",
+                "scanner/udp/matter_detect",
+                "workflow/iot-discovery",
+                "listeners/iot/mqtt",
+                "listeners/iot/coap_client",
+                "listeners/iot/onvif_client",
+                "listeners/iot/rtsp_client",
+                "listeners/iot/matter_client",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)firmware_arch_suggest$|(^|/)firmware_adaptive_payload$|(^|/)firmware_extractor_advanced$"
+        ),
+        {
+            "produces_capabilities": ["payload_plan"],
+            "suggested_followups": [
+                "analysis/binary/firmware_adaptive_payload",
+                "workflow/firmware-to-payload",
+                "listeners/multi/adaptive_reverse_tcp",
+                "listeners/multi/reverse_http_polling",
+                "payloads/singles/cmd/unix/busybox_reverse_tcp",
+                "payloads/singles/cmd/unix/busybox_http_polling",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mqtt_broker_identify$"),
+        {
+            "produces_capabilities": ["mqtt_access", "ot_assets"],
+            "suggested_followups": [
+                "listeners/iot/mqtt",
+                "post/mqtt/gather/topic_dump",
+                "post/mqtt/gather/broker_audit",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)media_streams$|(^|/)onvif_snapshot$"),
+        {
+            "produces_capabilities": ["onvif_access", "file_read"],
+            "suggested_followups": [
+                "listeners/iot/rtsp_client",
+                "post/rtsp/gather/describe_dump",
+                "post/onvif/gather/events_probe",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)rtsp_detect$|(^|/)rtsp_client$|(^|/)rtsp/.*/(describe_dump|stream_probe)$"
+        ),
+        {
+            "produces_capabilities": ["rtsp_access", "ot_assets"],
+            "suggested_followups": [
+                "listeners/iot/rtsp_client",
+                "post/rtsp/gather/describe_dump",
+                "post/rtsp/gather/stream_probe",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)matter_detect$|(^|/)matter_client$|"
+            r"(^|/)matter/gather/(discover|device_inventory)$"
+        ),
+        {
+            "produces_capabilities": ["matter_access", "ot_assets"],
+            "suggested_followups": [
+                "listeners/iot/matter_client",
+                "post/matter/gather/discover",
+                "post/matter/gather/device_inventory",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)observe_dump$|(^|/)config_dump$"),
+        {
+            "produces_capabilities": ["coap_access", "ot_assets"],
+            "suggested_followups": [
+                "post/coap/gather/observe_dump",
+                "post/coap/manage/resource_write",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)python_mqtt_reverse$|(^|/)reverse_mqtt_shell$|(^|/)deploy_reverse_agent$"
+            r"|(^|/)deploy_embedded_c2$|(^|/)busybox_http_polling$"
+        ),
+        {
+            "produces_capabilities": ["shell", "c2_beacon", "mqtt_access"],
+            "suggested_followups": [
+                "listeners/iot/reverse_mqtt_shell",
+                "listeners/multi/reverse_http_polling",
+                "post/shell/linux/busybox/deploy_embedded_c2",
+                "post/mqtt/gather/topic_dump",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)openwrt_|busybox/(firmware_info|dump_nvram|network_recon|deploy_embedded_c2)"),
+        {
+            "produces_capabilities": ["ot_assets", "file_read", "c2_beacon"],
+            "suggested_followups": [
+                "post/shell/linux/busybox/dump_nvram",
+                "post/shell/linux/busybox/dump_dropbear_keys",
+                "post/shell/linux/busybox/network_recon",
+                "post/shell/linux/busybox/deploy_embedded_c2",
+                "listeners/multi/reverse_http_polling",
+            ],
+        },
+        {"capabilities_any": ["shell"]},
     ),
     (
         re.compile(r"(^|/)kerberoastable_users$"),
@@ -360,9 +600,68 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         None,
     ),
     (
-        re.compile(
-            r"(^|/)openssh_banner_detect$|(^|/)rdp_service_detect$|(^|/)winrm_detect$"
-        ),
+        re.compile(r"(^|/)openssh_banner_detect$|(^|/)ssh_hostkey$"),
+        {
+            "produces_capabilities": [
+                "network_service",
+                "service_identified",
+                "remote_access",
+            ],
+            "suggested_followups": [
+                "scanner/ssh/ssh_auth_methods",
+                "scanner/ssh/ssh_empty_password_detect",
+                "auxiliary/scanner/ssh/ssh_login_bruteforce",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ssh_auth_methods$"),
+        {
+            "produces_capabilities": [
+                "service_identified",
+                "ssh_auth_surface",
+                "remote_access",
+            ],
+            "suggested_followups": [
+                "scanner/ssh/ssh_empty_password_detect",
+                "auxiliary/scanner/ssh/ssh_login_bruteforce",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ssh_empty_password_detect$"),
+        {
+            "produces_capabilities": [
+                {"capability": "ssh_access", "from_detail": "username"},
+                "authenticated_session",
+            ],
+            "suggested_followups": [
+                "auxiliary/scanner/ssh/ssh_login_bruteforce",
+                "post/shell/linux/gather/enum_system",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ssh_login_bruteforce$|(^|/)ssh_login$"),
+        {
+            "consumes_capabilities": ["service_identified", "ssh_auth_surface"],
+            "produces_capabilities": [
+                {"capability": "ssh_access", "from_detail": "username"},
+                "authenticated_session",
+                "shell",
+            ],
+            "suggested_followups": [
+                "post/shell/linux/gather/enum_system",
+                "post/shell/linux/gather/check_sudo",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)rdp_service_detect$|(^|/)winrm_detect$"),
         {
             "produces_capabilities": ["network_service", "remote_access"],
             "suggested_followups": [
@@ -380,10 +679,123 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         None,
     ),
     (
+        re.compile(
+            r"(^|/)ftp_banner_detect$|(^|/)ftp_syst_detect$|(^|/)ftp_feat_detect$"
+        ),
+        {
+            "produces_capabilities": ["service_identified", "ftp_surface"],
+            "suggested_followups": [
+                "scanner/ftp/ftp_anonymous_login_detect",
+                "auxiliary/scanner/ftp/ftp_enum",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)ftp_anonymous_login_detect$"),
+        {
+            "produces_capabilities": [
+                "anonymous_access",
+                "ftp_surface",
+                {"capability": "file_read", "from_detail": ""},
+            ],
+            "suggested_followups": ["auxiliary/scanner/ftp/ftp_enum"],
+        },
+        None,
+    ),
+    (
         re.compile(r"(^|/)ftp_enum$"),
         {
-            "produces_capabilities": ["service_identified"],
+            "consumes_capabilities": ["ftp_surface", "anonymous_access"],
+            "produces_capabilities": ["service_identified", "file_read"],
             "suggested_followups": [],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mysql_info_detect$|(^|/)mysql_tls_detect$"),
+        {
+            "produces_capabilities": ["service_identified", "db_surface"],
+            "suggested_followups": [
+                "scanner/mysql/mysql_empty_password_detect",
+                "auxiliary/scanner/mysql/mysql_login_bruteforce",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mysql_empty_password_detect$"),
+        {
+            "produces_capabilities": [
+                {"capability": "db_access", "from_detail": "username"},
+                "authenticated_session",
+            ],
+            "suggested_followups": [
+                "auxiliary/scanner/mysql/mysql_login_bruteforce",
+                "post/mysql/gather/enum_databases",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)mysql_login_bruteforce$"),
+        {
+            "consumes_capabilities": ["service_identified", "db_surface"],
+            "produces_capabilities": [
+                {"capability": "db_access", "from_detail": "username"},
+                "authenticated_session",
+            ],
+            "suggested_followups": [
+                "post/mysql/gather/enum_users",
+                "post/mysql/gather/enum_databases",
+                "post/mysql/gather/check_mysql_hardening",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(
+            r"(^|/)postgresql_info_detect$|(^|/)postgresql_auth_method_detect$"
+        ),
+        {
+            "produces_capabilities": [
+                "service_identified",
+                "db_surface",
+                "pgsql_auth_surface",
+            ],
+            "suggested_followups": [
+                "scanner/postgresql/postgresql_empty_password_detect",
+                "auxiliary/scanner/postgresql/postgresql_login_bruteforce",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)postgresql_empty_password_detect$"),
+        {
+            "produces_capabilities": [
+                {"capability": "db_access", "from_detail": "username"},
+                "authenticated_session",
+            ],
+            "suggested_followups": [
+                "auxiliary/scanner/postgresql/postgresql_login_bruteforce",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)postgresql_login_bruteforce$"),
+        {
+            "consumes_capabilities": ["service_identified", "pgsql_auth_surface"],
+            "produces_capabilities": [
+                {"capability": "db_access", "from_detail": "username"},
+                "authenticated_session",
+            ],
+            "suggested_followups": [
+                "post/postgresql/gather/enum_roles",
+                "post/postgresql/gather/enum_databases",
+                "post/postgresql/gather/check_postgresql_hardening",
+            ],
         },
         None,
     ),
@@ -480,10 +892,29 @@ def infer_chain_metadata(
             ])
         if "ssrf" in blob:
             chain.setdefault("produces_capabilities", []).append("ssrf_primitive")
-        if "modbus" in blob:
-            chain.setdefault("produces_capabilities", []).append("ot_assets")
-        if "s7" in blob or "siemens" in blob:
-            chain.setdefault("produces_capabilities", []).append("s7comm")
+        # OT caps only for ICS / protocol-named modules — never from substring noise
+        if "/ics/" in path or "/modbus" in path:
+            if "modbus" in path:
+                chain.setdefault("produces_capabilities", []).extend(["ot_assets", "modbus_tcp"])
+        if "/ics/" in path or "s7comm" in path or "/s7_" in path:
+            if "s7comm" in path or "/s7_" in path or "siemens" in blob:
+                chain.setdefault("produces_capabilities", []).extend(["ot_assets", "s7comm"])
+        if "/ics/" in path and "dnp3" in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "dnp3_access"])
+        if "/ics/" in path and "bacnet" in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "bacnet"])
+        if "/ics/" in path and ("opcua" in path or "opc_ua" in path):
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "opcua"])
+        if "/ics/" in path and "iec104" in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "iec104"])
+        if "/ics/" in path and ("iec61850" in path or "mms" in path):
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "iec61850"])
+        if "rtsp" in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "rtsp_access"])
+        if "onvif" in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "onvif_access"])
+        if "matter" in path and "mattermost" not in path:
+            chain.setdefault("produces_capabilities", []).extend(["ot_assets", "matter_access"])
         if family == "post" and "/gather/" in path:
             chain["consumes_capabilities"] = []
         return normalize_chain_block(chain)
@@ -503,8 +934,23 @@ def infer_requires_metadata(
     family = _module_family(path)
     if family == "post" and "/exploits/" in path:
         return {"capabilities_any": ["db_access", "rce", "shell", "file_read"]}
-    if family == "post" and "/manage/" in path and "ics" in path:
-        return {"capabilities_any": ["ot_assets", "modbus_tcp", "s7comm", "dnp3_access"]}
+    if family == "post" and "/manage/" in path and "/ics/" in path:
+        caps = ["ot_assets"]
+        if "modbus" in path:
+            caps.append("modbus_tcp")
+        if "s7" in path:
+            caps.append("s7comm")
+        if "dnp3" in path:
+            caps.append("dnp3_access")
+        if "bacnet" in path:
+            caps.append("bacnet")
+        if "iec104" in path:
+            caps.append("iec104")
+        if "iec61850" in path or "mms" in path:
+            caps.append("iec61850")
+        if "opcua" in path:
+            caps.append("opcua")
+        return {"capabilities_any": caps}
     return None
 
 

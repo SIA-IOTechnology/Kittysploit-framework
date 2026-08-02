@@ -18,8 +18,7 @@ class Module(Auxiliary, Http_client, Lfi, Wordpress):
         ),
         "author": ["mehran feizi", "KittySploit Team"],
         "references": [
-            "https://wordpress.org/plugins/wordfence/",
-        ],
+            "https://wordpress.org/plugins/wordfence/"],
         "cve": "",
         "tags": ["wordpress", "wordfence", "lfd", "lfi", "file-read", "auxiliary"],
     'agent': {
@@ -46,11 +45,8 @@ class Module(Auxiliary, Http_client, Lfi, Wordpress):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],

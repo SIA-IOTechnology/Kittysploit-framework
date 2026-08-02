@@ -42,9 +42,7 @@ class Module(Scanner, Http_client):
             },
             'chain': {
                 'produces_capabilities': [
-                    {'capability': 'admin_surface', 'from_detail': ''},
-                    {'capability': 'db_access', 'from_detail': ''},
-                ],
+                    {'capability': 'admin_surface', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': ['scanner/http/phpmyadmin_setup_detect'],
@@ -124,8 +122,7 @@ class Module(Scanner, Http_client):
                         "Bind phpMyAdmin to internal networks only",
                         "Enforce strong authentication and MFA",
                         "Add IP allow-listing / VPN requirement",
-                        "Remove unused phpMyAdmin installs",
-                    ],
+                        "Remove unused phpMyAdmin installs"],
                 },
             )
             return True

@@ -24,6 +24,7 @@ ICS_PROTOCOL_PORTS: dict[str, int] = {
     "enip": 44818,
     "dnp3": 20000,
     "iec104": 2404,
+    "iec61850": 102,
     "bacnet": 47808,
     "opcua": 4840,
 }

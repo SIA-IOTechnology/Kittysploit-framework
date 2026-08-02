@@ -24,7 +24,9 @@ class Module(Post, ModbusSessionMixin):
             "produces": ["risk_signals"],
             "chain": {
                 "consumes_capabilities": ["file_read"],
-                "produces_capabilities": ["rce"],
+                "produces_capabilities": [{'capability': 'modbus_tcp', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   "rce"],
             },
         },
     }

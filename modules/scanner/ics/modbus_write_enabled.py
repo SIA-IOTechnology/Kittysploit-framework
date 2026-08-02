@@ -26,7 +26,9 @@ class Module(Scanner, Ics_scanner_client):
             "produces": ["tech_hints", "risk_signals"],
             "chain": {
                 "consumes_capabilities": ["credentials"],
-                "produces_capabilities": ["file_read"],
+                "produces_capabilities": [{'capability': 'modbus_tcp', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   "file_read"],
                 "suggested_followups": ["post/ics/manage/modbus_write_register"],
             },
         },

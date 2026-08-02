@@ -20,6 +20,21 @@ class Module(Listener):
         "session_type": SessionType.BLE,
         "protocol": "ble-gatt",
         "dependencies": ["bleak"],
+        "tags": ["ble", "bluetooth", "iot", "gatt"],
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "produces": ["tech_hints", "endpoints"],
+            "chain": {
+                "produces_capabilities": ["ble_gatt_map", "ble_characteristics", "ot_assets"],
+                "suggested_followups": [
+                    "post/ble/gather/services",
+                    "post/ble/gather/characteristics",
+                    "post/ble/gather/uart_probe",
+                    "post/ble/manage/uart_exec",
+                ],
+            },
+        },
         "references": [
             "https://www.bluetooth.com/specifications/gatt/",
             "https://bleak.readthedocs.io/",

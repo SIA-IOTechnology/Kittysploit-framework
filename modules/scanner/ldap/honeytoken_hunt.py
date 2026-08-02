@@ -23,8 +23,7 @@ _BEHAVIOUR_ATTRS = [
     "adminCount",
     "pwdLastSet",
     "description",
-    "userAccountControl",
-]
+    "userAccountControl"]
 
 
 class Module(Scanner, Ad_client):
@@ -71,12 +70,8 @@ class Module(Scanner, Ad_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'ssrf_primitive', 'from_detail': ''},
                                    {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''}],
+                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

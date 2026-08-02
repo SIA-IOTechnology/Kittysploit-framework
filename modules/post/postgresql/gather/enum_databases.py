@@ -20,8 +20,7 @@ class Module(Post, PostgreSQLClient):
 	        'consumes_capabilities': ['db_access'],
 	        'suggested_followups': [
 	            'post/postgresql/gather/enum_roles',
-	            'post/postgresql/exploits/copy_program_exec',
-	        ],
+	            'post/postgresql/exploits/copy_program_exec'],
 	    },
 	},
 	}

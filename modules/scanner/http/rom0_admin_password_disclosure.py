@@ -20,11 +20,9 @@ class Module(Scanner, Http_client, Rom0):
         "cve": "CVE-2014-4019",
         "references": [
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-4019",
-            "http://rootatnasro.wordpress.com/2014/01/11/how-i-saved-your-a-from-the-zynos-rom-0-attack-full-disclosure/",
-        ],
+            "http://rootatnasro.wordpress.com/2014/01/11/how-i-saved-your-a-from-the-zynos-rom-0-attack-full-disclosure/"],
         "modules": [
-            "auxiliary/admin/http/dlink_rom0_admin_password_disclosure",
-        ],
+            "auxiliary/admin/http/dlink_rom0_admin_password_disclosure"],
         "tags": [
             "web",
             "scanner",
@@ -34,8 +32,7 @@ class Module(Scanner, Http_client, Rom0):
             "zynos",
             "disclosure",
             "credentials",
-            "cve-2014-4019",
-        ],
+            "cve-2014-4019"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -67,8 +64,7 @@ class Module(Scanner, Http_client, Rom0):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

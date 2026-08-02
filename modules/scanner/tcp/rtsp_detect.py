@@ -50,7 +50,10 @@ class Module(Scanner, Tcp_scanner_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'listeners/iot/rtsp_client',
+                    'post/rtsp/gather/describe_dump',
+                ],
             },
         },
         'references': ['https://nmap.org/nsedoc/scripts/rtsp-methods.html'],

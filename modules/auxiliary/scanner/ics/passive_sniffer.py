@@ -55,26 +55,21 @@ class Module(Auxiliary):
             "iec104",
             "purdue",
             "sniff",
-            "discovery",
-        ],
+            "discovery"],
         "references": [
             "https://attack.mitre.org/techniques/T0846/",
-            "https://github.com/valinorintelligence/Gridwolf",
-        ],
+            "https://github.com/valinorintelligence/Gridwolf"],
         "attack": {
             "tactics": ["TA0007", "Discovery"],
             "techniques": ["T0846"],
             "prerequisites": [
                 "SPAN/mirror port or network TAP on the OT segment",
                 "Root or CAP_NET_RAW on the capture interface",
-                "Promiscuous mode enabled on the sniffing NIC",
-            ],
+                "Promiscuous mode enabled on the sniffing NIC"],
             "detections": [
-                "Passive monitoring on a mirrored switch port",
-            ],
+                "Passive monitoring on a mirrored switch port"],
             "artifacts": [
-                "Optional PCAP and JSON report files on operator host",
-            ],
+                "Optional PCAP and JSON report files on operator host"],
         },
         "agent": {
             "risk": "passive",
@@ -89,8 +84,7 @@ class Module(Auxiliary):
                     "auxiliary/scanner/ics/modbus_identify",
                     "auxiliary/scanner/ics/s7comm_identify",
                     "auxiliary/scanner/ics/dnp3_identify",
-                    "auxiliary/scanner/ics/bacnet_whois",
-                ],
+                    "auxiliary/scanner/ics/bacnet_whois"],
             },
         },
     }

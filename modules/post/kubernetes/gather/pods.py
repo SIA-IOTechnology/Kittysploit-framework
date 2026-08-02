@@ -22,14 +22,13 @@ class Module(Post, KubernetesSessionMixin):
             "expected_requests": 2,
             "reversible": True,
             "approval_required": False,
-            "produces": ["ot_assets", "tech_hints"],
+            "produces": ["tech_hints"],
             "chain": {
                 "consumes_capabilities": ["cloud_identity"],
                 "produces_capabilities": [{"capability": "k8s_pods", "from_detail": ""}],
                 "suggested_followups": [
                     "post/kubernetes/manage/exec_pod",
-                    "post/kubernetes/gather/secrets",
-                ],
+                    "post/kubernetes/gather/secrets"],
             },
         },
     }

@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "advisory": "GHSA-wfc6-r584-vfw7",
         "references": ["https://github.com/advisories/GHSA-wfc6-r584-vfw7"],
         "modules": [
-            "auxiliary/scanner/http/nextjs_ghsa_wfc6_r584_vfw7_rsc_html_cache_poison",
-        ],
+            "auxiliary/scanner/http/nextjs_ghsa_wfc6_r584_vfw7_rsc_html_cache_poison"],
         "tags": ["scanner", "nextjs", "cache-poison", "rsc", "ghsa-wfc6"],
     'agent': {
         'risk': 'active',
@@ -45,8 +44,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

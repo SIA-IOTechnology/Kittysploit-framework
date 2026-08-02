@@ -39,7 +39,7 @@ class Module(Post, GcpPostMixin):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': ['shell'],
          'option_bindings': {},
          'suggested_followups': []},

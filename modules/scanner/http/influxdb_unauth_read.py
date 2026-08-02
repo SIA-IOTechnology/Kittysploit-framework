@@ -21,7 +21,7 @@ class Module(Scanner, Tcp_scanner_client):
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals"],
-            "chain": {"produces_capabilities": ["db_access", "unauth_read"]},
+            "chain": {"produces_capabilities": ["unauth_read"]},
         },
     }
 

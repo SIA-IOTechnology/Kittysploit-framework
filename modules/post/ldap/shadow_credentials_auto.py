@@ -18,8 +18,7 @@ class Module(Post):
         "tags": ["ad", "ldap", "shadow-credentials", "pkinit", "certipy", "post"],
         "references": [
             "https://posts.specterops.io/shadow-credentials-abusing-key-trust-account-mapping-for-takeover-8ee1a53566ab",
-            "https://github.com/ly4k/Certipy",
-        ],
+            "https://github.com/ly4k/Certipy"],
     'agent': {
         'risk': 'intrusive',
         'effects': ['active_exploitation', 'credential_access', 'account_modification'],
@@ -44,11 +43,7 @@ class Module(Post):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''}],
          'consumes_capabilities': ['shell'],
          'option_bindings': {},
          'suggested_followups': []},
@@ -96,8 +91,7 @@ class Module(Post):
             "-target",
             self._value(self.target).strip(),
             "-account",
-            self._value(self.account).strip(),
-        ]
+            self._value(self.account).strip()]
         if self._value(self.dc_ip).strip():
             argv.extend(["-dc-ip", self._value(self.dc_ip).strip()])
         if bool(self.use_kerberos):

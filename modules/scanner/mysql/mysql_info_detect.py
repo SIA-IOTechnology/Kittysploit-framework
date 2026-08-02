@@ -11,7 +11,10 @@ class Module(Scanner, Tcp_scanner_client):
 
     __info__ = {
         "name": "MySQL Info - Enumeration",
-        "description": "Connects to a MySQL server and prints information such as protocol, version, TLS support, and transport.",
+        "description": (
+            "Connects to a MySQL server and prints information such as "
+            "protocol, version, TLS support, and transport."
+        ),
         "author": ["KittySploit Team"],
         "severity": "info",
         "references": [
@@ -24,50 +27,27 @@ class Module(Scanner, Tcp_scanner_client):
             "vendor": "oracle",
         },
         "tags": ["mysql", "network", "enum", "discovery"],
-    'agent': {
-        'risk': 'active',
-        'effects': ['network_probe'],
-        'expected_requests': 2,
-        'reversible': True,
-        'approval_required': False,
-        'produces': ['tech_hints', 'risk_signals', 'endpoints'],
-        'cost': 1.0,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
-                                   {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
+        "agent": {
+            "risk": "active",
+            "effects": ["network_probe"],
+            "expected_requests": 1,
+            "reversible": True,
+            "approval_required": False,
+            "produces": ["tech_hints", "risk_signals"],
+            "chain": {
+                "produces_capabilities": [
+                    "service_identified",
+                    "db_surface",
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "scanner/mysql/mysql_tls_detect",
+                    "scanner/mysql/mysql_empty_password_detect",
+                    "auxiliary/scanner/mysql/mysql_login_bruteforce",
+                ],
+            },
+        },
     }
 
     port = OptPort(3306, "Target MySQL port", True)
@@ -82,10 +62,28 @@ class Module(Scanner, Tcp_scanner_client):
         if not info.get("success"):
             return False
 
+        version = str(info.get("Version") or "")
+        protocol = str(info.get("Protocol") or "")
+        tls = str(info.get("TLS") or "")
+        transport = str(info.get("Transport") or "tcp")
+        parts = []
+        if version:
+            parts.append(f"version={version}")
+        if protocol:
+            parts.append(f"protocol={protocol}")
+        if tls:
+            parts.append(f"tls={tls}")
+        if transport:
+            parts.append(f"transport={transport}")
+        reason = "MySQL service detected"
+        if parts:
+            reason = f"{reason} | {' | '.join(parts)}"
         self.set_info(
-            version=info.get("Version", ""),
-            protocol=info.get("Protocol", ""),
-            tls=info.get("TLS", ""),
-            transport=info.get("Transport", "tcp"),
+            severity="info",
+            reason=reason,
+            version=version,
+            protocol=protocol,
+            tls=tls,
+            transport=transport,
         )
         return True

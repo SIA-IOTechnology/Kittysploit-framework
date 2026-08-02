@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "advisory": "GHSA-3g8h-86w9-wvmq",
         "references": ["https://github.com/advisories/GHSA-3g8h-86w9-wvmq"],
         "modules": [
-            "auxiliary/scanner/http/nextjs_ghsa_3g8h_86w9_wvmq_x_nextjs_data_redirect",
-        ],
+            "auxiliary/scanner/http/nextjs_ghsa_3g8h_86w9_wvmq_x_nextjs_data_redirect"],
         "tags": ["scanner", "nextjs", "cache-poison", "redirect", "ghsa-3g8h"],
     'agent': {
         'risk': 'active',
@@ -45,8 +44,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

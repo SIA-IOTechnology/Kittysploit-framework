@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44574",
         "references": ["https://github.com/advisories/GHSA-44574"],
         "modules": [
-            "auxiliary/scanner/http/nextjs_cve_2026_44574_dynamic_route_param_injection",
-        ],
+            "auxiliary/scanner/http/nextjs_cve_2026_44574_dynamic_route_param_injection"],
         "tags": ["scanner", "nextjs", "injection", "cve-2026-44574"],
     'agent': {
         'risk': 'active',
@@ -45,8 +44,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

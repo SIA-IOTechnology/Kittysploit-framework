@@ -25,8 +25,7 @@ class Module(Auxiliary, Ics_scanner_client):
         ),
         "author": ["w3h", "wenzhe zhu", "KittySploit Team"],
         "references": [
-            "https://github.com/w3h/isf/blob/master/module/exploits/Schneider/Schneider_CPU_Comoand.py",
-        ],
+            "https://github.com/w3h/isf/blob/master/module/exploits/Schneider/Schneider_CPU_Comoand.py"],
         "platform": Platform.OTHER,
         "tags": ["ics", "schneider", "modbus", "quantum", "plc", "ot"],
         "agent": {

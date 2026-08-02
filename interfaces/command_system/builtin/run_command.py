@@ -16,6 +16,7 @@ from core.framework.module_executor import (
 )
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
 
+
 class RunCommand(BaseCommand):
     """Command to run the current module"""
     
@@ -155,6 +156,7 @@ Examples:
                         print_success(
                             f"Session {execution.session_id} created. Starting interactive shell..."
                         )
+                        self._maybe_show_assistant(execution, module)
                         return self._start_interactive_session_for_listener(
                             execution.session_id
                         )
@@ -188,6 +190,7 @@ Examples:
                 print_success(
                     f"Session {execution.session_id} created. Starting interactive shell..."
                 )
+                self._maybe_show_assistant(execution, module)
                 return self._start_interactive_session_for_listener(execution.session_id)
 
             return self._report_execution_result(
@@ -211,6 +214,12 @@ Examples:
             ):
                 print_success(
                     f"Session {session_id} detected. Starting interactive shell..."
+                )
+                from types import SimpleNamespace
+
+                self._maybe_show_assistant(
+                    SimpleNamespace(session_id=session_id, finding=None, evidence=None, success=True),
+                    module,
                 )
                 return self._start_interactive_session_for_listener(session_id)
             if hasattr(module, "listener_running"):
@@ -248,6 +257,7 @@ Examples:
                 print_success("Payload generated successfully!")
                 self._print_payload_listener_hint(module)
                 print_info(f"Payload: {execution.result}")
+                self._maybe_show_assistant(execution, module)
             else:
                 print_error(execution.error or "Failed to generate payload")
             return execution.command_success
@@ -261,6 +271,7 @@ Examples:
             else:
                 print_success("Module execution completed (scan finished).")
             self._print_module_result_details(execution)
+            self._maybe_show_assistant(execution, module)
             return True
 
         if execution.success:
@@ -278,7 +289,46 @@ Examples:
             print_error(execution.error or "Module execution failed")
 
         self._print_module_result_details(execution)
+        if (
+            execution.success
+            or execution.session_id
+            or execution.finding is not None
+            or execution.evidence is not None
+        ):
+            self._maybe_show_assistant(execution, module)
         return execution.command_success
+
+    def _maybe_show_assistant(self, execution, module) -> None:
+        try:
+            from interfaces.command_system.builtin.assistant import (
+                AssistantContext,
+                maybe_show_assistant,
+            )
+
+            session_type = ""
+            sid = str(getattr(execution, "session_id", "") or "")
+            if sid and hasattr(self.framework, "session_manager"):
+                try:
+                    sess = self.framework.session_manager.get_session(sid)
+                    if sess is not None:
+                        session_type = str(getattr(sess, "session_type", "") or "")
+                except Exception:
+                    pass
+
+            maybe_show_assistant(
+                self.framework,
+                AssistantContext(
+                    event="run",
+                    module=module,
+                    execution=execution,
+                    session_id=sid,
+                    session_type=session_type,
+                    finding=getattr(execution, "finding", None),
+                    evidence=getattr(execution, "evidence", None),
+                ),
+            )
+        except Exception:
+            pass
 
     def _print_payload_listener_hint(self, module) -> None:
         info = getattr(module, '__info__', {}) or {}
@@ -794,6 +844,24 @@ Examples:
                 shell_type = "modbus"
             elif session_type == "opcua":
                 shell_type = "opcua"
+            elif session_type == "bacnet":
+                shell_type = "bacnet"
+            elif session_type == "dnp3":
+                shell_type = "dnp3"
+            elif session_type == "iec104":
+                shell_type = "iec104"
+            elif session_type == "iec61850":
+                shell_type = "iec61850"
+            elif session_type == "coap":
+                shell_type = "coap"
+            elif session_type == "onvif":
+                shell_type = "onvif"
+            elif session_type == "upnp":
+                shell_type = "upnp"
+            elif session_type == "rtsp":
+                shell_type = "rtsp"
+            elif session_type == "matter":
+                shell_type = "matter"
             elif session_type == "kubernetes":
                 shell_type = "kubernetes"
             elif session_type == "ble":

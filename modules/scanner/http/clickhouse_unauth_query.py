@@ -22,7 +22,7 @@ class Module(Scanner, Tcp_scanner_client):
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals"],
             "chain": {
-                "produces_capabilities": ["db_access", "unauth_read"],
+                "produces_capabilities": ["unauth_read"],
                 "consumes_capabilities": ["devops_panel"],
             },
         },

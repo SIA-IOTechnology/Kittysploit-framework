@@ -34,12 +34,18 @@ class BleShell(BaseShell, BleSessionMixin):
             "read": self._cmd_read,
             "write": self._cmd_write,
             "notify": self._cmd_notify,
+            "uart": self._cmd_uart_probe,
+            "uart_probe": self._cmd_uart_probe,
+            "uart_send": self._cmd_uart_send,
+            "uart_exec": self._cmd_uart_exec,
+            "pivot": self._cmd_uart_exec,
             "exit": self._cmd_exit,
             "quit": self._cmd_exit,
             "disconnect": self._cmd_exit,
             "back": self._cmd_exit,
             "background": self._cmd_exit,
         }
+        self._uart_pivot = None
         self._initialize_connection()
 
     def _initialize_connection(self):
@@ -104,6 +110,10 @@ BLE GATT Shell Commands:
                                  write 2A00 48656c6c6f
                                  write 2A00 ascii:Hello
   notify <uuid> [seconds]      Capture notifications (default 5s)
+  uart / uart_probe            Detect Nordic NUS / UART-over-GATT endpoints
+  uart_send <text>             Send text on UART write characteristic
+  uart_exec <cmd> / pivot <cmd>
+                               Write command + collect notify response (BLE pivot)
   help                         Show this help
   exit / back / background     Return to main shell
 """
@@ -224,5 +234,65 @@ BLE GATT Shell Commands:
             lines.append(f"  ... {len(events) - 50} more")
         return {"output": "\n".join(lines), "status": 0, "error": ""}
 
+    def _get_uart_pivot(self, force_new: bool = False):
+        if self._uart_pivot and not force_new:
+            return self._uart_pivot
+        self._require_client()
+        self._uart_pivot = self.open_ble_uart(auto_start=True)
+        return self._uart_pivot
+
+    def _cmd_uart_probe(self, args: str) -> Dict[str, Any]:
+        from lib.protocols.ble.pivot import discover_uart_endpoints
+
+        client = self._require_client()
+        probe = discover_uart_endpoints(client)
+        if not probe.found:
+            return {
+                "output": "",
+                "status": 1,
+                "error": probe.error or "No UART/NUS endpoints found",
+            }
+        lines = [f"UART endpoints ({len(probe.endpoints)}):"]
+        for ep in probe.endpoints:
+            mark = "*" if probe.primary and ep.write_uuid == probe.primary.write_uuid else " "
+            lines.append(
+                f"{mark} [{ep.name}] write={ep.write_uuid} notify={ep.notify_uuid}"
+            )
+        lines.append("Use: uart_exec <command>  (auto-picks primary *)")
+        return {"output": "\n".join(lines) + "\n", "status": 0, "error": ""}
+
+    def _cmd_uart_send(self, args: str) -> Dict[str, Any]:
+        text = args.strip()
+        if not text:
+            return {"output": "", "status": 1, "error": "Usage: uart_send <text>"}
+        pivot = self._get_uart_pivot()
+        ok = pivot.send_text(text, newline=True)
+        if not ok:
+            return {"output": "", "status": 1, "error": "UART send failed"}
+        return {
+            "output": f"Sent via {pivot.profile_name or 'uart'} write={pivot.write_uuid}\n",
+            "status": 0,
+            "error": "",
+        }
+
+    def _cmd_uart_exec(self, args: str) -> Dict[str, Any]:
+        cmd = args.strip()
+        if not cmd:
+            return {"output": "", "status": 1, "error": "Usage: uart_exec <command>"}
+        pivot = self._get_uart_pivot()
+        result = pivot.exec_command(cmd, timeout=4.0)
+        if result.error and not result.response:
+            return {"output": "", "status": 1, "error": result.error}
+        body = result.text or result.response.hex()
+        header = f"[{pivot.profile_name or 'uart'}] {len(result.response)} byte(s)\n"
+        return {"output": header + body + ("\n" if body and not body.endswith("\n") else ""), "status": 0, "error": ""}
+
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
+        if self._uart_pivot:
+            try:
+                self._uart_pivot.stop()
+            except Exception:
+                pass
+            self._uart_pivot = None
         return {"output": "Returning to main shell (BLE session remains active)", "status": 0, "error": ""}
+

@@ -30,11 +30,9 @@ class Module(Scanner, Http_client, Wordpress):
         "cve": "CVE-2026-49772",
         "references": [
             "https://github.com/joshuavanderpoll/CVE-2026-49772",
-            "https://theeventscalendar.com/",
-        ],
+            "https://theeventscalendar.com/"],
         "modules": [
-            "exploits/multi/http/wordpress_events_calendar_cve_2026_49772_sqli",
-        ],
+            "exploits/multi/http/wordpress_events_calendar_cve_2026_49772_sqli"],
         "tags": [
             "web",
             "scanner",
@@ -42,8 +40,7 @@ class Module(Scanner, Http_client, Wordpress):
             "sqli",
             "the-events-calendar",
             "unauthenticated",
-            "cve-2026-49772",
-        ],
+            "cve-2026-49772"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -75,9 +72,7 @@ class Module(Scanner, Http_client, Wordpress):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

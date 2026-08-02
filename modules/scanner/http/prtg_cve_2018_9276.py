@@ -27,11 +27,9 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2018-9276",
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2018-9276",
-            "https://www.exploit-db.com/exploits/46527",
-        ],
+            "https://www.exploit-db.com/exploits/46527"],
         "modules": [
-            "exploits/windows/http/prtg_cve_2018_9276_rce",
-        ],
+            "exploits/windows/http/prtg_cve_2018_9276_rce"],
         "tags": [
             "web",
             "scanner",
@@ -40,8 +38,7 @@ class Module(Scanner, Http_client):
             "authenticated",
             "command-injection",
             "rce",
-            "cve-2018-9276",
-        ],
+            "cve-2018-9276"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -73,8 +70,7 @@ class Module(Scanner, Http_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

@@ -47,6 +47,10 @@ class ShowCommand(BaseCommand):
         "backdoor": "backdoor",
         "backdoors": "backdoor",
         "analysis": "analysis",
+        "browser_auxiliary": "browser_auxiliary",
+        "browser_aux": "browser_auxiliary",
+        "browser_exploit": "browser_exploit",
+        "browser_exploits": "browser_exploit",
     }
     
     MODULE_PATH_PREFIXES = [
@@ -76,7 +80,11 @@ class ShowCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|analysis|listeners|encoders|transforms|docker|backdoors]"
+        return (
+            "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|"
+            "analysis|listeners|encoders|transforms|docker|backdoors|"
+            "browser_auxiliary|browser_exploits]"
+        )
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
@@ -108,6 +116,10 @@ class ShowCommand(BaseCommand):
             "workspaces",
             "backdoors",
             "backdoor",
+            "browser_auxiliary",
+            "browser_aux",  # alias
+            "browser_exploits",
+            "browser_exploit",  # alias
         ]
         
         # Add module-specific options if a module is loaded
@@ -135,12 +147,14 @@ Arguments:
     auxiliary      Show auxiliary modules
     payloads       Show payload modules
     post           Show post-exploitation modules
-    analysis       Show analysis modules
-    listeners      Show available listeners
-    docker         Show Docker environment modules
-    nops           Show available NOP types
-    workspaces     Show available workspaces
-    backdoors      Show backdoor modules
+    analysis             Show analysis modules
+    browser_auxiliary    Show browser auxiliary modules
+    browser_exploits     Show browser exploit modules
+    listeners            Show available listeners
+    docker               Show Docker environment modules
+    nops                 Show available NOP types
+    workspaces           Show available workspaces
+    backdoors            Show backdoor modules
 
 Examples:
     show                    # Show current module information
@@ -149,6 +163,8 @@ Examples:
     show modules            # List all available modules
     show exploits           # List exploit modules
     show analysis           # List analysis modules
+    show browser_auxiliary  # List browser auxiliary modules
+    show browser_exploits   # List browser exploit modules
     show docker             # List Docker environments
     show backdoors          # List backdoor modules
     show listeners          # List all available listeners
@@ -220,6 +236,10 @@ Examples:
                 self._show_modules_by_category("Docker environment", "docker_environment")
             elif show_type in ("backdoor", "backdoors"):
                 self._show_modules_by_category("Backdoor", "backdoor")
+            elif show_type in ("browser_auxiliary", "browser_aux"):
+                self._show_modules_by_category("Browser auxiliary", "browser_auxiliary")
+            elif show_type in ("browser_exploit", "browser_exploits"):
+                self._show_modules_by_category("Browser exploit", "browser_exploit")
             elif show_type == "nops":
                 self._show_nops()
             elif show_type == "workspaces":
@@ -228,7 +248,8 @@ Examples:
                 print_error(f"Unknown show type: {show_type}")
                 print_info(
                     "Use 'show options', 'show advanced', 'show info', 'show modules', "
-                    "'show analysis', 'show listeners', 'show encoders', 'show transforms', "
+                    "'show analysis', 'show browser_auxiliary', 'show browser_exploits', "
+                    "'show listeners', 'show encoders', 'show transforms', "
                     "'show nops', 'show workspaces', or 'show backdoors'"
                 )
                 return False

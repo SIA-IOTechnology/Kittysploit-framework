@@ -219,3 +219,81 @@ def probe_ssh_hostkey(host: str, port: int = 22, timeout: float = 8.0) -> dict:
                 transport.close()
         except Exception:
             pass
+
+
+def probe_ssh_empty_password(
+    host: str,
+    port: int = 22,
+    timeout: float = 8.0,
+    usernames: Optional[list] = None,
+) -> dict:
+    """
+    Try empty-password authentication for a short username list.
+    Returns success=True and username on first hit.
+    """
+    result = {
+        "detected": False,
+        "success": False,
+        "username": "",
+        "banner": "",
+        "error": "",
+        "tried": [],
+    }
+    try:
+        import paramiko
+    except ImportError:
+        banner = probe_ssh_banner(host, port, timeout)
+        result["banner"] = banner.get("banner") or ""
+        result["detected"] = bool(banner.get("detected"))
+        result["error"] = "paramiko_required"
+        return result
+
+    users = [str(u).strip() for u in (usernames or ["root", "admin"]) if str(u).strip()]
+    if not users:
+        users = ["root"]
+
+    for username in users:
+        result["tried"].append(username)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            client.connect(
+                host,
+                port=int(port),
+                username=username,
+                password="",
+                timeout=timeout,
+                allow_agent=False,
+                look_for_keys=False,
+                auth_timeout=timeout,
+                banner_timeout=timeout,
+            )
+            transport = client.get_transport()
+            result["detected"] = True
+            result["success"] = True
+            result["username"] = username
+            result["banner"] = (transport.remote_version if transport else "") or ""
+            try:
+                client.close()
+            except Exception:
+                pass
+            return result
+        except paramiko.AuthenticationException:
+            result["detected"] = True
+            try:
+                client.close()
+            except Exception:
+                pass
+            continue
+        except Exception as exc:
+            result["error"] = str(exc)[:200]
+            try:
+                client.close()
+            except Exception:
+                pass
+            continue
+    if not result["detected"]:
+        banner = probe_ssh_banner(host, port, min(timeout, 5.0))
+        result["banner"] = banner.get("banner") or ""
+        result["detected"] = bool(banner.get("detected"))
+    return result

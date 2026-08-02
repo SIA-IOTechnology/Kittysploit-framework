@@ -34,7 +34,7 @@ def _enc_str(s):
 
 def _pkt(mtype, vh=b'', payload=b'', flags=0):
   rem=len(vh)+len(payload); hdr=bytes([(mtype<<4)|flags])
-  while True:²
+  while True:
     enc=rem % 128; rem//=128
     if rem: enc|=0x80
     hdr+=bytes([enc])

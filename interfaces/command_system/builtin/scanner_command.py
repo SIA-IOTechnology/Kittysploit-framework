@@ -83,7 +83,9 @@ class ScannerCommand(BaseCommand):
         return (
             "scanner -u <URL|HOSTNAME:PORT> [--protocol PROTO] [--tags TAG1,TAG2] "
             "[--port PORT] [--threads N] [--module MODULE] [--scan-ports] "
-            "[--auto-exploit] [--evidence] [--screenshots]"
+            "[--auto-exploit] [--evidence] [--screenshots]\n"
+            "       scanner --protocols | scanner protocols\n"
+            "       scanner --list"
         )
     
     @property
@@ -98,7 +100,7 @@ against the specified target URL.
 
 Options:
     -u, --url URL        Target URL to scan (required, or use hostname:port)
-    --protocol PROTO     Filter by protocol (http, ftp, ssh, etc.)
+    --protocol PROTO     Filter by scanner family folder (http, ssh, cassandra, …)
     --tags TAG1,TAG2     Filter by tags (comma-separated, e.g., ssh,apache)
     --port PORT          Specify target port (overrides URL port)
     --scan-ports         Enable automatic port scanning (default: enabled if no filters)
@@ -108,6 +110,7 @@ Options:
     --module MODULE      Execute only a specific module (e.g., http/apache_version_check)
     --all                Include panel/CVE/mass-detect modules (noisy/slow; off by default)
     --list               List all available scanner modules
+    --protocols          List scanner families usable with --protocol (not only wire protocols)
     --verbose, -v        Show detailed output for each module
     --no-cache           Disable HTTP request caching
     --no-dedup           Disable grouping/deduplication of identical findings
@@ -115,6 +118,10 @@ Options:
     --no-stack-gate      Disable stack fingerprint gating (run CMS/SPA modules blindly)
     --evidence           Capture HTTP/request evidence for vulnerable hits (disk + DB loot)
     --screenshots        Capture headless page screenshots for hits (implies --evidence; needs Playwright)
+
+Commands:
+    scanner protocols    Same as --protocols (list scanner/ families + module counts)
+    scanner --list       List every scanner module path
 
 By default only low-noise checks run (HTTP methods, security/headers, banners,
 non-HTTP services). Product/panel fingerprints are opt-in.
@@ -134,6 +141,8 @@ Examples:
     scanner -u example.com --tags ssh --port 2222
     scanner -u example.com --tags cve
     scanner -u example.com --scan-ports
+    scanner --protocols
+    scanner protocols
     scanner --list
     # Cloud (AWS S3, Azure, GCP, K8s, metadata):
     scanner -u https://bucket.s3.region.amazonaws.com --protocol cloud
@@ -162,11 +171,15 @@ Examples:
             
             if options['list']:
                 return self._list_modules()
+
+            if options.get("protocols"):
+                return self._list_protocols()
             
             if not options['url']:
                 print_error("URL is required. Use -u or --url to specify target URL")
                 print_info(f"Usage: {self.usage}")
-                print_info(f"Use 'scanner --help' for more information")
+                print_info("Use 'scanner --help' for more information")
+                print_info("List protocols: scanner --protocols  (or: scanner protocols)")
                 return False
             
             # Parse target (URL or hostname:port)
@@ -449,6 +462,7 @@ Examples:
             'threads': 10,
             'module': None,
             'list': False,
+            'protocols': False,
             'verbose': False,
             'no_cache': False,
             'no_dedup': False,
@@ -527,6 +541,9 @@ Examples:
                     i += 1
             elif arg == '--list':
                 options['list'] = True
+                i += 1
+            elif arg in ('--protocols', 'protocols'):
+                options['protocols'] = True
                 i += 1
             elif arg in ['-v', '--verbose']:
                 options['verbose'] = True
@@ -2273,6 +2290,87 @@ Examples:
         print_empty()
         print_info("=" * 70)
     
+    # Path segment under modules/scanner/ → display kind for --protocols.
+    # These are filter families for --protocol, not necessarily OSI “protocols”.
+    _SCANNER_FAMILY_KINDS = {
+        "http": "network",
+        "tcp": "network",
+        "udp": "network",
+        "dns": "network",
+        "ftp": "network",
+        "ssh": "network",
+        "ldap": "network",
+        "smb": "network",
+        "ipsec": "network",
+        "smtp": "network",
+        "telnet": "network",
+        "rdp": "network",
+        "vnc": "network",
+        "cassandra": "database",
+        "mysql": "database",
+        "mongodb": "database",
+        "mssql": "database",
+        "postgresql": "database",
+        "redis": "database",
+        "cloud": "domain",
+        "ics": "domain",
+        "telecom": "domain",
+        "multi": "other",
+    }
+
+    def _protocol_counts(self, modules: Optional[List[Dict[str, Any]]] = None) -> Dict[str, int]:
+        """Return ``{family: module_count}`` from scanner module paths."""
+        rows = modules if modules is not None else self._discover_modules()
+        counts: Dict[str, int] = {}
+        for module in rows:
+            parts = str(module.get("path") or "").split("/")
+            if len(parts) > 1 and parts[0] == "scanner":
+                protocol = parts[1].strip().lower() or "other"
+            else:
+                protocol = "other"
+            if protocol in ("__pycache__",):
+                continue
+            counts[protocol] = counts.get(protocol, 0) + 1
+        return dict(sorted(counts.items(), key=lambda item: item[0]))
+
+    def _family_kind(self, family: str) -> str:
+        return self._SCANNER_FAMILY_KINDS.get(str(family or "").lower(), "service")
+
+    def _list_protocols(self) -> bool:
+        """List scanner families usable with ``--protocol`` (path segments)."""
+        modules = self._discover_modules()
+        if not modules:
+            print_warning("No scanner modules found")
+            return False
+
+        counts = self._protocol_counts(modules)
+        if not counts:
+            print_warning("No scanner families found")
+            return False
+
+        print_success(f"Available scanner families ({len(counts)}):")
+        print_info(
+            "Each name is a modules/scanner/<family>/ folder — used by --protocol. "
+            "Databases/products (e.g. cassandra) are service families, not L4/L7 wire protocols."
+        )
+        print_empty()
+        rows = [
+            [family, self._family_kind(family), str(count)]
+            for family, count in counts.items()
+        ]
+        print_table(
+            ["Family", "Kind", "Modules"],
+            rows,
+            expand_to_terminal=True,
+            prefer_single_line=True,
+            column_min_widths={"Family": 12, "Kind": 8, "Modules": 7},
+        )
+        print_empty()
+        print_info(f"Total modules: {len(modules)}")
+        print_info("Filter a scan with:  scanner -u <target> --protocol <family>")
+        print_info("List modules in a family:  scanner --list")
+        return True
+
     def _list_modules(self) -> bool:
         """List all available scanner modules"""
         modules = self._discover_modules()
@@ -2298,7 +2396,7 @@ Examples:
             categories[category].append(module)
         
         for category in sorted(categories.keys()):
-            print_info(f"  {category.upper()}/")
+            print_info(f"  {category.upper()}/  ({len(categories[category])} module(s))")
             for module in categories[category]:
                 print_info(f"    {module['path']}")
                 print_info(f"      Name: {module['name']}")

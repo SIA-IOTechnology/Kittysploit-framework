@@ -41,17 +41,15 @@ class Module(Auxiliary, Tcp_scanner_client):
             "approval_required": True,
             "produces": ["credentials", "risk_signals"],
             "chain": {
-                "consumes_capabilities": [],
+                "consumes_capabilities": ["service_identified", "db_surface"],
                 "produces_capabilities": [
                     {"capability": "db_access", "from_detail": "username"},
-                    "authenticated_session",
-                ],
+                    "authenticated_session"],
                 "option_bindings": {},
                 "suggested_followups": [
                     "post/mysql/gather/enum_users",
                     "post/mysql/gather/enum_databases",
-                    "post/mysql/gather/check_mysql_hardening",
-                ],
+                    "post/mysql/gather/check_mysql_hardening"],
             },
         },
     }

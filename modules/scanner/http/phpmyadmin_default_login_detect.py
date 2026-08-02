@@ -34,8 +34,7 @@ class Module(Scanner, Http_client):
         "author": ["KittySploit Team"],
         "severity": "high",
         "references": [
-            "https://www.phpmyadmin.net",
-        ],
+            "https://www.phpmyadmin.net"],
         "tags": ["web", "scanner", "phpmyadmin", "default-login", "mysql", "vuln"],
         "modules": ["scanner/http/phpmyadmin_detect"],
         "agent": {
@@ -66,9 +65,7 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": ""},
-                    {"capability": "admin_surface", "from_detail": ""},
-                ],
+{"capability": "admin_surface", "from_detail": ""}],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],
@@ -179,8 +176,7 @@ class Module(Scanner, Http_client):
                     "actions": [
                         "Change or disable default accounts",
                         "Restrict phpMyAdmin to trusted networks / VPN",
-                        "Enforce strong passwords and MFA where possible",
-                    ],
+                        "Enforce strong passwords and MFA where possible"],
                 },
             )
             return True

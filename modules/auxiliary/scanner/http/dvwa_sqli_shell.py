@@ -32,8 +32,7 @@ class Module(Auxiliary, Http_client, Http_login, Sqli):
         "tags": ["web", "dvwa", "sqli", "mysql", "training"],
         "references": [
             "https://github.com/digininja/DVWA",
-            "https://owasp.org/www-community/attacks/SQL_Injection",
-        ],
+            "https://owasp.org/www-community/attacks/SQL_Injection"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -58,8 +57,7 @@ class Module(Auxiliary, Http_client, Http_login, Sqli):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

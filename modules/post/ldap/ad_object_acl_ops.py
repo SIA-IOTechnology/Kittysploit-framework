@@ -48,11 +48,7 @@ class Module(Post):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''}],
          'consumes_capabilities': ['shell'],
          'option_bindings': {},
          'suggested_followups': []},
@@ -102,8 +98,7 @@ class Module(Post):
             "-d",
             self._value(self.domain).strip(),
             "-u",
-            self._value(self.username).strip(),
-        ]
+            self._value(self.username).strip()]
         if bool(self.use_kerberos):
             argv.append("-k")
         if self._value(self.password):

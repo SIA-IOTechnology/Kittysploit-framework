@@ -22,12 +22,10 @@ class Module(Scanner, Http_client, WingFtp):
         "cve": "CVE-2026-44403",
         "references": [
             "https://www.wftpserver.com/",
-            "https://www.cve.org/CVERecord?id=CVE-2026-44403",
-        ],
+            "https://www.cve.org/CVERecord?id=CVE-2026-44403"],
         "modules": [
             "exploits/multi/http/wing_ftp_cve_2026_44403_rce",
-            "auxiliary/admin/http/wing_ftp_cve_2026_44403_auth_check",
-        ],
+            "auxiliary/admin/http/wing_ftp_cve_2026_44403_auth_check"],
         "tags": [
             "web",
             "scanner",
@@ -35,8 +33,7 @@ class Module(Scanner, Http_client, WingFtp):
             "ftp",
             "rce",
             "authenticated",
-            "cve-2026-44403",
-        ],
+            "cve-2026-44403"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -68,8 +65,7 @@ class Module(Scanner, Http_client, WingFtp):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

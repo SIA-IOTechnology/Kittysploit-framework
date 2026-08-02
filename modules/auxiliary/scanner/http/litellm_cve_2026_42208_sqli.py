@@ -27,8 +27,7 @@ class Module(Auxiliary, Http_client):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-42208",
             "https://github.com/BerriAI/litellm/security/advisories/GHSA-r75f-5x8p-qvmc",
-            "https://bishopfox.com/blog/cve-2026-42208-pre-authentication-sql-injection-in-litellm-proxy",
-        ],
+            "https://bishopfox.com/blog/cve-2026-42208-pre-authentication-sql-injection-in-litellm-proxy"],
         "tags": [
             "litellm",
             "llm",
@@ -38,8 +37,7 @@ class Module(Auxiliary, Http_client):
             "pre-auth",
             "postgresql",
             "cve-2026-42208",
-            "kev",
-        ],
+            "kev"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "data_exfiltration"],
@@ -68,8 +66,7 @@ class Module(Auxiliary, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

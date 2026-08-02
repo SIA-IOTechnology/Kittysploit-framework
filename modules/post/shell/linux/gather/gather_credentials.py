@@ -37,36 +37,7 @@ class Module(Post, System, LinuxSessionMixin):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -352,8 +323,7 @@ class Module(Post, System, LinuxSessionMixin):
                 r'passwd\s*[:=]\s*([^\s\n\'\"<>]+)',
                 r'pass\s*[:=]\s*([^\s\n\'\"<>]+)',
                 r'pwd\s*[:=]\s*([^\s\n\'\"<>]+)',
-                r'secret\s*[:=]\s*([^\s\n\'\"<>]+)',
-            ]
+                r'secret\s*[:=]\s*([^\s\n\'\"<>]+)']
             
             found_passwords = []
             
@@ -613,8 +583,7 @@ class Module(Post, System, LinuxSessionMixin):
                                         r'DB_PASSWORD\s*[:=]\s*[\'"]?([^\'"\s]+)',
                                         r'DB_PASS\s*[:=]\s*[\'"]?([^\'"\s]+)',
                                         r'password\s*[:=]\s*[\'"]?([^\'"\s]+)',
-                                        r'pwd\s*[:=]\s*[\'"]?([^\'"\s]+)',
-                                    ]
+                                        r'pwd\s*[:=]\s*[\'"]?([^\'"\s]+)']
                                     
                                     for db_pattern in db_patterns:
                                         matches = re.finditer(db_pattern, content, re.IGNORECASE)

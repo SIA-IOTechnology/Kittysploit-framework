@@ -20,7 +20,18 @@ OT_DESTRUCTIVE_PATH_MARKERS: tuple[str, ...] = (
     "rpc_integer_overflow",
     "modbus_write",
     "write_register",
+    "write_coil",
+    "write_property",
     "dnp3_write_enabled",
+    "operate_crob",
+    "single_command",
+    "double_command",
+    "ics/bacnet/manage/",
+    "ics/dnp3/manage/",
+    "ics/iec104/manage/",
+    "deploy_reverse_agent",
+    "deploy_embedded_c2",
+    "uart_exec",
     "qconn_rce",
 )
 
@@ -29,6 +40,35 @@ OT_RECON_PATH_MARKERS: tuple[str, ...] = (
     "scanner/ics/",
     "analysis/reporting/ics",
     "post/ics/gather/",
+    "post/ics/bacnet/gather/",
+    "post/ics/dnp3/gather/",
+    "post/ics/iec104/gather/",
+    "post/ics/iec61850/gather/",
+    "post/ics/modbus/gather/",
+    "listeners/ics/",
+    "post/mqtt/gather/",
+    "post/coap/gather/",
+    "post/coap/manage/",
+    "listeners/iot/onvif_client",
+    "post/onvif/gather/",
+    "listeners/iot/upnp_client",
+    "post/upnp/gather/",
+    "listeners/iot/rtsp_client",
+    "post/rtsp/gather/",
+    "scanner/tcp/rtsp_detect",
+    "listeners/iot/matter_client",
+    "post/matter/gather/",
+    "scanner/udp/matter_detect",
+    "post/ble/gather/",
+    "listeners/iot/ble_gatt_client",
+    "auxiliary/scanner/bluetooth/",
+    "scanner/udp/ssdp_detect",
+    "scanner/udp/mdns_detect",
+    "scanner/udp/mdns_enum",
+    "analysis/binary/firmware_arch_suggest",
+    "analysis/binary/firmware_adaptive_payload",
+    "auxiliary/admin/http/camera/onvif_",
+    "post/shell/linux/busybox/",
 )
 
 OT_TECH_HINTS: tuple[str, ...] = (
@@ -37,9 +77,24 @@ OT_TECH_HINTS: tuple[str, ...] = (
     "siemens",
     "bacnet",
     "iec104",
+    "iec61850",
+    "mms",
     "enip",
     "dnp3",
     "opcua",
+    "mqtt",
+    "coap",
+    "upnp",
+    "ssdp",
+    "onvif",
+    "rtsp",
+    "matter",
+    "chip",
+    "thread",
+    "ble",
+    "bluetooth",
+    "openwrt",
+    "busybox",
     "scada",
     "plc",
     "ics",
@@ -140,6 +195,12 @@ def merge_ot_context_from_results(
             risk_signals.add("s7_unprotected")
         if "write_enabled" in path or "write" in message.lower():
             risk_signals.add("modbus_write_exposed")
+        if "write_property" in path or "bacnet/manage" in path:
+            risk_signals.add("bacnet_write_exposed")
+        if "operate_crob" in path or "dnp3/manage" in path:
+            risk_signals.add("dnp3_control_exposed")
+        if "single_command" in path or "iec104/manage" in path:
+            risk_signals.add("iec104_command_exposed")
         if "default credential" in message.lower() or "valid credentials" in message.lower():
             risk_signals.add("ot_default_credentials")
 
@@ -193,12 +254,92 @@ OT_PROTOCOL_HANDOFF: Dict[str, str] = {
     "modbus tcp": "auxiliary/scanner/ics/modbus_identify",
     "s7comm": "auxiliary/scanner/ics/s7comm_identify",
     "s7": "auxiliary/scanner/ics/s7comm_identify",
-    "dnp3": "auxiliary/scanner/ics/dnp3_identify",
-    "bacnet": "auxiliary/scanner/ics/bacnet_whois",
-    "iec104": "auxiliary/scanner/ics/iec104_interrogate",
+    "dnp3": "listeners/ics/dnp3_client",
+    "bacnet": "listeners/ics/bacnet_client",
+    "iec104": "listeners/ics/iec104_client",
+    "iec61850": "listeners/ics/iec61850_client",
+    "mms": "listeners/ics/iec61850_client",
     "enip": "auxiliary/scanner/ics/enip_list_identity",
+    "opcua": "listeners/ics/opcua_client",
+    "mqtt": "listeners/iot/mqtt",
+    "coap": "listeners/iot/coap_client",
+    "onvif": "listeners/iot/onvif_client",
+    "upnp": "listeners/iot/upnp_client",
+    "ssdp": "listeners/iot/upnp_client",
+    "rtsp": "listeners/iot/rtsp_client",
+    "matter": "listeners/iot/matter_client",
+    "chip": "listeners/iot/matter_client",
+    "thread": "scanner/udp/matter_detect",
+    "ble": "listeners/iot/ble_gatt_client",
+    "bluetooth": "auxiliary/scanner/bluetooth/ble_scan",
+    "mdns": "scanner/udp/mdns_enum",
+    "bonjour": "scanner/udp/mdns_enum",
+    "dns-sd": "scanner/udp/mdns_enum",
+    "hap": "auxiliary/admin/http/camera/onvif_device_info",
+    "openwrt": "scanner/http/openwrt_detect",
+    "busybox": "post/shell/linux/busybox/firmware_info",
     "profinet": "auxiliary/scanner/ics/profinet_dcp",
 }
+
+IOT_DISCOVERY_WORKFLOW = "workflow/iot-discovery"
+IOT_DISCOVERY_PLAYBOOK = "iot-discovery-to-session"
+
+IOT_DISCOVERY_BASELINE: tuple[str, ...] = (
+    "scanner/udp/ssdp_detect",
+    "scanner/udp/mdns_detect",
+    "scanner/udp/mdns_enum",
+    "scanner/udp/matter_detect",
+    "auxiliary/scanner/ics/mqtt_broker_identify",
+    "auxiliary/admin/http/camera/onvif_device_info",
+    "scanner/http/openwrt_detect",
+)
+
+FIRMWARE_PAYLOAD_WORKFLOW = "workflow/firmware-to-payload"
+
+
+def suggest_iot_discovery_path(knowledge_base: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """
+    Recommend the IoT discovery workflow plus protocol sessions from KB/mDNS hints.
+    """
+    kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+    suggested = list(IOT_DISCOVERY_BASELINE)
+    for module in suggest_ot_active_handoff(kb):
+        if module not in suggested:
+            suggested.append(module)
+
+    mdns_services = kb.get("mdns_services") or kb.get("services") or []
+    if isinstance(mdns_services, (list, tuple)):
+        try:
+            from lib.scanner.mdns.detectors import suggest_modules_from_mdns
+
+            labels: List[str] = []
+            for item in mdns_services:
+                if isinstance(item, dict):
+                    for key in ("service_type", "instance", "name"):
+                        val = item.get(key)
+                        if val:
+                            labels.append(str(val))
+                else:
+                    labels.append(str(item))
+            for module in suggest_modules_from_mdns(labels):
+                if module not in suggested:
+                    suggested.append(module)
+        except Exception:
+            pass
+
+    return {
+        "safe_workflow": IOT_DISCOVERY_WORKFLOW,
+        "playbook": IOT_DISCOVERY_PLAYBOOK,
+        "baseline_modules": list(IOT_DISCOVERY_BASELINE),
+        "suggested_modules": suggested[:14],
+        "guidance": [
+            f"Start with {IOT_DISCOVERY_WORKFLOW} (read-only discovery).",
+            "Run scanner/udp/mdns_enum after mdns_detect for SRV/TXT/port handoffs.",
+            "Run scanner/udp/matter_detect (or listeners/iot/matter_client) on _matter/_matterc hits.",
+            "Open protocol sessions from SSDP/mDNS/MQTT/ONVIF/RTSP/Matter hits via listeners/iot/*.",
+            "After shell on OpenWrt/BusyBox, run post/shell/linux/busybox/*.",
+        ],
+    }
 
 
 def suggest_ot_active_handoff(knowledge_base: Dict[str, Any] | None) -> List[str]:
@@ -223,6 +364,9 @@ def suggest_ot_active_handoff(knowledge_base: Dict[str, Any] | None) -> List[str
     for token in details_proto.split(","):
         if token.strip():
             protocols.add(token.strip().lower())
+
+    for svc in kb.get("mdns_services") or []:
+        protocols.add(str(svc).strip().lower())
 
     for proto in sorted(protocols):
         for key, module in OT_PROTOCOL_HANDOFF.items():

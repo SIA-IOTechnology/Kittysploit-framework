@@ -70,7 +70,7 @@ def infer_device_type(protocols: Iterable[str] | None = None, port: int | None =
     names = {str(item).lower() for item in (protocols or [])}
     if port:
         names.add(ICS_SERVICE_PORTS.get(int(port), ""))
-    if names & {"s7comm", "modbus-tcp", "dnp3", "iec104", "enip", "bacnet"}:
+    if names & {"s7comm", "modbus-tcp", "dnp3", "iec104", "iec61850", "mms", "enip", "bacnet"}:
         return "PLC/RTU"
     if names & {"opcua", "hmi", "wincc"}:
         return "SCADA/HMI"

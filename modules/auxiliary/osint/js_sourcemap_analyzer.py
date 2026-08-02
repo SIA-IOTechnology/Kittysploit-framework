@@ -43,14 +43,11 @@ class Module(Auxiliary, Http_client):
             "produces": ["endpoints", "tech_hints", "risk_signals", "params"],
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "graphql_endpoint", "from_detail": "graphql_endpoint"},
-                    "db_access",
-                ],
+                    {"capability": "graphql_endpoint", "from_detail": "graphql_endpoint"}],
                 "suggested_followups": [
                     "auxiliary/scanner/http/graphql_abuse",
                     "auxiliary/scanner/http/api_fuzzer",
-                    "auxiliary/scanner/http/jwt_oauth_probe",
-                ],
+                    "auxiliary/scanner/http/jwt_oauth_probe"],
             },
         },
     }

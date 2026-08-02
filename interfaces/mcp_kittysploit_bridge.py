@@ -2304,3 +2304,220 @@ class NaturalLanguagePlanner:
             "executed_command": executed_command,
             "state": self.command_bridge.get_state() if self.command_bridge else None,
         }
+
+    def ot_overview(self, knowledge_base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """OT/IoT surface for MCP agents: safe workflow, recon modules, handoff map."""
+        from core.workflows import list_workflow_ids, load_workflow_definition
+        from interfaces.command_system.builtin.agent.ot_policy import (
+            OT_PROTOCOL_HANDOFF,
+            OT_RECON_PATH_MARKERS,
+            is_ot_destructive_module,
+            is_ot_recon_module,
+            ot_context_established,
+            suggest_iot_discovery_path,
+            suggest_ot_active_handoff,
+        )
+
+        kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+        ot_workflows: List[Dict[str, Any]] = []
+        for wid in list_workflow_ids():
+            try:
+                definition = load_workflow_definition(wid)
+            except Exception:
+                continue
+            tags = [str(t).lower() for t in (getattr(definition, "tags", None) or [])]
+            name = str(getattr(definition, "name", "") or wid).lower()
+            if not any(token in tags or token in name for token in ("ot", "ics", "iot", "scada")):
+                if wid not in {"ot-safe-assessment", "iot-discovery", "firmware-to-payload"}:
+                    continue
+            ot_workflows.append(
+                {
+                    "id": wid,
+                    "module_path": f"workflow/{wid}",
+                    "name": getattr(definition, "name", wid),
+                    "description": (getattr(definition, "description", "") or "").strip(),
+                    "tags": list(getattr(definition, "tags", None) or []),
+                    "intrusive": bool((getattr(definition, "policy", None) or {}).get("intrusive")),
+                }
+            )
+
+        recon: List[Dict[str, Any]] = []
+        destructive: List[Dict[str, Any]] = []
+        for row in self._get_module_index():
+            path = str(row.get("path") or "")
+            if is_ot_recon_module(path):
+                recon.append({k: row[k] for k in ("path", "name", "description", "type")})
+            elif is_ot_destructive_module(path):
+                destructive.append({k: row[k] for k in ("path", "name", "description", "type")})
+
+        iot_path = suggest_iot_discovery_path(kb)
+        return {
+            "safe_workflow": "workflow/ot-safe-assessment",
+            "iot_discovery_workflow": iot_path.get("safe_workflow"),
+            "iot_discovery_playbook": iot_path.get("playbook"),
+            "iot_discovery": iot_path,
+            "firmware_payload_workflow": "workflow/firmware-to-payload",
+            "recon_path_markers": list(OT_RECON_PATH_MARKERS),
+            "protocol_handoff": dict(OT_PROTOCOL_HANDOFF),
+            "suggested_active_modules": suggest_ot_active_handoff(kb),
+            "ot_context_established": ot_context_established(kb),
+            "ot_assets": kb.get("ot_assets") if isinstance(kb.get("ot_assets"), dict) else {},
+            "workflows": ot_workflows,
+            "recon_modules": recon[:80],
+            "destructive_modules_count": len(destructive),
+            "guidance": [
+                "OT/ICS: start with workflow/ot-safe-assessment (read-only Phase 1).",
+                "Consumer IoT: start with workflow/iot-discovery (SSDP/mDNS/MQTT/ONVIF/OpenWrt).",
+                "Firmware blob: workflow/firmware-to-payload → adaptive listener + BusyBox/CMD plan.",
+                "Prefer listeners/ics/* and listeners/iot/* for persistent sessions.",
+                "Block destructive ICS modules until ot_context_established is true.",
+                "Use ks_ot_recommend after passive recon to map protocols to identify modules.",
+            ],
+        }
+
+    def ot_list_modules(
+        self,
+        *,
+        kind: str = "recon",
+        query: Optional[str] = None,
+        limit: int = 80,
+    ) -> Dict[str, Any]:
+        """List OT/IoT modules filtered by kind: recon|destructive|all|session|post."""
+        from interfaces.command_system.builtin.agent.ot_policy import (
+            is_ot_destructive_module,
+            is_ot_module_path,
+            is_ot_recon_module,
+        )
+
+        kind_norm = str(kind or "recon").strip().lower()
+        q = str(query or "").strip().lower()
+        items: List[Dict[str, Any]] = []
+        for row in self._get_module_index():
+            path = str(row.get("path") or "")
+            path_low = path.lower()
+            if kind_norm == "recon" and not is_ot_recon_module(path):
+                continue
+            if kind_norm == "destructive" and not is_ot_destructive_module(path):
+                continue
+            if kind_norm == "session" and not (
+                path_low.startswith("listeners/ics/") or path_low.startswith("listeners/iot/")
+            ):
+                continue
+            if kind_norm == "post" and not (
+                path_low.startswith("post/ics/")
+                or path_low.startswith("post/mqtt/")
+                or path_low.startswith("post/coap/")
+                or path_low.startswith("post/onvif/")
+                or path_low.startswith("post/upnp/")
+                or path_low.startswith("auxiliary/admin/http/camera/onvif_")
+                or path_low.startswith("post/shell/linux/busybox/")
+            ):
+                continue
+            if kind_norm == "all" and not (
+                is_ot_module_path(path)
+                or is_ot_recon_module(path)
+                or path_low.startswith("listeners/iot/")
+                or path_low.startswith("post/mqtt/")
+                or path_low.startswith("post/coap/")
+                or path_low.startswith("post/onvif/")
+                or path_low.startswith("post/upnp/")
+                or path_low.startswith("auxiliary/admin/http/camera/onvif_")
+                or path_low.startswith("post/shell/linux/busybox/")
+            ):
+                continue
+            if kind_norm not in {"recon", "destructive", "session", "post", "all"}:
+                if not is_ot_recon_module(path):
+                    continue
+            blob = f"{path} {row.get('name') or ''} {row.get('description') or ''}".lower()
+            if q and q not in blob:
+                continue
+            items.append({k: row[k] for k in ("path", "name", "description", "type", "tags")})
+            if len(items) >= max(1, min(int(limit or 80), 200)):
+                break
+        return {"kind": kind_norm, "query": query or "", "count": len(items), "modules": items}
+
+    def ot_recommend(
+        self,
+        *,
+        target: Optional[str] = None,
+        protocols: Optional[List[str]] = None,
+        knowledge_base: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Recommend safe OT assessment path and protocol-specific modules."""
+        from interfaces.command_system.builtin.agent.ot_policy import (
+            OT_PROTOCOL_HANDOFF,
+            suggest_iot_discovery_path,
+            suggest_ot_active_handoff,
+        )
+
+        kb: Dict[str, Any] = dict(knowledge_base) if isinstance(knowledge_base, dict) else {}
+        if target:
+            kb.setdefault("target", str(target).strip())
+        proto_list = [str(p).strip().lower() for p in (protocols or []) if str(p).strip()]
+        if proto_list:
+            kb["ot_passive_protocols"] = ",".join(proto_list)
+            assets = dict(kb.get("ot_assets") or {}) if isinstance(kb.get("ot_assets"), dict) else {}
+            host = str(kb.get("target") or "unknown")
+            assets[host] = {
+                "host": host,
+                "protocols": proto_list,
+                "protocol": proto_list[0] if proto_list else "",
+            }
+            kb["ot_assets"] = assets
+            kb["ot_context_established"] = True
+
+        iot_tokens = {"mqtt", "coap", "onvif", "upnp", "ssdp", "mdns", "hap", "openwrt", "busybox", "iot"}
+        prefer_iot = bool(proto_list) and any(
+            any(tok in p for tok in iot_tokens) for p in proto_list
+        )
+        iot_path = suggest_iot_discovery_path(kb)
+        suggested = suggest_ot_active_handoff(kb)
+        if prefer_iot:
+            for module_path in iot_path.get("suggested_modules") or []:
+                if module_path not in suggested:
+                    suggested.append(module_path)
+
+        primary_workflow = (
+            iot_path.get("safe_workflow") if prefer_iot else "workflow/ot-safe-assessment"
+        )
+        commands = [
+            {
+                "command": f"use {primary_workflow}",
+                "reason": "Phase-1 read-only discovery/assessment",
+            }
+        ]
+        if not prefer_iot:
+            commands.append(
+                {
+                    "command": f"use {iot_path.get('safe_workflow')}",
+                    "reason": "Optional consumer IoT discovery path",
+                }
+            )
+        if target:
+            commands.append(
+                {
+                    "command": f"set target {target}",
+                    "reason": "Bind assessment to the authorized host",
+                }
+            )
+        for module_path in suggested[:10]:
+            commands.append({"command": f"use {module_path}", "reason": "Protocol handoff from recon context"})
+
+        return {
+            "target": target or kb.get("target"),
+            "protocols": proto_list,
+            "safe_workflow": primary_workflow,
+            "iot_discovery_workflow": iot_path.get("safe_workflow"),
+            "iot_discovery_playbook": iot_path.get("playbook"),
+            "suggested_modules": suggested[:12],
+            "protocol_handoff": {
+                key: OT_PROTOCOL_HANDOFF[key]
+                for key in OT_PROTOCOL_HANDOFF
+                if not proto_list or any(key in p for p in proto_list)
+            },
+            "recommended_commands": commands,
+            "knowledge_base": {
+                "ot_context_established": bool(kb.get("ot_context_established")),
+                "ot_assets": kb.get("ot_assets") if isinstance(kb.get("ot_assets"), dict) else {},
+            },
+        }

@@ -25,8 +25,7 @@ TABLE_HEADER = [
     "MAC Address",
     "IP Address",
     "Netmask",
-    "Gateway",
-]
+    "Gateway"]
 
 
 class Module(Auxiliary):

@@ -12,6 +12,7 @@ import tempfile
 from kittysploit import *
 
 from lib.firmware import (
+    FirmwareArch,
     FirmwareExtract,
     detect_firmware_type,
     extract_trx,
@@ -20,7 +21,7 @@ from lib.firmware import (
 from lib.firmware.utils import filter_gzip_redundant_with_trx
 
 
-class Module(Analysis, FirmwareExtract):
+class Module(Analysis, FirmwareExtract, FirmwareArch):
     __info__ = {
         "name": "Firmware Extractor (Advanced)",
         "description": (
@@ -133,6 +134,22 @@ class Module(Analysis, FirmwareExtract):
                 extracted_files,
                 suggestions,
             )
+
+        try:
+            arch_report = self.analyze_firmware_arch(
+                firmware_path,
+                scan_mb=mb,
+                max_hits=32,
+            )
+            for line in self.summarize_arch_report(arch_report):
+                suggestions.append(line)
+            if arch_report.get("primary_arch"):
+                print_info(
+                    f"Detected primary arch: {arch_report['primary_arch']} "
+                    f"(see analysis/binary/firmware_arch_suggest)"
+                )
+        except Exception as exc:
+            print_warning(f"Architecture probe skipped: {exc}")
 
         self._generate_report(output_dir, detected_structure, extracted_files, suggestions)
 

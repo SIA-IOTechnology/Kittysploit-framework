@@ -81,8 +81,7 @@ class Module(Auxiliary, Http_client, Lfi):
         "tags": ["web", "lfi", "wordpress", "madara", "cve-2025-4524", "auxiliary"],
         "references": [
             "CVE-2025-4524",
-            "https://www.cve.org/CVERecord?id=CVE-2025-4524",
-        ],
+            "https://www.cve.org/CVERecord?id=CVE-2025-4524"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -107,11 +106,8 @@ class Module(Auxiliary, Http_client, Lfi):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
          'consumes_capabilities': [],
          'option_bindings': {},

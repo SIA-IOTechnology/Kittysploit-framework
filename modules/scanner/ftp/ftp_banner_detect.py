@@ -22,6 +22,17 @@ class Module(Scanner, Tcp_scanner_client):
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals"],
+            "chain": {
+                "produces_capabilities": ["service_identified", "ftp_surface"],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "scanner/ftp/ftp_syst_detect",
+                    "scanner/ftp/ftp_feat_detect",
+                    "scanner/ftp/ftp_anonymous_login_detect",
+                    "auxiliary/scanner/ftp/ftp_enum",
+                ],
+            },
         },
     }
 
@@ -35,10 +46,15 @@ class Module(Scanner, Tcp_scanner_client):
         info = probe_ftp_banner(host=host, port=port, timeout=self._timeout())
         if not info.get("detected"):
             return False
+        product = str(info.get("product") or "unknown")
+        banner = str(info.get("banner") or "").strip()
+        reason = f"FTP service detected ({product})"
+        if banner:
+            reason = f"{reason} | banner={banner}"
         self.set_info(
             severity="info",
-            reason=f"FTP service detected ({info.get('product') or 'unknown'})",
-            banner=info.get("banner", ""),
-            product=str(info.get("product") or ""),
+            reason=reason,
+            banner=banner,
+            product=product if product != "unknown" else "",
         )
         return True

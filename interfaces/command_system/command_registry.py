@@ -110,6 +110,7 @@ class CommandRegistry:
             'inventory',
             'lab',
             'sound',
+            'assistant',
             'pattern',
             'reset',
             'syscall',

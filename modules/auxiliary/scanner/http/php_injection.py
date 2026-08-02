@@ -19,8 +19,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/Code_Injection',
             'https://owasp.org/www-community/attacks/Command_Injection',
-            'https://portswigger.net/web-security/os-command-injection',
-        ],
+            'https://portswigger.net/web-security/os-command-injection'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -45,10 +44,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -109,8 +105,7 @@ class Module(Auxiliary, Http_client):
         '; sleep 5',
         '| sleep 5',
         '; ping -c 3 127.0.0.1',
-        '| ping -c 3 127.0.0.1',
-    ]
+        '| ping -c 3 127.0.0.1']
 
     # File inclusion payloads
     FILE_INCLUSION_PAYLOADS = [
@@ -124,15 +119,13 @@ class Module(Auxiliary, Http_client):
         'expect://id',
         'file:///etc/passwd',
         '/etc/passwd',
-        'C:\\windows\\system32\\config\\sam',
-    ]
+        'C:\\windows\\system32\\config\\sam']
 
     # PHP deserialization payloads
     PHP_DESERIALIZATION_PAYLOADS = [
         'O:8:"stdClass":0:{}',
         'a:1:{s:4:"test";s:4:"data";}',
-        'O:4:"Test":0:{}',
-    ]
+        'O:4:"Test":0:{}']
 
     # Parameter names commonly used in PHP apps
     PHP_PARAMS = [
@@ -140,8 +133,7 @@ class Module(Auxiliary, Http_client):
         'cmd', 'command', 'exec', 'system', 'shell',
         'data', 'input', 'value', 'param', 'query',
         'user', 'username', 'email', 'name',
-        'template', 'view', 'action', 'func',
-    ]
+        'template', 'view', 'action', 'func']
 
     def check(self):
         """
@@ -156,8 +148,7 @@ class Module(Auxiliary, Http_client):
                 
                 php_indicators = [
                     'php', 'php/', 'x-powered-by.*php',
-                    '.php', 'phpsessid', 'sessionid',
-                ]
+                    '.php', 'phpsessid', 'sessionid']
                 
                 if any(indicator in content or indicator in headers for indicator in php_indicators):
                     return True
@@ -259,8 +250,7 @@ class Module(Auxiliary, Http_client):
             php_errors = [
                 'php warning', 'php fatal error', 'php parse error',
                 'parse error', 'syntax error', 'unexpected',
-                'call to undefined function',
-            ]
+                'call to undefined function']
             
             response_lower = response.text.lower()
             for error in php_errors:
@@ -356,8 +346,7 @@ class Module(Auxiliary, Http_client):
             # Check for error messages
             cmd_errors = [
                 'command not found', 'syntax error',
-                'permission denied', 'cannot execute',
-            ]
+                'permission denied', 'cannot execute']
             
             for error in cmd_errors:
                 if error in response_lower:
@@ -443,8 +432,7 @@ class Module(Auxiliary, Http_client):
             file_errors = [
                 'failed to open stream', 'no such file',
                 'file_get_contents', 'include_path',
-                'warning: include', 'warning: require',
-            ]
+                'warning: include', 'warning: require']
             
             response_lower = response.text.lower()
             for error in file_errors:

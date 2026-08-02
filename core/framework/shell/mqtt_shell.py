@@ -35,6 +35,7 @@ class MQTTShell(BaseShell):
             'unsubscribe': self._cmd_unsubscribe,
             'unsub': self._cmd_unsubscribe,
             'messages': self._cmd_messages,
+            'dump': self._cmd_dump,
             'exit': self._cmd_exit,
             'quit': self._cmd_exit,
             'disconnect': self._cmd_exit,
@@ -116,6 +117,7 @@ MQTT Shell Commands:
   subscribe <topic>          - Subscribe to topic (alias: sub)
   unsubscribe <topic>       - Unsubscribe from topic (alias: unsub)
   messages [N]               - Show last N received messages (default 10)
+  dump [seconds] [filter]    - Collect messages for N seconds (default filter #)
   info                      - Broker and session info
   help                      - This help
   exit, quit                 - Exit shell
@@ -200,6 +202,40 @@ MQTT Shell Commands:
         for m in recent:
             lines.append(f"[{m['topic']}] {m['payload']}")
         return {'output': '\n'.join(lines), 'status': 0, 'error': ''}
+
+    def _cmd_dump(self, args: str) -> Dict[str, Any]:
+        if not self.client:
+            return {'output': '', 'status': 1, 'error': 'MQTT client not available'}
+        parts = args.split()
+        seconds = 5
+        filt = "#"
+        if parts:
+            try:
+                seconds = max(1, int(parts[0]))
+                if len(parts) > 1:
+                    filt = parts[1]
+            except ValueError:
+                filt = parts[0]
+        before = 0
+        with self._messages_lock:
+            before = len(self._messages)
+        try:
+            self.client.subscribe(filt, qos=0)
+        except Exception as e:
+            return {'output': '', 'status': 1, 'error': str(e)}
+        import time
+        time.sleep(seconds)
+        with self._messages_lock:
+            new = self._messages[before:]
+        if not new:
+            return {'output': f'(no messages on {filt} in {seconds}s)\n', 'status': 0, 'error': ''}
+        lines = [f"Collected {len(new)} message(s) on {filt}:"]
+        for m in new[-50:]:
+            payload = m['payload']
+            if len(payload) > 100:
+                payload = payload[:97] + "..."
+            lines.append(f"  [{m['topic']}] {payload}")
+        return {'output': '\n'.join(lines) + '\n', 'status': 0, 'error': ''}
 
     def _cmd_exit(self, args: str) -> Dict[str, Any]:
         self.is_active = False

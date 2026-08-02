@@ -22,8 +22,7 @@ class Module(Auxiliary):
         "tags": ["web", "http", "smuggling", "scanner", "desync"],
         "references": [
             "https://portswigger.net/web-security/request-smuggling",
-            "https://cwe.mitre.org/data/definitions/444.html",
-        ],
+            "https://cwe.mitre.org/data/definitions/444.html"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -48,8 +47,7 @@ class Module(Auxiliary):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

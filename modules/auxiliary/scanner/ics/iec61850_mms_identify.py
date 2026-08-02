@@ -28,6 +28,14 @@ class Module(Auxiliary, Ics_scanner_client):
             "reversible": True,
             "approval_required": True,
             "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "chain": {
+                "produces_capabilities": ["ot_assets", "iec61850"],
+                "suggested_followups": [
+                    "listeners/ics/iec61850_client",
+                    "post/ics/iec61850/gather/identify",
+                    "post/ics/iec61850/gather/directory_dump",
+                ],
+            },
         },
     }
 
@@ -55,6 +63,13 @@ class Module(Auxiliary, Ics_scanner_client):
                 print_success("MMS initiate response observed")
             elif result.cotp_accepted:
                 print_info("MMS COTP accepted; initiate response inconclusive")
+            self.sync_workspace_ics(
+                port=self._port(),
+                protocol="iec61850",
+                device_type="IED/MMS",
+                purdue_level=1,
+                source="auxiliary/scanner/ics/iec61850_mms_identify",
+            )
         else:
             print_info(result.error or "No IEC 61850 MMS signal detected")
 

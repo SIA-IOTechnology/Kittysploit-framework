@@ -49,6 +49,14 @@ class SessionType(Enum):
     S7COMM = "s7comm"
     MODBUS = "modbus"
     OPCUA = "opcua"
+    BACNET = "bacnet"
+    DNP3 = "dnp3"
+    IEC104 = "iec104"
+    IEC61850 = "iec61850"
+    ONVIF = "onvif"
+    UPNP = "upnp"
+    RTSP = "rtsp"
+    MATTER = "matter"
     QUIC = "quic"
 
 class ServiceType(Enum):

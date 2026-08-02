@@ -17,8 +17,7 @@ class Module(Auxiliary, Http_client):
         'tags': ['web', 'spa', 'scanner', 'security', 'api'],
         'references': [
             'https://owasp.org/www-project-web-security-testing-guide/',
-            'https://portswigger.net/web-security',
-        ],
+            'https://portswigger.net/web-security'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -43,10 +42,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -74,8 +70,7 @@ class Module(Auxiliary, Http_client):
         '/profile',
         '/admin',
         '/config',
-        '/settings',
-    ]
+        '/settings']
 
     # Sensitive files that might be exposed
     SENSITIVE_FILES = [
@@ -95,8 +90,7 @@ class Module(Auxiliary, Http_client):
         '/.gitignore',
         '/webpack.config.js',
         '/.htaccess',
-        '/web.config',
-    ]
+        '/web.config']
 
     FRAMEWORK_STRONG_MARKERS = {
         "React": [
@@ -110,8 +104,7 @@ class Module(Auxiliary, Http_client):
             r"__next_data__",
             r"id=[\"']__next[\"']",
             r"id=[\"']___gatsby[\"']",
-            r"gatsby-",
-        ],
+            r"gatsby-"],
         "Angular": [
             r"\bng-version\b",
             r"\bng-app\b",
@@ -120,8 +113,7 @@ class Module(Auxiliary, Http_client):
             r"_ngcontent-",
             r"angular(?:\.min)?\.js",
             r"platform-browser",
-            r"zone\.js",
-        ],
+            r"zone\.js"],
         "Vue.js": [
             r"\bdata-v-[a-f0-9]{4,}",
             r"\bdata-v-app\b",
@@ -129,24 +121,20 @@ class Module(Auxiliary, Http_client):
             r"\bv-(?:if|for|bind|model|show|on)\b",
             r"vue(?:\.runtime)?(?:\.global|\.esm-browser|\.min)?\.js",
             r"__nuxt__",
-            r"id=[\"']__nuxt[\"']",
-        ],
+            r"id=[\"']__nuxt[\"']"],
         "Ember.js": [
             r"ember-application",
             r"ember-view",
             r"ember(?:\.min)?\.js",
-            r"data-ember-",
-        ],
+            r"data-ember-"],
         "Backbone.js": [
             r"backbone(?:\.min)?\.js",
             r"backbone\.history",
-            r"backbone\.router",
-        ],
+            r"backbone\.router"],
         "Knockout.js": [
             r"knockout(?:\.min)?\.js",
             r"\bko\.applybindings\b",
-            r"data-bind=[\"']",
-        ],
+            r"data-bind=[\"']"],
     }
 
     GENERIC_SPA_MARKERS = [
@@ -156,8 +144,7 @@ class Module(Auxiliary, Http_client):
         r"webpackjsonp",
         r"window\.__initial_state__",
         r"vite/client",
-        r"type=[\"']module[\"'][^>]+src=[\"'][^\"']+\.(?:js|mjs)",
-    ]
+        r"type=[\"']module[\"'][^>]+src=[\"'][^\"']+\.(?:js|mjs)"]
 
     DOM_XSS_SOURCE_PATTERNS = [
         r"location\.(?:hash|search|href|pathname)",
@@ -165,8 +152,7 @@ class Module(Auxiliary, Http_client):
         r"document\.location",
         r"document\.referrer",
         r"window\.name",
-        r"postmessage\s*\(",
-    ]
+        r"postmessage\s*\("]
 
     DOM_XSS_SINK_PATTERNS = [
         r"innerhtml\s*=",
@@ -176,10 +162,9 @@ class Module(Auxiliary, Http_client):
         r"insertadjacenthtml\s*\(",
         r"eval\s*\(",
         r"new\s+function\s*\(",
-        r"settimeout\s*\(\s*[^,]*[\"'`]",
-        r"setinterval\s*\(\s*[^,]*[\"'`]",
-        r"\.srcdoc\s*=",
-    ]
+        r"settimeout\s*\(\s*[^]*[\"'`]",
+        r"setinterval\s*\(\s*[^]*[\"'`]",
+        r"\.srcdoc\s*="]
 
     def _detect_framework_from_text(self, text):
         """

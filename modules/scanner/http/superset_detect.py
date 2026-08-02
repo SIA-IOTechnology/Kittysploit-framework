@@ -16,8 +16,7 @@ class Module(Scanner, Http_client):
         "cve": ["CVE-2026-23980"],
         "modules": [
             "scanner/http/superset_cve_2026_23980",
-            "auxiliary/scanner/http/superset_cve_2026_23980_sqli",
-        ],
+            "auxiliary/scanner/http/superset_cve_2026_23980_sqli"],
         "tags": ["web", "scanner", "superset", "apache", "bi", "panel"],
     'agent': {
         'risk': 'active',
@@ -43,14 +42,12 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': [
              'scanner/http/superset_cve_2026_23980',
-             'auxiliary/scanner/http/superset_cve_2026_23980_sqli',
-         ]},
+             'auxiliary/scanner/http/superset_cve_2026_23980_sqli']},
     },
     }
 

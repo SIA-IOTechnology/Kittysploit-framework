@@ -69,6 +69,8 @@ Rules:
   (`--dangerous-consent` or `KITTYMCP_DANGEROUS_CONSENT=1`).
 - Tool invocations are recorded in a local audit journal; use `ks_mcp_audit` to inspect it.
 - The "discreet" operation profile adjusts common options (timeout, threads, verbose) when they exist on the module.
+- For OT/ICS/IoT work, start with `ks_ot_overview` / `ks_ot_recommend` and prefer
+  `workflow/ot-safe-assessment` before any write/control modules.
 - The interpreter tool runs Python inside KittySploit's context — use with extreme care.
 """
 
@@ -708,6 +710,71 @@ def create_mcp_server(
             "events": authorizer.journal.read(limit=max(1, min(limit, 200))),
         }
         return _finish("ks_mcp_audit", _safe_json(payload))
+
+    @mcp.tool()
+    @safe
+    def ks_ot_overview() -> Dict[str, Any]:
+        """
+        OT/IoT operator surface: safe assessment workflow, recon modules,
+        protocol handoff map, and session/post entry points.
+        """
+        blocked = _authorize("ks_ot_overview")
+        if blocked:
+            return blocked
+        return _finish("ks_ot_overview", _safe_json(natural_bridge.ot_overview()))
+
+    @mcp.tool()
+    @safe
+    def ks_ot_list_modules(
+        kind: str = "recon",
+        query: Optional[str] = None,
+        limit: int = 80,
+    ) -> Dict[str, Any]:
+        """
+        List OT/IoT modules.
+
+        `kind`: recon | destructive | session | post | all
+        """
+        blocked = _authorize("ks_ot_list_modules")
+        if blocked:
+            return blocked
+        return _finish(
+            "ks_ot_list_modules",
+            _safe_json(
+                natural_bridge.ot_list_modules(
+                    kind=kind,
+                    query=query,
+                    limit=max(1, min(limit, 200)),
+                )
+            ),
+        )
+
+    @mcp.tool()
+    @safe
+    def ks_ot_recommend(
+        target: Optional[str] = None,
+        protocols: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Recommend a safe OT path and protocol-specific modules.
+
+        `protocols` may be a comma-separated list (e.g. "bacnet,mqtt,modbus").
+        """
+        blocked = _authorize("ks_ot_recommend")
+        if blocked:
+            return blocked
+        proto_list = None
+        if protocols and str(protocols).strip():
+            proto_list = [p.strip() for p in str(protocols).split(",") if p.strip()]
+        return _finish(
+            "ks_ot_recommend",
+            _safe_json(
+                natural_bridge.ot_recommend(
+                    target=target,
+                    protocols=proto_list,
+                )
+            ),
+        )
 
     return mcp
 

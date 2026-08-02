@@ -32,7 +32,8 @@ class Module(Auxiliary, Ics_scanner_client):
             "approval_required": False,
             "produces": ["endpoints", "tech_hints", "risk_signals"],
             "chain": {
-                "produces_capabilities": ["credentials"],
+                "produces_capabilities": [{'capability': 'ot_assets', 'from_detail': ''},
+                                   "credentials"],
                 "suggested_followups": ["exploits/ics/qnx/qconn_rce"],
             },
         },

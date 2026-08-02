@@ -1,0 +1,43 @@
+id: firmware-to-payload
+version: "1"
+name: Firmware to Adaptive Payload
+description: >
+  Local firmware analysis — extract common formats, detect ELF architecture,
+  then build an adaptive payload/listener plan (BusyBox/CMD + adaptive listener
+  for embedded targets).
+tags: [firmware, iot, payload, adaptive, mips, arm, analysis]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  firmware_path:
+    description: Path to local firmware image
+    required: true
+  lhost:
+    description: Callback host for payload/listener plan
+    required: false
+    default: "127.0.0.1"
+  lport:
+    description: Callback port for payload/listener plan
+    required: false
+    default: "4444"
+start_step: extract
+steps:
+  extract:
+    module: analysis/binary/firmware_extractor_advanced
+    description: Detect/extract firmware layers (TRX/gzip/lzma/ELF)
+    options:
+      firmware_path: "${firmware_path}"
+    on_success: arch_plan
+    on_failure: arch_plan
+  arch_plan:
+    module: analysis/binary/firmware_adaptive_payload
+    description: ELF arch → payload + adaptive listener command plan
+    options:
+      firmware_path: "${firmware_path}"
+      preference: "auto"
+      lhost: "${lhost}"
+      lport: "${lport}"
+      show_commands: "true"
+    on_success: done
+    on_failure: done

@@ -19,8 +19,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data',
             'https://github.com/frohoff/ysoserial',
-            'https://portswigger.net/web-security/deserialization',
-        ],
+            'https://portswigger.net/web-security/deserialization'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -45,8 +44,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -59,8 +57,7 @@ class Module(Auxiliary, Http_client):
         'apache', 'tomcat', 'jboss', 'weblogic', 'websphere',
         'spring', 'struts', 'hibernate',
         'serialization', 'deserialization',
-        'objectinputstream', 'readobject',
-    ]
+        'objectinputstream', 'readobject']
 
     # Common endpoints that might deserialize data
     DESERIALIZATION_ENDPOINTS = [
@@ -79,8 +76,7 @@ class Module(Auxiliary, Http_client):
         '/write',
         '/upload',
         '/file',
-        '/data',
-    ]
+        '/data']
 
     # Java serialization magic bytes (AC ED 00 05)
     JAVA_SERIALIZATION_MAGIC = b'\xac\xed\x00\x05'

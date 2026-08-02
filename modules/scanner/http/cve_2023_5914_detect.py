@@ -44,8 +44,7 @@ class Module(Scanner, Http_client):
                     {
                         'capability': 'admin_surface',
                         'from_detail': '',
-                    },
-                ],
+                    }],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': [],
@@ -55,8 +54,7 @@ class Module(Scanner, Http_client):
             'https://www.assetnote.io/resources/research/continuing-the-citrix-saga-cve-2023-5914-cve-2023-6184',
             'https://support.citrix.com/article/CTX583759/citrix-storefront-security-bulletin-for-cve20235914',
             'https://www.youtube.com/watch?v=t8MeUQrPqec',
-            'https://nvd.nist.gov/vuln/detail/CVE-2023-5914',
-        ],
+            'https://nvd.nist.gov/vuln/detail/CVE-2023-5914'],
         'cve': 'CVE-2023-5914',
     }
 

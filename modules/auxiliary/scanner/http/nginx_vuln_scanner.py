@@ -52,9 +52,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -154,16 +152,14 @@ class Module(Auxiliary, Http_client):
         '/package.json',
         '/composer.json',
         '/yarn.lock',
-        '/package-lock.json',
-    ]
+        '/package-lock.json']
     
     # Dangerous configurations to check
     DANGEROUS_CONFIGS = [
         ('/../', 'Path Traversal'),
         ('/%2e%2e%2f', 'URL Encoded Path Traversal'),
         ('/..\\', 'Windows Path Traversal'),
-        ('/....//....//', 'Double Slash Bypass'),
-    ]
+        ('/....//....//', 'Double Slash Bypass')]
     
     def check(self):
         """

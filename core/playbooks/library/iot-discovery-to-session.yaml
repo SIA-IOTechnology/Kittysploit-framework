@@ -1,0 +1,90 @@
+id: iot-discovery-to-session
+version: "1"
+name: IoT discovery to session handoff
+source: internal
+domain: iot
+tags: [iot, discovery, ssdp, mdns, matter, mqtt, coap, onvif, upnp, rtsp, busybox]
+description: >
+  Discovery scanners (SSDP/mDNS enum/Matter/MQTT/ONVIF/OpenWrt) followed by optional
+  interactive session listeners — agent handoff without LLM.
+prerequisites:
+  signals_any:
+    - iot
+    - upnp
+    - ssdp
+    - mdns
+    - matter
+    - mqtt
+    - onvif
+    - openwrt
+  capabilities: []
+chain:
+  - id: ssdp_detect
+    capability: upnp_access
+    module: scanner/udp/ssdp_detect
+    description: SSDP / UPnP discovery
+  - id: mdns_detect
+    capability: ot_assets
+    module: scanner/udp/mdns_detect
+    optional: true
+    description: mDNS typed IoT service detect
+  - id: mdns_enum
+    capability: mdns_map
+    module: scanner/udp/mdns_enum
+    optional: true
+    description: Deep DNS-SD enum PTR/SRV/TXT/A
+  - id: matter_detect
+    capability: matter_access
+    module: scanner/udp/matter_detect
+    optional: true
+    description: Matter/CHIP DNS-SD + UDP/5540
+  - id: mqtt_identify
+    capability: mqtt_access
+    module: auxiliary/scanner/ics/mqtt_broker_identify
+    optional: true
+    description: MQTT broker identify
+  - id: onvif_device
+    capability: onvif_access
+    module: auxiliary/admin/http/camera/onvif_device_info
+    optional: true
+    description: ONVIF device information
+  - id: openwrt_detect
+    capability: shell
+    module: scanner/http/openwrt_detect
+    optional: true
+    description: OpenWrt panel detect
+  - id: upnp_session
+    capability: upnp_access
+    module: listeners/iot/upnp_client
+    optional: true
+    description: Open UPnP interactive session
+  - id: mqtt_session
+    capability: mqtt_access
+    module: listeners/iot/mqtt
+    optional: true
+    description: Open MQTT session
+  - id: coap_session
+    capability: coap_access
+    module: listeners/iot/coap_client
+    optional: true
+    description: Open CoAP session
+  - id: onvif_session
+    capability: onvif_access
+    module: listeners/iot/onvif_client
+    optional: true
+    description: Open ONVIF session
+  - id: rtsp_session
+    capability: rtsp_access
+    module: listeners/iot/rtsp_client
+    optional: true
+    description: Open RTSP session (from ONVIF/mDNS URI)
+  - id: matter_session
+    capability: matter_access
+    module: listeners/iot/matter_client
+    optional: true
+    description: Open Matter discovery session
+  - id: busybox_firmware
+    capability: file_read
+    module: post/shell/linux/busybox/firmware_info
+    optional: true
+    description: BusyBox/OpenWrt firmware info (needs shell session)

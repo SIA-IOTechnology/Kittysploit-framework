@@ -34,7 +34,7 @@ class Module(Auxiliary, Ics_scanner_client):
          'specializations_any': [],
          'risk_signals_any': [],
          'auth_session': False,
-         'capabilities_any': [],
+         'capabilities_any': ['ot_assets', 'modbus_tcp'],
          'capabilities_all': [],
          'confidence_min': {},
          'confidence_min_any': {},

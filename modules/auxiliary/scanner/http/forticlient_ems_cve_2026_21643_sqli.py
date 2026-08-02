@@ -23,8 +23,7 @@ class Module(Auxiliary, Http_client):
         "references": [
             "https://fortiguard.fortinet.com/psirt/FG-IR-25-1142",
             "https://bishopfox.com/blog/cve-2026-21643-pre-authentication-sql-injection-in-forticlient-ems-7-4-4",
-            "https://nvd.nist.gov/vuln/detail/CVE-2026-21643",
-        ],
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-21643"],
         "tags": [
             "fortinet",
             "forticlient",
@@ -32,8 +31,7 @@ class Module(Auxiliary, Http_client):
             "sqli",
             "pre-auth",
             "postgresql",
-            "cve-2026-21643",
-        ],
+            "cve-2026-21643"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "network_probe"],
@@ -62,8 +60,7 @@ class Module(Auxiliary, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

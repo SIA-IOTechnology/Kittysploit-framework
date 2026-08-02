@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Reliable Controls MACH-ProWebSys is a web-based building controller for HVAC, lighting, and energy management using BACnet/IP. These controllers are widely deployed in commercial buildings across North America and are often directly internet-facing with no VPN protection.',
         'author': ['KittySploit Team'],
         'severity': 'info',
-        'tags': ['web', 'scanner', 'panel', 'ics', 'bms', 'bacnet', 'building-automation', 'reliable-controls', 'mach-pro'],
+        'tags': ['web', 'scanner', 'panel', 'ics', 'bms','building-automation', 'reliable-controls', 'mach-pro'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -44,8 +44,7 @@ class Module(Scanner, Http_client):
                     {
                         'capability': 'admin_surface',
                         'from_detail': '',
-                    },
-                ],
+                    }],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],

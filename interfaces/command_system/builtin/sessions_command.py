@@ -166,6 +166,23 @@ Session Types:
             print_info("Use 'sessions access <id>' to interact with a session")
             print_info("Use 'sessions kill <id>' to terminate a session")
 
+            try:
+                from interfaces.command_system.builtin.assistant import (
+                    AssistantContext,
+                    maybe_show_assistant,
+                )
+
+                session_rows = list(standard_sessions) + list(browser_sessions)
+                maybe_show_assistant(
+                    self.framework,
+                    AssistantContext(
+                        event="sessions_list",
+                        sessions=session_rows,
+                    ),
+                )
+            except Exception:
+                pass
+
             plugin_manager = getattr(self.framework, 'plugin_manager', None)
             metasploit_plugin = plugin_manager.get_plugin("metasploit") if plugin_manager else None
             if metasploit_plugin and getattr(metasploit_plugin, "_console_alive", lambda: False)():

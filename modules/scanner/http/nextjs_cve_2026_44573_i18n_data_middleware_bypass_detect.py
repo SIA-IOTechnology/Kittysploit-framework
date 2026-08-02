@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2026-44573",
         "references": ["https://github.com/advisories/GHSA-44573"],
         "modules": [
-            "auxiliary/scanner/http/nextjs_cve_2026_44573_i18n_data_route_middleware_bypass",
-        ],
+            "auxiliary/scanner/http/nextjs_cve_2026_44573_i18n_data_route_middleware_bypass"],
         "tags": ["scanner", "nextjs", "middleware", "bypass", "cve-2026-44573"],
     'agent': {
         'risk': 'active',
@@ -45,8 +44,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

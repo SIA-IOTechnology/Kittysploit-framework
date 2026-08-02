@@ -26,8 +26,7 @@ class Module(Auxiliary, Http_client, Sqli):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-26980",
             "https://github.com/TryGhost/Ghost/security/advisories/GHSA-w52v-v783-gw97",
-            "https://www.sonicwall.com/blog/ghost-cms-content-api-blind-sql-injection",
-        ],
+            "https://www.sonicwall.com/blog/ghost-cms-content-api-blind-sql-injection"],
         "tags": [
             "ghost",
             "cms",
@@ -35,8 +34,7 @@ class Module(Auxiliary, Http_client, Sqli):
             "blind",
             "unauthenticated",
             "mysql",
-            "cve-2026-26980",
-        ],
+            "cve-2026-26980"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "data_exfiltration"],
@@ -65,8 +63,7 @@ class Module(Auxiliary, Http_client, Sqli):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

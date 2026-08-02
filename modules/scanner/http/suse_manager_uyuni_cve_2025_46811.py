@@ -23,11 +23,9 @@ class Module(Scanner, Websocket_client):
         "references": [
             "https://www.uyuni-project.org/",
             "https://github.com/uyuni-project/uyuni",
-            "https://www.suse.com/",
-        ],
+            "https://www.suse.com/"],
         "modules": [
-            "exploits/multi/http/suse_manager_uyuni_cve_2025_46811_ws_rce",
-        ],
+            "exploits/multi/http/suse_manager_uyuni_cve_2025_46811_ws_rce"],
         "tags": ["web", "scanner", "suse", "uyuni", "websocket", "cve-2025-46811"],
     'agent': {
         'risk': 'active',
@@ -60,8 +58,7 @@ class Module(Scanner, Websocket_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

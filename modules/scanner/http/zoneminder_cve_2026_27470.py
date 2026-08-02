@@ -23,11 +23,9 @@ class Module(Scanner, Http_client):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-27470",
             "https://github.com/ZoneMinder/zoneminder/security/advisories/GHSA-r6gm-478g-f2c4",
-            "https://github.com/d3vn0mi/CVE-2026-27470-POC",
-        ],
+            "https://github.com/d3vn0mi/CVE-2026-27470-POC"],
         "modules": [
-            "auxiliary/scanner/http/zoneminder_cve_2026_27470_sqli",
-        ],
+            "auxiliary/scanner/http/zoneminder_cve_2026_27470_sqli"],
         "tags": [
             "web",
             "scanner",
@@ -35,8 +33,7 @@ class Module(Scanner, Http_client):
             "cctv",
             "sqli",
             "authenticated",
-            "cve-2026-27470",
-        ],
+            "cve-2026-27470"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -65,13 +62,11 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "auxiliary/scanner/http/zoneminder_cve_2026_27470_sqli",
-                ],
+                    "auxiliary/scanner/http/zoneminder_cve_2026_27470_sqli"],
             },
         },
     }

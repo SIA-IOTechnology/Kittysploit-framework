@@ -34,29 +34,25 @@ class Module(Post, DoIPSessionMixin):
         "tags": ["automotive", "doip", "gather", "ecu", "uds"],
         "references": [
             "ISO 13400-2",
-            "ISO 14229-1",
-        ],
+            "ISO 14229-1"],
         "agent": {
             "risk": "intrusive",
             "effects": ["recon", "network_probe"],
             "expected_requests": 16,
             "reversible": True,
             "approval_required": True,
-            "produces": ["ot_assets"],
+            "produces": [],
             "cost": 1.2,
             "noise": 0.4,
             "value": 1.5,
             "chain": {
                 "consumes_capabilities": ["doip_session"],
                 "produces_capabilities": [
-                    {"capability": "ot_assets", "from_detail": "ecu_map"},
-                    {"capability": "doip_ecu_map", "from_detail": ""},
-                ],
+{"capability": "doip_ecu_map", "from_detail": ""}],
                 "suggested_followups": [
                     "post/automotive/doip/gather/vin",
                     "post/automotive/doip/gather/dtc_read",
-                    "post/automotive/doip/exploits/uds_query",
-                ],
+                    "post/automotive/doip/exploits/uds_query"],
             },
         },
     }

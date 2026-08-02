@@ -58,10 +58,14 @@ class Module(Auxiliary):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [],
+        'chain':         {'produces_capabilities': [{'capability': 'ble_discover', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': []},
+         'suggested_followups': [
+             'listeners/iot/ble_gatt_client',
+             'post/ble/gather/uart_probe',
+         ]},
     },
     }
 

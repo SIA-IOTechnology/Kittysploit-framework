@@ -21,6 +21,14 @@ class Module(Scanner, Ics_scanner_client):
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals", "endpoints"],
+            "chain": {
+                "produces_capabilities": ["upnp_access", "ot_assets"],
+                "suggested_followups": [
+                    "listeners/iot/upnp_client",
+                    "post/upnp/gather/device_inventory",
+                    "post/upnp/gather/igd_portmap",
+                ],
+            },
         },
     }
 

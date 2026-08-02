@@ -19,11 +19,9 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2025-69985",
         "references": [
             "https://github.com/joshuavanderpoll/CVE-2025-69985",
-            "https://github.com/frangoteam/FUXA",
-        ],
+            "https://github.com/frangoteam/FUXA"],
         "modules": [
-            "exploits/http/fuxa_cve_2025_69985_rce",
-        ],
+            "exploits/http/fuxa_cve_2025_69985_rce"],
         "tags": ["web", "scanner", "fuxa", "scada", "cve-2025-69985", "rce"],
     'agent': {
         'risk': 'active',
@@ -49,8 +47,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

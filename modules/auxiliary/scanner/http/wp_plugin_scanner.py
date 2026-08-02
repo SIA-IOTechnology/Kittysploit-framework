@@ -17,8 +17,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://wpscan.com/',
             'https://cve.mitre.org/cgi-bin/cvekey.cgi?keyword=wordpress+plugin',
-            'https://wordpress.org/plugins/',
-        ],
+            'https://wordpress.org/plugins/'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -43,11 +42,8 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
          'consumes_capabilities': [],
          'option_bindings': {},
@@ -71,8 +67,7 @@ class Module(Auxiliary, Http_client):
         'advanced-custom-fields',
         'duplicate-post',
         'updraftplus',
-        'wp-mail-smtp',
-    ]
+        'wp-mail-smtp']
 
     # Plugin paths to check
     PLUGIN_PATHS = [
@@ -80,8 +75,7 @@ class Module(Auxiliary, Http_client):
         '/wp-content/plugins/{plugin}/',
         '/wp-content/plugins/{plugin}/readme.txt',
         '/wp-content/plugins/{plugin}/changelog.txt',
-        '/wp-content/plugins/{plugin}/{plugin}.php',
-    ]
+        '/wp-content/plugins/{plugin}/{plugin}.php']
 
     def check(self):
         """
@@ -170,8 +164,7 @@ class Module(Auxiliary, Http_client):
             plugin_patterns = [
                 r'wp-content/plugins/([^/"]+)',
                 r'plugins/([^/"]+)/',
-                r'plugin["\']?\s*:\s*["\']([^"\']+)',
-            ]
+                r'plugin["\']?\s*:\s*["\']([^"\']+)']
             
             for pattern in plugin_patterns:
                 matches = re.findall(pattern, content, re.IGNORECASE)

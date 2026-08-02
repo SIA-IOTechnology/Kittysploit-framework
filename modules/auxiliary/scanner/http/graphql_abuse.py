@@ -38,15 +38,13 @@ class Module(Auxiliary, Http_client):
             "chain": {
                 "consumes_capabilities": ["graphql_endpoint"],
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sensitive_query"},
-                ],
+],
                 "option_bindings": {
                     "graphql_path": "graphql_endpoint",
                 },
                 "suggested_followups": [
                     "auxiliary/scanner/http/sqli_engine",
-                    "post/http/gather/authenticated_surface",
-                ],
+                    "post/http/gather/authenticated_surface"],
             },
         },
     }

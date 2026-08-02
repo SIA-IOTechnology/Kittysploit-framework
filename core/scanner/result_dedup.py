@@ -393,7 +393,7 @@ def extract_evidence(result: Dict[str, Any]) -> str:
     elif not parts and message:
         parts.append(message)
 
-    return normalize_text(" | ".join(parts))[:400]
+    return normalize_text(" | ".join(parts))
 
 
 def _is_generic_module_description(text: str, module_description: str = "") -> bool:

@@ -39,11 +39,9 @@ class Module(Scanner, Http_client):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-42208",
             "https://github.com/BerriAI/litellm/security/advisories/GHSA-r75f-5x8p-qvmc",
-            "https://bishopfox.com/blog/cve-2026-42208-pre-authentication-sql-injection-in-litellm-proxy",
-        ],
+            "https://bishopfox.com/blog/cve-2026-42208-pre-authentication-sql-injection-in-litellm-proxy"],
         "modules": [
-            "auxiliary/scanner/http/litellm_cve_2026_42208_sqli",
-        ],
+            "auxiliary/scanner/http/litellm_cve_2026_42208_sqli"],
         "tags": [
             "web",
             "scanner",
@@ -53,8 +51,7 @@ class Module(Scanner, Http_client):
             "pre-auth",
             "postgresql",
             "cve-2026-42208",
-            "kev",
-        ],
+            "kev"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -80,20 +77,17 @@ class Module(Scanner, Http_client):
                 "endpoint_pattern_any": [
                     "/v1/chat/completions",
                     "/health/readiness",
-                    "/health",
-                ],
+                    "/health"],
                 "param_any": [],
                 "api_surface_ready": False,
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "auxiliary/scanner/http/litellm_cve_2026_42208_sqli",
-                ],
+                    "auxiliary/scanner/http/litellm_cve_2026_42208_sqli"],
             },
         },
     }

@@ -176,6 +176,9 @@ class Framework:
         
         # Initialize sound notifications (disabled by default)
         self.sound_enabled = False
+
+        # Operator assistant suggestions (disabled by default)
+        self.assistant_enabled = False
         
         # Initialize collaboration
         self.collab_server = None

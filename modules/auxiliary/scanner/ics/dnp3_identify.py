@@ -24,14 +24,12 @@ class Module(Auxiliary, Ics_scanner_client):
             "approval_required": False,
             "produces": ["endpoints", "tech_hints", "risk_signals"],
             "chain": {
-                "produces_capabilities": [
-                    {"capability": "dnp3_access", "from_detail": "protocol"},
-                    {"capability": "dnp3_dest", "from_detail": "dest_address"},
-                ],
+                "produces_capabilities": [{'capability': 'ot_assets', 'from_detail': ''},
+                                   
+                    {"capability": "dnp3_access", "from_detail": "protocol"}],
                 "suggested_followups": [
                     "post/ics/gather/dnp3_read_points",
-                    "auxiliary/scanner/ics/dnp3_integrity_poll",
-                ],
+                    "auxiliary/scanner/ics/dnp3_integrity_poll"],
             },
         },
     }

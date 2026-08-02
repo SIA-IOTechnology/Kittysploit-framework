@@ -23,19 +23,16 @@ class Module(Scanner, Http_client):
             "https://nvd.nist.gov/vuln/detail/CVE-2026-23980",
             "https://github.com/advisories/GHSA-gvxg-9hqx-f4rg",
             "https://lists.apache.org/thread.html",
-            "https://github.com/oscar-mine/CVE-2026-23980-Exploit",
-        ],
+            "https://github.com/oscar-mine/CVE-2026-23980-Exploit"],
         "modules": [
-            "auxiliary/scanner/http/superset_cve_2026_23980_sqli",
-        ],
+            "auxiliary/scanner/http/superset_cve_2026_23980_sqli"],
         "tags": [
             "web",
             "scanner",
             "superset",
             "apache",
             "sqli",
-            "cve-2026-23980",
-        ],
+            "cve-2026-23980"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -64,13 +61,11 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "auxiliary/scanner/http/superset_cve_2026_23980_sqli",
-                ],
+                    "auxiliary/scanner/http/superset_cve_2026_23980_sqli"],
             },
         },
     }

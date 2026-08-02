@@ -17,8 +17,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/xss/',
             'https://reactjs.org/docs/dom-elements.html#dangerouslysetinnerhtml',
-            'https://portswigger.net/web-security/cross-site-scripting',
-        ],
+            'https://portswigger.net/web-security/cross-site-scripting'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -43,10 +42,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -92,16 +88,14 @@ class Module(Auxiliary, Http_client):
         '<ScRiPt>alert(1)</ScRiPt>',
         '<img src=x onerror="alert(1)">',
         '<img src=x onerror=\'alert(1)\'>',
-        '<img src=x onerror=String.fromCharCode(97,108,101,114,116,40,49,41)>',
-    ]
+        '<img src=x onerror=String.fromCharCode(97,108,101,114,116,40,49,41)>']
 
     # Parameter names commonly used with React
     REACT_PARAMS = [
         'q', 'query', 'search', 'filter', 'sort', 'order',
         'name', 'value', 'id', 'key', 'data', 'input',
         'content', 'html', 'text', 'message', 'title',
-        'description', 'comment', 'user', 'username',
-    ]
+        'description', 'comment', 'user', 'username']
 
     def check(self):
         """
@@ -118,8 +112,7 @@ class Module(Auxiliary, Http_client):
                     'react', 'react-dom', 'reactjs',
                     'data-reactroot', 'data-react',
                     '__reactinternalinstance', '__reactfiber',
-                    'react.development.js', 'react.production.js',
-                ]
+                    'react.development.js', 'react.production.js']
                 
                 if any(indicator in content or indicator in headers for indicator in react_indicators):
                     return True

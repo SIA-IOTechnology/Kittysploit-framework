@@ -25,11 +25,9 @@ class Module(Scanner, Http_client, Wordpress):
         "cve": "CVE-2026-3844",
         "references": [
             "https://www.cve.org/CVERecord?id=CVE-2026-3844",
-            "https://github.com/tausifz",
-        ],
+            "https://github.com/tausifz"],
         "modules": [
-            "exploits/multi/http/wp_breeze_cve_2026_3844_rce",
-        ],
+            "exploits/multi/http/wp_breeze_cve_2026_3844_rce"],
         "tags": [
             "web",
             "scanner",
@@ -38,8 +36,7 @@ class Module(Scanner, Http_client, Wordpress):
             "file-upload",
             "rce",
             "unauthenticated",
-            "cve-2026-3844",
-        ],
+            "cve-2026-3844"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -72,9 +69,7 @@ class Module(Scanner, Http_client, Wordpress):
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
          'consumes_capabilities': [],
          'option_bindings': {},
@@ -101,8 +96,7 @@ class Module(Scanner, Http_client, Wordpress):
 
         candidates = [
             self.wp_plugin_path(wp_base, _PLUGIN, "breeze.php"),
-            self.wp_plugin_path(wp_base, _PLUGIN, "inc/class-breeze-cache-cronjobs.php"),
-        ]
+            self.wp_plugin_path(wp_base, _PLUGIN, "inc/class-breeze-cache-cronjobs.php")]
         for path in candidates:
             response = self.http_request(method="GET", path=path, allow_redirects=True)
             if not response or response.status_code != 200:

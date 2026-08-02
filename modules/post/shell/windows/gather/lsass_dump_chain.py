@@ -38,8 +38,7 @@ class Module(Post, WindowsSessionMixin):
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [
-            "https://attack.mitre.org/techniques/T1003/001/",
-        ],
+            "https://attack.mitre.org/techniques/T1003/001/"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation"],
@@ -53,7 +52,7 @@ class Module(Post, WindowsSessionMixin):
             "requires": {"capabilities_any": ["shell"], "capabilities_all": []},
             "chain": {
                 "consumes_capabilities": ["shell"],
-                "produces_capabilities": [{"capability": "db_access", "from_detail": "lsass_dump"}],
+                "produces_capabilities": [],
             },
         },
     }

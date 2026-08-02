@@ -55,6 +55,138 @@ def _recv_line(sock: socket.socket, timeout: float) -> str:
     return b"".join(chunks).decode("utf-8", errors="replace").strip()
 
 
+def _recv_until_complete(sock: socket.socket, timeout: float, *, multiline_code: str = "") -> str:
+    """Read FTP reply; for multi-line (e.g. 211-...211 ) keep reading until end marker."""
+    sock.settimeout(timeout)
+    lines: list[str] = []
+    first = _recv_line(sock, timeout)
+    if not first:
+        return ""
+    lines.append(first)
+    code = first[:3] if len(first) >= 3 else ""
+    # Multi-line replies use "NNN-text" until a final "NNN text"
+    if len(first) > 3 and first[3:4] == "-" and code.isdigit():
+        end_prefix = f"{code} "
+        while True:
+            line = _recv_line(sock, timeout)
+            if not line:
+                break
+            lines.append(line)
+            if line.startswith(end_prefix) or line == code:
+                break
+    elif multiline_code and first.startswith(f"{multiline_code}-"):
+        while True:
+            line = _recv_line(sock, timeout)
+            if not line:
+                break
+            lines.append(line)
+            if line.startswith(f"{multiline_code} ") or line == multiline_code:
+                break
+    return "\n".join(lines)
+
+
+def _ftp_connect_banner(host: str, port: int, timeout: float) -> tuple:
+    """Return (sock, banner, error). Caller must close sock on success."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect((host, int(port)))
+        banner = _recv_line(sock, timeout)
+        if not banner.upper().startswith("220"):
+            sock.close()
+            return None, banner, "not_ftp_welcome"
+        return sock, banner, ""
+    except Exception as exc:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        return None, "", str(exc)
+
+
+def probe_ftp_syst(host: str, port: int = 21, timeout: float = 5.0) -> Dict[str, object]:
+    """Issue SYST after welcome banner (NSE ftp-syst style)."""
+    result: Dict[str, object] = {
+        "detected": False,
+        "banner": "",
+        "syst": "",
+        "error": "",
+    }
+    sock, banner, err = _ftp_connect_banner(host, port, timeout)
+    if sock is None:
+        result["banner"] = banner
+        result["error"] = err or "connect_failed"
+        return result
+    try:
+        result["banner"] = banner
+        result["detected"] = True
+        sock.sendall(b"SYST\r\n")
+        resp = _recv_line(sock, timeout)
+        if resp.startswith("215"):
+            result["syst"] = resp[4:].strip() or resp
+        else:
+            result["error"] = f"syst_rejected:{resp[:120]}"
+        try:
+            sock.sendall(b"QUIT\r\n")
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def probe_ftp_feat(host: str, port: int = 21, timeout: float = 5.0) -> Dict[str, object]:
+    """Issue FEAT and parse advertised features."""
+    result: Dict[str, object] = {
+        "detected": False,
+        "banner": "",
+        "features": [],
+        "raw": "",
+        "error": "",
+    }
+    sock, banner, err = _ftp_connect_banner(host, port, timeout)
+    if sock is None:
+        result["banner"] = banner
+        result["error"] = err or "connect_failed"
+        return result
+    try:
+        result["banner"] = banner
+        result["detected"] = True
+        sock.sendall(b"FEAT\r\n")
+        resp = _recv_until_complete(sock, timeout, multiline_code="211")
+        result["raw"] = resp
+        if not resp.startswith("211"):
+            result["error"] = f"feat_rejected:{resp[:120]}"
+            return result
+        features: list[str] = []
+        for line in resp.splitlines()[1:]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("211"):
+                continue
+            # Feature lines are often indented
+            features.append(stripped.split()[0].upper() if stripped else "")
+        result["features"] = [f for f in features if f]
+        try:
+            sock.sendall(b"QUIT\r\n")
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
 def probe_ftp_anonymous(
     host: str,
     port: int = 21,

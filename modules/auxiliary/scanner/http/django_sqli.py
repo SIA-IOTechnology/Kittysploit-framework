@@ -18,8 +18,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://docs.djangoproject.com/en/stable/topics/security/',
             'https://owasp.org/www-community/attacks/SQL_Injection',
-            'https://portswigger.net/web-security/sql-injection',
-        ],
+            'https://portswigger.net/web-security/sql-injection'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -44,7 +43,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -94,8 +93,7 @@ class Module(Auxiliary, Http_client):
         # NoSQL injection (if using MongoDB)
         '{"$ne": null}',
         '{"$gt": ""}',
-        '{"$where": "1==1"}',
-    ]
+        '{"$where": "1==1"}']
 
     # Parameter names commonly used in Django
     DJANGO_PARAMS = [
@@ -103,8 +101,7 @@ class Module(Auxiliary, Http_client):
         'q', 'query', 'search', 'filter', 'sort', 'order',
         'page', 'limit', 'offset', 'count',
         'user', 'user_id', 'author', 'author_id',
-        'category', 'category_id', 'tag', 'tag_id',
-    ]
+        'category', 'category_id', 'tag', 'tag_id']
 
     def check(self):
         """

@@ -25,8 +25,7 @@ SENSITIVE_PATHS = [
     (".DS_Store", None),
     ("phpinfo.php", lambda r: "phpinfo" in r.text.lower() or "php version" in r.text.lower()),
     ("debug.log", None),
-    ("composer.json", lambda r: "require" in r.text and "{" in r.text),
-]
+    ("composer.json", lambda r: "require" in r.text and "{" in r.text)]
 
 
 class Module(Scanner, Http_client):
@@ -69,8 +68,7 @@ class Module(Scanner, Http_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

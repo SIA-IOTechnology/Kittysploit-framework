@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "advisory": "GHSA-gx5p-jg67-6x7h",
         "references": ["https://github.com/advisories/GHSA-gx5p-jg67-6x7h"],
         "modules": [
-            "auxiliary/scanner/http/nextjs_ghsa_gx5p_jg67_6x7h_script_before_interactive_xss",
-        ],
+            "auxiliary/scanner/http/nextjs_ghsa_gx5p_jg67_6x7h_script_before_interactive_xss"],
         "tags": ["scanner", "nextjs", "xss", "ghsa-gx5p"],
     'agent': {
         'risk': 'active',
@@ -45,8 +44,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

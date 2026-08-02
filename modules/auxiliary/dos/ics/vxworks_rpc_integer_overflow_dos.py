@@ -30,8 +30,7 @@ class Module(Auxiliary, Ics_scanner_client):
         "author": ["Yannick Formaggio", "wenzhe zhu", "KittySploit Team"],
         "cve": ["CVE-2015-7599"],
         "references": [
-            "https://nvd.nist.gov/vuln/detail/CVE-2015-7599",
-        ],
+            "https://nvd.nist.gov/vuln/detail/CVE-2015-7599"],
         "platform": Platform.OTHER,
         "tags": ["ics", "vxworks", "rpc", "dos", "rtos", "ot", "cve-2015-7599"],
         "agent": {

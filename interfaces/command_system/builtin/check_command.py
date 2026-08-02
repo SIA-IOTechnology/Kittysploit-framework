@@ -131,7 +131,32 @@ Examples:
                 
                 # Display results
                 self._display_check_results(result, duration, parsed_args.verbose)
-                
+
+                vulnerable = False
+                if isinstance(result, bool):
+                    vulnerable = bool(result)
+                elif isinstance(result, dict):
+                    vulnerable = bool(result.get("vulnerable", False))
+
+                if vulnerable:
+                    try:
+                        from interfaces.command_system.builtin.assistant import (
+                            AssistantContext,
+                            maybe_show_assistant,
+                        )
+
+                        maybe_show_assistant(
+                            self.framework,
+                            AssistantContext(
+                                event="check",
+                                module=module,
+                                check_vulnerable=True,
+                                finding=result if isinstance(result, dict) else {"vulnerable": True},
+                            ),
+                        )
+                    except Exception:
+                        pass
+
                 return True
                 
             except Exception as e:

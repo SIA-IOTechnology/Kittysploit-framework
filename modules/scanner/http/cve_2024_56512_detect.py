@@ -44,8 +44,7 @@ class Module(Scanner, Http_client):
                     {
                         'capability': 'admin_surface',
                         'from_detail': '',
-                    },
-                ],
+                    }],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
@@ -55,8 +54,7 @@ class Module(Scanner, Http_client):
             'https://lists.apache.org/thread/cjc8fns5kjsho0s7vonlnojokyfx47wn',
             'http://www.openwall.com/lists/oss-security/2024/12/28/1',
             'https://github.com/absholi7ly/CVE-2024-56512-Apache-NiFi-Exploit/',
-            'https://nvd.nist.gov/vuln/detail/CVE-2024-56512',
-        ],
+            'https://nvd.nist.gov/vuln/detail/CVE-2024-56512'],
         'cve': 'CVE-2024-56512',
     }
 

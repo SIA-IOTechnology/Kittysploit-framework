@@ -132,6 +132,19 @@ class Dnp3OperateProbeResult:
     error: str = ""
 
 
+@dataclass
+class Dnp3OperateResult:
+    host: str
+    port: int
+    index: int = 0
+    control: int = 0
+    connected: bool = False
+    select_accepted: bool = False
+    operate_accepted: bool = False
+    mode: str = "select_operate"
+    error: str = ""
+
+
 class Dnp3Client:
     def __init__(
         self,
@@ -343,6 +356,54 @@ class Dnp3Client:
         finally:
             self.close()
 
+    def operate_crob(
+        self,
+        index: int = 0,
+        control: int = 0x41,
+        select_before: bool = True,
+    ) -> Dnp3OperateResult:
+        """
+        Control Relay Output Block (g12v1).
+
+        control defaults to 0x41 (pulse ON). Use select_before for SBO; False = Direct Operate.
+        Intrusive — authorized OT lab only.
+        """
+        result = Dnp3OperateResult(
+            host=self.host,
+            port=self.port,
+            index=int(index),
+            control=int(control) & 0xFF,
+            mode="select_operate" if select_before else "direct_operate",
+        )
+        if not self.connect():
+            result.error = "connection failed"
+            return result
+        result.connected = True
+        try:
+            if not self.link_status():
+                result.error = "link status failed"
+                return result
+            crob = self._build_crob(result.index, control=result.control)
+            if select_before:
+                select_resp = self._app_request(FC_SELECT, crob)
+                result.select_accepted = _response_ok(select_resp, 16)
+                if not result.select_accepted:
+                    result.error = "SELECT rejected"
+                    return result
+                operate_resp = self._app_request(FC_OPERATE, crob)
+            else:
+                result.select_accepted = True
+                operate_resp = self._app_request(FC_DIRECT_OPERATE, crob)
+            result.operate_accepted = _response_ok(operate_resp, 16)
+            if not result.operate_accepted:
+                result.error = "OPERATE rejected"
+            return result
+        except OSError as exc:
+            result.error = str(exc)
+            return result
+        finally:
+            self.close()
+
     def probe(self) -> Dnp3ProbeResult:
         result = Dnp3ProbeResult(host=self.host, port=self.port)
         if not self.connect():
@@ -414,6 +475,23 @@ def probe_dnp3_operate(
     index: int = 0,
 ) -> Dnp3OperateProbeResult:
     return Dnp3Client(host, port, timeout, src, dest).probe_operate_accepted(index)
+
+
+def operate_dnp3_crob(
+    host: str,
+    port: int = 20000,
+    timeout: float = 5.0,
+    src: int = 1024,
+    dest: int = 1,
+    index: int = 0,
+    control: int = 0x41,
+    select_before: bool = True,
+) -> Dnp3OperateResult:
+    return Dnp3Client(host, port, timeout, src, dest).operate_crob(
+        index=index,
+        control=control,
+        select_before=select_before,
+    )
 
 
 def read_dnp3_points(

@@ -40,15 +40,14 @@ class Module(Post):
         "tags": ["canbus", "gather", "ecu", "uds", "automotive"],
         "references": [
             "https://en.wikipedia.org/wiki/Unified_Diagnostic_Services",
-            "https://en.wikipedia.org/wiki/ISO_15765-2",
-        ],
+            "https://en.wikipedia.org/wiki/ISO_15765-2"],
         "agent": {
             "risk": "intrusive",
             "effects": ["recon", "active_exploitation"],
             "expected_requests": 8,
             "reversible": True,
             "approval_required": True,
-            "produces": ["ot_assets", "risk_signals"],
+            "produces": ["risk_signals"],
             "cost": 1.2,
             "noise": 0.4,
             "value": 1.5,
@@ -70,16 +69,13 @@ class Module(Post):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "ot_assets", "from_detail": "ecu_map"},
-                    {"capability": "canbus_ecu_map", "from_detail": ""},
-                ],
+{"capability": "canbus_ecu_map", "from_detail": ""}],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
                     "post/canbus/gather/analyze_messages",
                     "post/canbus/analyze/replay_candidates",
-                    "post/canbus/gather/dump_messages",
-                ],
+                    "post/canbus/gather/dump_messages"],
             },
         },
     }

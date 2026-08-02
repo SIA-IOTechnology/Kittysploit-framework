@@ -14,8 +14,7 @@ class Module(Scanner, Http_client):
         "author": ["KittySploit Team"],
         "severity": "info",
         "modules": [
-            "auxiliary/admin/http/gitea_cve_2026_20896_auth_bypass",
-        ],
+            "auxiliary/admin/http/gitea_cve_2026_20896_auth_bypass"],
         "tags": ["web", "scanner", "gitea", "git", "devops", "panel"],
     'agent': {
         'risk': 'active',
@@ -41,8 +40,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

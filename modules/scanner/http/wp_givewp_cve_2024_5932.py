@@ -18,8 +18,7 @@ class Module(Scanner, Http_client):
         "tags": ["web", "scanner", "wordpress", "givewp", "rce", "cve-2024-5932"],
         "references": [
             "https://www.cve.org/CVERecord?id=CVE-2024-5932",
-            "https://github.com/EQSTLab/CVE-2024-8353",
-        ],
+            "https://github.com/EQSTLab/CVE-2024-8353"],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -52,9 +51,7 @@ class Module(Scanner, Http_client):
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
          'consumes_capabilities': [],
          'option_bindings': {},
@@ -84,8 +81,7 @@ class Module(Scanner, Http_client):
         patterns = [
             r"^\s*Stable tag:\s*([0-9][0-9A-Za-z.\-_]*)\s*$",
             r"^\s*Version:\s*([0-9][0-9A-Za-z.\-_]*)\s*$",
-            r"Give(?:WP)?\s+(?:Donation\s+Plugin\s+)?(?:version\s*)?([0-9]+(?:\.[0-9]+){1,3})",
-        ]
+            r"Give(?:WP)?\s+(?:Donation\s+Plugin\s+)?(?:version\s*)?([0-9]+(?:\.[0-9]+){1,3})"]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
@@ -114,8 +110,7 @@ class Module(Scanner, Http_client):
         candidates = [
             "/wp-content/plugins/give/readme.txt",
             "/wp-content/plugins/give/give.php",
-            "/wp-content/plugins/give/src/Give/ServiceProviders/ServiceProvider.php",
-        ]
+            "/wp-content/plugins/give/src/Give/ServiceProviders/ServiceProvider.php"]
         for suffix in candidates:
             response = self.http_request(method="GET", path=self._path(suffix), allow_redirects=False)
             if not response or response.status_code != 200:

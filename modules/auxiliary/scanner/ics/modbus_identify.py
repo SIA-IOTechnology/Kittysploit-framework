@@ -24,11 +24,12 @@ class Module(Auxiliary, Ics_scanner_client):
             "approval_required": False,
             "produces": ["endpoints", "tech_hints", "risk_signals"],
             "chain": {
-                "produces_capabilities": ["credentials"],
+                "produces_capabilities": [{'capability': 'modbus_tcp', 'from_detail': ''},
+                                   {'capability': 'ot_assets', 'from_detail': ''},
+                                   "credentials"],
                 "suggested_followups": [
                     "scanner/ics/modbus_write_enabled",
-                    "post/ics/modbus/gather/map_registers",
-                ],
+                    "post/ics/modbus/gather/map_registers"],
             },
         },
     }

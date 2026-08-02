@@ -47,10 +47,14 @@ class Module(Scanner, Tcp_scanner_client):
                 "api_surface_ready": False,
             },
             "chain": {
-                "produces_capabilities": [{"capability": "file_read", "from_detail": ""}],
+                "produces_capabilities": [
+                    {"capability": "file_read", "from_detail": ""},
+                    "ftp_surface",
+                    "anonymous_access",
+                ],
                 "consumes_capabilities": [],
                 "option_bindings": {},
-                "suggested_followups": [],
+                "suggested_followups": ["auxiliary/scanner/ftp/ftp_enum"],
             },
         },
     }

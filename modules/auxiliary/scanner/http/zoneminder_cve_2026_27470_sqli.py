@@ -26,16 +26,14 @@ class Module(Auxiliary, Http_client, Sqli):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-27470",
             "https://github.com/ZoneMinder/zoneminder/security/advisories/GHSA-r6gm-478g-f2c4",
-            "https://github.com/d3vn0mi/CVE-2026-27470-POC",
-        ],
+            "https://github.com/d3vn0mi/CVE-2026-27470-POC"],
         "tags": [
             "zoneminder",
             "cctv",
             "sqli",
             "second-order",
             "authenticated",
-            "cve-2026-27470",
-        ],
+            "cve-2026-27470"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "data_exfiltration"],
@@ -64,8 +62,7 @@ class Module(Auxiliary, Http_client, Sqli):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

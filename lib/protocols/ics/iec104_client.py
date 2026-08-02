@@ -35,6 +35,10 @@ class Iec104Client:
         self.common_address = int(common_address)
         self._sock: Optional[socket.socket] = None
 
+    @property
+    def connected(self) -> bool:
+        return self._sock is not None
+
     def connect(self) -> bool:
         self.close()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -121,6 +125,33 @@ class Iec104Client:
         self._sock.sendall(apdu)
         response = self._recv()
         return bool(response)
+
+    def double_command(self, ioa: int, value: int, select: bool = False) -> bool:
+        """C_DC_NA_1 (46) — value 1=OFF, 2=ON (IEC 60870-5-104 DCO)."""
+        if not self._sock:
+            return False
+        dco = int(value) & 0x03
+        if select:
+            dco |= 0x80
+        asdu = struct.pack(
+            ">BBBBBBBB",
+            0x2E,
+            0x01,
+            0x06,
+            0x00,
+            self.common_address & 0xFF,
+            (self.common_address >> 8) & 0xFF,
+            ioa & 0xFF,
+            (ioa >> 8) & 0xFF,
+        ) + bytes([(ioa >> 16) & 0xFF, dco])
+        apdu = bytes([0x68, len(asdu) + 4, 0x02, 0x00, 0x00, 0x00]) + asdu
+        self._sock.sendall(apdu)
+        response = self._recv()
+        return bool(response)
+
+    def collect_frames(self, max_frames: int = 16) -> List[str]:
+        """Receive up to max_frames APDUs without closing the session."""
+        return [frame.hex() for frame in self._recv_all(max_frames)]
 
     def interrogation_dump(self, max_frames: int = 16) -> Iec104Result:
         result = Iec104Result(host=self.host, port=self.port)

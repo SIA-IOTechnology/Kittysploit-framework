@@ -22,6 +22,16 @@ class Module(Scanner, Tcp_scanner_client):
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals"],
+            "chain": {
+                "produces_capabilities": ["service_identified", "db_surface"],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "scanner/postgresql/postgresql_auth_method_detect",
+                    "scanner/postgresql/postgresql_empty_password_detect",
+                    "auxiliary/scanner/postgresql/postgresql_login_bruteforce",
+                ],
+            },
         },
     }
 
@@ -37,9 +47,16 @@ class Module(Scanner, Tcp_scanner_client):
         if not info.get("detected"):
             return False
 
+        method = str(info.get("auth_method") or "").strip()
+        auth_required = bool(info.get("auth_required"))
+        parts = [f"auth_required={auth_required}"]
+        if method:
+            parts.append(f"auth_method={method}")
+        reason = f"PostgreSQL service detected | {' | '.join(parts)}"
         self.set_info(
             severity="info",
-            reason="PostgreSQL service detected",
-            auth_required=bool(info.get("auth_required")),
+            reason=reason,
+            auth_required=auth_required,
+            auth_method=method,
         )
         return True

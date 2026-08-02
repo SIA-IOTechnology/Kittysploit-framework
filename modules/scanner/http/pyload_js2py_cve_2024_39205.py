@@ -31,11 +31,9 @@ class Module(Scanner, Http_client):
         "references": [
             "https://github.com/Marven11/CVE-2024-39205-Pyload-RCE",
             "https://github.com/Marven11/CVE-2024-28397-js2py-Sandbox-Escape",
-            "https://github.com/advisories/GHSA-w7hq-f2pj-c53g",
-        ],
+            "https://github.com/advisories/GHSA-w7hq-f2pj-c53g"],
         "modules": [
-            "exploits/linux/http/pyload_js2py_rce_cve_2024_39205",
-        ],
+            "exploits/linux/http/pyload_js2py_rce_cve_2024_39205"],
         "tags": ["web", "scanner", "pyload", "js2py", "cve-2024-39205", "cve-2024-28397"],
     'agent': {
         'risk': 'active',
@@ -68,8 +66,7 @@ class Module(Scanner, Http_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

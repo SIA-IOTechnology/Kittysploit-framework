@@ -23,6 +23,20 @@ class Module(Scanner, Tcp_scanner_client):
             "reversible": True,
             "approval_required": False,
             "produces": ["tech_hints", "risk_signals"],
+            "chain": {
+                "produces_capabilities": [
+                    "network_service",
+                    "service_identified",
+                    "remote_access",
+                ],
+                "consumes_capabilities": [],
+                "option_bindings": {},
+                "suggested_followups": [
+                    "scanner/ssh/ssh_auth_methods",
+                    "scanner/ssh/ssh_empty_password_detect",
+                    "auxiliary/scanner/ssh/ssh_login_bruteforce",
+                ],
+            },
         },
     }
 

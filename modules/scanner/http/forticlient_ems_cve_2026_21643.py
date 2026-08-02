@@ -26,13 +26,11 @@ class Module(Scanner, Http_client):
         "severity": "high",
         "cve": "CVE-2026-21643",
         "modules": [
-            "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli",
-        ],
+            "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli"],
         "references": [
             "https://www.fortiguard.com/psirt/FG-IR-25-1142",
             "https://bishopfox.com/blog/cve-2026-21643-pre-authentication-sql-injection-in-forticlient-ems-7-4-4",
-            "https://nvd.nist.gov/vuln/detail/CVE-2026-21643",
-        ],
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-21643"],
         "tags": [
             "web",
             "scanner",
@@ -40,8 +38,7 @@ class Module(Scanner, Http_client):
             "forticlient",
             "ems",
             "exposure",
-            "cve-2026-21643",
-        ],
+            "cve-2026-21643"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -70,13 +67,11 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli",
-                ],
+                    "auxiliary/scanner/http/forticlient_ems_cve_2026_21643_sqli"],
             },
         },
     }
@@ -93,8 +88,7 @@ class Module(Scanner, Http_client):
             "forticlient ems",
             "forticlient endpoint management server",
             "fortinet",
-            "ems",
-        ]
+            "ems"]
         if any(marker in text for marker in markers):
             return True
 
@@ -112,8 +106,7 @@ class Module(Scanner, Http_client):
             r'"version"\s*:\s*"?(7\.\d+\.\d+)"?',
             r'"ems_version"\s*:\s*"?(7\.\d+\.\d+)"?',
             r'"productversion"\s*:\s*"?(7\.\d+\.\d+)"?',
-            r'"appversion"\s*:\s*"?(7\.\d+\.\d+)"?',
-        ]
+            r'"appversion"\s*:\s*"?(7\.\d+\.\d+)"?']
         for pattern in patterns:
             match = re.search(pattern, text, re.I)
             if match:

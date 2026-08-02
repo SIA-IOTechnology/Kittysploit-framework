@@ -547,6 +547,9 @@ MCP_TOOL_SCOPES: Dict[str, MCPToolScope] = {
     "ks_list_workspaces": MCPToolScope("workspaces:read"),
     "ks_switch_workspace": MCPToolScope("workspaces:switch"),
     "ks_mcp_audit": MCPToolScope("mcp:read"),
+    "ks_ot_overview": MCPToolScope("modules:read"),
+    "ks_ot_list_modules": MCPToolScope("modules:read"),
+    "ks_ot_recommend": MCPToolScope("modules:read"),
 }
 
 

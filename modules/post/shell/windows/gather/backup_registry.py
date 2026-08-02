@@ -29,8 +29,7 @@ class Module(Post):
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [
-            "https://attack.mitre.org/techniques/T1112/",
-        ],
+            "https://attack.mitre.org/techniques/T1112/"],
     'agent': {
         'risk': 'intrusive',
         'effects': ['active_exploitation'],
@@ -55,36 +54,7 @@ class Module(Post):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -150,8 +120,7 @@ class Module(Post):
             f"$OutputDir = '{out}'",
             "if (-not (Test-Path -LiteralPath $OutputDir)) {",
             "    New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null",
-            "}",
-        ]
+            "}"]
         for hive, enabled in hives.items():
             if not enabled:
                 continue
@@ -159,8 +128,7 @@ class Module(Post):
                 f"$dest = Join-Path $OutputDir '{hive}-registry.reg'",
                 f"& reg.exe export {hive} $dest /y | Out-Null",
                 f"if ($LASTEXITCODE -ne 0) {{ throw \"reg export {hive} failed with exit code $LASTEXITCODE\" }}",
-                f"Write-Output '__KS_FILE__:' + $dest",
-            ])
+                f"Write-Output '__KS_FILE__:' + $dest"])
         return "\n".join(lines)
 
     def _int_opt(self, val, default, minimum=None):

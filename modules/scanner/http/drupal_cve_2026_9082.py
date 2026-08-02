@@ -35,11 +35,9 @@ class Module(Scanner, Http_client):
             "https://nvd.nist.gov/vuln/detail/CVE-2026-9082",
             "https://www.drupal.org/sa-core-2026-004",
             "https://www.tenable.com/blog/cve-2026-9082-highly-critical-sql-injection-vulnerability-in-drupal-core-sa-core-2026-004",
-            "https://slcyber.io/research-center/keys-to-the-kingdom-anonymous-sql-injection-in-drupal-core-cve-2026-9082/",
-        ],
+            "https://slcyber.io/research-center/keys-to-the-kingdom-anonymous-sql-injection-in-drupal-core-cve-2026-9082/"],
         "modules": [
-            "auxiliary/scanner/http/drupal_cve_2026_9082_sqli",
-        ],
+            "auxiliary/scanner/http/drupal_cve_2026_9082_sqli"],
         "tags": [
             "web",
             "scanner",
@@ -48,8 +46,7 @@ class Module(Scanner, Http_client):
             "sqli",
             "postgresql",
             "unauthenticated",
-            "cve-2026-9082",
-        ],
+            "cve-2026-9082"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -78,13 +75,11 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "auxiliary/scanner/http/drupal_cve_2026_9082_sqli",
-                ],
+                    "auxiliary/scanner/http/drupal_cve_2026_9082_sqli"],
             },
         },
     }

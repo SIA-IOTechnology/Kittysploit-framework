@@ -1,0 +1,71 @@
+id: iot-discovery
+version: "1"
+name: IoT Discovery
+description: >
+  Phase-1 read-only IoT discovery on a single host — SSDP/UPnP, mDNS typed
+  services, Matter/CHIP DNS-SD, MQTT broker identify, ONVIF device probe,
+  OpenWrt panel detect. Continues on failure; no write/control actions.
+tags: [iot, discovery, ssdp, mdns, matter, mqtt, onvif, openwrt, safe, phase1]
+policy:
+  intrusive: false
+continue_on_failure: true
+variables:
+  target:
+    description: Target IP or hostname
+    required: true
+start_step: ssdp_detect
+steps:
+  ssdp_detect:
+    module: scanner/udp/ssdp_detect
+    description: SSDP / UPnP M-SEARCH (UDP 1900)
+    options:
+      target: "${target}"
+    on_success: mdns_detect
+    on_failure: mdns_detect
+  mdns_detect:
+    module: scanner/udp/mdns_detect
+    description: mDNS typed IoT services (_mqtt/_coap/_onvif/…)
+    options:
+      target: "${target}"
+      typed: "true"
+    on_success: mdns_enum
+    on_failure: mdns_enum
+  mdns_enum:
+    module: scanner/udp/mdns_enum
+    description: Deep DNS-SD enum (PTR→SRV/TXT/A) + session handoffs
+    options:
+      target: "${target}"
+      resolve_srv: "true"
+      save_local: "false"
+    on_success: matter_detect
+    on_failure: matter_detect
+  matter_detect:
+    module: scanner/udp/matter_detect
+    description: Matter/CHIP DNS-SD + UDP/5540 probe
+    options:
+      target: "${target}"
+      probe_udp: "true"
+    on_success: mqtt_identify
+    on_failure: mqtt_identify
+  mqtt_identify:
+    module: auxiliary/scanner/ics/mqtt_broker_identify
+    description: MQTT broker identify / anonymous probe (TCP 1883)
+    options:
+      target: "${target}"
+    on_success: onvif_device
+    on_failure: onvif_device
+  onvif_device:
+    module: auxiliary/admin/http/camera/onvif_device_info
+    description: ONVIF GetDeviceInformation (HTTP)
+    options:
+      rhost: "${target}"
+      save_local: "false"
+    on_success: openwrt_detect
+    on_failure: openwrt_detect
+  openwrt_detect:
+    module: scanner/http/openwrt_detect
+    description: OpenWrt / LuCI panel detect
+    options:
+      target: "${target}"
+    on_success: done
+    on_failure: done

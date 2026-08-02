@@ -65,6 +65,15 @@ SMBShell = _lazy_import('.smb_shell', 'SMBShell')
 S7CommShell = _lazy_import('.s7comm_shell', 'S7CommShell')
 ModbusShell = _lazy_import('.modbus_shell', 'ModbusShell')
 OpcUaShell = _lazy_import('.opcua_shell', 'OpcUaShell')
+BacnetShell = _lazy_import('.bacnet_shell', 'BacnetShell')
+Dnp3Shell = _lazy_import('.dnp3_shell', 'Dnp3Shell')
+Iec104Shell = _lazy_import('.iec104_shell', 'Iec104Shell')
+Iec61850Shell = _lazy_import('.iec61850_shell', 'Iec61850Shell')
+CoapShell = _lazy_import('.coap_shell', 'CoapShell')
+OnvifShell = _lazy_import('.onvif_shell', 'OnvifShell')
+UpnpShell = _lazy_import('.upnp_shell', 'UpnpShell')
+RtspShell = _lazy_import('.rtsp_shell', 'RtspShell')
+MatterShell = _lazy_import('.matter_shell', 'MatterShell')
 PollingShell = _lazy_import('.polling_shell', 'PollingShell')
 AzureRunCommandShell = _lazy_import('.azure_run_command_shell', 'AzureRunCommandShell')
 GcpComputeSshShell = _lazy_import('.gcp_compute_ssh_shell', 'GcpComputeSshShell')
@@ -95,6 +104,15 @@ class ShellManager:
             's7comm': S7CommShell,
             'modbus': ModbusShell,
             'opcua': OpcUaShell,
+            'bacnet': BacnetShell,
+            'dnp3': Dnp3Shell,
+            'iec104': Iec104Shell,
+            'iec61850': Iec61850Shell,
+            'coap': CoapShell,
+            'onvif': OnvifShell,
+            'upnp': UpnpShell,
+            'rtsp': RtspShell,
+            'matter': MatterShell,
             'polling': PollingShell,
             'azure_run_command': AzureRunCommandShell,
             'gcp_compute_ssh': GcpComputeSshShell,
@@ -143,7 +161,7 @@ class ShellManager:
                     return None
             if shell_type == "javascript" and browser_server:
                 shell = shell_class(session_id, session_type, browser_server)
-            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "smb", "s7comm", "modbus", "opcua", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "kubernetes", "ble", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "quic", "http_cmd", "classic"):
+            elif shell_type in ("ssh", "php", "mysql", "postgresql", "redis", "ldap", "mongodb", "elasticsearch", "mssql", "winrm", "smb", "s7comm", "modbus", "opcua", "bacnet", "dnp3", "iec104", "iec61850", "coap", "onvif", "upnp", "rtsp", "matter", "polling", "azure_run_command", "gcp_compute_ssh", "gcp_api", "kubernetes", "ble", "mqtt", "dns", "ftp", "aws_sqs", "aws_sqs_command", "android", "email", "quic", "http_cmd", "classic"):
                 # These shells need framework to get connection from listener
                 framework = kwargs.get('framework')
                 shell = shell_class(session_id, session_type, framework)
@@ -247,6 +265,24 @@ class ShellManager:
                         shell_type = 'modbus'
                     elif session_type == 'opcua':
                         shell_type = 'opcua'
+                    elif session_type == 'bacnet':
+                        shell_type = 'bacnet'
+                    elif session_type == 'dnp3':
+                        shell_type = 'dnp3'
+                    elif session_type == 'iec104':
+                        shell_type = 'iec104'
+                    elif session_type == 'iec61850':
+                        shell_type = 'iec61850'
+                    elif session_type == 'coap':
+                        shell_type = 'coap'
+                    elif session_type == 'onvif':
+                        shell_type = 'onvif'
+                    elif session_type == 'upnp':
+                        shell_type = 'upnp'
+                    elif session_type == 'rtsp':
+                        shell_type = 'rtsp'
+                    elif session_type == 'matter':
+                        shell_type = 'matter'
                     elif session_type == 'polling':
                         shell_type = 'polling'
                     elif session_type == 'azure_run_command':

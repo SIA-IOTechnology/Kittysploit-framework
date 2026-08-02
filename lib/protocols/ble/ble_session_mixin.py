@@ -115,6 +115,42 @@ class BleSessionMixin:
     def open_ble(self) -> BleGattClient:
         return self.get_ble_client()
 
+    def open_ble_uart(
+        self,
+        *,
+        write_uuid: str = "",
+        notify_uuid: str = "",
+        mtu_chunk: int = 20,
+        auto_start: bool = True,
+    ):
+        """Open a UART-over-GATT pivot (Nordic NUS / clones) on the BLE session."""
+        from lib.protocols.ble.pivot import BleUartPivot
+
+        client = self.open_ble()
+        w = str(write_uuid or self._opt_value("write_uuid") or "").strip()
+        n = str(notify_uuid or self._opt_value("notify_uuid") or "").strip()
+        if w and n:
+            pivot = BleUartPivot(client, write_uuid=w, notify_uuid=n, mtu_chunk=int(mtu_chunk))
+            pivot.profile_name = "manual"
+        else:
+            pivot = BleUartPivot.auto(client, mtu_chunk=int(mtu_chunk))
+        if auto_start:
+            pivot.start()
+        return pivot
+
+    def ble_uart_exec(self, command: str, *, timeout: float = 3.0) -> str:
+        pivot = self.open_ble_uart()
+        try:
+            result = pivot.exec_command(command, timeout=timeout)
+            if result.error:
+                raise RuntimeError(result.error)
+            return result.text
+        finally:
+            try:
+                pivot.stop()
+            except Exception:
+                pass
+
     def close_ble_client(self, session_id: str) -> None:
         framework = getattr(self, "framework", None)
         if not framework:

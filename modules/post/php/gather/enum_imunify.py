@@ -32,24 +32,7 @@ class Module(Post):
 	     'endpoint_pattern_any': [],
 	     'param_any': [],
 	     'api_surface_ready': False},
-	    'chain': 	    {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 's7comm', 'from_detail': ''},
-	                               {'capability': 'ot_assets', 'from_detail': ''},
-	                               {'capability': 'ot_assets', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''}],
+	    'chain': 	    {'produces_capabilities': [],
 	     'consumes_capabilities': [],
 	     'option_bindings': {},
 	     'suggested_followups': []},
@@ -64,8 +47,7 @@ class Module(Post):
 				"/etc/imunify",
 				"/usr/local/imunify360",
 				"../etc/imunify360",
-				"../../etc/imunify360",
-			]
+				"../../etc/imunify360"]
 			
 			# Files to check
 			config_files = [
@@ -76,16 +58,14 @@ class Module(Post):
 				"blacklist.conf",
 				"rules.conf",
 				"api.conf",
-				"license.conf",
-			]
+				"license.conf"]
 			
 			# Log files
 			log_files = [
 				"/var/log/imunify360/agent.log",
 				"/var/log/imunify360/imunify360.log",
 				"/var/log/imunify360/error.log",
-				"/var/log/imunify360/access.log",
-			]
+				"/var/log/imunify360/access.log"]
 			
 			found_files = {}
 			imunify_base_path = None
@@ -176,8 +156,7 @@ if (file_exists($file) && is_readable($file)) {{
 				abs_paths = [
 					f"/etc/imunify360/{config_file}",
 					f"/etc/imunify/{config_file}",
-					f"/usr/local/imunify360/{config_file}",
-				]
+					f"/usr/local/imunify360/{config_file}"]
 				
 				for abs_path in abs_paths:
 					read_code = f"""

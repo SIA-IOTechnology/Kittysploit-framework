@@ -22,11 +22,9 @@ class Module(Scanner, Http_client):
         "cve": "CVE-2024-4577",
         "references": [
             "https://labs.watchtowr.com/no-way-php-strikes-again-cve-2024-4577/",
-            "https://devco.re/blog/2024/06/06/security-alert-cve-2024-4577-php-cgi-argument-injection-vulnerability-en/",
-        ],
+            "https://devco.re/blog/2024/06/06/security-alert-cve-2024-4577-php-cgi-argument-injection-vulnerability-en/"],
         "modules": [
-            "exploits/linux/http/php_cgi_cve_2024_4577_rce",
-        ],
+            "exploits/linux/http/php_cgi_cve_2024_4577_rce"],
         "tags": ["web", "scanner", "php", "cgi", "argument-injection", "rce"],
     'agent': {
         'risk': 'active',
@@ -52,8 +50,7 @@ class Module(Scanner, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

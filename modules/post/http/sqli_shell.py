@@ -34,8 +34,7 @@ class Module(Post, Http_client, Sqli):
         "author": "KittySploit Team",
         "tags": ["web", "sqli", "post", "mysql", "postgresql", "extraction"],
         "references": [
-            "https://owasp.org/www-community/attacks/SQL_Injection",
-        ],
+            "https://owasp.org/www-community/attacks/SQL_Injection"],
         "agent": {
             "risk": "intrusive",
             "effects": ["network_probe", "active_exploitation"],

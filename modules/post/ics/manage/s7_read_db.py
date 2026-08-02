@@ -21,7 +21,8 @@ class Module(Post, S7SessionMixin):
             "produces": ["tech_hints", "risk_signals"],
             "chain": {
                 "consumes_capabilities": ["authenticated_session"],
-                "produces_capabilities": ["file_read"],
+                "produces_capabilities": [{'capability': 'ot_assets', 'from_detail': ''},
+                                   "file_read"],
             },
         },
     }

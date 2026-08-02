@@ -32,24 +32,7 @@ class Module(Post, Bind):
 	     'endpoint_pattern_any': [],
 	     'param_any': [],
 	     'api_surface_ready': False},
-	    'chain': 	    {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 's7comm', 'from_detail': ''},
-	                               {'capability': 'ot_assets', 'from_detail': ''},
-	                               {'capability': 'ot_assets', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''},
-	                               {'capability': 'db_access', 'from_detail': ''}],
+	    'chain': 	    {'produces_capabilities': [],
 	     'consumes_capabilities': ['shell'],
 	     'option_bindings': {},
 	     'suggested_followups': []},
@@ -64,7 +47,7 @@ class Module(Post, Bind):
 		  @set_time_limit(0); @ignore_user_abort(1); @ini_set('max_execution_time',0);
 		  $TSChg=@ini_get('disable_functions');
 		  if(!empty($TSChg)){{
-			$TSChg=preg_replace('/[, ]+/', ',', $TSChg);
+			$TSChg=preg_replace('/[ ]+/', ',', $TSChg);
 			$TSChg=explode(',', $TSChg);
 			$TSChg=array_map('trim', $TSChg);
 		  }}else{{

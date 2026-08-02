@@ -26,7 +26,8 @@ class Module(Auxiliary, Ics_scanner_client):
             "produces": ["endpoints", "tech_hints", "risk_signals"],
             "chain": {
                 "consumes_capabilities": ["credentials"],
-                "produces_capabilities": ["authenticated_session"],
+                "produces_capabilities": [{'capability': 'ot_assets', 'from_detail': ''},
+                                   "authenticated_session"],
                 "suggested_followups": ["post/ics/manage/s7_read_db"],
             },
         },

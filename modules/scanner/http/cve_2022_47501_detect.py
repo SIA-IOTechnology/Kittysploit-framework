@@ -45,8 +45,7 @@ class Module(Scanner, Http_client):
                     {
                         'capability': 'admin_surface',
                         'from_detail': '',
-                    },
-                ],
+                    }],
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': [],
@@ -57,8 +56,7 @@ class Module(Scanner, Http_client):
             'http://www.openwall.com/lists/oss-security/2023/04/18/5',
             'https://nvd.nist.gov/vuln/detail/CVE-2022-47501',
             'http://www.openwall.com/lists/oss-security/2023/04/18/9',
-            'http://www.openwall.com/lists/oss-security/2023/04/19/1',
-        ],
+            'http://www.openwall.com/lists/oss-security/2023/04/19/1'],
         'cve': 'CVE-2022-47501',
     }
 

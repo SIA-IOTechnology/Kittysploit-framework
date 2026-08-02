@@ -25,8 +25,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/SQL_Injection',
             'https://portswigger.net/web-security/sql-injection',
-            'https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html',
-        ],
+            'https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -109,8 +108,7 @@ class Module(Auxiliary, Http_client):
         # Second-order SQL injection
         "admin'--",
         "admin'/*",
-        "admin'#",
-    ]
+        "admin'#"]
 
     # Parameter names commonly used
     COMMON_PARAMS = [
@@ -118,8 +116,7 @@ class Module(Auxiliary, Http_client):
         'q', 'query', 'search', 'filter', 'sort', 'order',
         'page', 'limit', 'offset', 'count',
         'category', 'category_id', 'tag', 'tag_id',
-        'name', 'value', 'data', 'input', 'param',
-    ]
+        'name', 'value', 'data', 'input', 'param']
 
     scan_paths = OptString(
         "",
@@ -277,8 +274,7 @@ class Module(Auxiliary, Http_client):
                 'sql server',
                 'sqlstate[',
                 'syntax error near',
-                'you have an error in your sql',
-            ]
+                'you have an error in your sql']
 
             response_text = response.text or ""
             response_lower = response_text.lower()
@@ -491,8 +487,7 @@ class Module(Auxiliary, Http_client):
                         req,
                         payload_short,
                         indicators,
-                        ev,
-                    ])
+                        ev])
                 
                 if table_data:
                     print_table(

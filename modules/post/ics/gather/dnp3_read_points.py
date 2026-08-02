@@ -36,14 +36,14 @@ class Module(Post, Ics_scanner_client):
             "produces": ["risk_signals", "endpoints"],
             "chain": {
                 "consumes_capabilities": ["dnp3_access"],
-                "produces_capabilities": ["file_read"],
+                "produces_capabilities": [{'capability': 'ot_assets', 'from_detail': ''},
+                                   "file_read"],
                 "option_bindings": {
                     "dest_address": "dnp3_dest",
                 },
                 "suggested_followups": [
                     "scanner/ics/dnp3_write_enabled",
-                    "auxiliary/scanner/ics/dnp3_integrity_poll",
-                ],
+                    "auxiliary/scanner/ics/dnp3_integrity_poll"],
             },
         },
     }

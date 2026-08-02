@@ -19,8 +19,7 @@ class Module(Auxiliary, Http_client):
         'references': [
             'https://owasp.org/www-community/attacks/xss/',
             'https://portswigger.net/web-security/cross-site-scripting',
-            'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html',
-        ],
+            'https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html'],
     'agent': {
         'risk': 'active',
         'effects': ['network_probe'],
@@ -45,11 +44,8 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'file_read', 'from_detail': 'lfi_path'},
+        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''},
+{'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'}],
@@ -120,8 +116,7 @@ class Module(Auxiliary, Http_client):
         
         # CSS injection (if reflected in style)
         '<style>@import\'javascript:alert("XSS")\';</style>',
-        '<link rel=stylesheet href=javascript:alert(1)>',
-    ]
+        '<link rel=stylesheet href=javascript:alert(1)>']
 
     # Parameter names commonly used
     COMMON_PARAMS = [
@@ -129,8 +124,7 @@ class Module(Auxiliary, Http_client):
         'name', 'value', 'id', 'key', 'data', 'input',
         'message', 'comment', 'title', 'description',
         'user', 'username', 'email', 'content', 'text',
-        'url', 'uri', 'link', 'redirect', 'return',
-    ]
+        'url', 'uri', 'link', 'redirect', 'return']
 
     def check(self):
         """

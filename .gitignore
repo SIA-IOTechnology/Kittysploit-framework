@@ -11,6 +11,7 @@ docs/*
 !docs/academy/
 !docs/academy/**
 docs/academy/secrets/
+docs/academy/secrets/**
 artifacts/*
 
 # Python package files
@@ -94,3 +95,4 @@ TODO.md
 
 tests/*
 docs/academy/*
+data/loot/*

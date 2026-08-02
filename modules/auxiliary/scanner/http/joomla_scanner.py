@@ -43,8 +43,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},
@@ -113,8 +112,7 @@ class Module(Auxiliary, Http_client):
         '/web.config',
         '/index.php',
         '/README.txt',
-        '/CHANGELOG.php',
-    ]
+        '/CHANGELOG.php']
 
     # Sensitive files
     SENSITIVE_FILES = [
@@ -126,8 +124,7 @@ class Module(Auxiliary, Http_client):
         '/composer.json',
         '/package.json',
         '/README.txt',
-        '/CHANGELOG.php',
-    ]
+        '/CHANGELOG.php']
 
     def check(self):
         """

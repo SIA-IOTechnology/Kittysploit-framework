@@ -31,8 +31,7 @@ class Module(Auxiliary, Http_client):
             "https://nvd.nist.gov/vuln/detail/CVE-2026-9082",
             "https://www.drupal.org/sa-core-2026-004",
             "https://slcyber.io/research-center/keys-to-the-kingdom-anonymous-sql-injection-in-drupal-core-cve-2026-9082/",
-            "https://www.yeswehack.com/news/cve-2026-9082-postgresql-drupal",
-        ],
+            "https://www.yeswehack.com/news/cve-2026-9082-postgresql-drupal"],
         "tags": [
             "drupal",
             "jsonapi",
@@ -40,8 +39,7 @@ class Module(Auxiliary, Http_client):
             "blind",
             "postgresql",
             "unauthenticated",
-            "cve-2026-9082",
-        ],
+            "cve-2026-9082"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "data_exfiltration"],
@@ -70,8 +68,7 @@ class Module(Auxiliary, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

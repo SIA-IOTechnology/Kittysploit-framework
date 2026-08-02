@@ -38,8 +38,7 @@ class Module(Auxiliary, Http_client):
         "tags": ["web", "sqli", "sql", "injection", "scanner", "engine"],
         "references": [
             "https://owasp.org/www-community/attacks/SQL_Injection",
-            "https://portswigger.net/web-security/sql-injection",
-        ],
+            "https://portswigger.net/web-security/sql-injection"],
         "agent": {
             "risk": "active",
             "effects": ["network_probe"],
@@ -52,8 +51,7 @@ class Module(Auxiliary, Http_client):
                     "db_access",
                     {"capability": "inj_param", "from_detail": "inj_param"},
                     {"capability": "inj_path", "from_detail": "inj_path"},
-                    {"capability": "inj_method", "from_detail": "inj_method"},
-                ],
+                    {"capability": "inj_method", "from_detail": "inj_method"}],
                 "suggested_followups": ["post/http/sqli_shell"],
             },
         },
@@ -92,8 +90,7 @@ class Module(Auxiliary, Http_client):
     COMMON_PARAMS = [
         "id", "user", "user_id", "username", "email",
         "q", "query", "search", "filter", "sort", "order",
-        "page", "limit", "offset", "category", "category_id",
-    ]
+        "page", "limit", "offset", "category", "category_id"]
 
     def check(self) -> bool:
         try:
@@ -331,8 +328,7 @@ class Module(Auxiliary, Http_client):
                     str(vuln.get("request_url") or "")[:72],
                     vuln.get("injection_type", ""),
                     str(vuln.get("confidence") or ""),
-                    (vuln.get("evidence_snippet") or "")[:48],
-                ])
+                    (vuln.get("evidence_snippet") or "")[:48]])
             if table_data:
                 print_table(
                     ["Param", "Method", "URL", "Type", "Conf", "Evidence"],

@@ -25,16 +25,14 @@ class Module(Auxiliary, Http_client):
         "references": [
             "https://nvd.nist.gov/vuln/detail/CVE-2026-23980",
             "https://github.com/advisories/GHSA-gvxg-9hqx-f4rg",
-            "https://github.com/oscar-mine/CVE-2026-23980-Exploit",
-        ],
+            "https://github.com/oscar-mine/CVE-2026-23980-Exploit"],
         "tags": [
             "superset",
             "apache",
             "sqli",
             "authenticated",
             "postgresql",
-            "cve-2026-23980",
-        ],
+            "cve-2026-23980"],
         "agent": {
             "risk": "intrusive",
             "effects": ["active_exploitation", "data_exfiltration"],
@@ -63,8 +61,7 @@ class Module(Auxiliary, Http_client):
             },
             "chain": {
                 "produces_capabilities": [
-                    {"capability": "db_access", "from_detail": "sqli"},
-                ],
+],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

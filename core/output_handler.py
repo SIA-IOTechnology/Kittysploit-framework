@@ -156,7 +156,50 @@ def color_yellow(text):
 
 def color_blue(text):
     return f"{Fore.BLUE}{text}{Style.RESET_ALL}"
-    
+
+
+def color_cyan(text):
+    return f"{Fore.CYAN}{text}{Style.RESET_ALL}"
+
+
+def print_assistant(message="", **kwargs):
+    """Operator assistant line: cyan ``[?]`` prefix (distinct from ``[*]``/``[+]``/``[~]``)."""
+    if is_thread_output_quiet():
+        return
+    end_progress()
+    if USE_COLORS and is_interactive_terminal():
+        print(f"[{Fore.CYAN}?{Style.RESET_ALL}] {message}", **kwargs)
+    else:
+        print(f"[?] {message}", **kwargs)
+
+
+def print_assistant_panel(title: str, lines, *, width: int = 60) -> None:
+    """Framed cyan panel for assistant next-action suggestions."""
+    if is_thread_output_quiet():
+        return
+    end_progress()
+    items = [str(line).rstrip() for line in (lines or []) if str(line).strip()]
+    if not items:
+        return
+
+    frame_w = max(40, min(int(width) if width else 60, 80))
+    title_text = str(title or "Assistant - next actions").strip()
+    use_color = USE_COLORS and is_interactive_terminal()
+
+    def _paint(text: str) -> str:
+        return f"{Fore.CYAN}{text}{Style.RESET_ALL}" if use_color else text
+
+    top = "=" * frame_w
+    mid = "-" * frame_w
+    print(_paint(top))
+    prefix = f"[{Fore.CYAN}?{Style.RESET_ALL}] " if use_color else "[?] "
+    print(f"{prefix}{_paint(title_text)}")
+    print(_paint(mid))
+    for line in items:
+        print(_paint(f"  {line}"))
+    print(_paint(top))
+
+
 _progress_lock = threading.Lock()
 _progress_active = False
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import socket
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from lib.protocols.ics.bacnet import parse_bacnet
@@ -194,3 +194,83 @@ def write_property(
         return data
     finally:
         sock.close()
+
+
+class BacnetClient:
+    """Session-oriented BACnet/IP client (UDP) for listeners and shells."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int = 47808,
+        timeout: float = 5.0,
+        device_id: int = 0,
+    ):
+        self.host = str(host or "").strip()
+        self.port = int(port)
+        self.timeout = float(timeout)
+        self.device_id = int(device_id or 0)
+        self.devices: List[BacnetDevice] = []
+        self._alive = False
+
+    @property
+    def connected(self) -> bool:
+        return self._alive and bool(self.host)
+
+    def connect(self) -> bool:
+        if not self.host:
+            return False
+        self.devices = who_is(self.host, self.port, self.timeout, broadcast=False)
+        if self.device_id <= 0 and self.devices:
+            self.device_id = int(self.devices[0].device_id or 0)
+        # UDP is connectionless — treat successful Who-Is (or forced device_id) as live
+        self._alive = bool(self.devices) or self.device_id > 0
+        return self._alive
+
+    def close(self) -> None:
+        self._alive = False
+
+    def who_is(self, broadcast: bool = False) -> List[BacnetDevice]:
+        self.devices = who_is(self.host, self.port, self.timeout, broadcast=broadcast)
+        if self.device_id <= 0 and self.devices:
+            self.device_id = int(self.devices[0].device_id or 0)
+        self._alive = bool(self.devices) or self.device_id > 0
+        return self.devices
+
+    def inventory(self, device_id: Optional[int] = None) -> List[dict]:
+        did = int(device_id or self.device_id or 0)
+        if did <= 0:
+            return []
+        return object_inventory(self.host, did, self.port, self.timeout)
+
+    def read_prop(
+        self,
+        object_type: int,
+        object_instance: int,
+        property_id: int,
+        device_id: Optional[int] = None,
+    ) -> bytes:
+        did = int(device_id or self.device_id or 0)
+        return read_property(
+            self.host, did, object_type, object_instance, property_id, self.port, self.timeout
+        )
+
+    def write_prop(
+        self,
+        object_type: int,
+        object_instance: int,
+        property_id: int,
+        value_bytes: bytes,
+        device_id: Optional[int] = None,
+    ) -> bytes:
+        did = int(device_id or self.device_id or 0)
+        return write_property(
+            self.host,
+            did,
+            object_type,
+            object_instance,
+            property_id,
+            value_bytes,
+            self.port,
+            self.timeout,
+        )

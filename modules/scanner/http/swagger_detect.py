@@ -18,8 +18,7 @@ PATHS = [
     "/v2/api-docs",
     "/v3/api-docs",
     "/openapi.json",
-    "/openapi.yaml",
-]
+    "/openapi.yaml"]
 
 
 class Module(Scanner, Http_client):
@@ -62,8 +61,7 @@ class Module(Scanner, Http_client):
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
                                    {'capability': 'file_read', 'from_detail': 'lfi_path'},
                                    {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                                   {'capability': 'ssrf_primitive', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
+                                   {'capability': 'ssrf_primitive', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

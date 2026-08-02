@@ -578,9 +578,31 @@ class SessionManager:
         
         # Play sound notification if enabled
         self._play_session_sound()
-        
+        self._maybe_show_assistant_for_session(session_id, session_type)
+
         return session_id
-    
+
+    def _maybe_show_assistant_for_session(self, session_id: str, session_type: str) -> None:
+        """Show operator assistant suggestions when a new session is created."""
+        try:
+            if not self.framework or not getattr(self.framework, "assistant_enabled", False):
+                return
+            from interfaces.command_system.builtin.assistant import (
+                AssistantContext,
+                maybe_show_assistant,
+            )
+
+            maybe_show_assistant(
+                self.framework,
+                AssistantContext(
+                    event="session_created",
+                    session_id=str(session_id or ""),
+                    session_type=str(session_type or ""),
+                ),
+            )
+        except Exception:
+            pass
+
     def update_session_data(self, session_id: str, updates: Dict[str, Any]) -> bool:
         """Merge updates into an in-memory session and sync to the database."""
         session = self.sessions.get(session_id)
@@ -805,6 +827,7 @@ class SessionManager:
         # Play sound notification if enabled (only for new sessions)
         if is_new_session:
             self._play_session_sound()
+            self._maybe_show_assistant_for_session(session_id, "browser")
         
         return self.browser_sessions[session_id]
     

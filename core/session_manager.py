@@ -111,6 +111,11 @@ class SessionManager:
         # may be Fernet-encrypted). Framework.complete_sensitive_startup() loads them.
         self._deferred_durable_load = not clean_startup
         self._durable_sessions_loaded = False
+        # Session IDs explicitly killed this process — block DB re-activation races
+        self._removed_session_ids: set = set()
+        # Implant IDs retired via sessions kill / kill_agent (also persisted on disk)
+        self._retired_implant_ids: set = set()
+        self._load_retired_implants()
     
     def load_deferred_sessions(self, *, force: bool = False) -> int:
         """Load durable beacon sessions after encryption is ready.
@@ -151,6 +156,73 @@ class SessionManager:
             return self.db_manager.get_session("default")
         return None
 
+    def _workspace_name(self) -> str:
+        try:
+            wm = getattr(self.framework, "workspace_manager", None) if self.framework else None
+            if wm:
+                current = wm.get_current_workspace()
+                if current and getattr(current, "name", None):
+                    return str(current.name)
+        except Exception:
+            pass
+        return "default"
+
+    def _retired_implants_path(self):
+        from pathlib import Path
+
+        return (
+            Path.home()
+            / ".kittysploit"
+            / "workspaces"
+            / self._workspace_name()
+            / "retired_implants.json"
+        )
+
+    def _load_retired_implants(self) -> None:
+        try:
+            path = self._retired_implants_path()
+            if not path.is_file():
+                return
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                self._retired_implant_ids = {str(x).strip() for x in data if str(x).strip()}
+            elif isinstance(data, dict):
+                items = data.get("implants") or data.get("ids") or []
+                self._retired_implant_ids = {str(x).strip() for x in items if str(x).strip()}
+        except Exception:
+            pass
+
+    def _save_retired_implants(self) -> None:
+        try:
+            path = self._retired_implants_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(sorted(self._retired_implant_ids), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def is_implant_retired(self, implant_id: str) -> bool:
+        identity = str(implant_id or "").strip()
+        return bool(identity) and identity in self._retired_implant_ids
+
+    def retire_implant(self, implant_id: str) -> None:
+        """Persistently refuse durable restore / recreate for this implant id."""
+        identity = str(implant_id or "").strip()
+        if not identity:
+            return
+        self._retired_implant_ids.add(identity)
+        self._save_retired_implants()
+
+    def unretire_implant(self, implant_id: str) -> bool:
+        identity = str(implant_id or "").strip()
+        if not identity or identity not in self._retired_implant_ids:
+            return False
+        self._retired_implant_ids.discard(identity)
+        self._save_retired_implants()
+        return True
+
     def reload_for_current_workspace(self) -> None:
         self.sessions.clear()
         self.browser_sessions.clear()
@@ -166,6 +238,21 @@ class SessionManager:
         """Sync a session to the database"""
         if not self.db_manager:
             return False
+        # Never resurrect a session that was explicitly killed this process
+        if session_id in self._removed_session_ids:
+            return False
+        try:
+            implant = ""
+            if isinstance(getattr(session_data, "data", None), dict):
+                implant = str(
+                    session_data.data.get("implant_id")
+                    or session_data.data.get("client_id")
+                    or ""
+                ).strip()
+            if implant and implant in self._retired_implant_ids:
+                return False
+        except Exception:
+            pass
         
         try:
             db_session = self._get_db_session()
@@ -178,6 +265,9 @@ class SessionManager:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    # Re-check tombstone inside the retry loop (kill may race)
+                    if session_id in self._removed_session_ids:
+                        return False
                     existing_db_session = db_session.query(DBSession).filter_by(session_id=session_id).first()
                     
                     # Filter out non-serializable objects from session data
@@ -374,6 +464,8 @@ class SessionManager:
             
             for db_session_obj in db_sessions:
                 session_id = db_session_obj.session_id
+                if session_id in self._removed_session_ids:
+                    continue
                 
                 # Store metadata for session
                 self._session_metadata[session_id] = {
@@ -403,6 +495,23 @@ class SessionManager:
                     if durable_beacons_only and not self._is_durable_beacon_session(
                         db_session_obj.session_type, session_data
                     ):
+                        continue
+
+                    implant = str(
+                        (session_data or {}).get("implant_id")
+                        or (session_data or {}).get("client_id")
+                        or ""
+                    ).strip()
+                    if implant and implant in self._retired_implant_ids:
+                        # Keep DB row inactive so it cannot bounce back
+                        try:
+                            db_session_obj.is_active = False
+                            db_session.commit()
+                        except Exception:
+                            try:
+                                db_session.rollback()
+                            except Exception:
+                                pass
                         continue
                     
                     host = self._decrypt_host_value(
@@ -438,12 +547,20 @@ class SessionManager:
     
     def create_session(self, host: str, port: int, session_type: str, data=None) -> str:
         session_id = str(uuid.uuid4())
+        payload = data or {}
+        # Fresh check-in after a kill: clear durable retirement for this implant
+        try:
+            implant = str(payload.get("implant_id") or payload.get("client_id") or "").strip()
+            if implant and implant in self._retired_implant_ids:
+                self.unretire_implant(implant)
+        except Exception:
+            pass
         self.sessions[session_id] = SessionData(
             id=session_id,
             host=host,
             port=port,
             session_type=session_type,
-            data=data or {}
+            data=payload
         )
         self._session_metadata[session_id] = {
             "created_at": time.time(),
@@ -605,6 +722,10 @@ class SessionManager:
                     continue
                 existing_id = str(data.get("implant_id") or data.get("client_id") or "").strip()
                 if existing_id != identity:
+                    continue
+                if existing_id in self._retired_implant_ids:
+                    continue
+                if row.session_id in self._removed_session_ids:
                     continue
                 # Skip very old inactive beacons
                 ls = row.last_seen or row.created_at
@@ -791,7 +912,7 @@ class SessionManager:
             return 0
     
     def _remove_session_from_db(self, session_id: str) -> bool:
-        """Remove a session from the database"""
+        """Deactivate a session in the database (bulk UPDATE to avoid identity-map races)."""
         if not self.db_manager:
             return False
         
@@ -799,39 +920,120 @@ class SessionManager:
             db_session = self._get_db_session()
             if not db_session:
                 return False
-                
-            db_session_obj = db_session.query(DBSession).filter_by(session_id=session_id).first()
-            if db_session_obj:
-                db_session_obj.is_active = False
-                db_session.commit()
-                return True
+
+            # Bulk update bypasses stale ORM objects that concurrent poll threads
+            # may still hold with is_active=True and later commit.
+            updated = (
+                db_session.query(DBSession)
+                .filter_by(session_id=session_id)
+                .update({"is_active": False}, synchronize_session=False)
+            )
+            db_session.commit()
+            return updated > 0
         except Exception as e:
+            try:
+                db_session = self._get_db_session()
+                if db_session:
+                    db_session.rollback()
+            except Exception:
+                pass
             print_error(f"Error removing session {session_id} from database: {e}")
         return False
     
     def remove_session(self, session_id: str) -> bool:
+        session = self.sessions.get(session_id)
+        if session is None and session_id not in self.sessions:
+            # Still try to deactivate DB row if present
+            self._removed_session_ids.add(session_id)
+            self._remove_session_from_db(session_id)
+            return False
+
+        # Tombstone first so concurrent poll/rehydrate cannot re-activate the row
+        self._removed_session_ids.add(session_id)
+
+        implant = ""
+        try:
+            data = session.data if session and isinstance(session.data, dict) else {}
+            implant = str(data.get("implant_id") or data.get("client_id") or "").strip()
+        except Exception:
+            pass
+
         if session_id in self.sessions:
             session = self.sessions.pop(session_id)
-            
-            # Remove from database
+
+            # Deactivate this row (bulk UPDATE — race-safe vs poll sync)
             self._remove_session_from_db(session_id)
-            
+            # Also deactivate any other active durable rows for the same implant
+            if implant:
+                self._deactivate_sessions_for_implant(implant, except_id=None)
+                # Block durable restore of this implant until a fresh check-in
+                if self._is_durable_beacon_session(
+                    session.session_type if session else "",
+                    session.data if session else {},
+                ):
+                    self.retire_implant(implant)
+
             # Remove metadata
             self._session_metadata.pop(session_id, None)
-            
+
             # Notify the callbacks
             for callback in self.callbacks:
                 try:
                     callback('session_removed', session_id, session)
                 except Exception as e:
                     print_error(f"Error in session callback: {e}")
-            
+
             return True
+
+        self._remove_session_from_db(session_id)
         return False
+
+    def _deactivate_sessions_for_implant(self, implant_id: str, *, except_id: Optional[str] = None) -> int:
+        """Soft-delete all active DB sessions belonging to an implant id."""
+        identity = str(implant_id or "").strip()
+        if not identity or not self.db_manager:
+            return 0
+        try:
+            db_session = self._get_db_session()
+            if not db_session:
+                return 0
+            rows = (
+                db_session.query(DBSession)
+                .filter(DBSession.is_active == True)
+                .all()
+            )
+            deactivated = 0
+            for row in rows:
+                if except_id and row.session_id == except_id:
+                    continue
+                data = self._parse_session_data_field(row.session_data)
+                existing = str(
+                    (data or {}).get("implant_id") or (data or {}).get("client_id") or ""
+                ).strip()
+                if existing == identity:
+                    row.is_active = False
+                    self._removed_session_ids.add(row.session_id)
+                    deactivated += 1
+                    # Drop from memory too
+                    self.sessions.pop(row.session_id, None)
+                    self._session_metadata.pop(row.session_id, None)
+            if deactivated:
+                db_session.commit()
+            return deactivated
+        except Exception as e:
+            try:
+                db_session = self._get_db_session()
+                if db_session:
+                    db_session.rollback()
+            except Exception:
+                pass
+            print_error(f"Error deactivating sessions for implant {implant_id}: {e}")
+            return 0
     
     def remove_browser_session(self, victim_id: str) -> bool:
         if victim_id in self.browser_sessions:
             session = self.browser_sessions.pop(victim_id)
+            self._removed_session_ids.add(victim_id)
             
             # Remove from database
             self._remove_session_from_db(victim_id)

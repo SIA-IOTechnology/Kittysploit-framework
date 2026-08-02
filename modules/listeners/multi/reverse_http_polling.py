@@ -321,6 +321,10 @@ class Module(Listener):
             client_id = str(data.get("implant_id") or data.get("client_id") or "").strip()
             if not client_id:
                 continue
+            if hasattr(sm, "is_implant_retired") and sm.is_implant_retired(client_id):
+                continue
+            if session.id in getattr(sm, "_removed_session_ids", set()):
+                continue
             # Skip if another active map already owns this implant on this listener
             if client_id in self._client_id_to_session:
                 continue
@@ -362,16 +366,18 @@ class Module(Listener):
         if pub and not self._verify_client(client_id, sig):
             return None
 
-        # Retired implants: allow one mapped poll for die=true, never create a new durable session
+        sm = getattr(self.framework, "session_manager", None) if self.framework else None
         denied = getattr(self, "_denied_implants", None) or set()
-        if client_id in denied and client_id not in self._client_id_to_session:
-            return None
+        retired = bool(sm and hasattr(sm, "is_implant_retired") and sm.is_implant_retired(client_id))
 
         if client_id in self._client_id_to_session:
             sid = self._client_id_to_session[client_id]
+            removed = sid in getattr(sm, "_removed_session_ids", set()) if sm else False
+            if sid in self._killed_sessions or client_id in denied or removed:
+                # Deliver die=true once, then drop — do not revive
+                self._killed_sessions.add(sid)
+                return sid
             self._last_seen[sid] = time.time()
-            # First poll after rehydrate: flip disconnected -> connected
-            sm = getattr(self.framework, "session_manager", None) if self.framework else None
             if sm:
                 sess = sm.get_session(sid)
                 data = (sess.data if sess else {}) or {}
@@ -389,9 +395,12 @@ class Module(Listener):
                 )
             return sid
 
-        sm = getattr(self.framework, "session_manager", None) if self.framework else None
-        if sm:
-            # Prefer in-memory durable session, then revive from DB
+        # In-process deny after sessions kill: no new durable session this run
+        if client_id in denied:
+            return None
+
+        # Revive existing durable session unless implant was retired via kill
+        if sm and not retired:
             sid = sm.find_beacon_session_by_implant(
                 client_id, listener_module=self._listener_module_name()
             )
@@ -400,6 +409,8 @@ class Module(Listener):
                     client_id, listener_module=self._listener_module_name()
                 )
             if sid:
+                if sid in getattr(sm, "_removed_session_ids", set()):
+                    return None
                 return self._reattach_session(
                     sid, client_id, client_ip, chained=chained, chain_via=chain_via
                 )
@@ -711,7 +722,7 @@ class Module(Listener):
 
         return Handler
 
-    def run(self, background=False):
+    def run(self, background=False, quiet=False):
         host = str(self.lhost or "0.0.0.0")
         port = int(self.lport or 8088)
         self.httpd = ThreadingHTTPServer((host, port), self._handler_class())
@@ -745,31 +756,33 @@ class Module(Listener):
         self.listener_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.listener_thread.start()
         threading.Thread(target=self._stale_watch_loop, daemon=True).start()
-        profile = self._base_profile()
-        scheme = "https" if use_https else "http"
-        print_success(f"Reverse HTTP polling listener on {scheme}://{host}:{port}{self.url_prefix}")
-        if rebound:
-            print_info(
-                f"Durable C2: bound {rebound} restored beacon session(s) "
-                f"(waiting for check-in)"
-            )
-        print_info("Agent: GET /c2/poll?id=<implant_id>&sig=<b64url>, POST /c2/result?id=<implant_id>&sig=...")
-        if profile.kill_date:
-            print_info(f"Beacon kill_date={profile.kill_date} tz={profile.timezone}")
-        if profile.working_hours:
-            print_info(
-                f"Beacon working_hours={profile.working_hours} "
-                f"tz={profile.timezone} outside_sleep={profile.sleep_outside_hours}s"
-            )
-        if self._opt_bool("allow_chained", True):
-            tok = self._opt_str("chain_token", "")
-            print_info(
-                "Daisy-chain enabled"
-                + (f" (token required)" if tok else " (token optional)")
-            )
-        notify = self._opt_str("callback_notify_url", "")
-        if notify:
-            print_info(f"Callback notify webhook: {notify}")
+
+        if not quiet:
+            profile = self._base_profile()
+            scheme = "https" if use_https else "http"
+            print_success(f"Reverse HTTP polling listener on {scheme}://{host}:{port}{self.url_prefix}")
+            if rebound:
+                print_info(
+                    f"Durable C2: bound {rebound} restored beacon session(s) "
+                    f"(waiting for check-in)"
+                )
+            print_info("Agent: GET /c2/poll?id=<implant_id>&sig=<b64url>, POST /c2/result?id=<implant_id>&sig=...")
+            if profile.kill_date:
+                print_info(f"Beacon kill_date={profile.kill_date} tz={profile.timezone}")
+            if profile.working_hours:
+                print_info(
+                    f"Beacon working_hours={profile.working_hours} "
+                    f"tz={profile.timezone} outside_sleep={profile.sleep_outside_hours}s"
+                )
+            if self._opt_bool("allow_chained", True):
+                tok = self._opt_str("chain_token", "")
+                print_info(
+                    "Daisy-chain enabled"
+                    + (f" (token required)" if tok else " (token optional)")
+                )
+            notify = self._opt_str("callback_notify_url", "")
+            if notify:
+                print_info(f"Callback notify webhook: {notify}")
 
         if background:
             return True
@@ -889,8 +902,18 @@ class Module(Listener):
         self._session_profiles.pop(sid, None)
         self._received_output.pop(sid, None)
         self._stale_alerted.discard(sid)
-        # Remember implant id so a late poll cannot recreate a durable session
+        # Resolve implant id from maps OR session data (Waiting sessions may lack maps)
         cid = self._session_to_client_id.get(sid)
+        if not cid and self.framework and hasattr(self.framework, "session_manager"):
+            try:
+                sess = self.framework.session_manager.get_session(sid)
+                data = (sess.data if sess else {}) or {}
+                cid = str(data.get("implant_id") or data.get("client_id") or "").strip() or None
+                if cid and sid not in self._session_to_client_id:
+                    self._session_to_client_id[sid] = cid
+                    self._client_id_to_session.setdefault(cid, sid)
+            except Exception:
+                cid = None
         if cid:
             if not hasattr(self, "_denied_implants"):
                 self._denied_implants = set()

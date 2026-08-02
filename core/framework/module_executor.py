@@ -318,7 +318,9 @@ class ModuleExecutor:
         return attr
 
     @staticmethod
-    def register_background_job(module: Any, framework: Any) -> Optional[int]:
+    def register_background_job(
+        module: Any, framework: Any, silent: bool = False
+    ) -> Optional[int]:
         try:
             from core.job_manager import global_job_manager
 
@@ -342,26 +344,29 @@ class ModuleExecutor:
                 module=module,
             )
             if job_id:
-                ModuleExecutor._emit(
-                    framework,
-                    "print_success",
-                    f"Module registered as background job [ID: {job_id}]",
-                )
+                if not silent:
+                    ModuleExecutor._emit(
+                        framework,
+                        "print_success",
+                        f"Module registered as background job [ID: {job_id}]",
+                    )
                 if hasattr(module, "job_id"):
                     module.job_id = job_id
                 return job_id
 
-            ModuleExecutor._emit(
-                framework,
-                "print_warning",
-                "Failed to register module as background job",
-            )
+            if not silent:
+                ModuleExecutor._emit(
+                    framework,
+                    "print_warning",
+                    "Failed to register module as background job",
+                )
         except Exception as exc:
-            ModuleExecutor._emit(
-                framework,
-                "print_warning",
-                f"Could not register module as background job: {exc}",
-            )
+            if not silent:
+                ModuleExecutor._emit(
+                    framework,
+                    "print_warning",
+                    f"Could not register module as background job: {exc}",
+                )
         return None
 
     @staticmethod

@@ -714,6 +714,20 @@ Session Types:
             # Kill standard sessions
             for session in standard_sessions[:]:  # Copy list to avoid modification during iteration
                 self._cleanup_ics_session(session.id)
+                self._cleanup_session_transport(session.id)
+                active = getattr(self.framework, "active_listeners", None) or {}
+                for listener in active.values():
+                    if hasattr(listener, "retire_beacon_session"):
+                        try:
+                            listener.retire_beacon_session(session.id, remove=False)
+                        except Exception:
+                            pass
+                try:
+                    from lib.c2.ops_log import get_ops_log
+
+                    get_ops_log(self.framework).kill_pending_for_session(session.id)
+                except Exception:
+                    pass
                 if session_manager.remove_session(session.id):
                     killed_count += 1
                     print_success(f"Killed standard session: {session.id}")

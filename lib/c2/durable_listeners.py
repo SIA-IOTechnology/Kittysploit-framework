@@ -259,7 +259,7 @@ def _apply_options(module: Any, options: Dict[str, Any]) -> None:
 
 def _start_one_listener(framework: Any, rec: Dict[str, Any]) -> Optional[Any]:
     """Start a single durable listener from a bind record. Returns module or None."""
-    from core.output_handler import print_success, print_warning
+    from core.output_handler import print_warning
     from core.framework.module_executor import ModuleExecutor
 
     options = dict(rec.get("options") or {})
@@ -295,19 +295,20 @@ def _start_one_listener(framework: Any, rec: Dict[str, Any]) -> Optional[Any]:
             import uuid
 
             module.listener_id = str(uuid.uuid4())
-        ok = module.run(background=True)
+        # quiet=True: module banner is suppressed; caller prints a single summary
+        try:
+            ok = module.run(background=True, quiet=True)
+        except TypeError:
+            ok = module.run(background=True)
         if not ok:
             print_warning(
                 f"Durable listener failed to bind "
                 f"{options.get('lhost', '0.0.0.0')}:{options.get('lport', '?')}"
             )
             return None
-        ModuleExecutor.register_background_job(module, framework)
+        ModuleExecutor.register_background_job(module, framework, silent=True)
         if hasattr(framework, "active_listeners"):
             framework.active_listeners[module.listener_id] = module
-        host = options.get("lhost", "0.0.0.0")
-        port = options.get("lport", "?")
-        print_success(f"Auto-started durable listener {module_path} on {host}:{port}")
         return module
     except OSError as exc:
         print_warning(f"Durable listener bind error: {exc}")
@@ -408,18 +409,22 @@ def start_durable_listeners(framework: Any) -> int:
             pass
         return 0
 
-    from core.output_handler import print_info
+    from core.output_handler import print_success
 
-    started = 0
+    started_binds: list[str] = []
     for rec in records:
         options = dict(rec.get("options") or {})
         already = _port_already_served(framework, options)
         mod = _start_one_listener(framework, rec)
         if mod and not already:
-            started += 1
+            host = options.get("lhost", "0.0.0.0")
+            port = options.get("lport", "?")
+            started_binds.append(f"{host}:{port}")
 
-    if started:
-        print_info(
-            f"Durable C2: {started} listener(s) restored — Waiting sessions can check in"
+    if started_binds:
+        endpoints = ", ".join(started_binds)
+        print_success(
+            f"Durable C2: restored {len(started_binds)} listener(s) on {endpoints} "
+            f"— waiting for check-in"
         )
-    return started
+    return len(started_binds)

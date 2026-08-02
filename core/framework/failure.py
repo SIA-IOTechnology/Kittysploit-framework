@@ -55,6 +55,7 @@ class FailureType(Enum):
     Disconnect = "Disconnected"
     NotAccess = "No access"
     NoTarget = "Target not compatible"
+    NotCompatible = "Target not compatible"
     NotFound = "Not found"
     NotVulnerable = "The application response indicated it was not vulnerable"
     PayloadFailed = "The payload was delivered but no session was opened"

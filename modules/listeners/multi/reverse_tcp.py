@@ -38,8 +38,11 @@ class Module(Listener):
         True,
     )
     
-    def run(self):
+    def run(self, background=False):
         """Run the reverse TCP listener - accepts multiple connections"""
+        if background:
+            return self.start()
+
         try:
             # Only initialize socket once if not already created
             if not hasattr(self, 'sock') or self.sock is None:
@@ -104,6 +107,11 @@ class Module(Listener):
         """Clean up connection"""
         try:
             if hasattr(self, 'sock') and self.sock:
-                self.sock.close()
-        except OSError as e:
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+                self.sock = None
+        except OSError:
             pass
+        self.running = False

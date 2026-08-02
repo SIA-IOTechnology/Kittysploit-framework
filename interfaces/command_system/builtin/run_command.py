@@ -29,7 +29,7 @@ class RunCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "run [--preview] [--background] [--foreground]"
+        return "run [--preview] [-b|--background] [-f|--foreground]"
     
     @property
     def help_text(self) -> str:
@@ -43,15 +43,15 @@ all required options before running.
 
 Options:
     --preview                 Show execution preview without running
-    --background              Run in background (default for listeners)
-    --foreground              Keep the console blocked (listeners only)
+    -b, --background          Run in background (default for listeners)
+    -f, --foreground          Keep the console blocked (listeners only)
     --yes, -y                 Skip destructive-action confirmation (scope)
 
 Examples:
     run                       # Execute module (listeners auto-background)
     run --preview             # Show execution preview
-    run --background          # Force background job
-    run --foreground          # Block console until Ctrl+C (listener)
+    run -b / run --background # Force background job
+    run -f / run --foreground # Block console until Ctrl+C (listener)
         """
     
     def __init__(self, framework, session, output_handler):
@@ -72,13 +72,13 @@ Examples:
         )
         
         parser.add_argument(
-            '--background',
+            '-b', '--background',
             action='store_true',
             help='Run module in background (default for listeners)'
         )
 
         parser.add_argument(
-            '--foreground',
+            '-f', '--foreground',
             action='store_true',
             help='Run listener in foreground (block until Ctrl+C)'
         )

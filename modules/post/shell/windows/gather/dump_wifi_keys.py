@@ -179,9 +179,12 @@ Get-WiFiKeys
             f.write(content)
         return local_path
 
+    def _compat_failure(self):
+        return getattr(FailureType, "NotCompatible", None) or FailureType.NoTarget
+
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "WiFi key extraction prerequisites not met")
+            raise ProcedureError(self._compat_failure(), "WiFi key extraction prerequisites not met")
 
         print_status("Extracting saved WiFi profile keys...")
         use_ps = self._bool_opt(self.prefer_powershell, False) and self._powershell_available()
@@ -198,7 +201,7 @@ Get-WiFiKeys
 
         if re.search(r"netsh wlan show profiles failed", result, re.I):
             print_error(result)
-            raise ProcedureError(FailureType.NotCompatible, result)
+            raise ProcedureError(self._compat_failure(), result)
 
         if re.search(r"No saved WiFi profiles found", result, re.I):
             print_warning(result)

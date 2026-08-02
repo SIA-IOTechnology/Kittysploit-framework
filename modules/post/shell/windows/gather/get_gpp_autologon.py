@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import re
 
@@ -225,8 +226,7 @@ function Get-GPPAutologon
             self._execute_cmd(f'del /f /q "{path}"')
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
+        if not win_probe_powershell(self._execute_cmd):
             print_error("PowerShell is not available on the target")
             return False
         return True

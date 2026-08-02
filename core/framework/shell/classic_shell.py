@@ -5,6 +5,7 @@
 Classic shell implementation for standard sessions
 """
 
+import base64
 import os
 import subprocess
 import shlex
@@ -18,6 +19,8 @@ from typing import Dict, Any, List, Optional
 from .base_shell import BaseShell
 from .root_elevate import apply_root_elevate
 from core.output_handler import print_info, print_error
+
+_PS_MODE_KEY = "powershell_mode"
 
 class ClassicShell(BaseShell):
 
@@ -129,7 +132,9 @@ class ClassicShell(BaseShell):
     @property
     def prompt_template(self) -> str:
         if self.is_windows:
-            return "PS {directory}> "
+            if self._powershell_mode_enabled():
+                return "PS {directory}> "
+            return "CMD {directory}> "
         else:
             return "{username}@{hostname}:{directory}$ " if not self.is_root else "{username}@{hostname}:{directory}# "
     
@@ -145,6 +150,44 @@ class ClassicShell(BaseShell):
                 hostname=self.hostname,
                 directory=dir_display
             )
+
+    def _session_data(self) -> dict:
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return {}
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session:
+            return {}
+        data = getattr(session, "data", None)
+        if not isinstance(data, dict):
+            return {}
+        return data
+
+    def _powershell_mode_enabled(self) -> bool:
+        """True when operator enabled cmd→PowerShell wrapping on this session."""
+        data = self._session_data()
+        return bool(data.get(_PS_MODE_KEY)) or bool(data.get("shell_flavor") == "powershell")
+
+    def set_powershell_mode(self, enabled: bool) -> bool:
+        """Persist PowerShell wrapping flag on the framework session."""
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return False
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session:
+            return False
+        if not isinstance(session.data, dict):
+            session.data = {}
+        session.data[_PS_MODE_KEY] = bool(enabled)
+        if enabled:
+            session.data["shell_flavor"] = "powershell"
+        elif session.data.get("shell_flavor") == "powershell":
+            session.data.pop("shell_flavor", None)
+        return True
+
+    @staticmethod
+    def _wrap_as_powershell(command: str) -> str:
+        """One-shot PowerShell via EncodedCommand (safe quoting from cmd)."""
+        encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
+        return f"powershell -NoP -NonI -EncodedCommand {encoded}"
     
     def _get_windows_drive(self) -> str:
         m = re.match(r'^\s*([A-Za-z]:)\\', str(self.current_directory or ""))
@@ -939,20 +982,64 @@ class ClassicShell(BaseShell):
                 self._sync_remote_identity()
             elif not self.platform_detected:
                 self._detect_platform()
+
+            # Windows: toggle / wrap PowerShell mode (cmd underneath, PS one-shot per line)
+            original_command = command
+            if self.is_windows:
+                low = command.strip().lower()
+                if low in ("cmd", "exit-ps", "exit-powershell") and self._powershell_mode_enabled():
+                    self.set_powershell_mode(False)
+                    return {
+                        "output": "PowerShell mode disabled — back to cmd.exe\n",
+                        "status": 0,
+                        "error": "",
+                    }
+                if low == "powershell" and not self._powershell_mode_enabled():
+                    probe = self._send_command_raw(
+                        'powershell -NoP -NonI -Command "Write-Output PS_OK"',
+                        timeout=8.0,
+                    )
+                    if not probe or "PS_OK" not in probe:
+                        return {
+                            "output": "",
+                            "status": 1,
+                            "error": "PowerShell is not available on the target",
+                        }
+                    self.set_powershell_mode(True)
+                    return {
+                        "output": (
+                            "PowerShell mode enabled on this session.\n"
+                            "Commands are wrapped with powershell -EncodedCommand.\n"
+                            "Type 'cmd' to return to cmd.exe mode.\n"
+                        ),
+                        "status": 0,
+                        "error": "",
+                    }
+                if (
+                    self._powershell_mode_enabled()
+                    and low not in ("help", "history", "clear", "exit", "back", "background")
+                ):
+                    command = self._wrap_as_powershell(command)
             
-            # Parse command
+            # Parse command (use original for builtins like cd when wrapped)
+            parse_src = original_command if (
+                self.is_windows and command.lstrip().lower().startswith("powershell ")
+            ) else command
             try:
-                parts = shlex.split(command) if not self.is_windows else command.split()
-                cmd = parts[0] if parts else command
+                parts = shlex.split(parse_src) if not self.is_windows else parse_src.split()
+                cmd = parts[0] if parts else parse_src
                 args = parts[1:] if len(parts) > 1 else []
             except ValueError:
                 # Fallback for Windows-style commands
-                parts = command.split()
-                cmd = parts[0] if parts else command
+                parts = parse_src.split()
+                cmd = parts[0] if parts else parse_src
                 args = parts[1:] if len(parts) > 1 else []
+
+            # When wrapped, skip local cd/pwd special-cases — send wrapped PS then refresh cwd
+            wrapped_ps = self.is_windows and command.lstrip().lower().startswith("powershell ")
             
             # Handle built-in commands that need special processing
-            if cmd.lower() in ['cd', 'pwd', 'whoami']:
+            if not wrapped_ps and cmd.lower() in ['cd', 'pwd', 'whoami']:
                 # These might need special handling, but try remote first
                 result = self._send_command_raw(command, timeout=5.0)
                 if result is not None:

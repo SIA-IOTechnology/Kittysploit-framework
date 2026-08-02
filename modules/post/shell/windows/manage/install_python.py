@@ -3,6 +3,7 @@
 
 from kittysploit import *
 from core.framework.failure import FailureType, ProcedureError
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import os
 import re
 import time
@@ -135,22 +136,9 @@ class Module(Post):
     def _check_powershell(self) -> bool:
         """Check if PowerShell is available"""
         print_status("Checking for PowerShell...")
-        
-        # Check for PowerShell
-        check_cmd = 'powershell -Command "Write-Output $PSVersionTable.PSVersion"'
-        result = self._execute_cmd(check_cmd, timeout=10)
-        
-        if result and ("Major" in result or re.search(r'\d+\.\d+', result)):
+        if win_probe_powershell(lambda cmd: self._execute_cmd(cmd, timeout=10)):
             print_success("PowerShell is available")
             return True
-        else:
-            # Try alternative path
-            check_cmd2 = '%WINDIR%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -Command "exit"'
-            result2 = self._execute_cmd(check_cmd2, timeout=5)
-            if result2 is not None:  # Even empty output means it exists
-                print_success("PowerShell is available")
-                return True
-        
         print_error("[!] PowerShell is not available")
         return False
     
@@ -411,7 +399,7 @@ class Module(Post):
             
             # Check PowerShell availability
             if not self._check_powershell():
-                raise ProcedureError(FailureType.NotVulnerable, "PowerShell is required but not available")
+                raise ProcedureError(win_compat_failure_type(), "PowerShell is required but not available")
             
             # Download Python
             print_info("=" * 70)

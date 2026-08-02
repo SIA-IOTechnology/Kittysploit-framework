@@ -7,6 +7,7 @@ Gather current WLAN connection details on each wireless interface
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -166,12 +167,17 @@ if ($ifaceCount -eq 0) {
         if not netsh_check or "netsh" not in netsh_check.lower():
             print_error("netsh.exe is not available on the target")
             return False
-
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
         return True
+
+    def _extract_via_netsh(self) -> str:
+        out = self._execute_cmd("netsh wlan show interfaces")
+        if not out:
+            return ""
+        if re.search(r"(not supported|not available|not present)", out, re.I):
+            return f"WLAN_ERROR: {out}"
+        if re.search(r"there is no wireless interface|aucun", out, re.I):
+            return f"No wireless interfaces found.\n\n--- raw netsh output ---\n{out}"
+        return out
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -184,19 +190,23 @@ if ($ifaceCount -eq 0) {
     def run(self):
         if not self.check():
             raise ProcedureError(
-                FailureType.NotCompatible,
+                win_compat_failure_type(),
                 "WLAN current-connection prerequisites not met",
             )
 
         print_status("Querying wireless LAN current connections...")
-        result = self._run_powershell(self._powershell_script())
+        if win_probe_powershell(self._execute_cmd):
+            result = self._run_powershell(self._powershell_script())
+        else:
+            print_info("PowerShell unavailable — using netsh via cmd")
+            result = self._extract_via_netsh()
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")
 
         if re.search(r"WLAN_ERROR:", result, re.I):
             print_error(result)
-            raise ProcedureError(FailureType.NotCompatible, result)
+            raise ProcedureError(win_compat_failure_type(), result)
 
         if re.search(r"No wireless interfaces found", result, re.I):
             print_warning(result)

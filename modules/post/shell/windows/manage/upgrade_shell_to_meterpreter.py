@@ -11,6 +11,7 @@ embeddable Python via PowerShell (download + extract) and uses it.
 from kittysploit import *
 from core.framework.failure import ProcedureError, FailureType
 from core.framework.enums import Platform
+from lib.post.windows.session import win_probe_powershell
 import importlib
 import re
 import time
@@ -185,10 +186,8 @@ class Module(Post):
             return None
         sid = self._get_session_id_value()
         # Check PowerShell (required for install_python)
-        ps_check = self.cmd_execute('powershell -NoP -Command "Write-Output 1"')
-        if not ps_check or "1" not in (ps_check or "").strip():
-            if re.search(r"not recognized|cannot find", (ps_check or ""), re.I):
-                return None
+        if not win_probe_powershell(lambda cmd: self.cmd_execute(cmd) or ""):
+            return None
         mod = self.framework.module_loader.load_module(
             "post/shell/windows/manage/install_python", framework=self.framework
         )

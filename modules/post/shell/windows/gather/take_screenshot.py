@@ -7,6 +7,7 @@ through the current shell or Meterpreter session and save it under ./output.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -245,15 +246,14 @@ try {{
         self._execute_cmd(f'del /f /q "{path}"')
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
+        if not win_probe_powershell(self._execute_cmd):
             print_error("PowerShell is not available on the target")
             return False
         return True
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "PowerShell is not available on the target")
 
         temp_dir = self._remote_temp_dir()
         stamp = time.strftime("%Y%m%d_%H%M%S")

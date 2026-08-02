@@ -11,9 +11,38 @@ import re
 from typing import Optional
 
 from core.framework.enums import SessionType
+from core.framework.failure import FailureType
 from core.output_handler import print_error, print_status, print_warning
 
 KS_FILE_MARKER = "__KS_FILE__:"
+
+_PS_PROBE_COMMANDS = (
+    'powershell -NoP -NonI -Command "Write-Output PS_OK"',
+    'powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+    r'%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoP -NonI -Command "Write-Output PS_OK"',
+)
+
+
+def win_compat_failure_type():
+    """FailureType for target mismatch — works before/after NotCompatible was added."""
+    return getattr(FailureType, "NotCompatible", None) or FailureType.NoTarget
+
+
+def win_probe_powershell(execute_fn) -> bool:
+    """Robust PowerShell presence check (avoids fragile ``Write-Output 1`` framing misses).
+
+    ``execute_fn`` must accept a command string and return stdout text.
+    """
+    if not callable(execute_fn):
+        return False
+    for cmd in _PS_PROBE_COMMANDS:
+        try:
+            out = execute_fn(cmd) or ""
+        except Exception:
+            continue
+        if "PS_OK" in out:
+            return True
+    return False
 
 
 class WindowsSessionMixin:
@@ -184,11 +213,51 @@ class WindowsSessionMixin:
             return output.splitlines()[0].strip().rstrip("\\")
         return "C:\\Windows\\Temp"
 
+    def win_is_windows(self) -> bool:
+        """Best-effort Windows detection (session metadata + probes).
+
+        Avoids ``echo %OS%`` inside the default PowerShell job wrapper — ``%OS%``
+        is a cmd.exe expansion and never becomes ``Windows_NT`` under PowerShell.
+        """
+        sid = self._win_sid()
+        fw = getattr(self, "framework", None)
+        if sid and fw and hasattr(fw, "session_manager"):
+            session = fw.session_manager.get_session(sid)
+            if session:
+                data = getattr(session, "data", None) or {}
+                if isinstance(data, dict):
+                    plat = str(data.get("platform") or "").lower()
+                    if "win" in plat:
+                        return True
+                sm = getattr(fw, "shell_manager", None)
+                if sm:
+                    shell = sm.get_shell(sid)
+                    if shell and getattr(shell, "is_windows", False):
+                        return True
+                    if shell and getattr(shell, "platform_detected", False):
+                        # ClassicShell sets is_windows after probe; trust it either way
+                        return bool(getattr(shell, "is_windows", False))
+
+        # Always wrap_job=False. Prefer cmd /c so powershell_mode EncodedCommand wrapping
+        # still expands %OS% correctly.
+        probes = (
+            'cmd /c "echo %OS%"',
+            'powershell -NoP -NonI -Command "Write-Output $env:OS"',
+            "ver",
+        )
+        for cmd in probes:
+            out = self.win_execute(cmd, timeout=5, wrap_job=False) or ""
+            if "Windows_NT" in out:
+                return True
+            if re.search(r"Microsoft Windows|Windows\s+\[Version", out, re.I):
+                return True
+        return False
+
     def win_require_windows(self) -> bool:
         if not self._win_sid():
             print_error("Session ID is required.")
             return False
-        if "Windows_NT" not in self.win_execute("echo %OS%", timeout=5):
+        if not self.win_is_windows():
             print_error("Windows session required.")
             return False
         return True
@@ -204,12 +273,21 @@ class WindowsSessionMixin:
         )
         return "ADMIN" in self.win_execute(ps, timeout=8)
 
+    def win_powershell_available(self) -> bool:
+        """Silent check — True if PowerShell responds with the probe marker."""
+        return win_probe_powershell(
+            lambda cmd: self.win_execute(cmd, timeout=8, wrap_job=False)
+        )
+
     def win_require_powershell(self) -> bool:
-        out = self.win_execute('powershell -NoP -Command "Write-Output 1"', timeout=8)
-        if "1" not in out:
+        if not self.win_powershell_available():
             print_error("PowerShell is not available on the target.")
             return False
         return True
+
+    @staticmethod
+    def win_compat_failure():
+        return win_compat_failure_type()
 
     @staticmethod
     def win_parse_file_marker(output: str, marker: str = KS_FILE_MARKER) -> str:

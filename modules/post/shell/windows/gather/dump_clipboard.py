@@ -6,6 +6,7 @@ Read the current Windows clipboard text from an interactive user session.
 """
 
 from kittysploit import *
+from lib.post.windows.session import win_compat_failure_type, win_probe_powershell
 import base64
 import os
 import re
@@ -133,8 +134,7 @@ if ([string]::IsNullOrEmpty($text)) {
 """
 
     def check(self):
-        ps_check = self._execute_cmd('powershell -NoP -Command "Write-Output 1"')
-        if "1" not in ps_check:
+        if not win_probe_powershell(self._execute_cmd):
             print_error("PowerShell is not available on the target")
             return False
         print_warning("Requires an interactive desktop session (may fail in Session 0)")
@@ -150,7 +150,7 @@ if ([string]::IsNullOrEmpty($text)) {
 
     def run(self):
         if not self.check():
-            raise ProcedureError(FailureType.NotCompatible, "PowerShell is not available on the target")
+            raise ProcedureError(win_compat_failure_type(), "PowerShell is not available on the target")
 
         print_status("Reading clipboard contents...")
         result = self._run_powershell(self._powershell_script())

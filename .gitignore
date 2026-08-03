@@ -12,6 +12,13 @@ docs/*
 !docs/academy/**
 docs/academy/secrets/
 docs/academy/secrets/**
+docs/academy/.env
+docs/academy/data/
+docs/academy/data/**
+docs/academy/uploads/
+docs/academy/uploads/**
+docs/academy/backups/
+docs/academy/backups/**
 artifacts/*
 
 # Python package files

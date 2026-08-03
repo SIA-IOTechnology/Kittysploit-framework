@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/livewire_powergrid_cve_2026_65971_detect',
+                    'auxiliary/scanner/http/livewire_powergrid_cve_2026_65971_sqli',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': ['https://livewire.laravel.com/'],

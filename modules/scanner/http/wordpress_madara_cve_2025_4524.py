@@ -63,9 +63,7 @@ class Module(Scanner, Http_client, Wordpress):
                 "api_surface_ready": False,
             },
             "chain": {
-                "produces_capabilities": [
-                    {"capability": "file_read", "from_detail": "lfi_path"},
-                ],
+                "produces_capabilities": [{'capability': 'file_read', 'from_detail': ''}],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [

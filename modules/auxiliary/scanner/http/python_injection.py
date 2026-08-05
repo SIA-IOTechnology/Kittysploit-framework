@@ -43,7 +43,7 @@ class Module(Auxiliary, Http_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

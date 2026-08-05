@@ -57,11 +57,7 @@ class Module(Scanner, Http_client, Joomla):
                 "api_surface_ready": False,
             },
             "chain": {
-                "produces_capabilities": [
-                    {"capability": "ssrf_primitive", "from_detail": ""},
-                    {"capability": "file_read", "from_detail": "lfi_path"},
-                    {"capability": "lfi_param", "from_detail": "lfi_param"},
-                ],
+                "produces_capabilities": [{'capability': 'file_read', 'from_detail': ''}],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

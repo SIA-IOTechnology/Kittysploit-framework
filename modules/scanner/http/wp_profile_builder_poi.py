@@ -68,9 +68,7 @@ class Module(Scanner, Http_client, Wordpress):
                 "api_surface_ready": False,
             },
             "chain": {
-                "produces_capabilities": [
-                    {"capability": "ssrf_primitive", "from_detail": ""},
-                ],
+                "produces_capabilities": [{'capability': 'admin_surface', 'from_detail': ''}],
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [],

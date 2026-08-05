@@ -31,11 +31,7 @@ class Module(Auxiliary, Http_client):
         'approval_required': False,
         'produces': ['tech_hints', 'risk_signals', 'endpoints', 'params'],
         'chain': {
-            'produces_capabilities': [
-                'file_read',
-                {'capability': 'lfi_param', 'from_detail': 'lfi_param'},
-                {'capability': 'log_file_path', 'from_detail': 'log_path'},
-            ],
+            'produces_capabilities': [{'capability': 'lfi_param', 'from_detail': 'lfi_param'}, {'capability': 'log_file_path', 'from_detail': 'log_path'}],
             'suggested_followups': ['auxiliary/scanner/http/lfi_log_poison'],
         },
     },

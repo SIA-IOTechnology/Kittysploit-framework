@@ -37,7 +37,7 @@ class Module(Scanner, Http_client):
         'cost': 'medium',
         'noise': 'low',
         'value': 'medium',
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

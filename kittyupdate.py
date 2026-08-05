@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.utils.venv_helper import ensure_venv
 ensure_venv(__file__)
 
+import argparse
 import subprocess
 from pathlib import Path
 from typing import Set
@@ -197,47 +198,78 @@ def git_update() -> bool:
         print_error(f"Git update failed: {e}")
         return False
 
-def update_python_packages(verbose: bool = False) -> bool:
-    """Update Python packages from requirements.txt"""
+def resolve_requirements_file() -> Path | None:
+    """Return the preferred requirements.txt path, if any."""
+    requirements_file = Path("install/requirements.txt")
+    if requirements_file.exists():
+        return requirements_file
+    fallback = Path("requirements.txt")
+    return fallback if fallback.exists() else None
+
+
+def update_python_packages(upgrade: bool = False, verbose: bool = False) -> bool:
+    """Install missing packages from requirements.txt.
+
+    By default packages already satisfying constraints are left alone.
+    Pass upgrade=True to force pip --upgrade (slower, checks PyPI for every dep).
+    """
     try:
-        # Try install/requirements.txt first (preferred location)
-        requirements_file = Path("install/requirements.txt")
-        if not requirements_file.exists():
-            # Fallback: check root directory
-            requirements_file = Path("requirements.txt")
-        
-        if not requirements_file.exists():
+        requirements_file = resolve_requirements_file()
+        if requirements_file is None:
             print_warning("No requirements.txt found, skipping package updates")
             return True
-                
-        cmd = [sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file), '--upgrade']
-        
+
+        cmd = [sys.executable, '-m', 'pip', 'install', '-r', str(requirements_file)]
+        if upgrade:
+            cmd.append('--upgrade')
+            print_info("Upgrading all packages to latest matching versions (this can take a while)...")
+        else:
+            print_info("Installing missing packages only (use --upgrade-deps for a full upgrade)...")
+
         if verbose:
             cmd.append('--verbose')
-        
-        result = subprocess.run(cmd, 
-                              capture_output=True, 
-                              text=True,
-                              cwd=os.getcwd())
-        
+
+        # Stream output so the update does not look frozen
+        result = subprocess.run(cmd, cwd=os.getcwd())
+
         if result.returncode != 0:
-            print_error(f"Failed to update packages: {result.stderr}")
+            print_error("Failed to update packages")
             return False
-        
+
         print_success("Python packages updated successfully!")
-        
-        if verbose and result.stdout:
-            print_info("Package update output:")
-            print(result.stdout)
-        
         return True
-        
+
     except Exception as e:
         print_error(f"Package update failed: {e}")
         return False
 
-def main():
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Update KittySploit framework (git pull + optional package install)",
+    )
+    parser.add_argument(
+        "--upgrade-deps",
+        action="store_true",
+        help="Force pip --upgrade on all requirements (slow)",
+    )
+    parser.add_argument(
+        "--skip-deps",
+        action="store_true",
+        help="Skip Python package install/upgrade entirely",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Pass --verbose to pip",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> bool:
     """Main update function"""
+    args = parse_args(argv)
+
     print_status("=== KittySploit Framework Update ===")
     print_info("Fetching latest updates from GitHub...")
     print_info("Your custom modules and venv will be preserved automatically\n")
@@ -265,6 +297,7 @@ def main():
         print_warning("Note: Tracked files have been modified - these will be stashed during update\n")
     
     success = True
+    packages_updated = False
     
     # Update framework via git pull
     if not git_update():
@@ -273,9 +306,15 @@ def main():
     print()
     
     # Update Python packages
-    print_status("=== Python Package Update ===")
-    if not update_python_packages(verbose=False):
-        success = False
+    if args.skip_deps:
+        print_status("=== Python Package Update ===")
+        print_info("Skipped (--skip-deps)")
+    else:
+        print_status("=== Python Package Update ===")
+        if not update_python_packages(upgrade=args.upgrade_deps, verbose=args.verbose):
+            success = False
+        else:
+            packages_updated = True
     
     print()
     
@@ -285,7 +324,13 @@ def main():
         print_success("✓ Framework updated successfully!")
         if custom_modules:
             print_success(f"✓ {len(custom_modules)} custom module(s) preserved")
-        print_success("✓ Python packages updated")
+        if args.skip_deps:
+            print_info("✓ Python packages skipped")
+        elif packages_updated:
+            if args.upgrade_deps:
+                print_success("✓ Python packages upgraded")
+            else:
+                print_success("✓ Python packages checked/installed")
         print_info("\nYour installation is now up to date!")
     else:
         print_error("✗ Some errors occurred during the update")

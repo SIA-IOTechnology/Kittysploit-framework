@@ -39,7 +39,7 @@ class Module(Scanner, Tcp_scanner_client):
          'endpoint_pattern_any': [],
          'param_any': [],
          'api_surface_ready': False},
-        'chain':         {'produces_capabilities': [{'capability': 'ssrf_primitive', 'from_detail': ''}],
+        'chain':         {'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': []},

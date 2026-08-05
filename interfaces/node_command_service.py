@@ -76,6 +76,8 @@ DANGEROUS_COMMANDS = {
     "export",
     "proxy",
     "reset",
+    "room",
+    "connect",
     "route",
     "run",
     "scanner",

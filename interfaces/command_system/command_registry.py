@@ -136,6 +136,7 @@ class CommandRegistry:
             'agent_task',
             'mcp',
             'scope',
+            'room',
             'campaign',
             'workflows'
         ]

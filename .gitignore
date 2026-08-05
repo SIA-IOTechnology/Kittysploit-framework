@@ -103,3 +103,6 @@ TODO.md
 tests/*
 docs/academy/*
 data/loot/*
+lib/vulners/__init__.py
+lib/vulners/client.py
+plugins/vulners.py

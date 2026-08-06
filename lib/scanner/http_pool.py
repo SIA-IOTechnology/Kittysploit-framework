@@ -29,6 +29,20 @@ def get_scan_session() -> Optional[requests.Session]:
     return _active_session
 
 
+def force_close_active_session() -> None:
+    """Close the shared scan session regardless of nesting depth."""
+    global _active_session, _active_depth
+    with _lock:
+        session = _active_session
+        _active_session = None
+        _active_depth = 0
+    if session is not None:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def _build_session(pool_size: int, user_agent: str) -> requests.Session:
     session = requests.Session()
     session.headers.update(

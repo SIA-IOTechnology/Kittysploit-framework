@@ -5,10 +5,10 @@
 Exit command implementation
 """
 
-import sys
 import random
 from interfaces.command_system.base_command import BaseCommand
 from core.utils.bye import EXIT_MESSAGES
+from core.utils.shutdown import graceful_shutdown
 from core.output_handler import print_info
 
 class ExitCommand(BaseCommand):
@@ -72,12 +72,9 @@ Examples:
                 # Return True because the command executed successfully (it just refused to exit for safety)
                 return True
         
-        # Exit the framework
         print_info()
         print_info(random.choice(EXIT_MESSAGES))
         print_info()
-        
-        # Use sys.exit to properly exit
-        sys.exit(0)
-        
-        return True  # This line will never be reached
+
+        graceful_shutdown(self.framework)
+        raise SystemExit(0)

@@ -319,6 +319,7 @@ def main():
         try:
             cli.start()
         finally:
+            graceful_shutdown(framework)
             if auto_started_proxy and proxy_manager and proxy_manager.is_running:
                 proxy_manager.stop()
                 print_info("Integrated proxy stopped.")

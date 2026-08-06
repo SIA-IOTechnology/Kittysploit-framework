@@ -20,6 +20,7 @@ from interfaces.command_system.advanced_completer import AdvancedCompleter
 from interfaces.command_system.command_parser import split_command_line
 from core.config import Config
 from core.history_manager import MAX_HISTORY_ENTRIES
+from core.utils.shutdown import graceful_shutdown
 
 
 class LimitedFileHistory(FileHistory):
@@ -278,10 +279,10 @@ class CLI:
                 # Ctrl+D - quit properly
                 print_info("Quitting KittySploit...")
                 break
-            except SystemExit:
-                # Do not let nested SystemExit tear down the framework silently
+            except SystemExit as exc:
+                graceful_shutdown(self.framework)
                 print_info("Quitting KittySploit...")
-                break
+                raise SystemExit(exc.code) from None
             except Exception as e:
                 print_error(f"Error: {str(e)}")
     

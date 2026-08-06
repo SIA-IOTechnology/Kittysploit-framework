@@ -14,7 +14,7 @@ class Module(Scanner, Http_client, Joomla):
             "CVE-2026-56291 — unauthenticated arbitrary file upload via "
             "form.uploadAttachmentFile without CSRF or permission checks."
         ),
-        "author": ["KittySploit Team"],
+        "author": ["Phil Taylor", "KittySploit Team"],
         "severity": "critical",
         "cve": "CVE-2026-56291",
         "references": [

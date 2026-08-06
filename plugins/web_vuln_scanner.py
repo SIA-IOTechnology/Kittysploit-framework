@@ -22,6 +22,7 @@ import posixpath
 import re
 import secrets
 import shlex
+import shutil
 import time
 import warnings
 from collections import defaultdict, deque
@@ -687,6 +688,8 @@ class WebVulnScannerPlugin(Plugin):
 
                 traceback.print_exc()
             return False
+        finally:
+            self._close_http_sessions()
 
     def _reset_state(self):
         self.waf_detected = None
@@ -709,6 +712,8 @@ class WebVulnScannerPlugin(Plugin):
         self._budget_warned = False
         self._http_failures = 0
         self._session_local = threading.local()
+        self._tracked_sessions = set()
+        self._tracked_sessions_lock = Lock()
         self.soft_404_fingerprints = {}
         self.javascript_urls = set()
 
@@ -759,7 +764,24 @@ class WebVulnScannerPlugin(Plugin):
         cookie = self._session_config.get("cookie", "")
         if cookie:
             session.headers["Cookie"] = cookie
+        with self._tracked_sessions_lock:
+            self._tracked_sessions.add(session)
         return session
+
+    def _close_http_sessions(self):
+        with self._tracked_sessions_lock:
+            sessions = list(self._tracked_sessions)
+            self._tracked_sessions.clear()
+        for session in sessions:
+            try:
+                session.close()
+            except (KeyboardInterrupt, SystemExit):
+                pass
+            except Exception:
+                pass
+        self.session = None
+        if hasattr(self._session_local, "session"):
+            del self._session_local.session
 
     def _http_session(self):
         session = getattr(self._session_local, "session", None)
@@ -2643,6 +2665,14 @@ class WebVulnScannerPlugin(Plugin):
             print_success(f"{prefix} {name} on {url} (confidence={confidence}%)")
         return 1
 
+    @staticmethod
+    def _console_table_width(default: int = 80) -> int:
+        try:
+            columns = shutil.get_terminal_size(fallback=(default, 24)).columns
+            return min(max(columns - 2, default), 400)
+        except (OSError, ValueError):
+            return default
+
     def _display_results(self):
         if not self.results:
             print_warning("No vulnerability reached the configured confidence threshold.")
@@ -2708,9 +2738,11 @@ class WebVulnScannerPlugin(Plugin):
         print_table(
             headers,
             rows,
-            wrap_extra_headers=("Finding", "URL", "Details"),
-            column_min_widths={"Severity": 8, "Conf.": 5},
-            column_max_widths={"URL": 42, "Finding": 48},
+            max_width=self._console_table_width(),
+            expand_headers=("Details",),
+            wrap_extra_headers=("Finding", "Details"),
+            column_min_widths={"Severity": 8, "Conf.": 5, "URL": 28},
+            prefer_single_line=True,
         )
 
         omitted = len(ordered) - display_limit

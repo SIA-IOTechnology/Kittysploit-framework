@@ -97,12 +97,15 @@ class Module(Scanner, Http_client):
     _FINGERPRINT_MARKERS = (
         "freescout",
         "free open source help desk",
+        "freescout-help-desk",
+        "/storage/js/vars.js",
+        "freescout.app",
+    )
+    _SUPPORTING_MARKERS = (
         "shared mailbox",
         "shared inbox",
         "/css/style.css",
         "/js/main.js",
-        "/storage/js/vars.js",
-        "csrf-token",
     )
 
     @staticmethod
@@ -136,8 +139,13 @@ class Module(Scanner, Http_client):
         low = (body or "").lower()
         if not low:
             return False
-        hits = sum(1 for marker in self._FINGERPRINT_MARKERS if marker in low)
-        return hits >= 2 or "freescout" in low
+        if "freescout" in low:
+            return True
+        strong_hits = sum(1 for marker in self._FINGERPRINT_MARKERS if marker in low)
+        if strong_hits >= 2:
+            return True
+        support_hits = sum(1 for marker in self._SUPPORTING_MARKERS if marker in low)
+        return strong_hits >= 1 and support_hits >= 2
 
     def _extract_version(self, body: str) -> str:
         text = body or ""
@@ -239,6 +247,8 @@ class Module(Scanner, Http_client):
                 if not response or not response.text:
                     continue
                 body = response.text
+                if self.is_same_as_index(response, path=path):
+                    continue
                 combined += "\n" + body
                 if self._looks_like_freescout(body):
                     detected = True

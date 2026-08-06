@@ -15,10 +15,12 @@ The plugin now uses a staged workflow:
 
 from kittysploit import *
 import html
+import hashlib
 import json
 import os
 import posixpath
 import re
+import secrets
 import shlex
 import time
 import warnings
@@ -136,8 +138,13 @@ COMMON_DISCOVERY_PATHS = [
     "phpinfo.php",
     "server-status",
     "swagger",
+    "swagger.json",
     "swagger/index.html",
     "swagger-ui/",
+    "openapi.json",
+    "api-docs",
+    "v2/api-docs",
+    "v3/api-docs",
     "actuator",
     "graphql",
     "api",
@@ -147,6 +154,10 @@ COMMON_DISCOVERY_PATHS = [
     "admin/",
     "login/",
 ]
+
+API_HTTP_METHODS = {"get", "post"}
+MAX_JAVASCRIPT_FILES = 24
+MAX_RESPONSE_FINGERPRINT_BYTES = 32768
 
 PASSIVE_SCANNERS = [
     "scanner/http/admin_panel_detect",
@@ -286,12 +297,14 @@ DETECTION_CONFIDENCE_BASE = {
     "ssrf_cloud_metadata": 83,
     "ssrf_backend_error": 64,
     "rce_cmd_injection": 97,
+    "xxe_file_read": 95,
 }
 
 # Lower value = stronger / more reliable signal for secondary sort.
 DETECTION_RELIABILITY_RANK = {
     "sqli_error": 0,
     "rce_cmd_injection": 0,
+    "xxe_file_read": 1,
     "lfi_linux_passwd": 1,
     "lfi_windows_ini": 2,
     "ssrf_cloud_metadata": 2,
@@ -312,7 +325,7 @@ class WebVulnScannerPlugin(Plugin):
     __info__ = {
         "name": "web_vuln_scanner",
         "description": "Crawl targets, fingerprint stack, run passive detectors, deep active SQLi/XSS/LFI probes on parameters, and auto-run ranked HTTP scanner modules",
-        "version": "3.2.0",
+        "version": "4.0.0",
         "author": "KittySploit Team",
         "dependencies": ["requests", "beautifulsoup4"],
     }
@@ -358,6 +371,11 @@ class WebVulnScannerPlugin(Plugin):
         self._probe_local = threading.local()
         self._stealth_backoff = 1.0
         self._http_failures = 0
+        self._session_local = threading.local()
+        self._session_config: Dict[str, Any] = {}
+        self.soft_404_fingerprints: Dict[str, Dict[str, Any]] = {}
+        self.javascript_urls: Set[str] = set()
+        self.max_params_per_endpoint = 8
 
     def check_dependencies(self):
         if not REQUESTS_AVAILABLE:
@@ -431,6 +449,14 @@ class WebVulnScannerPlugin(Plugin):
             type=int,
             default=0,
         )
+        parser.add_argument(
+            "--max-params-per-endpoint",
+            dest="max_params_per_endpoint",
+            help="Maximum parameters tested per endpoint (default: 8, 16 in aggressive mode)",
+            metavar="<n>",
+            type=int,
+            default=8,
+        )
         parser.add_argument("-v", "--verbose", dest="verbose", help="Verbose output", action="store_true")
 
         if not args or not args[0]:
@@ -473,6 +499,7 @@ class WebVulnScannerPlugin(Plugin):
                 stealth=bool(getattr(pargs, "stealth", False)),
                 request_budget=max(0, int(getattr(pargs, "request_budget", 0) or 0)),
                 max_probes_per_endpoint=max(0, int(getattr(pargs, "max_probes_per_endpoint", 0) or 0)),
+                max_params_per_endpoint=max(1, int(getattr(pargs, "max_params_per_endpoint", 8) or 8)),
             )
         except Exception as exc:
             print_error(f"An error occurred: {exc}")
@@ -505,6 +532,7 @@ class WebVulnScannerPlugin(Plugin):
         stealth: bool,
         request_budget: int,
         max_probes_per_endpoint: int,
+        max_params_per_endpoint: int,
     ) -> bool:
         try:
             self._reset_state()
@@ -535,6 +563,11 @@ class WebVulnScannerPlugin(Plugin):
                     self.max_modules = min(self.max_modules, 6)
             self.request_budget_total = rb if rb > 0 else None
             self.max_probes_per_endpoint = mpe if mpe > 0 else None
+            self.max_params_per_endpoint = max(1, int(max_params_per_endpoint))
+            if self.aggressive:
+                self.max_params_per_endpoint = max(self.max_params_per_endpoint, 16)
+            elif self.stealth_mode:
+                self.max_params_per_endpoint = min(self.max_params_per_endpoint, 5)
             self._requests_spent = 0
             self._stealth_backoff = 1.0
             self.scan_started_at = time.time()
@@ -580,6 +613,10 @@ class WebVulnScannerPlugin(Plugin):
                 self._crawl_website(self.target_url, depth)
             self._discover_common_files()
             self._discover_robots_paths()
+            self._discover_sitemap_paths()
+            self._prefetch_crawled_pages()
+            self._discover_javascript_endpoints()
+            self._prefetch_crawled_pages()
             print_success(f"Collected {len(self.crawled_urls)} URLs after crawl and discovery")
 
             print_status("Step 2: Building endpoint inventory...")
@@ -671,28 +708,65 @@ class WebVulnScannerPlugin(Plugin):
         self._stealth_backoff = 1.0
         self._budget_warned = False
         self._http_failures = 0
+        self._session_local = threading.local()
+        self.soft_404_fingerprints = {}
+        self.javascript_urls = set()
 
     def _init_session(self, user_agent: str, cookie: str):
         if urllib3 is not None:
             urllib3.disable_warnings(InsecureRequestWarning)
 
-        retry = Retry(total=2, backoff_factor=0.4, status_forcelist=[429, 500, 502, 503, 504])
-        adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=retry)
-        self.session = requests.Session()
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-        self.session.verify = False
-        self.session.headers.update(
-            {
+        self._session_config = {
+            "headers": {
                 "User-Agent": user_agent,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
                 "Accept-Encoding": "gzip, deflate",
                 "Connection": "keep-alive",
-            }
+            },
+            "cookie": cookie,
+        }
+        self.session = self._new_session()
+        self._session_local = threading.local()
+        self._session_local.session = self.session
+
+    def _new_session(self):
+        """Create one connection-pooled Session per worker.
+
+        requests.Session mutates cookie and connection state and is not guaranteed to
+        be thread-safe. Worker-local sessions keep connection reuse without races.
+        """
+        retry = Retry(
+            total=2,
+            connect=2,
+            read=1,
+            backoff_factor=0.25,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=frozenset({"HEAD", "GET", "OPTIONS"}),
+            respect_retry_after_header=True,
         )
+        adapter = HTTPAdapter(
+            pool_connections=max(8, min(32, getattr(self, "threads", 8) * 2)),
+            pool_maxsize=max(16, min(64, getattr(self, "threads", 8) * 4)),
+            max_retries=retry,
+            pool_block=True,
+        )
+        session = requests.Session()
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        session.verify = False
+        session.headers.update(self._session_config.get("headers", {}))
+        cookie = self._session_config.get("cookie", "")
         if cookie:
-            self.session.headers["Cookie"] = cookie
+            session.headers["Cookie"] = cookie
+        return session
+
+    def _http_session(self):
+        session = getattr(self._session_local, "session", None)
+        if session is None:
+            session = self._new_session()
+            self._session_local.session = session
+        return session
 
     def _normalize_target(self, raw_url: str) -> Tuple[str, str]:
         value = (raw_url or "").strip()
@@ -707,9 +781,29 @@ class WebVulnScannerPlugin(Plugin):
         scheme = (parsed.scheme or "http").lower()
         path = self._normalize_path(parsed.path)
         query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
-        normalized = urlunparse((scheme, parsed.netloc, path, "", query, ""))
-        base_url = f"{scheme}://{parsed.netloc}"
+        netloc = self._normalized_netloc(parsed, scheme)
+        normalized = urlunparse((scheme, netloc, path, "", query, ""))
+        base_url = f"{scheme}://{netloc}"
         return normalized, base_url
+
+    def _normalized_netloc(self, parsed, scheme: str) -> str:
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError(f"Invalid target port: {exc}") from exc
+        default_port = 443 if scheme == "https" else 80
+        userinfo = ""
+        if parsed.username:
+            userinfo = parsed.username
+            if parsed.password:
+                userinfo += f":{parsed.password}"
+            userinfo += "@"
+        return f"{userinfo}{host}{f':{port}' if port and port != default_port else ''}"
 
     def _normalize_path(self, path: str) -> str:
         if not path:
@@ -725,15 +819,32 @@ class WebVulnScannerPlugin(Plugin):
 
     def _canonicalize_url(self, url: str) -> str:
         parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"}:
             return ""
         path = self._normalize_path(parsed.path)
         query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
-        return urlunparse((parsed.scheme.lower(), parsed.netloc, path, "", query, ""))
+        netloc = self._normalized_netloc(parsed, scheme)
+        return urlunparse((scheme, netloc, path, "", query, ""))
 
     def _same_origin(self, url: str) -> bool:
         parsed = urlparse(url)
-        return bool(parsed.netloc) and parsed.netloc == self.target_parts.netloc
+        if not parsed.hostname or not self.target_parts:
+            return False
+        try:
+            port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+            target_port = self.target_parts.port or (443 if self.target_parts.scheme.lower() == "https" else 80)
+        except ValueError:
+            return False
+        return (
+            parsed.scheme.lower(),
+            parsed.hostname.lower().rstrip("."),
+            port,
+        ) == (
+            self.target_parts.scheme.lower(),
+            (self.target_parts.hostname or "").lower().rstrip("."),
+            target_port,
+        )
 
     def _should_visit_url(self, url: str) -> bool:
         if not url:
@@ -762,6 +873,18 @@ class WebVulnScannerPlugin(Plugin):
                 return False
             self._requests_spent += cost
             return True
+
+    def _reserve_probe_request(self) -> bool:
+        """Reserve a real probe without charging requests skipped by endpoint caps."""
+        limit = getattr(self._probe_local, "limit", None)
+        used = getattr(self._probe_local, "count", 0)
+        if limit is not None and used >= limit:
+            return False
+        if not self._reserve_plugin_request(1):
+            return False
+        if limit is not None:
+            self._probe_local.count = used + 1
+        return True
 
     def _stealth_on_status(self, status_code: int):
         if not (self.stealth_mode or self.request_budget_total is not None):
@@ -841,6 +964,8 @@ class WebVulnScannerPlugin(Plugin):
             return "ssrf_backend_error"
         if "command injection" in n or "rce" in n:
             return "rce_cmd_injection"
+        if "external entity" in n or "xxe" in n:
+            return "xxe_file_read"
         return (signal or "generic").strip() or "generic"
 
     def _tuned_confidence(self, detection_kind: str) -> int:
@@ -870,9 +995,10 @@ class WebVulnScannerPlugin(Plugin):
         return max(50, min(99, base + adj))
 
     def _get_page(self, url: str, use_cache: bool = True) -> Optional[Dict[str, Any]]:
+        cache_key = self._canonicalize_url(url) or url
         if use_cache:
             with self.cache_lock:
-                cached = self.page_cache.get(url)
+                cached = self.page_cache.get(cache_key)
             if cached:
                 return cached
 
@@ -880,7 +1006,7 @@ class WebVulnScannerPlugin(Plugin):
             return None
 
         try:
-            response = self.session.get(
+            response = self._http_session().get(
                 url,
                 timeout=self.timeout,
                 allow_redirects=True,
@@ -897,7 +1023,7 @@ class WebVulnScannerPlugin(Plugin):
             if use_cache:
                 with self.cache_lock:
                     if len(self.page_cache) < self.max_urls * 4:
-                        self.page_cache[url] = page
+                        self.page_cache[cache_key] = page
             return page
         except Exception as exc:
             self._note_http_failure()
@@ -944,7 +1070,10 @@ class WebVulnScannerPlugin(Plugin):
                     self.waf_detected = waf
                     return
 
-        probe_url = f"{url}?id=1%27%20OR%20%271%27=%271&xss=%3Csvg/onload=alert(1)%3E"
+        parsed = urlparse(url)
+        probe_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+        probe_pairs.extend([("id", "1' OR '1'='1"), ("xss", "<svg/onload=alert(1)>")])
+        probe_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", urlencode(probe_pairs), ""))
         probe = self._get_page(probe_url, use_cache=False)
         if not probe:
             return
@@ -957,37 +1086,54 @@ class WebVulnScannerPlugin(Plugin):
             self.waf_detected = "Generic/Unknown WAF"
 
     def _crawl_website(self, start_url: str, max_depth: int):
-        queue = deque([(start_url, 0)])
-        visited = set()
+        seed = self._canonicalize_url(start_url)
+        if not seed or not self._should_visit_url(seed):
+            return
+        frontier = [seed]
+        scheduled = {seed}
+        workers = max(1, min(self.threads, 8))
+        if self.stealth_mode:
+            workers = min(workers, 3)
 
-        while queue and len(self.crawled_urls) < self.max_urls:
-            current_url, depth = queue.popleft()
-            current_url = self._canonicalize_url(current_url)
-            if not current_url or current_url in visited or not self._should_visit_url(current_url):
-                continue
-
-            visited.add(current_url)
-            self.crawled_urls.add(current_url)
-            self._verbose(f"Crawling depth={depth}: {current_url}")
-
+        for depth in range(max_depth + 1):
+            if not frontier or len(self.crawled_urls) >= self.max_urls:
+                break
+            remaining = self.max_urls - len(self.crawled_urls)
+            level = frontier[:remaining]
+            frontier = []
+            for current_url in level:
+                self.crawled_urls.add(current_url)
+                self._verbose(f"Crawling depth={depth}: {current_url}")
             if depth >= max_depth:
-                continue
+                break
 
-            page = self._get_page(current_url)
-            if not page or page["status_code"] not in {200, 401, 403}:
-                continue
+            with ThreadPoolExecutor(max_workers=min(workers, len(level) or 1)) as executor:
+                futures = {executor.submit(self._crawl_fetch_page, url): url for url in level}
+                for future in as_completed(futures):
+                    current_url = futures[future]
+                    try:
+                        page = future.result()
+                    except Exception as exc:
+                        self._verbose(f"Crawl worker failed for {current_url}: {exc}")
+                        continue
+                    if not page or page["status_code"] not in {200, 401, 403}:
+                        continue
+                    if page.get("final_url") and not self._same_origin(page["final_url"]):
+                        self._verbose(f"Ignoring cross-origin redirect from {current_url} to {page['final_url']}")
+                        continue
+                    for candidate in sorted(
+                        self._extract_candidate_links(current_url, page["text"], page.get("content_type", ""))
+                    ):
+                        if len(self.crawled_urls) + len(frontier) >= self.max_urls:
+                            break
+                        if candidate not in scheduled:
+                            scheduled.add(candidate)
+                            frontier.append(candidate)
 
-            for candidate in self._extract_candidate_links(
-                current_url,
-                page["text"],
-                page.get("content_type", ""),
-            ):
-                if len(self.crawled_urls) + len(queue) >= self.max_urls:
-                    break
-                if candidate not in visited:
-                    queue.append((candidate, depth + 1))
-
-            self._crawl_throttle_sleep()
+    def _crawl_fetch_page(self, url: str) -> Optional[Dict[str, Any]]:
+        page = self._get_page(url)
+        self._crawl_throttle_sleep()
+        return page
 
     def _extract_candidate_links(self, current_url: str, text: str, content_type: str = "") -> Set[str]:
         candidates = set()
@@ -1016,6 +1162,9 @@ class WebVulnScannerPlugin(Plugin):
                 continue
             absolute = urljoin(current_url, raw)
             normalized = self._canonicalize_url(absolute)
+            if tag.name == "script" and normalized and self._same_origin(normalized):
+                if os.path.splitext(urlparse(normalized).path.lower())[1] in {".js", ".mjs"}:
+                    self.javascript_urls.add(normalized)
             if normalized and self._should_visit_url(normalized):
                 candidates.add(normalized)
 
@@ -1047,13 +1196,19 @@ class WebVulnScannerPlugin(Plugin):
 
     def _discover_common_files(self):
         roots = self._discovery_roots()
+        for root in roots:
+            marker = secrets.token_hex(8)
+            missing_url = urljoin(root, f".kitty-{marker}-missing")
+            missing_page = self._get_page(missing_url, use_cache=False)
+            if missing_page:
+                self.soft_404_fingerprints[root] = self._page_fingerprint(missing_page, marker)
         probes = []
         for root in roots:
             for path in COMMON_DISCOVERY_PATHS:
                 probes.append(urljoin(root, path))
 
         with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
-            futures = {executor.submit(self._get_page, probe, False): probe for probe in probes}
+            futures = {executor.submit(self._get_page, probe, True): probe for probe in probes}
             for future in as_completed(futures):
                 probe = futures[future]
                 try:
@@ -1062,10 +1217,41 @@ class WebVulnScannerPlugin(Plugin):
                     continue
                 if not page or page["status_code"] not in {200, 401, 403}:
                     continue
+                root = max((r for r in roots if probe.startswith(r)), key=len, default=self.base_url)
+                if self._looks_like_soft_404(page, self.soft_404_fingerprints.get(root)):
+                    self._verbose(f"Ignored soft-404 discovery response: {probe}")
+                    continue
                 normalized = self._canonicalize_url(probe)
-                if normalized and normalized not in self.crawled_urls:
+                if normalized and normalized not in self.crawled_urls and len(self.crawled_urls) < self.max_urls:
                     self.crawled_urls.add(normalized)
                     self._verbose(f"Discovered interesting path: {normalized} ({page['status_code']})")
+
+    def _page_fingerprint(self, page: Dict[str, Any], volatile_token: str = "") -> Dict[str, Any]:
+        text = (page.get("text") or "")[:MAX_RESPONSE_FINGERPRINT_BYTES].lower()
+        if volatile_token:
+            text = text.replace(volatile_token.lower(), "<token>")
+        text = re.sub(r"[a-f0-9]{12,}", "<hex>", text)
+        text = re.sub(r"\b\d{3,}\b", "<num>", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+        return {
+            "status_code": int(page.get("status_code", 0) or 0),
+            "length": len(text),
+            "digest": hashlib.sha256(text.encode("utf-8", "ignore")).hexdigest(),
+            "title": title,
+            "sample": text[:4096],
+        }
+
+    def _looks_like_soft_404(self, page: Dict[str, Any], baseline: Optional[Dict[str, Any]]) -> bool:
+        if not baseline or int(page.get("status_code", 0) or 0) != baseline["status_code"]:
+            return False
+        candidate = self._page_fingerprint(page)
+        if candidate["digest"] == baseline["digest"]:
+            return True
+        length_delta = abs(candidate["length"] - baseline["length"])
+        similar_length = length_delta <= max(96, int(max(candidate["length"], baseline["length"]) * 0.08))
+        return bool(similar_length and candidate["title"] and candidate["title"] == baseline["title"])
 
     def _discover_robots_paths(self):
         robots_url = urljoin(self.base_url, "robots.txt")
@@ -1080,7 +1266,79 @@ class WebVulnScannerPlugin(Plugin):
             absolute = urljoin(self.base_url, match.group(1).strip())
             normalized = self._canonicalize_url(absolute)
             if normalized and self._should_visit_url(normalized):
-                self.crawled_urls.add(normalized)
+                if len(self.crawled_urls) < self.max_urls:
+                    self.crawled_urls.add(normalized)
+
+    def _discover_sitemap_paths(self):
+        sitemap_urls = {urljoin(self.base_url, "sitemap.xml")}
+        robots = self._get_page(urljoin(self.base_url, "robots.txt"))
+        if robots and robots.get("status_code") == 200:
+            for match in re.finditer(r"^\s*Sitemap\s*:\s*(\S+)", robots.get("text") or "", re.I | re.M):
+                sitemap_urls.add(urljoin(self.base_url, match.group(1)))
+        for sitemap_url in sorted(sitemap_urls)[:8]:
+            page = self._get_page(sitemap_url)
+            if not page or page.get("status_code") != 200:
+                continue
+            for candidate in sorted(
+                self._extract_candidate_links(sitemap_url, page.get("text") or "", page.get("content_type", ""))
+            ):
+                if len(self.crawled_urls) >= self.max_urls:
+                    return
+                self.crawled_urls.add(candidate)
+
+    def _prefetch_crawled_pages(self):
+        with self.cache_lock:
+            cached = set(self.page_cache)
+        missing = [url for url in sorted(self.crawled_urls) if url not in cached]
+        if not missing:
+            return
+        workers = min(self.threads, 8, len(missing))
+        if self.stealth_mode:
+            workers = min(workers, 3)
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+            futures = [executor.submit(self._get_page, url) for url in missing]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    self._verbose(f"Page prefetch failed: {exc}")
+
+    def _discover_javascript_endpoints(self):
+        with self.cache_lock:
+            pages = list(self.page_cache.items())
+        for page_url, page in pages:
+            content_type = (page.get("content_type") or "").lower()
+            if "html" not in content_type and "<script" not in (page.get("text") or "").lower():
+                continue
+            soup = self._get_soup(page_url, page.get("text") or "", content_type)
+            for script in soup.find_all("script", src=True):
+                script_url = self._canonicalize_url(urljoin(page_url, script.get("src")))
+                if script_url and self._same_origin(script_url):
+                    self.javascript_urls.add(script_url)
+
+        script_urls = sorted(self.javascript_urls)[:MAX_JAVASCRIPT_FILES]
+        if not script_urls:
+            return
+        with ThreadPoolExecutor(max_workers=min(self.threads, 6, len(script_urls))) as executor:
+            futures = {executor.submit(self._get_page, url): url for url in script_urls}
+            for future in as_completed(futures):
+                script_url = futures[future]
+                try:
+                    page = future.result()
+                except Exception:
+                    continue
+                if not page or page.get("status_code") != 200:
+                    continue
+                text = page.get("text") or ""
+                patterns = [
+                    r"(?:fetch|axios\.(?:get|post)|\.open)\s*\(\s*[\"']([^\"']+)[\"']",
+                    r"[\"']((?:/|\.\.?/)(?:api|graphql|rest|v\d+)[^\"'\s]{0,180})[\"']",
+                ]
+                for pattern in patterns:
+                    for raw in re.findall(pattern, text, re.I):
+                        candidate = self._canonicalize_url(urljoin(script_url, raw))
+                        if candidate and self._should_visit_url(candidate) and len(self.crawled_urls) < self.max_urls:
+                            self.crawled_urls.add(candidate)
 
     def _build_endpoint_inventory(self) -> List[Dict[str, Any]]:
         endpoint_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -1103,6 +1361,17 @@ class WebVulnScannerPlugin(Plugin):
                     discovered_from="form",
                     source_page=url,
                     enctype=form["enctype"],
+                )
+
+            for api_entry in self._extract_openapi_endpoints(url, page["text"], page.get("content_type", "")):
+                self._merge_endpoint(
+                    endpoint_map,
+                    api_entry["url"],
+                    api_entry["method"],
+                    api_entry["params"],
+                    discovered_from="openapi",
+                    source_page=url,
+                    enctype=api_entry.get("content_type", ""),
                 )
 
         endpoints = list(endpoint_map.values())
@@ -1147,6 +1416,7 @@ class WebVulnScannerPlugin(Plugin):
                 "method": method.upper(),
                 "params": {},
                 "enctype": enctype or "",
+                "content_type": enctype or "",
                 "source_pages": set(),
                 "discovered_from": set(),
             }
@@ -1157,6 +1427,7 @@ class WebVulnScannerPlugin(Plugin):
         entry["discovered_from"].add(discovered_from)
         if enctype and not entry["enctype"]:
             entry["enctype"] = enctype
+            entry["content_type"] = enctype
 
         for name, value in (params or {}).items():
             if value is None:
@@ -1201,6 +1472,124 @@ class WebVulnScannerPlugin(Plugin):
                 }
             )
         return forms
+
+    def _extract_openapi_endpoints(
+        self, page_url: str, text: str, content_type: str = ""
+    ) -> List[Dict[str, Any]]:
+        if "json" not in (content_type or "").lower() and not (text or "").lstrip().startswith("{"):
+            return []
+        try:
+            document = json.loads(text)
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(document, dict) or not isinstance(document.get("paths"), dict):
+            return []
+        if not (document.get("openapi") or document.get("swagger")):
+            return []
+
+        api_base = self.base_url
+        servers = document.get("servers") or []
+        if servers and isinstance(servers[0], dict) and servers[0].get("url"):
+            api_base = urljoin(page_url, str(servers[0]["url"]))
+        elif document.get("basePath"):
+            api_base = f"{self.base_url}/{str(document['basePath']).strip('/')}"
+
+        endpoints = []
+        for raw_path, path_item in document["paths"].items():
+            if not isinstance(path_item, dict):
+                continue
+            shared_params = path_item.get("parameters") or []
+            for method, operation in path_item.items():
+                if method.lower() not in API_HTTP_METHODS or not isinstance(operation, dict):
+                    continue
+                params: Dict[str, Any] = {}
+                rendered_path = str(raw_path)
+                operation_params = list(shared_params) + list(operation.get("parameters") or [])
+                for raw_parameter in operation_params:
+                    parameter = self._resolve_openapi_ref(document, raw_parameter)
+                    if not isinstance(parameter, dict) or not parameter.get("name"):
+                        continue
+                    name = str(parameter["name"])
+                    value = self._openapi_example(parameter.get("schema") or parameter)
+                    location = str(parameter.get("in") or "query").lower()
+                    if location == "path":
+                        rendered_path = rendered_path.replace("{" + name + "}", str(value))
+                    elif location in {"query", "formdata"}:
+                        params[name] = value
+
+                request_content_type = ""
+                request_body = self._resolve_openapi_ref(document, operation.get("requestBody"))
+                if isinstance(request_body, dict):
+                    content = request_body.get("content") or {}
+                    if isinstance(content, dict) and content:
+                        request_content_type = next(
+                            (kind for kind in content if "json" in kind.lower()), next(iter(content), "")
+                        )
+                        media = content.get(request_content_type) or {}
+                        schema = self._resolve_openapi_ref(document, media.get("schema"))
+                        params.update(self._openapi_object_params(document, schema))
+
+                for raw_parameter in operation_params:
+                    parameter = self._resolve_openapi_ref(document, raw_parameter)
+                    if isinstance(parameter, dict) and str(parameter.get("in") or "").lower() == "body":
+                        params.update(self._openapi_object_params(document, parameter.get("schema")))
+                        request_content_type = "application/json"
+
+                endpoint_url = self._canonicalize_url(
+                    f"{api_base.rstrip('/')}/{rendered_path.lstrip('/')}"
+                )
+                if endpoint_url and self._should_visit_url(endpoint_url):
+                    endpoints.append(
+                        {
+                            "url": endpoint_url,
+                            "method": method.upper(),
+                            "params": params,
+                            "content_type": request_content_type,
+                        }
+                    )
+        return endpoints
+
+    def _resolve_openapi_ref(self, document: Dict[str, Any], value: Any) -> Any:
+        if not isinstance(value, dict) or not str(value.get("$ref") or "").startswith("#/"):
+            return value
+        current: Any = document
+        for token in value["$ref"][2:].split("/"):
+            token = token.replace("~1", "/").replace("~0", "~")
+            if not isinstance(current, dict) or token not in current:
+                return value
+            current = current[token]
+        return current
+
+    def _openapi_object_params(self, document: Dict[str, Any], schema: Any) -> Dict[str, Any]:
+        schema = self._resolve_openapi_ref(document, schema)
+        if not isinstance(schema, dict):
+            return {}
+        properties = schema.get("properties") or {}
+        if not isinstance(properties, dict):
+            return {}
+        return {
+            str(name): self._openapi_example(self._resolve_openapi_ref(document, definition))
+            for name, definition in properties.items()
+        }
+
+    def _openapi_example(self, definition: Any) -> Any:
+        if not isinstance(definition, dict):
+            return "test"
+        if "example" in definition:
+            return definition["example"]
+        if "default" in definition:
+            return definition["default"]
+        enum = definition.get("enum")
+        if isinstance(enum, list) and enum:
+            return enum[0]
+        kind = str(definition.get("type") or "string").lower()
+        if kind in {"integer", "number"}:
+            return "1"
+        if kind == "boolean":
+            return "true"
+        if kind == "array":
+            return "test"
+        return "test"
 
     def _score_endpoint(self, entry: Dict[str, Any]) -> int:
         score = 0
@@ -1410,27 +1799,53 @@ class WebVulnScannerPlugin(Plugin):
         self._probe_local.limit = self.max_probes_per_endpoint
         self._probe_local.count = 0
         baseline_resp, baseline_time = self._send_entry_request(entry, dict(entry["params"]))
-        if not baseline_resp:
+        if baseline_resp is None:
             return 0
 
         hits += self._probe_sqli_headers(entry)
 
-        for param in sorted(entry["params"].keys()):
+        for param in self._rank_endpoint_params(entry)[: self.max_params_per_endpoint]:
             if not self._should_probe_param(param):
                 continue
 
             for attack in self._candidate_attacks(param, entry):
+                if self.request_budget_total is not None and self._requests_spent >= self.request_budget_total:
+                    return hits
+                if (
+                    self.max_probes_per_endpoint is not None
+                    and getattr(self._probe_local, "count", 0) >= self.max_probes_per_endpoint
+                ):
+                    return hits
                 if attack == "sqli":
                     hits += self._probe_sqli(entry, param, baseline_resp, baseline_time)
                 elif attack == "xss":
-                    hits += self._probe_xss(entry, param)
+                    hits += self._probe_xss(entry, param, baseline_resp)
                 elif attack == "lfi":
-                    hits += self._probe_lfi(entry, param)
+                    hits += self._probe_lfi(entry, param, baseline_resp)
                 elif attack == "ssrf":
-                    hits += self._probe_ssrf(entry, param)
+                    hits += self._probe_ssrf(entry, param, baseline_resp)
                 elif attack == "rce" and self.aggressive:
                     hits += self._probe_rce(entry, param)
+                elif attack == "xxe":
+                    hits += self._probe_xxe(entry, param, baseline_resp)
         return hits
+
+    def _rank_endpoint_params(self, entry: Dict[str, Any]) -> List[str]:
+        def rank(name: str) -> Tuple[int, str]:
+            lowered = name.lower()
+            score = 0
+            for hints in ACTIVE_PARAM_HINTS.values():
+                if lowered in hints:
+                    score += 30
+                elif any(hint in lowered for hint in hints):
+                    score += 12
+            if lowered in {"id", "q", "query", "search", "url", "file", "path", "cmd"}:
+                score += 20
+            if entry["params"].get(name) not in {None, "", "test"}:
+                score += 4
+            return (-score, lowered)
+
+        return sorted(entry["params"].keys(), key=rank)
 
     def _should_probe_param(self, param: str) -> bool:
         name = param.lower()
@@ -1443,21 +1858,27 @@ class WebVulnScannerPlugin(Plugin):
     def _candidate_attacks(self, param: str, entry: Dict[str, Any]) -> List[str]:
         name = param.lower()
         attacks = ["sqli"]
+        value = str(entry.get("params", {}).get(param, "") or "")
+        path = entry.get("path", "").lower()
         for attack, hints in ACTIVE_PARAM_HINTS.items():
             if attack == "sqli":
                 continue
             if any(name == hint or hint in name for hint in hints):
                 attacks.append(attack)
 
-        if "xss" not in attacks:
+        looks_numeric = bool(re.fullmatch(r"[-+]?\d+(?:\.\d+)?", value.strip()))
+        if "xss" not in attacks and (self.aggressive or not looks_numeric):
             attacks.append("xss")
-        if "lfi" not in attacks:
+        looks_path_like = any(token in value for token in ("/", "\\", ".php", ".html", ".txt"))
+        path_handles_files = any(token in path for token in ("download", "file", "include", "template", "view"))
+        if "lfi" not in attacks and (looks_path_like or path_handles_files or self.aggressive):
             attacks.append("lfi")
 
-        if "xml" in entry["path"].lower() and "xxe" not in attacks:
+        content_type = str(entry.get("content_type") or entry.get("enctype") or "").lower()
+        if ("xml" in path or "xml" in content_type or name in ACTIVE_PARAM_HINTS["xxe"]) and "xxe" not in attacks:
             attacks.append("xxe")
 
-        if "php" in self.tech_tokens and "rce" not in attacks:
+        if self.aggressive and "php" in self.tech_tokens and name in ACTIVE_PARAM_HINTS["rce"] and "rce" not in attacks:
             attacks.append("rce")
 
         deduped = []
@@ -1515,18 +1936,13 @@ class WebVulnScannerPlugin(Plugin):
 
     def _probe_sqli_headers(self, entry: Dict[str, Any]) -> int:
         def send_with_header(header_name: str, value: str):
-            if not self._reserve_plugin_request(1):
+            if not self._reserve_probe_request():
                 return None, 0.0
-            lim = getattr(self._probe_local, "limit", None)
-            if lim is not None and getattr(self._probe_local, "count", 0) >= lim:
-                return None, 0.0
-            if lim is not None:
-                self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
             try:
                 started = time.monotonic()
                 headers = {header_name: value}
                 if entry["method"] == "POST":
-                    response = self.session.post(
+                    response = self._http_session().post(
                         entry["url"],
                         data=dict(entry["params"]),
                         headers=headers,
@@ -1535,7 +1951,7 @@ class WebVulnScannerPlugin(Plugin):
                         verify=False,
                     )
                 else:
-                    response = self.session.get(
+                    response = self._http_session().get(
                         entry["url"],
                         params=dict(entry["params"]),
                         headers=headers,
@@ -1608,16 +2024,11 @@ class WebVulnScannerPlugin(Plugin):
         ):
 
             def send_json(body: Dict[str, Any]):
-                if not self._reserve_plugin_request(1):
+                if not self._reserve_probe_request():
                     return None, 0.0
-                lim = getattr(self._probe_local, "limit", None)
-                if lim is not None and getattr(self._probe_local, "count", 0) >= lim:
-                    return None, 0.0
-                if lim is not None:
-                    self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
                 try:
                     started = time.monotonic()
-                    response = self.session.post(
+                    response = self._http_session().post(
                         entry["url"],
                         json=body,
                         timeout=self.timeout,
@@ -1657,14 +2068,19 @@ class WebVulnScannerPlugin(Plugin):
             context = "JSON body"
         return self._record_sqli_scan(entry, param, _Scan(), context=context)
 
-    def _probe_xss(self, entry: Dict[str, Any], param: str) -> int:
-        marker = "KSPXSS"
+    def _probe_xss(self, entry: Dict[str, Any], param: str, baseline_resp=None) -> int:
+        marker = f"KSPXSS{secrets.token_hex(5)}"
         payload = f"{marker}<svg/onload=alert(1)>"
         response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
-        if not response:
+        if response is None:
             return 0
 
         body = response.text or ""
+        content_type = str((response.headers or {}).get("Content-Type", "")).lower()
+        if "html" not in content_type and "xhtml" not in content_type:
+            return 0
+        if baseline_resp is not None and marker in (baseline_resp.text or ""):
+            return 0
         reflected = payload in body
         escaped = html.escape(payload) in body or payload.replace("<", "&lt;") in body
         if reflected and not escaped:
@@ -1683,32 +2099,22 @@ class WebVulnScannerPlugin(Plugin):
                 detection_kind="xss_reflected",
             )
         if marker in body and (escaped or "&lt;" in body or "&#x3c;" in body.lower()):
-            return self._record_result(
-                source="active",
-                name="XSS (escaped or filtered reflection)",
-                url=entry["url"],
-                method=entry["method"],
-                parameter=param,
-                severity="low",
-                confidence=0,
-                evidence="Marker present but HTML appears encoded or filtered",
-                payload=payload,
-                repro=self._build_repro_command(entry, param, payload),
-                signal="xss",
-                detection_kind="xss_reflected_escaped",
-            )
+            self._verbose(f"XSS marker was safely encoded for {entry['url']} parameter {param}")
         return 0
 
-    def _probe_lfi(self, entry: Dict[str, Any], param: str) -> int:
+    def _probe_lfi(self, entry: Dict[str, Any], param: str, baseline_resp=None) -> int:
         payloads = [
             "../../../../etc/passwd",
             "..\\..\\..\\windows\\win.ini",
         ]
         for payload in payloads:
             response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
-            if not response:
+            if response is None:
                 continue
             kind, evidence = self._lfi_evidence(response.text or "")
+            baseline_kind, _ = self._lfi_evidence(baseline_resp.text or "") if baseline_resp is not None else ("", "")
+            if kind and kind == baseline_kind:
+                continue
             if evidence:
                 return self._record_result(
                     source="active",
@@ -1726,13 +2132,14 @@ class WebVulnScannerPlugin(Plugin):
                 )
         return 0
 
-    def _probe_ssrf(self, entry: Dict[str, Any], param: str) -> int:
+    def _probe_ssrf(self, entry: Dict[str, Any], param: str, baseline_resp=None) -> int:
         payload = "http://169.254.169.254/latest/meta-data/"
         response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
-        if not response:
+        if response is None:
             return 0
 
         body = (response.text or "").lower()
+        baseline_body = (baseline_resp.text or "").lower() if baseline_resp is not None else ""
         indicators = [
             "instance-id",
             "ami-id",
@@ -1748,7 +2155,7 @@ class WebVulnScannerPlugin(Plugin):
             "dial tcp",
         ]
 
-        if any(indicator in body for indicator in indicators):
+        if any(indicator in body and indicator not in baseline_body for indicator in indicators):
             return self._record_result(
                 source="active",
                 name="Potential SSRF",
@@ -1764,7 +2171,9 @@ class WebVulnScannerPlugin(Plugin):
                 detection_kind="ssrf_cloud_metadata",
             )
 
-        if self.aggressive and any(indicator in body for indicator in error_indicators):
+        if self.aggressive and any(
+            indicator in body and indicator not in baseline_body for indicator in error_indicators
+        ):
             return self._record_result(
                 source="active",
                 name="Potential SSRF",
@@ -1786,7 +2195,7 @@ class WebVulnScannerPlugin(Plugin):
         payloads = [f";echo {marker}", f"&& echo {marker}", f"| echo {marker}"]
         for payload in payloads:
             response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
-            if response and marker in (response.text or ""):
+            if response is not None and marker in (response.text or ""):
                 return self._record_result(
                     source="active",
                     name="Command Injection",
@@ -1803,49 +2212,94 @@ class WebVulnScannerPlugin(Plugin):
                 )
         return 0
 
+    def _probe_xxe(self, entry: Dict[str, Any], param: str, baseline_resp=None) -> int:
+        payload = (
+            '<?xml version="1.0"?><!DOCTYPE ksp [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+            "<ksp>&xxe;</ksp>"
+        )
+        content_type = str(entry.get("content_type") or entry.get("enctype") or "").lower()
+        if "xml" in content_type:
+            response, _ = self._send_raw_request(entry, payload, "application/xml")
+        else:
+            response, _ = self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+        if response is None:
+            return 0
+        kind, evidence = self._lfi_evidence(response.text or "")
+        baseline_kind, _ = self._lfi_evidence(baseline_resp.text or "") if baseline_resp is not None else ("", "")
+        if not kind or kind == baseline_kind:
+            return 0
+        return self._record_result(
+            source="active",
+            name="XML External Entity File Read",
+            url=entry["url"],
+            method=entry["method"],
+            parameter=param,
+            severity="high",
+            confidence=0,
+            evidence=evidence,
+            payload=payload,
+            repro=self._build_repro_command(entry, param, payload),
+            signal="xxe",
+            detection_kind="xxe_file_read",
+        )
+
     def _send_entry_request(
         self,
         entry: Dict[str, Any],
         params: Dict[str, Any],
         timeout: Optional[int] = None,
     ) -> Tuple[Optional[Any], float]:
-        lim = getattr(self._probe_local, "limit", None)
-        if lim is not None:
-            used = getattr(self._probe_local, "count", 0)
-            if used >= lim:
-                self._verbose(f"Per-endpoint probe cap reached ({lim}) for {entry.get('url')}")
-                return None, 0.0
-
-        if not self._reserve_plugin_request(1):
+        if not self._reserve_probe_request():
+            limit = getattr(self._probe_local, "limit", None)
+            if limit is not None and getattr(self._probe_local, "count", 0) >= limit:
+                self._verbose(f"Per-endpoint probe cap reached ({limit}) for {entry.get('url')}")
             return None, 0.0
-
-        if lim is not None:
-            self._probe_local.count = getattr(self._probe_local, "count", 0) + 1
 
         try:
             started = time.monotonic()
             timeout = timeout or self.timeout
+            session = self._http_session()
             if entry["method"] == "POST":
-                response = self.session.post(
-                    entry["url"],
-                    data=params,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    verify=False,
-                )
+                content_type = str(entry.get("content_type") or entry.get("enctype") or "").lower()
+                kwargs = {"json": params} if "json" in content_type else {"data": params}
             else:
-                response = self.session.get(
-                    entry["url"],
-                    params=params,
-                    timeout=timeout,
-                    allow_redirects=True,
-                    verify=False,
-                )
+                kwargs = {"params": params}
+            response = session.request(
+                entry["method"],
+                entry["url"],
+                timeout=timeout,
+                allow_redirects=True,
+                verify=False,
+                **kwargs,
+            )
             self._stealth_on_status(response.status_code)
             return response, time.monotonic() - started
         except Exception as exc:
             self._note_http_failure()
             self._verbose(f"Probe failed for {entry['url']} ({entry['method']}): {exc}")
+            return None, 0.0
+
+    def _send_raw_request(
+        self, entry: Dict[str, Any], body: str, content_type: str
+    ) -> Tuple[Optional[Any], float]:
+        if not self._reserve_probe_request():
+            return None, 0.0
+        try:
+            started = time.monotonic()
+            response = self._http_session().request(
+                entry.get("method") or "POST",
+                entry["url"],
+                data=body,
+                headers={"Content-Type": content_type},
+                timeout=self.timeout,
+                allow_redirects=True,
+                verify=False,
+            )
+            self._stealth_on_status(response.status_code)
+            return response, time.monotonic() - started
+        except Exception as exc:
+            self._note_http_failure()
+            self._verbose(f"Raw probe failed for {entry['url']}: {exc}")
             return None, 0.0
 
     def _mutated_params(self, entry: Dict[str, Any], param: str, payload: str) -> Dict[str, Any]:
@@ -2225,27 +2679,43 @@ class WebVulnScannerPlugin(Plugin):
         if src_summary:
             print_info(f"Sources: {src_summary}")
 
-        for result in ordered[:20]:
-            line = (
-                f"[{result['severity'].upper()}] {result['name']} | {result['url']} "
-                f"| method={result['method']} | confidence={result['confidence']}%"
-            )
+        display_limit = 20
+        headers = ["Severity", "Finding", "URL", "Conf.", "Details"]
+        rows = []
+        for result in ordered[:display_limit]:
+            method = result["method"]
             if result.get("parameter"):
-                line += f" | parameter={result['parameter']}"
+                method = f"{method} ({result['parameter']})"
+            detail_parts = [f"method={method}"]
             if result.get("detection_kind"):
-                line += f" | kind={result['detection_kind']}"
-            print_info(line)
+                detail_parts.append(f"kind={result['detection_kind']}")
             if result.get("module"):
-                print_info(f"  module: {result['module']}")
+                detail_parts.append(f"module: {result['module']}")
             if result.get("evidence"):
-                print_info(f"  evidence: {result['evidence']}")
+                detail_parts.append(f"evidence: {result['evidence']}")
             if result.get("payload"):
-                print_info(f"  payload: {result['payload']}")
+                detail_parts.append(f"payload: {result['payload']}")
             if result.get("repro"):
-                print_info(f"  repro: {result['repro']}")
+                detail_parts.append(f"repro: {result['repro']}")
+            rows.append([
+                result["severity"].upper(),
+                result["name"],
+                result["url"],
+                f"{result['confidence']}%",
+                " | ".join(detail_parts),
+            ])
 
-        if len(ordered) > 20:
-            print_info(f"... {len(ordered) - 20} additional findings omitted from console summary")
+        print_table(
+            headers,
+            rows,
+            wrap_extra_headers=("Finding", "URL", "Details"),
+            column_min_widths={"Severity": 8, "Conf.": 5},
+            column_max_widths={"URL": 42, "Finding": 48},
+        )
+
+        omitted = len(ordered) - display_limit
+        if omitted > 0:
+            print_info(f"... {omitted} additional findings omitted from console summary")
 
         if self.show_module_suggestions and self.followup_candidates:
             print_info("Additional module ideas (--suggest-modules):")
@@ -2263,6 +2733,7 @@ class WebVulnScannerPlugin(Plugin):
             "base_url": self.base_url,
             "started_at": self.scan_started_at,
             "finished_at": time.time(),
+            "scanner_version": self.__info__["version"],
             "scan_profile": self._scan_profile_label(),
             "aggressive": self.aggressive,
             "stealth_mode": self.stealth_mode,
@@ -2276,6 +2747,7 @@ class WebVulnScannerPlugin(Plugin):
             "waf_detected": self.waf_detected,
             "technologies": {tech: sorted(urls) for tech, urls in sorted(self.technologies.items())},
             "crawled_urls": sorted(self.crawled_urls),
+            "javascript_files_analyzed": len(self.javascript_urls),
             "endpoints": [
                 {
                     "url": entry["url"],
@@ -2286,6 +2758,7 @@ class WebVulnScannerPlugin(Plugin):
                     "interesting_score": entry["interesting_score"],
                     "source_pages": entry["source_pages"],
                     "discovered_from": entry["discovered_from"],
+                    "content_type": entry.get("content_type", ""),
                 }
                 for entry in self.endpoint_inventory
             ],
@@ -2304,10 +2777,18 @@ class WebVulnScannerPlugin(Plugin):
         params = dict(entry["params"])
         params[param] = payload
         if entry["method"] == "POST":
+            content_type = str(entry.get("content_type") or entry.get("enctype") or "").lower()
+            if "json" in content_type:
+                body = json.dumps(params, separators=(",", ":"))
+                return (
+                    f"curl -isk -X POST -H {shlex.quote('Content-Type: application/json')} "
+                    f"--data {shlex.quote(body)} {shlex.quote(entry['url'])}"
+                )
             body = urlencode(params, doseq=True)
-            return f"curl -isk -X POST --data '{body}' '{entry['url']}'"
+            return f"curl -isk -X POST --data {shlex.quote(body)} {shlex.quote(entry['url'])}"
         query = urlencode(params, doseq=True)
-        return f"curl -isk '{entry['url']}?{query}'"
+        separator = "&" if "?" in entry["url"] else "?"
+        return f"curl -isk {shlex.quote(entry['url'] + separator + query)}"
 
     def _normalize_severity(self, severity: Any) -> str:
         normalized = str(severity or "info").strip().lower()

@@ -22,7 +22,7 @@ class Module(Scanner, Websocket_client):
         ),
         "author": ["KittySploit Team"],
         "severity": "critical",
-        "modules": [],
+        "modules": ["exploits/multi/http/marimo_cve_2026_39987_rce"],
         "references": [
             "https://github.com/advisories/GHSA-2679-6mx9-h9xc",
             "https://nvd.nist.gov/vuln/detail/CVE-2026-39987",

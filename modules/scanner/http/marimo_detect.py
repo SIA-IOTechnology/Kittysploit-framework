@@ -48,10 +48,17 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/marimo_websocket_rce',
+                    'exploits/multi/http/marimo_cve_2026_39987_rce',
+                ],
             },
         },
         'references': ['https://github.com/marimo-team/marimo', 'https://marimo.io'],
+        'modules': [
+            'scanner/http/marimo_websocket_rce',
+            'exploits/multi/http/marimo_cve_2026_39987_rce',
+        ],
     }
 
     def run(self):

@@ -50,6 +50,14 @@ def graceful_shutdown(framework: Optional[Any] = None) -> None:
             except Exception:
                 pass
 
+        graph_server = getattr(framework, "graph_explorer_server", None)
+        if graph_server is not None:
+            try:
+                if getattr(graph_server, "is_running", lambda: False)():
+                    graph_server.stop()
+            except Exception:
+                pass
+
         room_client = getattr(framework, "room_client", None)
         if room_client is not None:
             _safe_close(getattr(room_client, "session", None))

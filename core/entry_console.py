@@ -20,6 +20,7 @@ from core.session import Session
 from core.output_handler import OutputHandler
 from core.output_handler import print_info, print_success, print_error, print_warning, print_debug, print_status
 from interfaces.command_system.command_registry import CommandRegistry
+from core.utils.shutdown import graceful_shutdown
 
 
 def parse_arguments():

@@ -138,6 +138,7 @@ class CommandRegistry:
             'scope',
             'room',
             'campaign',
+            'graph',
             'workflows'
         ]
         

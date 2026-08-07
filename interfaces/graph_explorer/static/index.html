@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KittySploit — Attack Path Explorer</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Attack Path Explorer</h1>
+      <p id="subtitle">Loading…</p>
+    </div>
+    <div id="stats-bar" class="stats-bar"></div>
+    <div class="toolbar">
+      <button id="btn-refresh" type="button" title="Reload graph">Refresh</button>
+      <button id="btn-clear" type="button" title="Clear selection">Clear</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="paths-panel">
+      <div class="controls">
+        <input id="search" type="search" placeholder="Search host, path, module…" autocomplete="off">
+        <select id="host-filter" aria-label="Filter by host">
+          <option value="">All hosts</option>
+        </select>
+        <select id="risk-filter" aria-label="Filter by risk">
+          <option value="">All risks</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="intrusive">Intrusive</option>
+          <option value="medium">Medium</option>
+          <option value="active">Active</option>
+          <option value="low">Low</option>
+          <option value="read">Read</option>
+        </select>
+        <select id="sort-by" aria-label="Sort">
+          <option value="confidence">Sort: confidence</option>
+          <option value="risk">Sort: risk</option>
+          <option value="host">Sort: host</option>
+        </select>
+        <label class="control-toggle" title="Only show paths with at least one validation module">
+          <input id="actionable-filter" type="checkbox">
+          Actionable only
+        </label>
+        <button id="btn-reset-filters" type="button">Reset filters</button>
+      </div>
+
+      <div class="path-table-wrap">
+        <table class="path-table">
+          <thead>
+            <tr>
+              <th class="col-num">#</th>
+              <th class="col-host">Host</th>
+              <th class="col-path">Path</th>
+              <th class="col-conf">Conf.</th>
+              <th class="col-risk">Risk</th>
+              <th class="col-modules">Modules</th>
+            </tr>
+          </thead>
+          <tbody id="path-list"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <p id="path-count" class="path-count"></p>
+        <span class="keyboard-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open graph · <kbd>/</kbd> search</span>
+      </div>
+    </section>
+
+    <div id="split-handle" class="split-handle" title="Drag to resize panels"></div>
+
+    <aside class="inspector">
+      <div class="inspector-tabs">
+        <button type="button" class="tab active" data-tab="detail">Detail</button>
+        <button type="button" class="tab" data-tab="graph">Graph</button>
+      </div>
+
+      <div id="tab-detail" class="tab-pane active">
+        <div id="next-action" class="next-action hidden"></div>
+        <div id="detail-actions" class="detail-actions hidden">
+          <button id="btn-view-graph" type="button">View graph</button>
+          <button id="btn-copy-path" type="button">Copy path</button>
+          <button id="btn-copy-modules" type="button">Copy modules</button>
+        </div>
+        <div id="details" class="details empty">
+          Select a path in the table to see steps, risk, and validation modules.
+        </div>
+      </div>
+
+      <div id="tab-graph" class="tab-pane">
+        <div class="graph-toolbar">
+          <label class="toggle">
+            <input id="toggle-labels" type="checkbox">
+            Labels
+          </label>
+          <label class="toggle">
+            <input id="toggle-full-graph" type="checkbox">
+            Full graph
+          </label>
+          <button id="btn-fit" type="button">Fit</button>
+        </div>
+        <div class="graph-panel">
+          <div id="cy" class="graph"></div>
+          <div id="graph-empty" class="graph-empty">Select a path to visualize it.</div>
+        </div>
+        <div id="kind-legend" class="kind-legend"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

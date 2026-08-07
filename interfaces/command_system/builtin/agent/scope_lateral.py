@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
@@ -121,6 +122,9 @@ class ScopedCredential:
     source_host: str = ""
     protocol_hint: str = ""
     origin: str = "discovered"
+    scope_hosts: List[str] = field(default_factory=list)
+    scope_ports: List[int] = field(default_factory=list)
+    expires_at: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return sanitize_nested({
@@ -131,7 +135,13 @@ class ScopedCredential:
             "source_host": self.source_host,
             "protocol_hint": self.protocol_hint,
             "origin": self.origin,
+            "scope_hosts": self.scope_hosts,
+            "scope_ports": self.scope_ports,
+            "expires_at": self.expires_at,
         })
+
+    def is_expired(self) -> bool:
+        return bool(self.expires_at and self.expires_at < time.time())
 
 
 @dataclass
@@ -284,7 +294,12 @@ def _protocol_from_row(row: Mapping[str, Any]) -> str:
     return ""
 
 
-def index_credentials(kb: Mapping[str, Any], *, state: Any = None) -> List[ScopedCredential]:
+def index_credentials(
+    kb: Mapping[str, Any],
+    *,
+    state: Any = None,
+    framework: Any = None,
+) -> List[ScopedCredential]:
     rows: List[ScopedCredential] = []
     seen: set[str] = set()
     source_host = ""
@@ -322,6 +337,33 @@ def index_credentials(kb: Mapping[str, Any], *, state: Any = None) -> List[Scope
     active = kb.get("active_auth_context")
     if isinstance(active, dict):
         _append(active, origin="active")
+
+    framework_ref = framework
+    if framework_ref is None and state is not None:
+        framework_ref = getattr(state, "framework", None)
+    if framework_ref is not None:
+        try:
+            from core.vault.persistent_store import get_persistent_vault
+
+            for row in get_persistent_vault(framework_ref).to_scoped_credentials():
+                cid = str(row.get("credential_id") or "")
+                if not cid or cid in seen:
+                    continue
+                seen.add(cid)
+                rows.append(ScopedCredential(
+                    credential_id=cid,
+                    username=str(row.get("username") or ""),
+                    password_handle=str(row.get("password_handle") or ""),
+                    source_module=str(row.get("source_module") or ""),
+                    source_host=str(row.get("source_host") or ""),
+                    protocol_hint=str(row.get("protocol_hint") or ""),
+                    origin=str(row.get("origin") or "persistent_vault"),
+                    scope_hosts=[str(item) for item in (row.get("scope_hosts") or []) if str(item).strip()],
+                    scope_ports=[int(item) for item in (row.get("scope_ports") or []) if str(item).strip().isdigit()],
+                    expires_at=float(row.get("expires_at") or 0.0),
+                ))
+        except RuntimeError:
+            pass
 
     # Ground-truth lab_manifest credentials are never indexed here — that would
     # fake live campaigns. Benchmarks inject discovered/vault creds explicitly.
@@ -366,6 +408,12 @@ def propose_credential_reuse(
         if _service_has_session(world, service_id):
             continue
         for cred in creds:
+            if cred.is_expired():
+                continue
+            if cred.scope_hosts and not any(_hosts_match(host, dest.host) for host in cred.scope_hosts):
+                continue
+            if cred.scope_ports and int(dest.port) not in cred.scope_ports:
+                continue
             protocol = dest.protocol or cred.protocol_hint or "tcp"
             if cred.protocol_hint and dest.protocol and cred.protocol_hint not in {dest.protocol, "tcp"}:
                 continue
@@ -416,8 +464,9 @@ def sync_scope_lateral(
                 state=state,
             )
 
+    framework_ref = getattr(state, "framework", None) if state is not None else None
     index = build_scope_index(kb, state=state)
-    credentials = index_credentials(kb, state=state)
+    credentials = index_credentials(kb, state=state, framework=framework_ref)
     proposals = propose_credential_reuse(kb, state=state, scope_index=index, credentials=credentials)
     snapshot = sanitize_nested({
         "schema_version": SCHEMA_VERSION,

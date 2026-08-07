@@ -27,6 +27,11 @@ class Workspace(Base):
     tasks = relationship("Task", back_populates="workspace", cascade="all, delete-orphan")
     notes = relationship("Note", back_populates="workspace", cascade="all, delete-orphan")
     loot = relationship("Loot", back_populates="workspace", cascade="all, delete-orphan")
+    vault_credentials = relationship(
+        "VaultCredentialEntry",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
     
     def __repr__(self):
         return f"<Workspace(name='{self.name}', active={self.is_active})>"
@@ -286,6 +291,39 @@ class Credential(Base, EncryptedFieldMixin):
     
     # Relationships
     host = relationship("Host", back_populates="credentials")
+
+
+class VaultCredentialEntry(Base, EncryptedFieldMixin):
+    """Persistent encrypted credential vault entry (master-key protected)."""
+    __tablename__ = 'vault_credentials'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False, index=True)
+    credential_id = Column(String(64), nullable=False)
+    handle = Column(String(128), nullable=False)
+    kind = Column(String(32), default='password')
+    username = Column(EncryptedString(255), default='')
+    secret = Column(EncryptedText, nullable=False)
+    origin = Column(String(255), default='manual')
+    source_host = Column(String(255), default='')
+    scope_hosts = Column(JSON, default=list)
+    scope_ports = Column(JSON, default=list)
+    protocol_hint = Column(String(32), default='')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+    notes = Column(EncryptedText, default='')
+
+    __table_args__ = (
+        UniqueConstraint('workspace_id', 'credential_id', name='uq_vault_cred_workspace_id'),
+        UniqueConstraint('workspace_id', 'handle', name='uq_vault_handle_workspace_id'),
+        Index('idx_vault_cred_workspace_expires', 'workspace_id', 'expires_at'),
+    )
+
+    workspace = relationship("Workspace", back_populates="vault_credentials")
+
+    def __repr__(self):
+        return f"<VaultCredentialEntry {self.credential_id}@{self.workspace_id}>"
 
 class Note(Base):
     """Represents notes and findings"""

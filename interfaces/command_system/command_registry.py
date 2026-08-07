@@ -139,6 +139,7 @@ class CommandRegistry:
             'room',
             'campaign',
             'graph',
+            'vault',
             'workflows'
         ]
         

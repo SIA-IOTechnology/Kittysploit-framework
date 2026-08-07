@@ -135,11 +135,12 @@ def load_explorer_graph(
                 propose_credential_reuse,
             )
 
-            cred_rows = [item.to_dict() for item in index_credentials(kb)]
+            cred_rows = [item.to_dict() for item in index_credentials(kb, framework=framework)]
             credentials.extend(cred_rows)
             if include_proposals:
                 index = build_scope_index(kb)
-                lateral = [item.to_dict() for item in propose_credential_reuse(kb, scope_index=index, credentials=None)]
+                creds = index_credentials(kb, framework=framework)
+                lateral = [item.to_dict() for item in propose_credential_reuse(kb, scope_index=index, credentials=creds)]
         except Exception:
             pass
 

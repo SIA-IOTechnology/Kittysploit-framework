@@ -84,9 +84,16 @@ def _value_fingerprint(value: str) -> str:
 class CredentialVault:
     """Run-scoped secret store. Values never belong in KB, prompts, or checkpoints."""
 
-    def __init__(self, *, run_id: str = "", ttl_seconds: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        *,
+        run_id: str = "",
+        ttl_seconds: Optional[float] = None,
+        framework: Any = None,
+    ) -> None:
         self.run_id = str(run_id or "")
         self.ttl_seconds = float(ttl_seconds if ttl_seconds is not None else vault_ttl_seconds())
+        self._framework = framework
         self._entries: Dict[str, VaultEntry] = {}
         self._fingerprints: Dict[str, str] = {}
 
@@ -121,10 +128,18 @@ class CredentialVault:
     def resolve(self, value: Any) -> Any:
         if not is_vault_handle(value):
             return value
-        entry = self._entries.get(str(value))
-        if entry is None or self._is_expired(entry):
-            return ""
-        return entry.value
+        token = str(value)
+        entry = self._entries.get(token)
+        if entry is not None and not self._is_expired(entry):
+            return entry.value
+        if token.startswith(f"{VAULT_PREFIX}persist:") and self._framework is not None:
+            try:
+                from core.vault.persistent_store import get_persistent_vault
+
+                return get_persistent_vault(self._framework).resolve_secret(token)
+            except Exception:
+                return ""
+        return ""
 
     def resolve_tree(self, value: Any) -> Any:
         if is_vault_handle(value):
@@ -165,10 +180,15 @@ class CredentialVault:
         })
 
 
-def get_credential_vault(state: Any = None, kb: Any = None) -> CredentialVault:
+def get_credential_vault(state: Any = None, kb: Any = None, framework: Any = None) -> CredentialVault:
+    framework_ref = framework
+    if framework_ref is None and state is not None:
+        framework_ref = getattr(state, "framework", None)
     if state is not None:
         vault = getattr(state, "credential_vault", None)
         if isinstance(vault, CredentialVault):
+            if framework_ref is not None:
+                vault._framework = framework_ref
             return vault
     run_id = ""
     if state is not None:
@@ -179,8 +199,10 @@ def get_credential_vault(state: Any = None, kb: Any = None) -> CredentialVault:
         run_id = "anonymous"
     vault = _RUN_VAULTS.get(run_id)
     if vault is None:
-        vault = CredentialVault(run_id=run_id)
+        vault = CredentialVault(run_id=run_id, framework=framework_ref)
         _RUN_VAULTS[run_id] = vault
+    elif framework_ref is not None:
+        vault._framework = framework_ref
     if state is not None:
         state.credential_vault = vault
     if isinstance(kb, dict):

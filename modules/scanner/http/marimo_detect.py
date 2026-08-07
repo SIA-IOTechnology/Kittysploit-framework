@@ -4,9 +4,10 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.protocols.http.marimo import Marimo
 
 
-class Module(Scanner, Http_client):
+class Module(Scanner, Http_client, Marimo):
     __info__ = {
         'name': 'Marimo Panel - Detect',
         'description': 'Marimo is an open-source reactive Python notebook and app framework that replaces Jupyter with git-friendly, reproducible notebooks.',
@@ -62,19 +63,12 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/', allow_redirects=True)
-        if not r or r.status_code != 200:
+        if not self.marimo_detected():
             return False
-        body = (r.text or "")
-        markers = (
-            'marimo-version',
+        self.set_info(
+            severity='info',
+            reason="Marimo Panel detected",
+            path='/',
         )
-        if any(m in body for m in markers):
-            self.set_info(
-                severity='info',
-                reason="Marimo Panel detected",
-                path='/',
-            )
-            return True
-        return False
+        return True
 

@@ -145,6 +145,11 @@ class AdaptiveLoopEngine:
                 loop_state.replans += 1
                 loop_state.pivots.append(f"plan_recalc:{replan_reasons[0]}")
 
+            if raw.get("http_intel_replan"):
+                pending.clear()
+                loop_state.replans += 1
+                loop_state.pivots.append("http_intel_update")
+
             if outcome.verdict in {"confirmed"} and self._goal_reached(state, loop_state):
                 loop_state.stop = StopDecision(
                     stop=True,
@@ -418,6 +423,7 @@ class AdaptiveLoopEngine:
         if action_type == "http_request":
             from interfaces.command_system.builtin.agent.http_probe_actions import (
                 execute_agent_http_request,
+                ingest_http_probe_result,
                 record_llm_http_requests,
             )
 
@@ -430,14 +436,19 @@ class AdaptiveLoopEngine:
                 },
             )
             kb = getattr(state, "knowledge_base", None)
+            http_intel_replan = False
             if isinstance(kb, dict):
                 record_llm_http_requests(kb, [raw])
+                if getattr(state, "framework", None) is None:
+                    state.framework = getattr(getattr(self.services, "core", None), "framework", None)
+                http_intel_replan = ingest_http_probe_result(state, raw)
                 state.knowledge_base = kb
             return {
                 "blocked": str(raw.get("status") or "").lower() in {"skipped", "error"},
                 "error": str(raw.get("message") or ""),
                 "execution": None,
                 "http_result": raw,
+                "http_intel_replan": http_intel_replan,
                 "planned": False,
             }
         if action_type == "surface_scan":

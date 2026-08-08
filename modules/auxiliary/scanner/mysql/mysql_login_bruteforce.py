@@ -45,8 +45,15 @@ class Module(Auxiliary, Tcp_scanner_client):
                 "produces_capabilities": [
                     {"capability": "db_access", "from_detail": "username"},
                     "authenticated_session"],
-                "option_bindings": {},
+                "option_bindings": {
+                    "target": "target",
+                    "port": "port",
+                    "username": "username",
+                    "password": "password",
+                    "database": "database",
+                },
                 "suggested_followups": [
+                    "auxiliary/admin/mysql/mysql_bind_session_launcher",
                     "post/mysql/gather/enum_users",
                     "post/mysql/gather/enum_databases",
                     "post/mysql/gather/check_mysql_hardening"],
@@ -64,6 +71,11 @@ class Module(Auxiliary, Tcp_scanner_client):
     max_attempts = OptInteger(50, "Maximum credential pairs to try (0 = unlimited)", False)
     stop_on_success = OptBool(True, "Stop after the first valid credential pair", False)
     create_session = OptBool(True, "Register a MySQL session on successful login", False)
+    auto_bind_session = OptBool(
+        True,
+        "On success, open session via MySQL BIND listener (recommended; uses mysql_bind_session payload path)",
+        False,
+    )
 
     def _opt(self, name: str, default: Any = "") -> Any:
         value = getattr(self, name, default)
@@ -201,6 +213,46 @@ class Module(Auxiliary, Tcp_scanner_client):
         print_info("Use `sessions -i <id>` to open the MySQL shell")
         return session_id
 
+    def _open_bind_session(
+        self,
+        host: str,
+        username: str,
+        password: str,
+    ) -> Optional[str]:
+        from lib.c2.bind_listener_launcher import launch_bind_listener
+
+        db_name = str(self._opt("database", "") or "").strip()
+        return launch_bind_listener(
+            self.framework,
+            "listeners/database/mysql",
+            {
+                "host": host,
+                "port": int(self._port()),
+                "username": username,
+                "password": password,
+                "database": db_name,
+            },
+        )
+
+    def _finalize_success(
+        self,
+        host: str,
+        connection: pymysql.connections.Connection,
+        username: str,
+        password: str,
+    ) -> Optional[str]:
+        auto_bind = bool(self._opt("auto_bind_session", True))
+        if auto_bind:
+            try:
+                connection.close()
+            except Exception:
+                pass
+            session_id = self._open_bind_session(host, username, password)
+            if session_id:
+                print_info("Payload pairing: payloads/singles/cmd/multi/mysql_bind_session")
+            return session_id
+        return self._register_session(host, connection, username, password)
+
     def check(self):
         host = self._host()
         port = self._port()
@@ -258,7 +310,7 @@ class Module(Auxiliary, Tcp_scanner_client):
                 continue
 
             print_success(f"Valid MySQL credentials: {user}:{pwd if pwd else '(empty)'}")
-            session_id = self._register_session(host, connection, user, pwd)
+            session_id = self._finalize_success(host, connection, user, pwd)
             entry = {
                 "username": user,
                 "password": pwd,

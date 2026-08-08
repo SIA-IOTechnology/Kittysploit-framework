@@ -610,10 +610,14 @@ Examples:
                     for module in modules:
                         path = module.get('path', '')
                         seen_paths.add(path)
+                        description = self._resolve_module_description(
+                            path,
+                            module.get('description', ''),
+                        )
                         formatted_modules.append({
                             'path': module.get('path', ''),
                             'name': module.get('name', module.get('path', '')),
-                            'description': module.get('description', 'No description'),
+                            'description': description,
                             'type': module.get('type', ''),
                             'author': module.get('author', 'Unknown')
                         })
@@ -642,7 +646,36 @@ Examples:
             modules = self._search_modules_filesystem(normalized_type)
         
         return modules or []
-    
+
+    def _resolve_module_description(self, module_path: str, description: str) -> str:
+        """Return a non-empty description, loading library workflow YAML when needed."""
+        text = str(description or "").strip()
+        if text and text.lower() != "no description":
+            return text
+        workflow_id = self._workflow_id_from_module_path(module_path)
+        if not workflow_id:
+            return text or "No description"
+        try:
+            from core.workflows.module_bridge import library_workflow_search_metadata
+
+            meta = library_workflow_search_metadata(workflow_id)
+            yaml_desc = str(meta.get("description") or "").strip()
+            if yaml_desc:
+                return yaml_desc
+        except Exception:
+            pass
+        return text or "No description"
+
+    @staticmethod
+    def _workflow_id_from_module_path(module_path: str) -> Optional[str]:
+        path = str(module_path or "").strip().strip("/")
+        if not path.startswith("workflow/"):
+            return None
+        slug = path.split("/", 1)[1].strip()
+        if not slug or slug.startswith("_"):
+            return None
+        return slug.replace("_", "-")
+
     def _extract_module_metadata_from_source(self, file_path: str) -> Dict[str, Any]:
         """Extract basic module metadata from source file without loading the module (fast)"""
         metadata = {
@@ -727,11 +760,24 @@ Examples:
                 
                 # Extract metadata directly from source file (fast, no module loading)
                 try:
-                    metadata = self._extract_module_metadata_from_source(file_path)
+                    if str(file_path).startswith("library://"):
+                        from core.workflows.module_bridge import (
+                            library_workflow_search_metadata,
+                            workflow_id_from_uri,
+                        )
+
+                        metadata = library_workflow_search_metadata(
+                            workflow_id_from_uri(file_path)
+                        )
+                    else:
+                        metadata = self._extract_module_metadata_from_source(file_path)
                     modules.append({
                         'path': module_path,
                         'name': metadata.get('name') or module_path,
-                        'description': metadata.get('description', 'No description'),
+                        'description': self._resolve_module_description(
+                            module_path,
+                            metadata.get('description', ''),
+                        ),
                         'type': module_type,
                         'author': metadata.get('author', 'Unknown')
                     })

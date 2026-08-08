@@ -827,6 +827,7 @@ Examples:
             cancellation_token=CancellationToken(),
             run_store=run_store,
         )
+        state.framework = self.framework
         # Operator --protocol always wins over any lab-hint KB seed.
         # Otherwise seed from inferred URL scheme so planners filter local RF modules.
         if parsed.protocol:

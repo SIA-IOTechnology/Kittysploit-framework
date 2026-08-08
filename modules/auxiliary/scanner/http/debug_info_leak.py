@@ -71,6 +71,31 @@ class Module(Auxiliary, Http_client):
         re.IGNORECASE,
     )
 
+    # CDN / reverse-proxy Server values — not actionable version disclosure.
+    _BENIGN_SERVER_VALUES = frozenset({
+        "cloudflare",
+        "cloudfront",
+        "akamaighost",
+        "nginx",
+        "openresty",
+        "varnish",
+        "awselb",
+        "gws",
+        "github.com",
+        "sucuri",
+        "fastly",
+    })
+
+    _SPA_META_CONTEXT = re.compile(
+        r'rel=["\']canonical["\']|property=["\']og:|name=["\']twitter:',
+        re.IGNORECASE,
+    )
+
+    _CONFIG_BODY_MARKERS = re.compile(
+        r"(?:^|[\s;])(?:DB_|APP_|AWS_|SECRET|PASSWORD|DATABASE_URL|MYSQL_)\s*[=:]",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
     # Patterns de détection pour les fuites d'informations
     DEBUG_PATTERNS = {
         'stack_trace': [
@@ -232,6 +257,14 @@ class Module(Auxiliary, Http_client):
                 'leaks': [],
                 'has_leaks': False
             }
+
+        if self._is_soft_404_response(response, path):
+            return {
+                'path': path,
+                'status_code': response.status_code,
+                'leaks': [],
+                'has_leaks': False
+            }
         
         # Analyser le contenu avec les patterns
         seen_matches = set()
@@ -293,6 +326,8 @@ class Module(Auxiliary, Http_client):
         for header in sensitive_headers:
             if header in headers:
                 header_value = headers[header]
+                if self._is_benign_version_header(header, header_value):
+                    continue
                 leaks.append({
                     'type': 'version_info',
                     'header': header,
@@ -360,6 +395,69 @@ class Module(Auxiliary, Http_client):
                 "password",
             ))
         )
+
+    def _seed_soft404_baselines(self):
+        """Register index + canary fingerprints so SPA catch-alls are filtered."""
+        try:
+            from lib.scanner.http.soft_404 import (
+                make_canary_path,
+                origin_key_from_url,
+                register_baseline_from_response,
+                register_canary_from_response,
+                remember_canary_path,
+            )
+
+            root = self.http_request(method="GET", path="/")
+            origin = getattr(self, "_ks_http_origin", "") or ""
+            if not origin and root is not None:
+                origin = origin_key_from_url(getattr(root, "url", "") or "")
+            if root is not None and origin:
+                register_baseline_from_response(origin, root)
+
+            canary = make_canary_path()
+            canary_resp = self.http_request(method="GET", path=canary)
+            if canary_resp is not None and origin:
+                register_canary_from_response(origin, canary_resp, path=canary)
+                remember_canary_path(origin, canary)
+        except Exception:
+            pass
+
+    def _is_soft_404_response(self, response, path):
+        if bool(getattr(response, "ks_soft_404", False) or getattr(response, "ks_same_as_index", False)):
+            return True
+        try:
+            if hasattr(self, "is_same_as_index") and self.is_same_as_index(response, path=path):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _is_benign_version_header(self, header, value):
+        name = str(header or "").strip().lower()
+        text = str(value or "").strip().lower()
+        if not text:
+            return True
+        if name == "server":
+            token = text.split("/", 1)[0].strip()
+            if token in self._BENIGN_SERVER_VALUES:
+                return True
+        return False
+
+    def _looks_like_real_config_exposure(self, content, path):
+        sample = str(content or "")
+        lowered = sample.lower()
+        if self._CONFIG_BODY_MARKERS.search(sample):
+            return True
+        if "<?php" in lowered or "<configuration" in lowered:
+            return True
+        if re.search(r"^\s*\{", sample.strip()) and re.search(
+            r'"(?:api[_-]?key|secret|password|database)"\s*:', sample, re.I
+        ):
+            return True
+        path_lower = str(path or "").lower()
+        if path_lower.endswith(".env") and re.search(r"^[A-Z0-9_]+=", sample, re.M):
+            return True
+        return False
 
     def _is_login_wall_response(self, response, tested_path, content):
         # If we are explicitly testing a login path, keep analysis enabled.
@@ -523,6 +621,15 @@ class Module(Auxiliary, Http_client):
             if self._offset_inside_script_block(content, match_offset):
                 return False
 
+        if leak_type == "config_files":
+            start = max(0, int(match_offset or 0) - 120)
+            end = min(len(content), int(match_offset or 0) + len(text) + 120)
+            context = content[start:end]
+            if self._SPA_META_CONTEXT.search(context):
+                return False
+            if is_html and not self._looks_like_real_config_exposure(content, path):
+                return False
+
         if leak_type == "error_messages" and is_html and response.status_code == 200:
             if path in ("", "/") and not any(
                 token in text.lower()
@@ -583,6 +690,8 @@ class Module(Auxiliary, Http_client):
         print_status("Starting HTTP Debug Information Leak Scan...")
         print_info(f"Target: {self.target}")
         print_info("")
+
+        self._seed_soft404_baselines()
         
         # Construire la liste des chemins à tester
         paths_to_test = list(self.COMMON_DEBUG_PATHS)

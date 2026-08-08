@@ -16,14 +16,15 @@ class Module(Payload):
 		"name": "PowerShell Command Shell, Reverse HTTPS (TLS)",
 		"description": (
 			"Connect back over TLS (SslStream) and create an interactive command shell. "
-			"No native reverse_https listener — terminate TLS on the operator side "
-			"(stunnel, openssl s_server, etc.) and forward plaintext to "
-			"listeners/multi/reverse_tcp."
+            "No native reverse_https listener — terminate TLS on the operator side "
+            "(stunnel, openssl s_server, etc.) and forward plaintext to "
+            "listeners/multi/reverse_tcp, or use listeners/multi/reverse_tls "
+            "for native TLS termination."
 		),
 		"category": PayloadCategory.SINGLE,
 		"arch": Arch.OTHER,
 		"platform": Platform.WINDOWS,
-		"listener": "listeners/multi/reverse_tcp",
+        "listener": "listeners/multi/reverse_tls",
 		"handler": Handler.REVERSE,
 		"session_type": SessionType.SHELL,
 	}

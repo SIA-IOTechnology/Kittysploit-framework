@@ -7,6 +7,7 @@ from sqlalchemy.orm import relationship, sessionmaker, validates
 from datetime import datetime
 import re
 from core.utils.validate import validate_hash_type
+from core.utils.module_static_metadata import is_valid_cve_storage_value
 from core.models.encrypted_fields import EncryptedString, EncryptedText, EncryptedFieldMixin
 
 Base = declarative_base()
@@ -192,8 +193,8 @@ class Vulnerability(Base):
     
     @validates('cve')
     def validate_cve(self, key, cve):
-        if cve and not re.match(r'^CVE-\d{4}-\d{4,}$', cve):
-            raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN)")
+        if not is_valid_cve_storage_value(cve):
+            raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN or comma-separated list)")
         return cve
     
     @validates('cvss_score')
@@ -500,8 +501,8 @@ class Module(Base):
     
     @validates('cve')
     def validate_cve(self, key, cve):
-        if cve and not re.match(r'^CVE-\d{4}-\d{4,}$', cve):
-            raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN)")
+        if not is_valid_cve_storage_value(cve):
+            raise ValueError("Invalid CVE format (expected: CVE-YYYY-NNNN or comma-separated list)")
         return cve
     
     def __repr__(self):

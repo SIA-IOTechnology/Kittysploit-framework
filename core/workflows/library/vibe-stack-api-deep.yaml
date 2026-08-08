@@ -1,0 +1,138 @@
+id: vibe-stack-api-deep
+version: "1"
+name: Vibe Stack Modern API Deep Scan
+description: >
+  API-layer audit for modern JavaScript stacks — OpenAPI/Swagger, GraphQL introspection,
+  tRPC procedures and batch amplification, gRPC-Web, WebSocket/SSE auth, Supabase Realtime,
+  BaaS panels (Convex/Appwrite/PocketBase), CMS APIs (Strapi, Payload), and Drizzle/Prisma artifacts.
+  Complements vibe-stack-audit. Mostly active probes; pair with vibe-credentials-abuse for enum.
+tags: [vibe, api, graphql, trpc, websocket, baas, cms, audit]
+policy:
+  safe_only: true
+continue_on_failure: true
+variables:
+  target:
+    description: API base URL or hostname
+    required: true
+  port: "443"
+  ssl: "true"
+  graphql_path:
+    description: GraphQL endpoint path
+    default: "/graphql"
+  trpc_base:
+    description: Primary tRPC base path
+    default: "/api/trpc"
+start_step: swagger
+steps:
+  swagger:
+    module: scanner/http/swagger_detect
+    description: Exposed Swagger/OpenAPI documentation
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: graphql_abuse
+    on_failure: graphql_abuse
+  graphql_abuse:
+    module: auxiliary/scanner/http/graphql_abuse
+    description: GraphQL introspection and sensitive field discovery
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      graphql_path: "${graphql_path}"
+    on_success: graphql_subscription
+    on_failure: graphql_subscription
+  graphql_subscription:
+    module: auxiliary/scanner/http/graphql_subscription_abuse
+    description: GraphQL subscription and alias amplification
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      graphql_path: "${graphql_path}"
+    on_success: trpc_enum
+    on_failure: trpc_enum
+  trpc_enum:
+    module: auxiliary/scanner/http/trpc_openapi_procedure_enum
+    description: tRPC procedure and OpenAPI route enumeration
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      trpc_base: "${trpc_base}"
+    on_success: trpc_batch
+    on_failure: trpc_batch
+  trpc_batch:
+    module: scanner/http/trpc_batch_amplification_detect
+    description: tRPC batch DoS / amplification signals
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      trpc_base: "${trpc_base}"
+    on_success: grpc_web
+    on_failure: grpc_web
+  grpc_web:
+    module: auxiliary/scanner/http/grpc_web_method_enum
+    description: gRPC-Web method enumeration over HTTP
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: websocket_sse
+    on_failure: websocket_sse
+  websocket_sse:
+    module: scanner/http/websocket_sse_auth_probe
+    description: WebSocket and SSE authentication gaps
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: baas_panels
+    on_failure: baas_panels
+  baas_panels:
+    module: auxiliary/scanner/http/convex_appwrite_pocketbase_api_enum
+    description: Convex / Appwrite / PocketBase API reachability
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: strapi_docs
+    on_failure: strapi_docs
+  strapi_docs:
+    module: scanner/http/strapi_documentation_detect
+    description: Strapi CMS documentation panel
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: payloadcms_panel
+    on_failure: payloadcms_panel
+  payloadcms_panel:
+    module: scanner/http/payloadcms_detect
+    description: Payload CMS admin panel
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: drizzle_prisma
+    on_failure: drizzle_prisma
+  drizzle_prisma:
+    module: scanner/http/drizzle_prisma_schema_exposure_detect
+    description: ORM schema/migration file exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: supabase_realtime
+    on_failure: supabase_realtime
+  supabase_realtime:
+    module: auxiliary/scanner/http/supabase_realtime_channel_abuse
+    description: Supabase Realtime channel subscription probe
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

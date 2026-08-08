@@ -134,6 +134,83 @@ def default_ssl_context(state: Any) -> ssl.SSLContext:
     return ctx
 
 
+def _proxy_dict_from_state(state: Any) -> Dict[str, str]:
+    """Route agent HTTP probes through KittyProxy/Tor when enabled."""
+    framework = getattr(state, "framework", None)
+    if framework is None:
+        return {}
+    try:
+        from interfaces.command_system.builtin.agent.http_intelligence import HttpRequestIntelligence
+
+        return HttpRequestIntelligence(framework).proxy_dict_for_state(state)
+    except Exception:
+        return {}
+
+
+def _tls_verify_from_state(state: Any) -> bool:
+    policy = getattr(state, "runtime_policy", None)
+    if policy is not None and not getattr(policy, "tls_verify", True):
+        return False
+    return True
+
+
+def _execute_http_via_requests(
+    *,
+    method: str,
+    url: str,
+    req_headers: Dict[str, str],
+    data: Optional[bytes],
+    timeout_s: float,
+    proxies: Dict[str, str],
+    verify: bool,
+) -> tuple[int, Dict[str, str], str, str]:
+    import requests
+
+    if not verify:
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    response = requests.request(
+        method,
+        url,
+        headers=req_headers,
+        data=data,
+        timeout=timeout_s,
+        allow_redirects=False,
+        proxies=proxies or None,
+        verify=verify,
+    )
+    body = (response.text or "")[:8192]
+    status = int(response.status_code or 0)
+    response_headers = {k.lower(): str(v) for k, v in response.headers.items()}
+    final_url = str(response.url or url)
+    return status, response_headers, body, final_url
+
+
+def ingest_http_probe_result(state: Any, raw: Mapping[str, Any]) -> bool:
+    """
+    Analyze an agent HTTP exchange and merge intel into the knowledge base.
+
+    Returns True when the response warrants replanning (interesting surface).
+    """
+    kb = getattr(state, "knowledge_base", None)
+    if not isinstance(kb, dict):
+        return False
+    framework = getattr(state, "framework", None)
+    if framework is None:
+        return False
+    try:
+        from interfaces.command_system.builtin.agent.http_intelligence import HttpRequestIntelligence
+
+        intel = HttpRequestIntelligence(framework)
+        merged = intel.ingest_agent_http_result(kb, raw, state=state)
+        state.knowledge_base = kb
+        last = merged.get("last_agent_item") if isinstance(merged, dict) else {}
+        return int((last or {}).get("interesting_score", 0) or 0) > 0
+    except Exception:
+        return False
+
+
 def execute_agent_http_request(
     state: Any,
     action: Mapping[str, Any],
@@ -193,18 +270,54 @@ def execute_agent_http_request(
     extra = options.get("headers") if isinstance(options.get("headers"), dict) else {}
     req_headers.update(extra)
     data = None
+    request_body = ""
     if method not in {"GET", "HEAD", "OPTIONS"} and "body" in options:
-        data = str(options.get("body") or "").encode("utf-8")
-    request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+        request_body = str(options.get("body") or "")
+        data = request_body.encode("utf-8")
     timeout_s = float(options.get("timeout") or 5.0)
-    read_bytes = 8192
+    proxies = _proxy_dict_from_state(state)
+    verify = _tls_verify_from_state(state)
+    status = 0
+    response_headers: Dict[str, str] = {}
+    body = ""
+    final_url = url
+
+    if sleep_fn is not None:
+        sleep_fn()
+    else:
+        delay = float(getattr(state, "request_delay_min", 0) or 0)
+        if delay > 0:
+            time.sleep(min(delay, 2.0))
+
+    sent = False
     try:
-        if sleep_fn is not None:
-            sleep_fn()
-        else:
-            delay = float(getattr(state, "request_delay_min", 0) or 0)
-            if delay > 0:
-                time.sleep(min(delay, 2.0))
+        status, response_headers, body, final_url = _execute_http_via_requests(
+            method=method,
+            url=url,
+            req_headers=req_headers,
+            data=data,
+            timeout_s=timeout_s,
+            proxies=proxies,
+            verify=verify,
+        )
+        sent = True
+    except ImportError:
+        pass
+    except Exception as exc:
+        module = str(getattr(type(exc), "__module__", "") or "")
+        if module.startswith("requests.") or "HTTPError" in type(exc).__name__:
+            if hasattr(exc, "response") and getattr(exc, "response", None) is not None:
+                resp = exc.response
+                status = int(getattr(resp, "status_code", 0) or 0)
+                response_headers = {k.lower(): str(v) for k, v in resp.headers.items()}
+                body = (getattr(resp, "text", "") or "")[:8192]
+                final_url = str(getattr(resp, "url", "") or url)
+                sent = True
+        if not sent:
+            pass  # fall through to urllib
+
+    if not sent:
+        request = urllib.request.Request(url, data=data, headers=req_headers, method=method)
 
         class _NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
@@ -215,31 +328,35 @@ def execute_agent_http_request(
             ctx_fn = ssl_context_fn or (lambda: default_ssl_context(state))
             handlers.append(urllib.request.HTTPSHandler(context=ctx_fn()))
         opener = urllib.request.build_opener(*handlers)
-        with opener.open(request, timeout=timeout_s) as response:
-            body = response.read(read_bytes).decode("utf-8", errors="ignore")
-            status = int(getattr(response, "status", 0) or response.getcode() or 0)
-            response_headers = {k.lower(): str(v) for k, v in response.headers.items()}
-            final_url = str(response.geturl() or "")
-    except urllib.error.HTTPError as exc:
         try:
-            body = exc.read(read_bytes).decode("utf-8", errors="ignore")
-        except Exception:
-            body = ""
-        status = int(exc.code or 0)
-        response_headers = {k.lower(): str(v) for k, v in (exc.headers.items() if exc.headers else [])}
-        final_url = str(getattr(exc, "url", "") or url)
-    except Exception as exc:
-        result["message"] = f"HTTP request failed: {exc}"
-        return result
+            with opener.open(request, timeout=timeout_s) as response:
+                body = response.read(8192).decode("utf-8", errors="ignore")
+                status = int(getattr(response, "status", 0) or response.getcode() or 0)
+                response_headers = {k.lower(): str(v) for k, v in response.headers.items()}
+                final_url = str(response.geturl() or "")
+        except urllib.error.HTTPError as exc:
+            try:
+                body = exc.read(8192).decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            status = int(exc.code or 0)
+            response_headers = {k.lower(): str(v) for k, v in (exc.headers.items() if exc.headers else [])}
+            final_url = str(getattr(exc, "url", "") or url)
+        except Exception as exc:
+            result["message"] = f"HTTP request failed: {exc}"
+            return result
 
     result["status"] = "ok" if 200 <= status < 500 else "error"
     result["message"] = f"HTTP {method} {path} -> {status}"
     result["details"].update({
         "status_code": status,
         "headers": response_headers,
+        "request_headers": req_headers,
+        "request_body": request_body[:4096],
         "body_sample": body[:2000],
         "body_length_sampled": len(body),
         "final_url": final_url,
+        "via_proxy": bool(proxies),
     })
     return result
 
@@ -301,6 +418,8 @@ def execute_plan_http_requests(
     kb = getattr(state, "knowledge_base", None)
     if isinstance(kb, dict):
         record_llm_http_requests(kb, results)
+        for row in results:
+            ingest_http_probe_result(state, row)
         state.knowledge_base = kb
     return results
 

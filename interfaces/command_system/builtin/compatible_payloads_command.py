@@ -139,9 +139,40 @@ Note: This command only works when an exploit module is selected.
         print_info("")
         print_info("Use 'set payload <path>' to select a payload")
         self._show_builtin_payload_hint()
+        self._show_recommended_payloads()
         print_info("You can also use Metasploit payloads with: set payload msf/<payload_name>")
         print_info("Use 'compatible_payloads --detailed' for detailed information")
     
+    def _show_recommended_payloads(self):
+        """Show catalog suggestions when exploit has no strict match."""
+        try:
+            from core.framework.payload_catalog import recommend_payloads
+        except ImportError:
+            return
+        exploit = self.framework.current_module
+        info = getattr(exploit, "__info__", None) or {}
+        platform = info.get("platform")
+        plat_str = getattr(platform, "value", platform) if platform else ""
+        category = ""
+        payload_info = info.get("payload") if isinstance(info, dict) else None
+        if isinstance(payload_info, dict):
+            cat = payload_info.get("category")
+            category = getattr(cat, "value", cat) if cat else ""
+        recs = recommend_payloads(str(plat_str or ""), str(category or ""))
+        if not recs:
+            return
+        print_info("Suggested stagers (payload catalog):")
+        for path in recs[:8]:
+            print_info(f"  {path}")
+        try:
+            from core.framework.payload_catalog import LISTENER_PAYLOAD_PAIRS
+            print_info("Listener pairings:")
+            for listener, payload in list(LISTENER_PAYLOAD_PAIRS.items())[:6]:
+                print_info(f"  {listener} → {payload}")
+        except ImportError:
+            pass
+        print_info("  Download stagers: auto-prepared on exploit run (or: host_stager generate && host_stager start)")
+
     def _show_builtin_payload_hint(self):
         """Mention nopayload when the exploit can deliver its own command."""
         exploit = self.framework.current_module
@@ -156,6 +187,14 @@ Note: This command only works when an exploit module is selected.
                 "Built-in command delivery: set payload nopayload "
                 "(no listener; uses module options such as verify_cmd or CMD)"
             )
+        print_info(
+            "Download stagers: auto-prepared when exploit runs (stager_url injected) "
+            "or manually: host_stager generate && host_stager start"
+        )
+        print_info(
+            "Staged shellcode: set payload payloads/stagers/linux/x64/reverse_tcp_recv_stage "
+            "(stage auto-sent on connect)"
+        )
 
     def _show_compatibility_info(self):
         """Show compatibility information for current exploit"""

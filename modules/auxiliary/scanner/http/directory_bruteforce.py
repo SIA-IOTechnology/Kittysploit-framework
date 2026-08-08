@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import urllib.parse
 from typing import Dict, List
 
 from kittysploit import *
@@ -90,6 +91,36 @@ class Module(Auxiliary, Http_client):
             values = {200, 301, 302, 401, 403}
         return status_code in values
 
+    def _filter_catch_all_redirects(self, findings: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        """Drop paths that only share an identical redirect hop (SPA / CDN catch-all)."""
+        redirect_groups: Dict[tuple, List[Dict[str, object]]] = {}
+        kept: List[Dict[str, object]] = []
+        for entry in findings:
+            status = int(entry.get("status_code") or 0)
+            if status not in (301, 302, 307, 308):
+                kept.append(entry)
+                continue
+            sig = (
+                status,
+                int(entry.get("length") or 0),
+                str(entry.get("location") or "").strip(),
+            )
+            redirect_groups.setdefault(sig, []).append(entry)
+
+        suppressed = 0
+        for sig, group in redirect_groups.items():
+            if len(group) >= 3:
+                suppressed += len(group)
+                continue
+            kept.extend(group)
+
+        if suppressed:
+            print_info(
+                f"Suppressed {suppressed} path(s) with identical redirect signature "
+                f"(likely catch-all / CDN redirect)"
+            )
+        return kept
+
     def check(self):
         try:
             return bool(self.http_request(method="GET", path="/"))
@@ -105,14 +136,24 @@ class Module(Auxiliary, Http_client):
                 continue
             if not self._interesting(resp.status_code):
                 continue
-            entry = {
+            status_code = int(resp.status_code)
+            location = str(resp.headers.get("Location", "") or "").strip()
+            if status_code in (301, 302, 307, 308) and location:
+                parsed = urllib.parse.urlparse(location)
+                location = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/') or '/'}"
+            findings.append({
                 "path": path,
-                "status_code": resp.status_code,
+                "status_code": status_code,
                 "length": len(resp.text or ""),
-                "location": resp.headers.get("Location", ""),
-            }
-            findings.append(entry)
-            print_info(f"[{resp.status_code}] {path} ({entry['length']} bytes)")
+                "location": location,
+            })
+
+        findings = self._filter_catch_all_redirects(findings)
+
+        for entry in findings:
+            print_info(
+                f"[{entry['status_code']}] {entry['path']} ({entry['length']} bytes)"
+            )
 
         data = {"count": len(findings), "findings": findings}
         if not findings:

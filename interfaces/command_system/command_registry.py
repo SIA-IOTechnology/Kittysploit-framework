@@ -99,6 +99,8 @@ class CommandRegistry:
             'history',
             'plugin',
             'generate',
+            'host_stager',
+            'deploy_agent',
             'host',
             'vuln',
             'jobs',

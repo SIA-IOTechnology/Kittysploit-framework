@@ -1,0 +1,239 @@
+id: vibe-stack-audit
+version: "1"
+name: Vibe Stack Full Audit (Safe)
+description: >
+  Complete safe audit for vibe-coded / no-code SPAs (Next.js, Vercel, Netlify).
+  Phase 1 — secrets in bundles, preview deploy leaks, Supabase/Firebase keys, ORM schemas,
+  CI/CD exposure (GitHub Actions, GitLab CI, Terraform state), PaaS misconfigs,
+  auth surfaces (magic link, SAML, OAuth PKCE), MCP/LLM injection probes.
+  Non-intrusive: detection only, no credential abuse. Run vibe-credentials-abuse after findings.
+tags: [vibe, nocode, spa, secrets, vercel, supabase, audit, safe, quick-win]
+policy:
+  safe_only: true
+  quiet_probes: true
+continue_on_failure: true
+variables:
+  target:
+    description: Target hostname or URL (SPA / Vercel / Netlify app)
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: waf_fingerprint
+steps:
+  waf_fingerprint:
+    module: scanner/http/waf_fingerprint
+    description: WAF/CDN fingerprint for context
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      path: "/"
+    on_success: react_detect
+    on_failure: react_detect
+  react_detect:
+    module: scanner/http/react_detect
+    description: React / Next.js stack fingerprint
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: vibe_secrets
+    on_failure: vibe_secrets
+  vibe_secrets:
+    module: scanner/http/vibe_stack_secrets_detect
+    description: Multi-service client secret scan (Stripe, OpenAI, Clerk, DB URLs, …)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: preview_deploy_secrets
+    on_failure: preview_deploy_secrets
+  preview_deploy_secrets:
+    module: scanner/http/preview_deploy_prod_secrets_detect
+    description: Production secrets on Vercel/Netlify preview branches
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: vercel_env_leak
+    on_failure: vercel_env_leak
+  vercel_env_leak:
+    module: scanner/http/vercel_env_leak_detect
+    description: Deep Vercel/Netlify env.js and config leak scan
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: react_env_bundle
+    on_failure: react_env_bundle
+  react_env_bundle:
+    module: scanner/http/react_env_bundle_detect
+    description: NEXT_PUBLIC_ / VITE_ env assignments in bundles
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: react_sourcemap
+    on_failure: react_sourcemap
+  react_sourcemap:
+    module: scanner/http/react_sourcemap_detect
+    description: Exposed JS source maps
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: supabase_keys
+    on_failure: supabase_keys
+  supabase_keys:
+    module: scanner/http/supabase_key_exposure_detect
+    description: Supabase anon/service_role JWT in client assets
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: firebase_keys
+    on_failure: firebase_keys
+  firebase_keys:
+    module: scanner/http/firebase_api_key_detect
+    description: Firebase browser API keys and project config
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: firestore_public
+    on_failure: firestore_public
+  firestore_public:
+    module: scanner/http/firestore_public_access_detect
+    description: Firestore REST anonymous document access
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: firebase_rtdb_rules
+    on_failure: firebase_rtdb_rules
+  firebase_rtdb_rules:
+    module: scanner/http/firebase_rtdb_rules_audit_detect
+    description: Firebase RTDB rules and path enumeration
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: firestore_rules
+    on_failure: firestore_rules
+  firestore_rules:
+    module: scanner/http/firestore_rules_audit_detect
+    description: Firestore collection rules audit
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: orm_schema
+    on_failure: orm_schema
+  orm_schema:
+    module: scanner/http/drizzle_prisma_schema_exposure_detect
+    description: Drizzle / Prisma schema and migration leaks
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: github_workflows
+    on_failure: github_workflows
+  github_workflows:
+    module: scanner/http/github_workflows_secrets_detect
+    description: GitHub Actions workflow secret patterns
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: gitlab_ci
+    on_failure: gitlab_ci
+  gitlab_ci:
+    module: scanner/http/gitlab_ci_secrets_detect
+    description: Exposed GitLab CI YAML and embedded secrets
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: terraform_state
+    on_failure: terraform_state
+  terraform_state:
+    module: scanner/http/terraform_state_secrets_detect
+    description: Exposed terraform.tfstate files
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: paas_secrets
+    on_failure: paas_secrets
+  paas_secrets:
+    module: scanner/http/railway_render_fly_secrets_detect
+    description: Railway / Render / Fly.io deploy secrets
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: cloudflare_workers
+    on_failure: cloudflare_workers
+  cloudflare_workers:
+    module: scanner/http/cloudflare_workers_env_detect
+    description: Cloudflare Workers env exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: serverless_urls
+    on_failure: serverless_urls
+  serverless_urls:
+    module: scanner/http/serverless_function_url_detect
+    description: Public serverless function URLs
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: magic_link
+    on_failure: magic_link
+  magic_link:
+    module: scanner/http/magic_link_surface_detect
+    description: Magic link / passwordless auth endpoints
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: saml_metadata
+    on_failure: saml_metadata
+  saml_metadata:
+    module: scanner/http/saml_metadata_abuse_detect
+    description: SAML metadata exposure and weak signing
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: oauth_pkce
+    on_failure: oauth_pkce
+  oauth_pkce:
+    module: scanner/http/oauth_pkce_refresh_detect
+    description: OAuth PKCE and refresh token misconfigs
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: mcp_auth
+    on_failure: mcp_auth
+  mcp_auth:
+    module: scanner/http/mcp_server_auth_abuse
+    description: MCP server auth bypass surfaces
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: llm_injection
+    on_failure: llm_injection
+  llm_injection:
+    module: scanner/http/llm_prompt_injection_surface_detect
+    description: LLM prompt injection and agent tool surfaces
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

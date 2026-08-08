@@ -38,6 +38,27 @@ _NOT_FOUND_TITLE = re.compile(
     r"page\s+introuvable|doesn'?t\s+exist|can'?t\s+be\s+found|could\s+not\s+be\s+found)\b",
     re.I,
 )
+# Per-path canonical / OG tags on SPA catch-alls (e.g. href="https://site/.env").
+_SPA_META_RE = re.compile(
+    r"<link\b[^>]*\brel=[\"']canonical[\"'][^>]*>"
+    r"|<meta\b[^>]*\bproperty=[\"']og:(?:url|title)[\"'][^>]*>"
+    r"|<meta\b[^>]*\bname=[\"']twitter:(?:url|title)[\"'][^>]*>",
+    re.I,
+)
+
+
+def strip_spa_path_variants(body: str, path: str = "") -> str:
+    """Drop SPA meta tags (and optional path echoes) before shell comparison."""
+    text = str(body or "")
+    text = _SPA_META_RE.sub("", text)
+    path_norm = str(path or "").strip()
+    if path_norm and path_norm != "/":
+        for variant in {path_norm, path_norm.rstrip("/"), path_norm.lstrip("/")}:
+            if variant and len(variant) > 1:
+                text = text.replace(variant, "/")
+    return text
+
+
 _NOT_FOUND_BODY = re.compile(
     r"(?:"
     r"not\s+found|"
@@ -64,12 +85,32 @@ class Fingerprint:
     title: str
     ctype: str
     head_digest: str
+    shell_digest: str = ""
 
     def exact_match(self, other: "Fingerprint") -> bool:
         return self.digest == other.digest and self.status == other.status
 
+    def spa_shell_match(self, other: "Fingerprint") -> bool:
+        """Same HTML shell after stripping per-path canonical/OG meta tags."""
+        if not self.shell_digest or not other.shell_digest:
+            return False
+        if self.shell_digest != other.shell_digest:
+            return False
+        if self.status == other.status:
+            return True
+        # Redirect hop vs final 200 SPA page on the same host.
+        return self.status in (200, 301, 302, 307, 308) and other.status in (
+            200,
+            301,
+            302,
+            307,
+            308,
+        )
+
     def near_match(self, other: "Fingerprint") -> bool:
         """Same status + similar size + same title/head — typical soft-404."""
+        if self.spa_shell_match(other):
+            return True
         if self.status != other.status:
             return False
         if self.digest == other.digest:
@@ -150,6 +191,10 @@ def fingerprint_text(
     digest = hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
     head = normalized[:2048]
     head_digest = hashlib.sha256(head.encode("utf-8", errors="replace")).hexdigest()
+    shell_normalized = _normalize_body(strip_spa_path_variants(raw))
+    shell_digest = hashlib.sha256(
+        shell_normalized.encode("utf-8", errors="replace")
+    ).hexdigest()
     ctype = str(content_type or "").lower()
     return Fingerprint(
         status=int(status or 0),
@@ -158,6 +203,7 @@ def fingerprint_text(
         title=_extract_title(raw),
         ctype=ctype,
         head_digest=head_digest,
+        shell_digest=shell_digest,
     )
 
 

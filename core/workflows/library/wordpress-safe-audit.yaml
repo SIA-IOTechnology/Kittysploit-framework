@@ -1,0 +1,220 @@
+id: wordpress-safe-audit
+version: "1"
+name: WordPress Safe Audit
+description: >
+  Safe WordPress surface audit — core fingerprint, version/readme exposure, user enumeration,
+  XML-RPC, login surfaces, directory listings, backup leaks (UpdraftPlus, Total Upkeep),
+  wp-env/git/emergency misconfigs, WooCommerce/Elementor plugin exposure, and phpMyAdmin.
+  Detection only: no SQLi/XSS exploitation. Chain after web-recon or run standalone on WP targets.
+tags: [wordpress, cms, web, audit, safe, quick-win]
+policy:
+  safe_only: true
+  quiet_probes: true
+continue_on_failure: true
+variables:
+  target:
+    description: WordPress site hostname or URL (e.g. example.com or https://blog.example.com)
+    required: true
+  port: "443"
+  ssl: "true"
+start_step: waf_fingerprint
+steps:
+  waf_fingerprint:
+    module: scanner/http/waf_fingerprint
+    description: WAF/CDN fingerprint for scan context
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+      path: "/"
+    on_success: wordpress_detect
+    on_failure: wordpress_detect
+  wordpress_detect:
+    module: scanner/http/wordpress_detect
+    description: Confirm WordPress and fingerprint core version
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: readme_exposure
+    on_failure: readme_exposure
+  readme_exposure:
+    module: scanner/http/wordpress_readme_file_detect
+    description: Exposed readme.html version and install hints
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: user_enum
+    on_failure: user_enum
+  user_enum:
+    module: scanner/http/wordpress_user_enum_detect
+    description: Author/user enumeration via REST or ?author=
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: rdf_user_enum
+    on_failure: rdf_user_enum
+  rdf_user_enum:
+    module: scanner/http/wordpress_rdf_user_enum_detect
+    description: User enumeration via RDF/feed endpoints
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: login_detect
+    on_failure: login_detect
+  login_detect:
+    module: auxiliary/scanner/http/login_page_detector
+    description: Exposed wp-login and admin authentication pages
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: xmlrpc_detect
+    on_failure: xmlrpc_detect
+  xmlrpc_detect:
+    module: scanner/http/wordpress_xmlrpc_detect
+    description: XML-RPC enabled on wp-login.php/xmlrpc.php
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: xmlrpc_methods
+    on_failure: xmlrpc_methods
+  xmlrpc_methods:
+    module: scanner/http/wordpress_xmlrpc_listmethods_detect
+    description: XML-RPC system.listMethods exposure (brute-force/SSRF risk)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: directory_listing
+    on_failure: directory_listing
+  directory_listing:
+    module: scanner/http/wordpress_directory_listing_detect
+    description: Directory listing on uploads, plugins, or themes
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: wp_env_exposure
+    on_failure: wp_env_exposure
+  wp_env_exposure:
+    module: scanner/http/wordpress_wp_env_detect
+    description: Exposed wp-config / wp-env configuration artifacts
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: git_config
+    on_failure: git_config
+  git_config:
+    module: scanner/http/wordpress_git_config_detect
+    description: .git/config or VCS metadata in web root
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: emergency_script
+    on_failure: emergency_script
+  emergency_script:
+    module: scanner/http/wordpress_emergency_script_detect
+    description: emergency.php password-reset script left online
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: db_repair
+    on_failure: db_repair
+  db_repair:
+    module: scanner/http/wordpress_db_repair_detect
+    description: wp-admin/maint/repair.php reachable without auth
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: installer_log
+    on_failure: installer_log
+  installer_log:
+    module: scanner/http/wordpress_installer_log_detect
+    description: Installer or upgrade log files in web root
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: db_backup
+    on_failure: db_backup
+  db_backup:
+    module: scanner/http/wordpress_db_backup_detect
+    description: SQL/database backup files exposed under web root
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: db_backup_listing
+    on_failure: db_backup_listing
+  db_backup_listing:
+    module: scanner/http/wordpress_db_backup_listing_detect
+    description: Backup directory listing (sql.gz, zip, dumps)
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: updraftplus_key
+    on_failure: updraftplus_key
+  updraftplus_key:
+    module: scanner/http/wordpress_updraftplus_pem_key_detect
+    description: UpdraftPlus PEM/backup keys downloadable
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: total_upkeep_backup
+    on_failure: total_upkeep_backup
+  total_upkeep_backup:
+    module: scanner/http/wordpress_total_upkeep_backup_download_detect
+    description: Total Upkeep backup archive download without auth
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: woocommerce_listing
+    on_failure: woocommerce_listing
+  woocommerce_listing:
+    module: scanner/http/wordpress_woocommerce_listing_detect
+    description: WooCommerce plugin directory or debug exposure
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: elementor_listing
+    on_failure: elementor_listing
+  elementor_listing:
+    module: scanner/http/wordpress_elementor_plugin_listing_detect
+    description: Elementor plugin directory listing
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: phpmyadmin_detect
+    on_failure: phpmyadmin_detect
+  phpmyadmin_detect:
+    module: scanner/http/phpmyadmin_detect
+    description: phpMyAdmin panel exposed on host or subdirectory
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: phpmyadmin_setup
+    on_failure: phpmyadmin_setup
+  phpmyadmin_setup:
+    module: scanner/http/phpmyadmin_setup_detect
+    description: phpMyAdmin setup/install script reachable
+    options:
+      target: "${target}"
+      port: "${port}"
+      ssl: "${ssl}"
+    on_success: null
+    on_failure: null

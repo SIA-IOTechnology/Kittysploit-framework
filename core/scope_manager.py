@@ -583,8 +583,16 @@ class ScopeManager:
         if decision.action == "deny" and self.enabled and not self.allowed_ips and not self.allowed_domains:
             print_info(f"{prefix} Add allowlist entries with: scope allow add ip|domain <value>")
 
-    def ensure_execution_permitted(self, module, *, skip_confirm: bool = False) -> bool:
+    def ensure_execution_permitted(
+        self,
+        module,
+        *,
+        skip_confirm: bool = False,
+        skip_enforcement: bool = False,
+    ) -> bool:
         """Gate module execution. Returns True when run may proceed."""
+        if skip_enforcement:
+            return True
         decision = self.check_execution(module, skip_confirm=skip_confirm)
         if not self.enabled:
             return True

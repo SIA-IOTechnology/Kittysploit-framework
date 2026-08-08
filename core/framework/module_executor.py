@@ -36,6 +36,7 @@ class ModuleExecutionRequest:
     module: Any
     background: bool = False
     skip_scope_confirm: bool = False
+    skip_scope_enforcement: bool = False
     use_runtime_kernel: bool = False
     use_exploit_wrapper: bool = True
     collect_metrics: bool = True
@@ -247,11 +248,16 @@ class ModuleExecutor:
         module: Any,
         *,
         skip_confirm: bool = False,
+        skip_enforcement: bool = False,
     ) -> bool:
         manager = getattr(framework, "scope_manager", None)
         if not manager:
             return True
-        return manager.ensure_execution_permitted(module, skip_confirm=skip_confirm)
+        return manager.ensure_execution_permitted(
+            module,
+            skip_confirm=skip_confirm,
+            skip_enforcement=skip_enforcement,
+        )
 
     @staticmethod
     def run_preflight(
@@ -259,6 +265,7 @@ class ModuleExecutor:
         module: Any,
         *,
         skip_scope_confirm: bool = False,
+        skip_scope_enforcement: bool = False,
         verbose_guardian_debug: bool = False,
         check_options: bool = True,
     ) -> PreflightResult:
@@ -280,6 +287,7 @@ class ModuleExecutor:
             framework,
             module,
             skip_confirm=skip_scope_confirm,
+            skip_enforcement=skip_scope_enforcement,
         ):
             return PreflightResult(
                 allowed=False,
@@ -753,6 +761,7 @@ class ModuleExecutor:
                 framework,
                 module,
                 skip_scope_confirm=request.skip_scope_confirm,
+                skip_scope_enforcement=request.skip_scope_enforcement,
                 verbose_guardian_debug=request.verbose_guardian_debug,
             )
             if not preflight.allowed:

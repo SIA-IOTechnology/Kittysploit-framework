@@ -187,6 +187,9 @@ Examples:
             if not target_info:
                 print_error(f"Invalid target: {options['url']}")
                 return False
+
+            if not self._ensure_scanner_target_in_scope(target_info):
+                return False
             
             # Discover scanner modules (static metadata only — no import)
             print_info("Discovering scanner modules...")
@@ -321,6 +324,7 @@ Examples:
 
             timing: Dict[str, float] = {}
             scan_t0 = time.perf_counter()
+            gate_info: Dict[str, Any] = {}
             with scan_http_session(pool_size=max(20, options["threads"] * 2)):
                 # Fingerprint `/` (+ cheap CMS confirms) BEFORE prefetch so we do
                 # not pull hundreds of WordPress/plugin paths on non-CMS targets.
@@ -339,6 +343,7 @@ Examples:
                         print_info(
                             f"Stack fingerprint: {', '.join(gate_info['hints'])}"
                         )
+                        target_info["stack_hints"] = list(gate_info["hints"])
                     if not modules:
                         print_warning("No modules left after stack gating")
                         return False
@@ -640,6 +645,27 @@ Examples:
             return None
         
         return None
+
+    def _ensure_scanner_target_in_scope(self, target_info: Dict[str, Any]) -> bool:
+        """
+        Abort ``scanner -u`` before port scan / module execution when the target
+        is outside the engagement allowlist (RoE scope).
+        """
+        manager = getattr(self.framework, "scope_manager", None)
+        if not manager or not getattr(manager, "enabled", False):
+            return True
+
+        hostname = str(target_info.get("hostname") or "").strip()
+        if not hostname:
+            return True
+
+        decision = manager.is_target_allowed(hostname)
+        if decision.allowed:
+            return True
+
+        manager.report_denial(decision)
+        print_error("Scanner aborted: target is outside engagement scope.")
+        return False
     
     def _port_to_protocol(self, port: int) -> Optional[str]:
         """Map port number to protocol name"""
@@ -1003,12 +1029,20 @@ Examples:
         if configured_port in open_ports:
             proto = self._port_to_protocol(configured_port)
             if proto == family:
+                if (
+                    family in ("http", "cloud")
+                    and int(configured_port) == 80
+                    and 443 in open_ports
+                ):
+                    return 443
                 return configured_port
             if family in ("http", "cloud") and configured_port in (80, 443, 8080, 8443, 8000, 8888):
+                if int(configured_port) == 80 and 443 in open_ports:
+                    return 443
                 return configured_port
 
         if family in ("http", "cloud"):
-            preferred = [80, 443, 8080, 8443, 8000, 8888]
+            preferred = [443, 80, 8080, 8443, 8000, 8888]
         elif family == "mysql":
             preferred = [3306]
         elif family == "redis":
@@ -1374,7 +1408,18 @@ Examples:
                     )
 
                     if not module_instance:
-                        result['message'] = 'Failed to load module'
+                        failure = getattr(self.framework.module_loader, "last_load_failure", None)
+                        if failure is not None:
+                            cause = str(getattr(failure, "cause", "") or getattr(failure, "detail", "") or "")
+                            kind = getattr(getattr(failure, "kind", None), "value", "") or ""
+                            bits = ["Failed to load module"]
+                            if kind:
+                                bits.append(f"({kind})")
+                            if cause:
+                                bits.append(f": {cause}")
+                            result["message"] = " ".join(bits)
+                        else:
+                            result["message"] = "Failed to load module"
                         return result
 
                     # Reset dynamic state when reusing a cached instance
@@ -1705,15 +1750,31 @@ Examples:
         total = len(raw_results)
         raw_vulnerable = sum(1 for r in raw_results if r.get("vulnerable"))
         unique_vulnerable = sum(1 for r in results if r.get("vulnerable"))
+        blocked = sum(1 for r in raw_results if r.get("status") == "blocked")
         safe = sum(
             1
             for r in raw_results
-            if not r.get("vulnerable") and r.get("status") not in ("error",)
+            if not r.get("vulnerable")
+            and r.get("status") not in ("error", "blocked", "skipped")
         )
         skipped = sum(1 for r in raw_results if r.get("status") == "skipped")
         errors = sum(1 for r in raw_results if r.get("status") == "error")
+        suppressed_soft404 = sum(1 for r in raw_results if r.get("suppressed_soft404"))
+        suppressed_postprocess = sum(
+            1
+            for r in results
+            if str(r.get("suppressed_reason") or "").startswith("suppressed")
+        )
+
+        ti = target_info or {}
+        stack_hints = list(ti.get("stack_hints") or [])
+        open_ports = [int(p) for p in (ti.get("open_ports") or [])]
+        if 3306 in open_ports and not any("mysql" in str(h).lower() for h in stack_hints):
+            stack_hints.append("mysql (port 3306/tcp open)")
 
         print_info(f"Total modules executed: {total}")
+        if stack_hints:
+            print_info(f"Technologies identified: {', '.join(stack_hints)}")
         if grouped and raw_vulnerable != unique_vulnerable:
             print_success(
                 f"Vulnerabilities found: {unique_vulnerable} unique "
@@ -1721,11 +1782,32 @@ Examples:
             )
         else:
             print_success(f"Vulnerabilities found: {unique_vulnerable}")
+        if raw_vulnerable > 0 and unique_vulnerable == 0:
+            print_warning(
+                "All positive detections were removed by deduplication/suppression filters "
+                "(try scanner --no-dedup to inspect raw hits)"
+            )
         print_info(f"Safe: {safe}")
+        if blocked > 0:
+            host = str(ti.get("hostname") or ti.get("host") or "target").strip()
+            print_warning(
+                f"Scope blocked: {blocked} module(s) — target outside engagement allowlist "
+                f"(add with: scope allow domain {host})"
+            )
         if skipped > 0:
             print_info(f"Skipped: {skipped}")
         if errors > 0:
             print_warning(f"Errors: {errors}")
+        if suppressed_soft404 > 0:
+            print_warning(
+                f"Soft-404 suppressed: {suppressed_soft404} positive hit(s) matched the homepage/canary "
+                f"(common on SPAs — try scanner --no-cache or --no-dedup)"
+            )
+        if suppressed_postprocess > 0:
+            print_warning(
+                f"Post-process suppressed: {suppressed_postprocess} row(s) filtered as noise/speculative "
+                f"(try scanner --no-dedup to see raw positives)"
+            )
         if timing:
             print_empty()
             print_info("Timing:")

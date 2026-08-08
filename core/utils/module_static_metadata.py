@@ -100,6 +100,22 @@ OPTION_CLASS_NAMES: Set[str] = {
 CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 
 
+def is_valid_cve_storage_value(cve: Any) -> bool:
+    """Return True when *cve* is empty or comma/whitespace-separated CVE tokens."""
+    if cve is None:
+        return True
+    text = str(cve).strip()
+    if not text:
+        return True
+    for part in re.split(r"[\s,;]+", text):
+        token = part.strip()
+        if not token:
+            continue
+        if not CVE_RE.match(token):
+            return False
+    return True
+
+
 def _string_ast_value(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value

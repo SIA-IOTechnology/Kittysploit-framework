@@ -7,7 +7,7 @@ from core.utils.exceptions import OptionValidationError
 class OptChoice(Option):
     """Option for selecting from a list of choices"""
     
-    def __init__(self, default="", description="", required=False, choices=None):
+    def __init__(self, default="", description="", required=False, choices=None, advanced=False):
         """
         Initialize a choice option
         
@@ -16,15 +16,15 @@ class OptChoice(Option):
             description: Option description
             required: Whether the option is required
             choices: List of valid choices
+            advanced: Whether the option is advanced (hidden from basic show options)
         """
         self.choices = choices or []
-        self.advanced = False
         
         # Validate default value if provided
         if default and self.choices and default not in self.choices:
             raise OptionValidationError(f"Invalid default choice '{default}'. Valid choices: {', '.join(self.choices)}")
         
-        super().__init__(default, description, required)
+        super().__init__(default, description, required, advanced=advanced)
     
     def __get__(self, instance, owner):
         """Get the value directly (returns the value, not the option object)"""

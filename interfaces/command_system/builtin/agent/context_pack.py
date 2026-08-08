@@ -54,6 +54,8 @@ def _score_section(name: str, content: Any, keywords: Sequence[str]) -> float:
     # Prefer actionable sections
     if name in {"risk_signals", "unlocked_capabilities", "login_paths", "tech_confidence"}:
         score += 2.0
+    if name in {"persistent_vault", "scope_lateral"}:
+        score += 2.5
     if name in {"discovered_endpoints", "discovered_params"}:
         score += 1.0
     return score
@@ -112,6 +114,12 @@ def pack_knowledge_context(
         ("discovered_params", kb.get("discovered_params", [])),
         ("observed_modules", kb.get("observed_modules", [])),
         ("unlocked_capabilities", kb.get("unlocked_capabilities", [])),
+        ("persistent_vault", kb.get("persistent_vault", {})),
+        ("scope_lateral", {
+            "credential_reuse_ready": bool((kb.get("scope_lateral") or {}).get("credential_reuse_ready")),
+            "proposals": list((kb.get("scope_lateral") or {}).get("proposals") or [])[:4],
+            "credentials": list((kb.get("scope_lateral") or {}).get("credentials") or [])[:4],
+        }),
     ]
     if extra_sections:
         for name, content in extra_sections.items():

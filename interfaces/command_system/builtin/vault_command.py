@@ -193,9 +193,9 @@ Examples:
                 "expired" if row.is_expired() else "active",
             ])
         print_table(
+            ["ID", "User", "Kind", "Source", "Scope hosts", "Ports", "Expires", "Status"],
             table_rows,
-            headers=["ID", "User", "Kind", "Source", "Scope hosts", "Ports", "Expires", "Status"],
-            title="Credential vault",
+            expand_to_terminal=True,
         )
         print_info("Secrets are encrypted in the workspace database with the master key.")
         return True
@@ -278,9 +278,9 @@ Examples:
                 item.reason,
             ])
         print_table(
+            ["Action", "Target", "Protocol", "Credential", "Module hint", "Reason"],
             rows,
-            headers=["Action", "Target", "Protocol", "Credential", "Module hint", "Reason"],
-            title="Scope-bound credential reuse",
+            expand_to_terminal=True,
         )
         print_info("Suggestions only — no automatic out-of-scope testing.")
         return True

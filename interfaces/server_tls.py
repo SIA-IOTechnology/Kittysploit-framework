@@ -139,9 +139,12 @@ def _generate_with_cryptography(
     now = datetime.now(timezone.utc)
     san_names = [
         x509.DNSName("localhost"),
-        x509.DNSName(common_name),
         x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
     ]
+    try:
+        san_names.append(x509.IPAddress(ipaddress.ip_address(common_name)))
+    except ValueError:
+        san_names.append(x509.DNSName(common_name))
     try:
         san_names.append(x509.IPAddress(ipaddress.IPv6Address("::1")))
     except Exception:

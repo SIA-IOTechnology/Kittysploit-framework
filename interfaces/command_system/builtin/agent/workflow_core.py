@@ -4423,6 +4423,9 @@ class AgentWorkflowCore:
         state.knowledge_base = kb
 
     def _run_agent_flow(self, state: AgentState) -> AgentState:
+        from core.vault.agent_bridge import bind_agent_runtime
+
+        bind_agent_runtime(self.framework, state)
         install_requests_budget_hook()
         store = getattr(state, "run_store", None)
         if store is not None:
@@ -4448,6 +4451,9 @@ class AgentWorkflowCore:
         def _wrap(fn):
             def _inner(raw: Dict[str, Any]) -> Dict[str, Any]:
                 st = agent_state_from_dict(raw)
+                from core.vault.agent_bridge import bind_agent_runtime
+
+                bind_agent_runtime(self.framework, st)
                 phase = fn.__name__.replace("_node_", "")
                 st.phase_started_at = time.monotonic()
                 st.current_phase = phase
@@ -10973,7 +10979,11 @@ class AgentWorkflowCore:
                 get_credential_vault,
             )
 
-            vault = get_credential_vault(state=state, kb=getattr(state, "knowledge_base", None))
+            vault = get_credential_vault(
+                state=state,
+                kb=getattr(state, "knowledge_base", None),
+                framework=self.framework,
+            )
             apply_resolved_options(module_instance, options, vault)
             return
         for key, value in options.items():

@@ -1,22 +1,28 @@
 from core.framework.option.base_option import Option
+from core.framework.payload_paths import is_nopayload_path, normalize_nopayload_path
 from core.utils.exceptions import OptionValidationError
 from core.utils.function import pythonize_path
 import importlib
 
 class OptPayload(Option):
 
+    def _store_payload_path(self, instance, value):
+        instance_id = id(instance)
+        self._instance_values[instance_id] = {
+            'value': value,
+            'display_value': str(value) if value else "",
+        }
+        self._default_value = value
+        self._default_display_value = str(value) if value else ""
+
     def __set__(self, instance, value):
+        if is_nopayload_path(value):
+            self._store_payload_path(instance, normalize_nopayload_path(value))
+            return
+
         payload = instance._add_payload_option(value)
         if payload:
-            # Store the value for this specific instance (the path, not the generated payload)
-            instance_id = id(instance)
-            self._instance_values[instance_id] = {
-                'value': value,  # Store the path
-                'display_value': str(value) if value else ""
-            }
-            # Also update default value for backward compatibility
-            self._default_value = value
-            self._default_display_value = str(value) if value else ""
+            self._store_payload_path(instance, value)
         else:
             raise OptionValidationError(f"Failed to add payload option: {value}")
     
@@ -67,6 +73,9 @@ class OptPayload(Option):
             payload_path_value = self._default_value
         
         if not payload_path_value:
+            return None
+
+        if is_nopayload_path(payload_path_value):
             return None
 
         if isinstance(payload_path_value, str) and payload_path_value.startswith("msf/"):

@@ -83,6 +83,13 @@ def apply_normalized_outcome_to_state(
 
     sync_campaign_world(kb, state=state)
 
+    from core.vault.agent_bridge import capture_discovered_credentials, sync_agent_vault_context
+
+    if framework is not None and state is not None:
+        state.framework = framework
+    sync_agent_vault_context(kb, state=state, framework=framework, resync_lateral=False)
+    capture_discovered_credentials(kb, state=state, framework=framework)
+
     from interfaces.command_system.builtin.agent.scope_lateral import sync_scope_lateral
 
     sync_scope_lateral(kb, state=state, structured_details=structured_details)

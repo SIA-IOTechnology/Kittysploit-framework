@@ -8,8 +8,6 @@ __pycache__/
 venv/*
 .venv/*
 docs/*
-!docs/academy/
-!docs/academy/**
 docs/academy/secrets/
 docs/academy/secrets/**
 docs/academy/.env
@@ -43,7 +41,6 @@ cache/
 # Test files
 test_*.py
 *_test.py
-!tests/test_json_schemas.py
 
 # Temporary files
 *.tmp
@@ -106,3 +103,4 @@ data/loot/*
 lib/vulners/__init__.py
 lib/vulners/client.py
 plugins/vulners.py
+

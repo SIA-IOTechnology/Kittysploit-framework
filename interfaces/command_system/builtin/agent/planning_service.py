@@ -111,6 +111,8 @@ def build_reason_prompt_payload(
         "If post_auth_context.authenticated_session is true, a credential milestone succeeded: use landing_html_excerpt only as evidence "
         "(infer stack from distinctive tokens and structure; do not invent a product unless the HTML supports it). "
         "When credential_reuse_ready is true, prefer authenticated follow-up or exploit paths and keep reusing the known login path/cookies instead of re-running login discovery. "
+        "When persistent_vault entries or lateral_proposals are present, prefer scope-bound credential reuse modules "
+        "(ssh_login, smb_login, ftp_login, etc.) using vault handles already indexed in credential_store — never test out-of-scope targets. "
         "After a valid access, keep pushing toward a session/shell with grounded exploit paths before resuming any generic crawling. "
         "Prefer next_actions that align matched_catalog_paths_from_landing_html with run_followup/run_exploit when paths exist in the catalog. "
         "If matches are empty or low confidence, propose a short crawler pass then narrow XSS/SQLi/LFI only on parameters/endpoints that were actually observed. "
@@ -121,6 +123,14 @@ def build_reason_prompt_payload(
         "authenticated_session": auth_session,
         "credential_reuse_ready": bool(auth_context),
     }
+    persistent_vault = knowledge_base.get("persistent_vault") if isinstance(knowledge_base.get("persistent_vault"), dict) else {}
+    scope_lateral = knowledge_base.get("scope_lateral") if isinstance(knowledge_base.get("scope_lateral"), dict) else {}
+    if persistent_vault.get("available") or scope_lateral.get("credential_reuse_ready"):
+        post_auth_context.update({
+            "persistent_vault_count": int(persistent_vault.get("entry_count") or 0),
+            "persistent_vault_entries": list(persistent_vault.get("entries") or [])[:6],
+            "lateral_proposals": list(scope_lateral.get("proposals") or [])[:4],
+        })
     if auth_session or auth_first:
         post_auth_context.update(
             {

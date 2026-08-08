@@ -93,6 +93,7 @@ class AgentState:
     active_service_id: str = ""
     post_exploit_mission: Dict[str, Any] = field(default_factory=dict)
     credential_vault: Any = None
+    framework: Any = None
     campaign_stop_reason: Optional[str] = None
     scan_specializations: List[str] = field(default_factory=list)
     scan_tech_hints: List[str] = field(default_factory=list)
@@ -377,6 +378,8 @@ def agent_state_checkpoint_dict(state: AgentState) -> Dict[str, Any]:
         "network_budget",
         "cancellation_token",
         "run_store",
+        "framework",
+        "credential_vault",
     ):
         payload.pop(key, None)
     sessions_before = payload.get("sessions_before") or {}

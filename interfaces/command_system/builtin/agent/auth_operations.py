@@ -166,7 +166,11 @@ class AuthContextOperations:
                 vault_sensitive_fields,
             )
 
-            vault = get_credential_vault(state=state, kb=knowledge_base)
+            vault = get_credential_vault(
+                state=state,
+                kb=knowledge_base,
+                framework=getattr(state, "framework", None),
+            )
             candidate = dict(candidate)
             vault_sensitive_fields(candidate, vault, source=str(candidate.get("source_module") or "auth"))
 
@@ -198,6 +202,18 @@ class AuthContextOperations:
         if vault is not None:
             scrub_plaintext_secrets_in_kb(knowledge_base, vault)
             sync_vault_index_to_kb(knowledge_base, vault)
+            from core.vault.agent_bridge import capture_discovered_credentials, sync_agent_vault_context
+
+            capture_discovered_credentials(
+                knowledge_base,
+                state=state,
+                framework=getattr(state, "framework", None),
+            )
+            sync_agent_vault_context(
+                knowledge_base,
+                state=state,
+                framework=getattr(state, "framework", None),
+            )
 
     def get_active_auth_context(self, knowledge_base: Any) -> Dict[str, Any]:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
@@ -293,7 +309,11 @@ class AuthContextOperations:
         )
         if not context:
             return
-        vault = get_credential_vault(state=state, kb=state.knowledge_base)
+        vault = get_credential_vault(
+            state=state,
+            kb=state.knowledge_base,
+            framework=getattr(state, "framework", None),
+        )
         cookies = context.get("cookies") or {}
         merged_cookies = self.sanitize_cookie_map(cookies)
         for name, value in list(merged_cookies.items()):
@@ -360,7 +380,10 @@ class AuthContextOperations:
             vault_sensitive_fields,
         )
 
-        vault = get_credential_vault(state)
+        vault = get_credential_vault(
+            state,
+            framework=getattr(state, "framework", None),
+        )
         safe_overrides: Dict[str, Any] = {}
         for key, value in overrides.items():
             if is_vault_handle(value):

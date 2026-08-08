@@ -351,6 +351,7 @@ def build_planner_llm_context(
 
     safe_findings = sanitize_finding_rows(findings or [])
     scope_lateral = kb.get("scope_lateral") if isinstance(kb.get("scope_lateral"), dict) else {}
+    persistent_vault = kb.get("persistent_vault") if isinstance(kb.get("persistent_vault"), dict) else {}
     payload = sanitize_nested({
         "schema_version": "1.0",
         "host_service": host_ctx.to_dict(),
@@ -362,6 +363,8 @@ def build_planner_llm_context(
         "sanitized_findings": safe_findings[:8],
         "credential_reuse_ready": bool(scope_lateral.get("credential_reuse_ready")),
         "lateral_proposals": list(scope_lateral.get("proposals") or [])[:3],
+        "persistent_vault_entries": list(persistent_vault.get("entries") or [])[:6],
+        "persistent_vault_count": int(persistent_vault.get("entry_count") or 0),
         "plan_revision": int((kb.get("plan_recalc") or {}).get("revision") or 0),
         "plan_recalc_pending": bool((kb.get("plan_recalc") or {}).get("replan_required")),
     })

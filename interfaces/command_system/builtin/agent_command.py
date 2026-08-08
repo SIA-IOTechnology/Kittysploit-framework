@@ -893,6 +893,9 @@ Examples:
             if isinstance(state.knowledge_base, dict):
                 state.knowledge_base["_vault_run_id"] = run_id
             state.checkpoint_enabled = True
+        from core.vault.agent_bridge import bind_agent_runtime
+
+        bind_agent_runtime(self.framework, state)
         self._agent.knowledge.bootstrap_knowledge_from_host_profile(state)
 
         previous_module = capture_module_context(self.framework)

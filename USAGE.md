@@ -523,6 +523,30 @@ python3 kittyconsole.py -a --api-port 5000 --api-key "$KITTYSPLOIT_API_KEY"
 python3 kittyconsole.py -r --rpc-port 8888 --api-key "$KITTYSPLOIT_API_KEY"
 ```
 
+### Mobile pairing
+
+From the interactive console, start the restricted mobile API and display a
+single-use QR code:
+
+```text
+mobile pair
+mobile pair --advertise-host 192.168.1.42 --port 5000
+mobile status
+mobile revoke <device-id>
+```
+
+`mobile pair` uses HTTPS by default, generates a local certificate, and embeds
+its SHA-256 fingerprint in the QR for certificate pinning. The QR expires after
+120 seconds and can only be claimed once. The issued mobile identity has the
+`viewer` role: it can read modules, sessions, events and workspace information,
+but cannot run modules or mutate the engagement. Use `--insecure-http` only on a
+trusted isolated network.
+
+The app claims the QR code with `POST /api/mobile/pair/claim` and JSON fields
+`code` and `device_name`. Access tokens last 15 minutes and rotate through a
+refresh token valid for 30 days. Pairings and tokens are intentionally held in
+memory and are revoked when the framework exits.
+
 ### MCP (Cursor / IDE integration)
 
 ```bash

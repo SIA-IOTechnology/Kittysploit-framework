@@ -135,6 +135,7 @@ class CommandRegistry:
             'bloodhound',
             'agent_task',
             'mcp',
+            'mobile',
             'scope',
             'room',
             'campaign',

@@ -6,6 +6,7 @@ Compatible Payloads command implementation
 """
 
 from interfaces.command_system.base_command import BaseCommand
+from core.framework.payload_paths import is_nopayload_path
 from core.output_handler import print_info, print_success, print_error, print_warning
 
 class CompatiblePayloadsCommand(BaseCommand):
@@ -90,6 +91,7 @@ Note: This command only works when an exploit module is selected.
             if not compatible_payloads:
                 print_warning("No compatible payloads found for this exploit.")
                 self._show_compatibility_info()
+                self._show_builtin_payload_hint()
                 print_info("Metasploit payloads are also available with: set payload msf/<payload_name>")
                 return True
             
@@ -136,9 +138,25 @@ Note: This command only works when an exploit module is selected.
         
         print_info("")
         print_info("Use 'set payload <path>' to select a payload")
+        self._show_builtin_payload_hint()
         print_info("You can also use Metasploit payloads with: set payload msf/<payload_name>")
         print_info("Use 'compatible_payloads --detailed' for detailed information")
     
+    def _show_builtin_payload_hint(self):
+        """Mention nopayload when the exploit can deliver its own command."""
+        exploit = self.framework.current_module
+        info = getattr(exploit, "__info__", None) or {}
+        payload_info = info.get("payload") if isinstance(info, dict) else None
+        default_payload = ""
+        if isinstance(payload_info, dict):
+            default_payload = str(payload_info.get("default") or "")
+        attrs = getattr(type(exploit), "exploit_attributes", {}) or {}
+        if is_nopayload_path(default_payload) or "verify_cmd" in attrs:
+            print_info(
+                "Built-in command delivery: set payload nopayload "
+                "(no listener; uses module options such as verify_cmd or CMD)"
+            )
+
     def _show_compatibility_info(self):
         """Show compatibility information for current exploit"""
         exploit = self.framework.current_module

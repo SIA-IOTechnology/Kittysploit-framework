@@ -31,6 +31,7 @@ KittySploit brings these workflows together in an extensible, Metasploit-inspire
 * **AI-assisted planning** : use local Ollama models to analyze targets and prepare testing plans.
 * **Extension ecosystem** : add proxy, OSINT, GUI and protocol-analysis capabilities.
 * **Automation ready** : interactive console, one-shot commands, RPC and API modes.
+* **Mobile companion** : pair the Flutter app with a one-time QR and monitor an engagement in read-only mode.
 
 ## Quick Start
 
@@ -64,6 +65,12 @@ Verify the installation:
 
 ```text
 kittysploit> doctor
+```
+
+Pair the mobile companion (phone and workstation must be able to reach each other):
+
+```text
+kittysploit> mobile pair
 ```
 
 Create a workspace and define the authorized scope:

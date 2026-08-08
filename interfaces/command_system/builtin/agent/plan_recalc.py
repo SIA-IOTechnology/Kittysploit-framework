@@ -98,17 +98,27 @@ def _identity_tokens(kb: Mapping[str, Any], state: Any = None) -> Tuple[str, ...
     return _sorted_tokens(tokens)
 
 
-def _credential_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
+def _credential_tokens(kb: Mapping[str, Any], *, state: Any = None) -> Tuple[str, ...]:
     tokens: List[str] = []
     for row in kb.get("credential_store") or []:
         if not isinstance(row, dict):
             continue
         username = str(row.get("username") or "").strip().lower()
         password = str(row.get("password") or row.get("authenticated_password") or "").strip()
-        source = str(row.get("source_module") or "").strip().lower()
+        source = str(row.get("source_module") or row.get("origin") or "").strip().lower()
         if username or password:
             pw_token = password if password.startswith("vault:") else hashlib.sha256(password.encode()).hexdigest()[:12] if password else ""
             tokens.append(f"cred:{username}:{pw_token}:{source}")
+    persistent = kb.get("persistent_vault") if isinstance(kb.get("persistent_vault"), dict) else {}
+    for row in persistent.get("entries") or []:
+        if not isinstance(row, dict):
+            continue
+        cid = str(row.get("credential_id") or "").strip()
+        handle = str(row.get("handle") or "").strip()
+        if cid:
+            tokens.append(f"vault_db:{cid}")
+        if handle:
+            tokens.append(f"vault_handle:{handle}")
     lateral = kb.get("scope_lateral") if isinstance(kb.get("scope_lateral"), dict) else {}
     for row in lateral.get("credentials") or []:
         if not isinstance(row, dict):
@@ -168,7 +178,7 @@ def _route_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
 def build_campaign_asset_snapshot(kb: Mapping[str, Any], *, state: Any = None) -> CampaignAssetSnapshot:
     return CampaignAssetSnapshot(
         identity=_identity_tokens(kb, state=state),
-        credential=_credential_tokens(kb),
+        credential=_credential_tokens(kb, state=state),
         session=_session_tokens(kb, state=state),
         route=_route_tokens(kb),
     )

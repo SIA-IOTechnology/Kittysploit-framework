@@ -340,7 +340,12 @@ def index_credentials(
 
     framework_ref = framework
     if framework_ref is None and state is not None:
-        framework_ref = getattr(state, "framework", None)
+        try:
+            from core.vault.agent_bridge import resolve_agent_framework
+
+            framework_ref = resolve_agent_framework(state)
+        except ImportError:
+            framework_ref = getattr(state, "framework", None)
     if framework_ref is not None:
         try:
             from core.vault.persistent_store import get_persistent_vault
@@ -465,6 +470,13 @@ def sync_scope_lateral(
             )
 
     framework_ref = getattr(state, "framework", None) if state is not None else None
+    if framework_ref is None and state is not None:
+        try:
+            from core.vault.agent_bridge import resolve_agent_framework
+
+            framework_ref = resolve_agent_framework(state)
+        except ImportError:
+            pass
     index = build_scope_index(kb, state=state)
     credentials = index_credentials(kb, state=state, framework=framework_ref)
     proposals = propose_credential_reuse(kb, state=state, scope_index=index, credentials=credentials)

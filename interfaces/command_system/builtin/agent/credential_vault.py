@@ -266,6 +266,7 @@ def sanitize_credential_store_for_export(kb: Mapping[str, Any]) -> Dict[str, Any
         "credential_store": rows[:6],
         "active_auth_context": active_safe,
         "credential_vault_index": sanitize_nested(kb.get("credential_vault_index") or {}),
+        "persistent_vault": sanitize_nested(kb.get("persistent_vault") or {}),
     }
 
 

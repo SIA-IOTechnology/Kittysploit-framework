@@ -12,6 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Gogs self-hosted Git service versions 0.13.3 and earlier contain a critical symlink bypass vulnerability that circumvents the fix for CVE-2024-55947. Authenticated users can exploit improper symbolic link handling in the PutContents API to overwrite files outside the repository by committing a symlink pointing to sensitive targets, leading to remote code execution. As of December 2025, this remains an unpatched zero-day with active exploitation ongoing. Approximately 1,400 exposed Gogs instances exist, with over 700 showing signs of compromise. The vulnerability stems from the API writing to file paths without checking if targets are symlinks pointing outside the repository. Gogs maintainers are working on a fix.',
         'author': ['KittySploit Team'],
         'severity': 'high',
+        'modules': ['exploits/linux/http/gogs_cve_2025_8110_rce'],
         'tags': ['web', 'scanner', 'cve', 'cve2025', 'gogs', 'git', 'symlink', 'rce', 'kev', 'vkev', 'passive'],
         'agent': {
             'risk': 'active',
@@ -42,13 +43,15 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
-                        'from_detail': '',
+                        'capability': 'rce',
+                        'from_detail': 'gogs symlink putcontents',
                     },
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/gogs_cve_2025_8110_rce',
+                ],
             },
         },
         'references': [

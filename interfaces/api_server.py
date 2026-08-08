@@ -59,7 +59,15 @@ class ApiServer:
     et headless_service (pipelines, events, resources, workspaces).
     """
     
-    def __init__(self, framework, host='127.0.0.1', port=5000, api_key=None, ssl_context=None):
+    def __init__(
+        self,
+        framework,
+        host='127.0.0.1',
+        port=5000,
+        api_key=None,
+        ssl_context=None,
+        mobile_pairing_manager=None,
+    ):
         self.host = host
         self.port = port
         self.api_key = (api_key or "").strip() or None
@@ -72,6 +80,7 @@ class ApiServer:
         self.server_thread: Optional[threading.Thread] = None
         self.running = False
         self.token_manager = RotatingTokenManager(self.api_key, issuer="kittysploit-api")
+        self.mobile_pairing_manager = mobile_pairing_manager
         self.authenticator = RequestAuthenticator(self.token_manager)
         self.rate_limiter = ApiRateLimiter()
         self.route_permissions: Dict[str, str] = {}
@@ -306,6 +315,37 @@ class ApiServer:
                 "principal": ctx.to_dict() if ctx else None,
                 "token_manager": self.token_manager.stats(),
             })
+
+        @self.app.route('/api/mobile/pair/claim', methods=['POST'])
+        def mobile_pair_claim():
+            """Exchange a single-use mobile pairing code for viewer credentials."""
+            manager = self.mobile_pairing_manager
+            if manager is None:
+                return jsonify({
+                    "error": "Pairing unavailable",
+                    "message": "Start pairing from the console with 'mobile pair'.",
+                }), 503
+            data = request.get_json(silent=True) or {}
+            code = data.get("code")
+            device_name = data.get("device_name")
+            if not isinstance(code, str) or not isinstance(device_name, str):
+                return jsonify({
+                    "error": "Invalid request",
+                    "message": "String fields 'code' and 'device_name' are required.",
+                }), 400
+            try:
+                token_data = manager.claim(
+                    code,
+                    device_name=device_name,
+                    workspace=self._current_workspace_name(),
+                )
+            except ValueError:
+                # Deliberately avoid revealing whether a code existed or expired.
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": "Invalid or expired pairing code.",
+                }), 401
+            return jsonify(token_data), 201
         
         @self.app.route('/api/metrics', methods=['GET'])
         def get_metrics():
@@ -1012,6 +1052,7 @@ class ApiServer:
             "openapi_json": "public",
             "api_docs": "public",
             "auth_refresh": "public",
+            "mobile_pair_claim": "public",
 
             # Auth/token lifecycle.
             "auth_token": "auth:token",
@@ -1059,6 +1100,7 @@ class ApiServer:
             "api_docs": "public",
             "auth_token": "auth",
             "auth_refresh": "auth",
+            "mobile_pair_claim": "auth",
             "auth_revoke": "auth",
             "generate_mock_data": "admin",
             "run_module": "mutate",
@@ -1128,6 +1170,17 @@ class ApiServer:
             return False
         g.auth_context = ctx
         return True
+
+    def _current_workspace_name(self) -> str:
+        """Return a stable workspace label without assuming one framework shape."""
+        getter = getattr(self.framework, "get_current_workspace_name", None)
+        if callable(getter):
+            try:
+                return str(getter() or "default")
+            except Exception:
+                pass
+        current = getattr(self.framework, "current_workspace", None)
+        return str(getattr(current, "name", current) or "default")
 
     def rate_limit_response(self, rate_info: Optional[Dict[str, int]]):
         """Return a 429 response when a client exceeds route rate limits."""
@@ -1325,6 +1378,14 @@ class ApiServer:
             },
             "/api/auth/me": {
                 "get": operation("getAuthContext", "Current authenticated principal", "authenticated"),
+            },
+            "/api/mobile/pair/claim": {
+                "post": operation(
+                    "claimMobilePairing",
+                    "Exchange a one-time pairing code for viewer credentials",
+                    public=True,
+                    request_body=True,
+                ),
             },
             "/api/metrics": {
                 "get": operation("getMetrics", "Framework metrics", "metrics:read"),

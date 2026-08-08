@@ -323,6 +323,10 @@ class RotatingTokenManager:
         access_ttl = max(30, int(access_ttl_seconds or self.access_ttl_seconds))
         refresh_ttl = max(access_ttl, int(refresh_ttl_seconds or self.refresh_ttl_seconds))
 
+        resolved_metadata = dict(metadata or {})
+        # Preserve custom lifetimes across refresh rotation (used by mobile clients).
+        resolved_metadata["_access_ttl_seconds"] = access_ttl
+        resolved_metadata["_refresh_ttl_seconds"] = refresh_ttl
         access_token, access_record = self._new_record(
             subject=subject,
             roles=resolved_roles,
@@ -331,7 +335,7 @@ class RotatingTokenManager:
             issued_at=now,
             expires_at=now + access_ttl,
             family_id=family_id,
-            metadata=metadata or {},
+            metadata=resolved_metadata,
         )
         refresh_token, refresh_record = self._new_record(
             subject=subject,
@@ -341,7 +345,7 @@ class RotatingTokenManager:
             issued_at=now,
             expires_at=now + refresh_ttl,
             family_id=family_id,
-            metadata=metadata or {},
+            metadata=resolved_metadata,
         )
 
         with self._lock:
@@ -393,6 +397,8 @@ class RotatingTokenManager:
             subject=subject,
             roles=roles,
             permissions=permissions,
+            access_ttl_seconds=metadata.pop("_access_ttl_seconds", None),
+            refresh_ttl_seconds=metadata.pop("_refresh_ttl_seconds", None),
             metadata=metadata,
         )
 
@@ -407,6 +413,19 @@ class RotatingTokenManager:
                 return False
             record.revoked = True
             return True
+
+    def revoke_subject(self, subject: str) -> int:
+        """Revoke every access and refresh token issued to a principal."""
+        normalized = str(subject or "").strip()
+        if not normalized:
+            return 0
+        revoked = 0
+        with self._lock:
+            for record in self._records.values():
+                if record.subject == normalized and not record.revoked:
+                    record.revoked = True
+                    revoked += 1
+        return revoked
 
     def stats(self) -> Dict[str, Any]:
         with self._lock:

@@ -216,6 +216,9 @@ class AgentModuleExecutionService:
         from interfaces.command_system.builtin.agent.credential_vault import resolve_module_instance_options
 
         resolve_module_instance_options(module_instance, state)
+        from interfaces.command_system.builtin.agent.credential_vault import get_credential_vault
+
+        get_credential_vault(state=state, framework=self.framework)
         request = ModuleExecutionRequest(
             module=module_instance,
             skip_scope_confirm=approved,

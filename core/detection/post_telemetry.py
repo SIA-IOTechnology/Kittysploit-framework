@@ -353,6 +353,23 @@ POST_TELEMETRY: Dict[str, Dict[str, Any]] = {
             "CommandLine|contains: 'base64 -d'",
         ],
     },
+    "modules/post/shell/linux/manage/kvm_cve_2026_53359_dos": {
+        "mitre": ["T1499", "T1529"],
+        "edr_hypotheses": [
+            "Prebuilt or kbuild-compiled poc.ko uploaded to target KVM host.",
+            "rmmod kvm_intel/kvm_amd followed by insmod of unsigned poc.ko.",
+            "Host DoS via KVM shadow MMU race (CVE-2026-53359) — no session gain.",
+        ],
+        "expected_events": [
+            {"source": "linux.audit", "type": "SYSCALL", "note": "init_module/finit_module"},
+            {"source": "edr.file", "path": "/tmp", "action": "create", "note": "poc.ko upload"},
+            {"source": "edr.process", "command_line|contains": "insmod|rmmod kvm"},
+        ],
+        "sigma_hints": [
+            "CommandLine|contains: 'insmod' AND CommandLine|contains: 'poc.ko'",
+            "CommandLine|contains: 'rmmod kvm_intel' OR CommandLine|contains: 'rmmod kvm_amd'",
+        ],
+    },
 }
 
 

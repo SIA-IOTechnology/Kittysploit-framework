@@ -370,6 +370,44 @@ POST_TELEMETRY: Dict[str, Dict[str, Any]] = {
             "CommandLine|contains: 'rmmod kvm_intel' OR CommandLine|contains: 'rmmod kvm_amd'",
         ],
     },
+    "modules/post/shell/linux/manage/kvm_cve_2026_46316_escape": {
+        "mitre": ["T1068", "T1203", "T1611"],
+        "edr_hypotheses": [
+            "KVM selftest PoC binary uploaded or built on arm64 hypervisor host.",
+            "vgic_its_invalidate_cache UAF chain — host UMH runs staged callback as root.",
+            "Reverse-shell payload registers new shell session via framework listener.",
+        ],
+        "expected_events": [
+            {"source": "edr.file", "path": "/ITScape", "action": "create"},
+            {"source": "edr.file", "path": "/tmp/.k46316", "action": "create"},
+            {"source": "edr.process", "command_line|contains": "/dev/kvm"},
+            {"source": "edr.network", "direction": "outbound", "note": "host root reverse shell callback"},
+            {"source": "linux.audit", "type": "SYSCALL", "note": "call_usermodehelper from host kernel"},
+        ],
+        "sigma_hints": [
+            "file.path: '/ITScape' AND file.action: create",
+            "CommandLine|contains: 'vgic_lpi_stress' OR CommandLine|contains: '.ks_kvm46316'",
+        ],
+    },
+    "modules/post/shell/linux/manage/kvm_cve_2026_64561_escape": {
+        "mitre": ["T1068", "T1203", "T1611"],
+        "edr_hypotheses": [
+            "Zapscape static PoC uploaded or cross-compiled for x86_64 KVM/AMD host.",
+            "mmu_page_zap_pte() recursive-zap UAF — host UMH runs staged callback as root.",
+            "Reverse-shell payload registers new shell session via framework listener.",
+        ],
+        "expected_events": [
+            {"source": "edr.file", "path": "/Zapscape", "action": "create"},
+            {"source": "edr.file", "path": "/tmp/.k64561", "action": "create"},
+            {"source": "edr.process", "command_line|contains": "/dev/kvm"},
+            {"source": "edr.network", "direction": "outbound", "note": "host root reverse shell callback"},
+            {"source": "linux.audit", "type": "SYSCALL", "note": "call_usermodehelper from host kernel"},
+        ],
+        "sigma_hints": [
+            "file.path: '/Zapscape' AND file.action: create",
+            "CommandLine|contains: '.ks_kvm64561' OR CommandLine|contains: 'Zapscape'",
+        ],
+    },
 }
 
 

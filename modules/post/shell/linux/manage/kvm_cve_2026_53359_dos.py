@@ -467,7 +467,13 @@ class Module(Post, System, LinuxSessionMixin):
                 "(stop running VMs first or unload may fail)."
             )
 
-        print_warning("Host DoS only — expect panic, hang, or lost session. No new shell is produced.")
+        print_warning(
+            "Host DoS only — expect panic, hang, or lost session. "
+            "No UMH/code-exec primitive: reverse_shell payload does not apply (unlike CVE-2026-46316/64561 escapes)."
+        )
+        print_status(
+            "You already need root on the KVM host for insmod; this module does not open a new session."
+        )
         return True
 
     def run(self):

@@ -2867,6 +2867,11 @@ Examples:
             result = client.launch_extension(
                 args.extension_id,
                 background=not args.foreground,
+                env=(
+                    self.framework.export_extension_launch_env()
+                    if hasattr(self.framework, "export_extension_launch_env")
+                    else {}
+                ),
             )
             if not result:
                 return False

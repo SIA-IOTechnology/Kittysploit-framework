@@ -58,18 +58,28 @@ class Module(Scanner, Http_client):
         r = self.http_request(method="GET", path='/', allow_redirects=True)
         if not r or r.status_code != 200:
             return False
-        body = (r.text or "")
-        markers = (
-            'Kong Manager OSS',
-            'Kong Admin',
-            'kconfig.js',
-            'text/html',
+        body = r.text or ""
+        # Do NOT match generic HTML — routers/soft pages caused FPs via 'text/html'.
+        strong = (
+            "Kong Manager OSS",
+            "Kong Manager",
+            "Kong Admin",
+            "window.K_CONFIG",
+            "kong-admin-ui",
         )
-        if any(m in body for m in markers):
+        if any(m in body for m in strong):
             self.set_info(
-                severity='medium',
+                severity="medium",
                 reason="Kong Manager OSS/Admin - Exposure detected",
-                path='/',
+                path="/",
+            )
+            return True
+        # Secondary: kconfig.js reference only when Kong context is also present.
+        if "kconfig.js" in body and "kong" in body.lower():
+            self.set_info(
+                severity="medium",
+                reason="Kong Manager OSS/Admin - Exposure detected",
+                path="/",
             )
             return True
         return False

@@ -49,6 +49,8 @@ pymysql>=1.0.0
 psycopg2-binary>=2.9.0
 redis>=4.5.0
 ldap3>=2.9.0
+# Optional AD collector (also: pip install -e ".[bloodhound]")
+# bloodhound>=1.7.0
 pyasn1>=0.4.8
 pymongo>=4.0.0
 elasticsearch>=8.0.0

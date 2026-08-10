@@ -64,26 +64,32 @@ class KittyInterpreter(code.InteractiveInterpreter):
         
         super().__init__(locals)
         
-        # Setup key bindings for Tab handling
-        from prompt_toolkit.key_binding import KeyBindings
-        from prompt_toolkit.keys import Keys
-        
-        self.kb = KeyBindings()
-        
-        # Make Tab insert spaces for indentation instead of triggering completion
-        @self.kb.add(Keys.Tab)
-        def _(event):
-            # Insert 4 spaces for indentation
-            event.app.current_buffer.insert_text('    ')
-        
-        # Setup prompt toolkit
-        self.session = PromptSession(
-            lexer=PygmentsLexer(PythonLexer),
-            style=self._get_style(),
-            completer=self._create_completer(),
-            key_bindings=self.kb,  # Use custom key bindings
-            complete_while_typing=False  # Disable auto-completion while typing
-        )
+        # Setup prompt toolkit only for real interactive TTY sessions.
+        # Cosmic / web UIs call runsource() without prompting — avoid fileno crashes.
+        self.session = None
+        self.kb = None
+        try:
+            stdin = getattr(sys, "__stdin__", None) or sys.stdin
+            if stdin is not None and hasattr(stdin, "isatty") and stdin.isatty():
+                from prompt_toolkit.key_binding import KeyBindings
+                from prompt_toolkit.keys import Keys
+                
+                self.kb = KeyBindings()
+                
+                @self.kb.add(Keys.Tab)
+                def _(event):
+                    event.app.current_buffer.insert_text('    ')
+                
+                self.session = PromptSession(
+                    lexer=PygmentsLexer(PythonLexer),
+                    style=self._get_style(),
+                    completer=self._create_completer(),
+                    key_bindings=self.kb,
+                    complete_while_typing=False
+                )
+        except Exception:
+            self.session = None
+            self.kb = None
         
         # Command history
         self.history = []
@@ -164,6 +170,11 @@ class KittyInterpreter(code.InteractiveInterpreter):
         
         # Buffer for multi-line code blocks
         code_buffer = []
+
+        def _read_line(prompt: str) -> str:
+            if self.session is not None:
+                return self.session.prompt(prompt)
+            return input(prompt)
         
         while True:
             try:
@@ -174,7 +185,7 @@ class KittyInterpreter(code.InteractiveInterpreter):
                 else:
                     prompt = self.get_prompt()
                 
-                code = self.session.prompt(prompt)
+                code = _read_line(prompt)
                 
                 # Handle exit command
                 if code.strip() in ('exit', 'quit'):

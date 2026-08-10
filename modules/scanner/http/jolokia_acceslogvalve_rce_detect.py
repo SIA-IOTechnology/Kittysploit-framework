@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
         'name': 'Jolokia write to RCE valve Detection',
         'description': 'RCE in Jolokia < 1.7.1 using AccesLogValve',
         'author': ['KittySploit Team'],
-        'severity': 'critical',
+        'severity': 'high',
         'tags': ['web', 'scanner', 'vulnerability', 'jolokia', 'rce', 'vuln'],
         'agent': {
             'risk': 'active',
@@ -42,7 +42,7 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
+                        'capability': 'risk_signal',
                         'from_detail': '',
                     },
                 ],
@@ -66,7 +66,7 @@ class Module(Scanner, Http_client):
         if (any(m in body for m in body_any)):
             self.set_info(
                 severity='critical',
-                reason="Jolokia write to RCE valve detected",
+                reason="Jolokia AccessLogValve MBean exposed (RCE surface, not confirmed exec)",
                 path='/jolokia/list',
             )
             return True

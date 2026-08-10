@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import io
 import threading
 import queue
 import logging
@@ -925,6 +926,11 @@ class StdoutRedirector:
 
     def __init__(self, handler):
         self.handler = handler
+        self.encoding = getattr(handler.original_stdout, "encoding", "utf-8") or "utf-8"
+        self.errors = getattr(handler.original_stdout, "errors", "replace") or "replace"
+        self.closed = False
+        self.name = "<StdoutRedirector>"
+        self.mode = "w"
 
     def write(self, text):
         text = _coerce_text(text)
@@ -943,11 +949,44 @@ class StdoutRedirector:
         except Exception:
             return False
 
+    def fileno(self):
+        """Delegate to the original stdout when possible (prompt_toolkit, rich, etc.)."""
+        stream = getattr(self.handler, "original_stdout", None)
+        fileno = getattr(stream, "fileno", None)
+        if callable(fileno):
+            try:
+                return fileno()
+            except Exception:
+                pass
+        # Fall back to process stdout fd so callers that require an int keep working.
+        try:
+            return sys.__stdout__.fileno()
+        except Exception as exc:
+            raise io.UnsupportedOperation("fileno") from exc
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def reconfigure(self, *args, **kwargs):
+        return None
+
+
 class StderrRedirector:
     """Redirects stderr"""
 
     def __init__(self, handler):
         self.handler = handler
+        self.encoding = getattr(handler.original_stderr, "encoding", "utf-8") or "utf-8"
+        self.errors = getattr(handler.original_stderr, "errors", "replace") or "replace"
+        self.closed = False
+        self.name = "<StderrRedirector>"
+        self.mode = "w"
 
     def write(self, text):
         text = _coerce_text(text)
@@ -965,3 +1004,29 @@ class StderrRedirector:
             return _stream_isatty(self.handler.original_stderr)
         except Exception:
             return False
+
+    def fileno(self):
+        """Delegate to the original stderr when possible."""
+        stream = getattr(self.handler, "original_stderr", None)
+        fileno = getattr(stream, "fileno", None)
+        if callable(fileno):
+            try:
+                return fileno()
+            except Exception:
+                pass
+        try:
+            return sys.__stderr__.fileno()
+        except Exception as exc:
+            raise io.UnsupportedOperation("fileno") from exc
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+    def reconfigure(self, *args, **kwargs):
+        return None

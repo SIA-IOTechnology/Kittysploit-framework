@@ -8,11 +8,11 @@ from lib.protocols.http.http_client import Http_client
 
 class Module(Scanner, Http_client):
     __info__ = {
-        'name': 'Apache NiFi - Remote Code Execution Detection',
-        'description': 'Apache NiFi is designed for data streaming. It supports highly configurable data routing, transformation, and system mediation logic that indicate graphs. The system has unauthorized remote command execution vulnerability.',
+        'name': 'Apache NiFi - Unauthenticated API Exposure Detection',
+        'description': 'Detects unauthenticated access to /nifi-api/process-groups/root (RCE attack surface when API auth is disabled). Does not confirm command execution.',
         'author': ['KittySploit Team'],
-        'severity': 'critical',
-        'tags': ['web', 'scanner', 'vulnerability', 'packetstorm', 'apache', 'nifi', 'rce', 'vuln'],
+        'severity': 'high',
+        'tags': ['web', 'scanner', 'vulnerability', 'packetstorm', 'apache', 'nifi', 'exposure', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -68,8 +68,8 @@ class Module(Scanner, Http_client):
         header_any = ('application/json',)
         if (all(m in body for m in body_all)) and (any(m in headers for m in header_any)):
             self.set_info(
-                severity='critical',
-                reason="Apache NiFi - Remote Code Execution detected",
+                severity='high',
+                reason="Apache NiFi process-groups API unauthenticated (RCE surface, not confirmed exec)",
                 path='/nifi-api/process-groups/root',
             )
             return True

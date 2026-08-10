@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import json
-import re
 import urllib.parse
 from typing import Any, Callable, Dict, List, Optional
 
@@ -25,22 +24,38 @@ _TOKEN_PATHS = (
     "/api/auth/token",
 )
 
-_PKCE_OPTIONAL_MARKERS = (
-    "code_challenge_method",
-    "plain",
-    "S256",
+_OAUTH_PAGE_MARKERS = (
+    "oauth",
+    "openid",
+    "client_id",
+    "redirect_uri",
+    "response_type",
+    "authorization",
+    "authorize",
+    "scope=",
+    "unsupported_response_type",
+    "invalid_client",
+    "invalid_request",
 )
 
-_REFRESH_GRANT_MARKERS = (
+_REFRESH_JSON_MARKERS = (
+    "unsupported_grant_type",
+    "invalid_grant",
+    "invalid_client",
+    "invalid_request",
     "refresh_token",
-    "grant_type",
-    "refresh_token_expires_in",
 )
 
 
 def _paths_csv(raw: str, default: str) -> List[str]:
     text = str(raw or "").strip() or default
     return [p.strip() for p in text.split(",") if p.strip()][:12]
+
+
+def _looks_like_oauth_surface(text: str) -> bool:
+    low = text.lower()
+    hits = sum(1 for m in _OAUTH_PAGE_MARKERS if m in low)
+    return hits >= 2
 
 
 def probe_oidc_config(http_request: Callable[..., Any], path: str) -> Optional[Dict[str, Any]]:
@@ -53,6 +68,8 @@ def probe_oidc_config(http_request: Callable[..., Any], path: str) -> Optional[D
     except Exception:
         return None
     if not isinstance(data, dict) or "issuer" not in data:
+        return None
+    if not (data.get("authorization_endpoint") or data.get("token_endpoint")):
         return None
     return {
         "kind": "oidc_discovery",
@@ -75,21 +92,41 @@ def probe_pkce_optional(http_request: Callable[..., Any], auth_path: str) -> Opt
     }
     query = urllib.parse.urlencode(params)
     sep = "&" if "?" in auth_path else "?"
-    response = http_request(method="GET", path=f"{auth_path}{sep}{query}", allow_redirects=False, timeout=10)
+    response = http_request(
+        method="GET",
+        path=f"{auth_path}{sep}{query}",
+        allow_redirects=False,
+        timeout=10,
+    )
     if not response:
         return None
     status = int(getattr(response, "status_code", 0) or 0)
-    body = (str(getattr(response, "text", "") or "") + str(getattr(response, "headers", {}).get("Location") or "")).lower()
-    if status in (200, 302, 400) and "code_challenge" not in body:
-        if "invalid" not in body or status == 302:
-            return {
-                "kind": "pkce_not_required",
-                "path": auth_path,
-                "status_code": status,
-                "severity": "high",
-                "indicator": "authorize_without_pkce",
-            }
-    return None
+    location = ""
+    headers = getattr(response, "headers", None) or {}
+    try:
+        location = str(headers.get("Location") or headers.get("location") or "")
+    except Exception:
+        location = ""
+    body = str(getattr(response, "text", "") or "")
+    combined = (body + "\n" + location).lower()
+
+    # Soft HTML 200/404 catch-alls on routers must not count as OAuth.
+    if not _looks_like_oauth_surface(combined):
+        return None
+    if "code_challenge" in combined:
+        return None
+    if status not in (200, 302, 400):
+        return None
+    # Reject generic login portals that only mention "authorize" once in nav text.
+    if status == 200 and "<html" in combined and "client_id" not in combined and "oauth" not in combined:
+        return None
+    return {
+        "kind": "pkce_not_required",
+        "path": auth_path,
+        "status_code": status,
+        "severity": "high",
+        "indicator": "authorize_without_pkce",
+    }
 
 
 def probe_refresh_endpoint(http_request: Callable[..., Any], token_path: str) -> Optional[Dict[str, Any]]:
@@ -111,9 +148,21 @@ def probe_refresh_endpoint(http_request: Callable[..., Any], token_path: str) ->
     if not response:
         return None
     status = int(getattr(response, "status_code", 0) or 0)
-    body = str(getattr(response, "text", "") or "").lower()
-    if status in (200, 400, 401):
-        if any(m in body for m in _REFRESH_GRANT_MARKERS):
+    body = str(getattr(response, "text", "") or "")
+    if status not in (200, 400, 401):
+        return None
+
+    data = None
+    try:
+        data = json.loads(body)
+    except Exception:
+        data = None
+
+    # Prefer structured OAuth token errors; avoid HTML soft pages.
+    if isinstance(data, dict):
+        err = str(data.get("error") or "").lower()
+        blob = json.dumps(data).lower()
+        if err or any(m in blob for m in _REFRESH_JSON_MARKERS):
             return {
                 "kind": "refresh_token_endpoint",
                 "path": token_path,
@@ -122,6 +171,18 @@ def probe_refresh_endpoint(http_request: Callable[..., Any], token_path: str) ->
                 "preview": body[:300],
                 "indicator": "refresh_grant_accepted_or_parsed",
             }
+        return None
+
+    low = body.lower()
+    if any(m in low for m in _REFRESH_JSON_MARKERS) and _looks_like_oauth_surface(low):
+        return {
+            "kind": "refresh_token_endpoint",
+            "path": token_path,
+            "status_code": status,
+            "severity": "medium",
+            "preview": body[:300],
+            "indicator": "refresh_grant_text_error",
+        }
     return None
 
 

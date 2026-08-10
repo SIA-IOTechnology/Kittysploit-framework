@@ -479,7 +479,7 @@ class Framework:
         Load encryption with master password
         
         Args:
-            password: Master password (if None, will prompt)
+            password: Master password (if None, will prompt / use env / parent session)
             
         Returns:
             True if loading successful, False otherwise
@@ -489,6 +489,22 @@ class Framework:
             # Update database manager with loaded encryption
             self.db_manager.set_encryption_manager(self.encryption_manager)
         return success
+
+    def export_extension_launch_env(self) -> dict:
+        """
+        Environment for child UI extensions so they reuse the unlocked vault.
+        Empty if encryption is not loaded in this process.
+        """
+        em = getattr(self, "encryption_manager", None)
+        if em is None:
+            return {}
+        export = getattr(em, "export_launch_env", None)
+        if callable(export):
+            try:
+                return dict(export() or {})
+            except Exception:
+                return {}
+        return {}
     
     def is_encryption_initialized(self) -> bool:
         """

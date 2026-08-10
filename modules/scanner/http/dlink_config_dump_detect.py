@@ -49,7 +49,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/cve_2018_17786_detect',
+                    'auxiliary/admin/http/dlink_exportsettings_config_dump',
+                ],
             },
         },
         'references': [
@@ -59,20 +62,25 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        return False  # disabled: corrupted matchers
-        r = self.http_request(method="GET", path='/cgi-bin/ExportSettings.sh', allow_redirects=False)
+        # Prefer scanner/http/cve_2018_17786_detect (NASL-aligned header matchers).
+        path = '/cgi-bin/ExportSettings.sh'
+        r = self.http_request(method='GET', path=path, allow_redirects=False)
         if not r or r.status_code != 200:
             return False
-        body = (r.text or "").lower()
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items()).lower()
-        body_any = ('password',)
-        header_regexes = ('filename="(.*)_Settings.dat', 'application/octet-stream',)
-        if (any(m in body for m in body_any)) and (any(re.search(rx, headers, re.I) for rx in header_regexes)):
-            self.set_info(
-                severity='critical',
-                reason="D-Link DAP-1325 - Information Disclosure detected",
-                path='/cgi-bin/ExportSettings.sh',
-            )
-            return True
-        return False
+        ctype = (r.headers.get('Content-Type') or r.headers.get('content-type') or '')
+        cdisp = (
+            r.headers.get('Content-Disposition')
+            or r.headers.get('content-disposition')
+            or ''
+        )
+        if 'application/octet-stream' not in ctype.lower():
+            return False
+        if not re.search(r'attachment;\s*filename="[^"]+\.(dat|bin)"', cdisp, re.I):
+            return False
+        self.set_info(
+            severity='critical',
+            reason='D-Link/TOTOLINK unauthenticated ExportSettings.sh config download',
+            path=path,
+        )
+        return True
 

@@ -61,13 +61,21 @@ class Module(Scanner, Http_client):
         r = self.http_request(method="GET", path='/', allow_redirects=False)
         if not r or r.status_code != 200:
             return False
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items()).lower()
-        header_any = ('expect-ct', 'max-age=0', 'enforce',)
-        if (any(m in headers for m in header_any)):
+        # Only the Expect-CT header value — avoid matching max-age=/enforce elsewhere.
+        expect_ct = ""
+        for key, value in (r.headers or {}).items():
+            if str(key).lower() == "expect-ct":
+                expect_ct = str(value or "").lower()
+                break
+        if not expect_ct:
+            return False
+        # Misconfig: present but ineffective (max-age=0) and/or missing enforce.
+        if "max-age=0" in expect_ct.replace(" ", "") or "enforce" not in expect_ct:
             self.set_info(
-                severity='info',
+                severity="info",
                 reason="Expect-CT Header - Misconfigured detected",
-                path='/',
+                path="/",
+                expect_ct=expect_ct[:200],
             )
             return True
         return False

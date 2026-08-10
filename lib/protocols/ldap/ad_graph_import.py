@@ -151,6 +151,21 @@ def _ingest_sharphound_ce(
         props = row.get("Properties") or row.get("properties") or row
         if not isinstance(props, dict):
             props = {}
+
+        # Classic BloodHound.py sessions.json: {UserSID, ComputerSID} without ObjectIdentifier
+        user_sid = str(row.get("UserSID") or props.get("UserSID") or "")
+        computer_sid = str(row.get("ComputerSID") or props.get("ComputerSID") or "")
+        is_session_row = (
+            type_hint in {"session", "sessions"}
+            or (user_sid and computer_sid and not (
+                row.get("ObjectIdentifier") or row.get("ObjectId") or props.get("objectid")
+            ))
+        )
+        if is_session_row and user_sid and computer_sid:
+            # Computer has session of user → computer -> user (pathing toward the principal)
+            edges.append({"StartNode": computer_sid, "EndNode": user_sid, "Type": "HasSession"})
+            continue
+
         oid = str(
             row.get("ObjectIdentifier")
             or row.get("ObjectId")
@@ -180,6 +195,29 @@ def _ingest_sharphound_ce(
         }
         nodes.append(node)
 
+        # Primary group membership (Domain Users / Domain Computers, etc.)
+        primary_group = str(
+            row.get("PrimaryGroupSID")
+            or props.get("PrimaryGroupSID")
+            or props.get("primarygroupsid")
+            or ""
+        )
+        if primary_group and primary_group != oid:
+            edges.append({"StartNode": oid, "EndNode": primary_group, "Type": "MemberOf"})
+
+        def _oid_from(value: Any) -> str:
+            if isinstance(value, dict):
+                return str(
+                    value.get("ObjectIdentifier")
+                    or value.get("ObjectId")
+                    or value.get("UserSID")
+                    or value.get("ComputerSID")
+                    or value.get("PrincipalSID")
+                    or value.get("id")
+                    or ""
+                )
+            return str(value or "")
+
         # MemberOf / ACL-ish relationships embedded in CE objects
         for rel_key, rel_name in (
             ("MemberOf", "MemberOf"),
@@ -188,6 +226,7 @@ def _ingest_sharphound_ce(
             ("CanRDP", "CanRDP"),
             ("CanPSRemote", "CanPSRemote"),
             ("HasSession", "HasSession"),
+            ("Sessions", "HasSession"),
             ("AllowedToDelegate", "AllowedToDelegate"),
             ("AllowedToAct", "AllowedToAct"),
             ("ForceChangePassword", "ForceChangePassword"),
@@ -195,31 +234,47 @@ def _ingest_sharphound_ce(
             ("GenericAll", "GenericAll"),
             ("WriteDacl", "WriteDacl"),
             ("Owns", "Owns"),
+            ("LocalAdmins", "AdminTo"),
         ):
             rel = row.get(rel_key) or props.get(rel_key)
             if not rel:
                 continue
             targets = rel if isinstance(rel, list) else [rel]
             for tgt in targets:
-                tgt_oid = ""
-                if isinstance(tgt, dict):
-                    tgt_oid = str(
-                        tgt.get("ObjectIdentifier")
-                        or tgt.get("ObjectId")
-                        or tgt.get("id")
-                        or ""
-                    )
-                else:
-                    tgt_oid = str(tgt)
+                tgt_oid = _oid_from(tgt)
                 if not tgt_oid:
                     continue
-                # MemberOf direction: user -> group; Members list is group -> member (invert to MemberOf)
-                if rel_key == "Members":
-                    edges.append({"StartNode": tgt_oid, "EndNode": oid, "Type": "MemberOf"})
+                # MemberOf: user -> group. Members/LocalAdmins lists are inverted.
+                if rel_key in {"Members", "LocalAdmins"}:
+                    edges.append({"StartNode": tgt_oid, "EndNode": oid, "Type": rel_name})
                 elif rel_key == "MemberOf":
                     edges.append({"StartNode": oid, "EndNode": tgt_oid, "Type": "MemberOf"})
+                elif rel_key in {"Sessions", "HasSession"}:
+                    # Computer has session of user → computer -> user (owned host reaches principal)
+                    edges.append({"StartNode": oid, "EndNode": tgt_oid, "Type": "HasSession"})
                 else:
                     edges.append({"StartNode": oid, "EndNode": tgt_oid, "Type": rel_name})
+
+        # SharpHound CE ACE array: principal with right → this object
+        aces = row.get("Aces") or props.get("Aces") or []
+        if isinstance(aces, list):
+            for ace in aces:
+                if not isinstance(ace, dict):
+                    continue
+                principal = str(
+                    ace.get("PrincipalSID")
+                    or ace.get("PrincipalId")
+                    or ace.get("principal")
+                    or ""
+                )
+                right = str(
+                    ace.get("RightName")
+                    or ace.get("Right")
+                    or ace.get("name")
+                    or "GenericAll"
+                )[:64]
+                if principal and right:
+                    edges.append({"StartNode": principal, "EndNode": oid, "Type": right})
 
 
 def _load_bloodhound_zip(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:

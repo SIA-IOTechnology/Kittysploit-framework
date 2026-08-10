@@ -68,7 +68,7 @@ class Module(Scanner, Http_client):
             if (all(m in body for m in body_all)):
                 self.set_info(
                     severity='high',
-                    reason="Jolokia Logback JNDI - Remote Code Execution detected",
+                    reason="Jolokia Logback reloadByURL MBean exposed (JNDI/RCE surface)",
                     path=path,
                 )
                 return True

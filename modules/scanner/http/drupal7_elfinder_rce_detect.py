@@ -8,10 +8,10 @@ from lib.protocols.http.http_client import Http_client
 
 class Module(Scanner, Http_client):
     __info__ = {
-        'name': 'Drupal 7 Elfinder - Remote Code Execution Detection',
+        'name': 'Drupal 7 Elfinder - Unauthenticated Connector Exposure Detection',
         'description': 'Identifies Drupal sites with the elfinder library installed, which could be vulnerable to unrestricted file upload through the connector.php file.When this component is detected, the site may be vulnerable to remote code execution attacks via PHP file uploads.This template only detects the presence of the vulnerable component and does not perform any exploitation.',
         'author': ['KittySploit Team'],
-        'severity': 'critical',
+        'severity': 'high',
         'tags': ['web', 'scanner', 'vulnerability', 'drupal', 'elfinder', 'filemanager', 'exposure', 'vuln'],
         'agent': {
             'risk': 'active',
@@ -42,7 +42,7 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
+                        'capability': 'risk_signal',
                         'from_detail': '',
                     },
                 ],
@@ -66,7 +66,7 @@ class Module(Scanner, Http_client):
         if (any(m in body for m in body_any)) and (any(m in content_type for m in ctype_any)):
             self.set_info(
                 severity='critical',
-                reason='Drupal 7 Elfinder - Remote Code Execution detected',
+                reason='Drupal 7 elfinder connector.php exposed (upload/RCE surface, not confirmed RCE)',
                 path=path,
             )
             return True

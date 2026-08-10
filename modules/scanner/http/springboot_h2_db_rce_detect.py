@@ -67,7 +67,7 @@ class Module(Scanner, Http_client):
         body = r.text or ""
         body_any = ('"spring.datasource.hikari.connection-test-query":"CREATE ALIAS EXEC AS CONCAT',)
         if any(m in body for m in body_any):
-            self.set_info(severity='critical', reason='Spring Boot H2 Database - Remote Command Execution detected', path=path)
+            self.set_info(severity='high', reason='Spring Boot actuator accepted H2 connection-test-query injection (RCE surface)', path=path)
             return True
         return False
 

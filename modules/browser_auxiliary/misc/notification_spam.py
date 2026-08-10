@@ -18,7 +18,7 @@ class Module(BrowserAuxiliary):
 	icon = OptString("", "Notification icon URL (empty = default)", False)
 	count = OptInteger(10, "Number of notifications to send", True)
 	delay = OptFloat(0.5, "Delay between notifications in seconds", False)
-	request_permission = OptString("true", "Request notification permission if not granted (true/false)", False)
+	request_permission = OptBool(True, "Request notification permission if not granted", False)
 	redirect_url = OptString("", "URL to redirect to when notification is clicked (empty = no redirect)", False)
 	onclick_action = OptString("", "JavaScript code to execute when notification is clicked (empty = no action)", False)
 
@@ -26,7 +26,7 @@ class Module(BrowserAuxiliary):
 		"""Send multiple push notifications to the target browser"""
 		
 		# First, request permission if needed
-		if self.request_permission.lower() == "true":
+		if self._to_bool(self.request_permission):
 			permission_js = """
 			(function() {
 				if ('Notification' in window) {

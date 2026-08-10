@@ -63,19 +63,35 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/module/api.php?mobile/webNasIPS', allow_redirects=False)
-        if not r or r.status_code != 200:
-            return False
-        body = r.text or ""
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-        header_all = ('application/json', 'TerraMaster',)
-        body_regexes = ('webNasIPS successful', '(ADDR|(IFC|PWD|[DS]AT)):', '"((firmware|(version|ma(sk|c)|port|url|ip))|hostname)":',)
-        if (all(m in headers for m in header_all)) and (any(re.search(rx, body, 0) for rx in body_regexes)):
-            self.set_info(
-                severity='high',
-                reason="TerraMaster TOS < 4.2.30 Server Information Disclosure detected",
-                path='/module/api.php?mobile/webNasIPS',
+        # Greenbone check uses User-Agent: TNAS and accepts firmware/PWD markers without
+        # requiring TerraMaster response headers (those are often absent).
+        paths = (
+            '/module/api.php?mobile/webNasIPS',
+            '/module/api.php?mobile/wapNasIPS',
+        )
+        body_regexes = (
+            r'webNasIPS successful',
+            r'(ADDR|(IFC|PWD|[DS]AT)):',
+            r'"((firmware|(version|ma(sk|c)|port|url|ip))|hostname)"',
+            r'\\?"firmware\\?"',
+            r'\nPWD:',
+        )
+        for path in paths:
+            r = self.http_request(
+                method='GET',
+                path=path,
+                headers={'User-Agent': 'TNAS'},
+                allow_redirects=False,
             )
-            return True
+            if not r or r.status_code != 200:
+                continue
+            body = r.text or ''
+            if any(re.search(rx, body) for rx in body_regexes):
+                self.set_info(
+                    severity='high',
+                    reason='TerraMaster TOS information disclosure (CVE-2022-24990 family)',
+                    path=path,
+                )
+                return True
         return False
 

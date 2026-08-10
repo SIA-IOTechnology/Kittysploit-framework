@@ -830,11 +830,16 @@ class ExtensionClient:
         identifier: str,
         *,
         background: bool = True,
+        env: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Launch an installed UI/interface extension via its generated launcher.
 
         Returns metadata including the subprocess handle when background=True.
+
+        Args:
+            env: Optional extra environment (e.g. KITTYSPLOIT_SESSION_KEY from an
+                 already-unlocked console so Cosmic does not re-prompt).
         """
         ext = self.find_installed_extension(identifier)
         if not ext:
@@ -856,10 +861,18 @@ class ExtensionClient:
             print_info("Try reinstalling: market install " + ext["id"])
             return None
 
+        child_env = os.environ.copy()
+        if env:
+            for key, value in env.items():
+                if value is None:
+                    continue
+                child_env[str(key)] = str(value)
+
         try:
             process = subprocess.Popen(
                 [sys.executable, str(launcher)],
                 cwd=str(self.framework_root),
+                env=child_env,
             )
         except Exception as exc:
             print_error(f"Failed to launch extension: {exc}")

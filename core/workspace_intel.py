@@ -60,6 +60,11 @@ class WorkspaceIntelStore:
         state: str = "open",
         source: str = "",
         hostname: Optional[str] = None,
+        version: Optional[str] = None,
+        banner: Optional[str] = None,
+        os_name: Optional[str] = None,
+        mac: Optional[str] = None,
+        host_status: Optional[str] = None,
     ) -> bool:
         if not host_address or not port:
             return False
@@ -85,7 +90,11 @@ class WorkspaceIntelStore:
                 session.add(host)
                 session.flush()
 
-            host.status = "up"
+            status = (host_status or "up").strip().lower()
+            if status in ("up", "down", "unknown"):
+                host.status = status
+            else:
+                host.status = "up"
             host.updated_at = datetime.utcnow()
             # Keep DNS name when scanning via domain (don't overwrite with empty)
             if hostname and str(hostname).strip():
@@ -96,6 +105,11 @@ class WorkspaceIntelStore:
                     # Prefer FQDN over short labels when longer
                     if len(hn) > len(host.hostname or ""):
                         host.hostname = hn
+
+            if os_name and str(os_name).strip():
+                host.os = str(os_name).strip()[:255]
+            if mac and str(mac).strip() and not host.mac:
+                host.mac = str(mac).strip()
 
             svc_name = name or ICS_SERVICE_NAMES.get(int(port)) or TCP_SERVICE_NAMES.get(int(port), f"tcp-{port}")
             service = (
@@ -109,6 +123,8 @@ class WorkspaceIntelStore:
                     port=int(port),
                     protocol=protocol,
                     state=state,
+                    version=(str(version).strip()[:255] if version else None),
+                    banner=(str(banner).strip() if banner else None),
                 )
                 session.add(service)
                 session.flush()
@@ -116,6 +132,10 @@ class WorkspaceIntelStore:
                 service.state = state
                 if svc_name and (not service.name or service.name.startswith("tcp-")):
                     service.name = svc_name
+                if version and str(version).strip():
+                    service.version = str(version).strip()[:255]
+                if banner and str(banner).strip():
+                    service.banner = str(banner).strip()
                 service.updated_at = datetime.utcnow()
 
             if service not in host.services:
@@ -155,6 +175,114 @@ class WorkspaceIntelStore:
                 ):
                     saved += 1
         return saved
+
+    def record_nmap_scan(
+        self,
+        report: Dict[str, Any],
+        *,
+        source: str = "nmap",
+        open_only: bool = True,
+    ) -> Dict[str, int]:
+        """Persist a parsed nmap report (``parse_nmap_xml`` output) into the workspace.
+
+        Returns counts: ``{"hosts": n, "services": n}``.
+        """
+        hosts_saved = 0
+        services_saved = 0
+        for host in report.get("hosts") or []:
+            address = (host.get("address") or "").strip()
+            if not address:
+                continue
+            hostname = host.get("hostname")
+            os_name = host.get("os")
+            mac = host.get("mac")
+            host_status = host.get("status") or "up"
+            services = host.get("services") or []
+            wrote_service = False
+
+            for svc in services:
+                state = (svc.get("state") or "unknown").lower()
+                if open_only and state != "open":
+                    continue
+                port = svc.get("port")
+                if not port:
+                    continue
+                if self.record_open_port(
+                    address,
+                    int(port),
+                    protocol=(svc.get("protocol") or "tcp").lower(),
+                    name=svc.get("name"),
+                    state=state if state in ("open", "closed", "filtered", "unknown") else "unknown",
+                    source=source,
+                    hostname=hostname,
+                    version=svc.get("version"),
+                    banner=svc.get("banner"),
+                    os_name=os_name,
+                    mac=mac,
+                    host_status=host_status,
+                ):
+                    services_saved += 1
+                    wrote_service = True
+
+            if wrote_service:
+                hosts_saved += 1
+                continue
+
+            # Host seen by nmap but no (open) services persisted — still upsert host row
+            if self._upsert_host_meta(
+                address,
+                hostname=hostname,
+                os_name=os_name,
+                mac=mac,
+                host_status=host_status,
+            ):
+                hosts_saved += 1
+
+        return {"hosts": hosts_saved, "services": services_saved}
+
+    def _upsert_host_meta(
+        self,
+        address: str,
+        *,
+        hostname: Optional[str] = None,
+        os_name: Optional[str] = None,
+        mac: Optional[str] = None,
+        host_status: Optional[str] = None,
+    ) -> bool:
+        session = self._db_session()
+        workspace_id = self._workspace_id()
+        if not session or workspace_id is None or not address:
+            return False
+
+        from core.models.models import Host
+
+        try:
+            row = (
+                session.query(Host)
+                .filter(Host.workspace_id == workspace_id, Host.address == address)
+                .first()
+            )
+            if not row:
+                row = Host(workspace_id=workspace_id, address=address, status="unknown")
+                session.add(row)
+                session.flush()
+            status = str(host_status or "up").strip().lower()
+            row.status = status if status in ("up", "down", "unknown") else "up"
+            if hostname and str(hostname).strip():
+                hn = str(hostname).strip()
+                if not row.hostname or len(hn) > len(row.hostname or ""):
+                    row.hostname = hn
+            if os_name and str(os_name).strip():
+                row.os = str(os_name).strip()[:255]
+            if mac and str(mac).strip() and not row.mac:
+                row.mac = str(mac).strip()
+            row.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+        except Exception as exc:
+            session.rollback()
+            logger.warning("Could not record host meta %s (%s)", address, exc)
+            return False
 
     def record_ics_passive_scan(
         self,

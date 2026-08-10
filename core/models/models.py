@@ -792,6 +792,7 @@ class Workflow(Base):
         import json
         return {
             'id': self.id,
+            'workflow_id': f'wf-{self.id}',
             'name': self.name,
             'description': self.description,
             'trigger': self.trigger,

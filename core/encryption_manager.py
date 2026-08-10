@@ -47,6 +47,8 @@ class EncryptionManager:
         
         self._fernet = None
         self._is_initialized = False
+        # In-memory Fernet key after unlock — used to launch child UIs without re-prompting
+        self._session_key: Optional[bytes] = None
     
     @staticmethod
     def is_available() -> bool:
@@ -130,6 +132,7 @@ class EncryptionManager:
             
             # Create Fernet instance
             self._fernet = Fernet(key)
+            self._session_key = key
             
             # Save salt and encrypted key
             with open(self.salt_file, 'wb') as f:
@@ -166,7 +169,7 @@ class EncryptionManager:
         Load encryption with password
         
         Args:
-            password: Master password (if None, will prompt)
+            password: Master password (if None, will try env then prompt)
             
         Returns:
             True if loading successful, False otherwise
@@ -178,7 +181,28 @@ class EncryptionManager:
             return False
         
         try:
+            # Prefer an already-unlocked session key from a parent console launch
+            session_key = (password is None) and (
+                os.environ.get("KITTYSPLOIT_SESSION_KEY")
+                or os.environ.get("KITTY_SESSION_KEY")
+            )
+            if session_key:
+                ok = self._load_from_session_key(str(session_key).strip())
+                if ok:
+                    # Avoid leaving the key in the child process environment longer than needed
+                    for env_name in ("KITTYSPLOIT_SESSION_KEY", "KITTY_SESSION_KEY"):
+                        if env_name in os.environ:
+                            os.environ.pop(env_name, None)
+                    return True
+                print_warning("Session key rejected — falling back to password unlock.")
+
             # Get password if not provided
+            if password is None:
+                password = (
+                    os.environ.get("KITTYSPLOIT_MASTER_KEY")
+                    or os.environ.get("KITTY_MASTER_KEY")
+                    or None
+                )
             if password is None:
                 print_status("Enter master password to decrypt sensitive data...")
                 try:
@@ -208,11 +232,14 @@ class EncryptionManager:
                 decrypted_key = self._fernet.decrypt(encrypted_key)
                 if decrypted_key != key:
                     print_error("Invalid password.")
+                    self._fernet = None
                     return False
             except Exception:
                 print_error("Invalid password or corrupted key file.")
+                self._fernet = None
                 return False
             
+            self._session_key = key
             self._is_initialized = True
             print_success("Encryption loaded successfully!")
             return True
@@ -220,6 +247,41 @@ class EncryptionManager:
         except Exception as e:
             print_error(f"Error loading encryption: {e}")
             return False
+
+    def _load_from_session_key(self, key_b64: str) -> bool:
+        """Unlock using a Fernet key exported by an already-authenticated parent process."""
+        try:
+            key = key_b64.encode("ascii") if isinstance(key_b64, str) else key_b64
+            fernet = Fernet(key)
+            with open(self.key_file, 'rb') as f:
+                encrypted_key = f.read()
+            decrypted_key = fernet.decrypt(encrypted_key)
+            if decrypted_key != key:
+                return False
+            self._fernet = fernet
+            self._session_key = key
+            self._is_initialized = True
+            print_success("Encryption loaded from parent session.")
+            return True
+        except Exception:
+            self._fernet = None
+            self._session_key = None
+            return False
+
+    def get_session_key(self) -> Optional[str]:
+        """Return the in-memory Fernet key (urlsafe base64) if encryption is unlocked."""
+        if not self._session_key:
+            return None
+        if isinstance(self._session_key, bytes):
+            return self._session_key.decode("ascii")
+        return str(self._session_key)
+
+    def export_launch_env(self) -> Dict[str, str]:
+        """Env vars so a child process (Cosmic, Proxy, …) can unlock without re-prompting."""
+        key = self.get_session_key()
+        if not key:
+            return {}
+        return {"KITTYSPLOIT_SESSION_KEY": key}
     
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         """
@@ -385,6 +447,7 @@ class EncryptionManager:
             
             # Update Fernet instance
             self._fernet = new_fernet
+            self._session_key = new_key
             
             print_success("Password changed successfully!")
             return True
@@ -409,6 +472,7 @@ class EncryptionManager:
                 os.remove(self.config_file)
             
             self._fernet = None
+            self._session_key = None
             self._is_initialized = False
             
             print_warning("Encryption reset. All encrypted data is now unreadable!")

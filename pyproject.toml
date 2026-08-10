@@ -102,6 +102,11 @@ windows = [
     "winshell>=0.6",
     "pyreadline3>=3.4.0",
 ]
+# AD BloodHound.py collector (Linux/Windows, no SharpHound.exe):
+#   pip install -e ".[bloodhound]"
+bloodhound = [
+    "bloodhound>=1.7.0",
+]
 # Developer tooling: pip install -e ".[dev]"
 dev = [
     "pytest>=7.0",

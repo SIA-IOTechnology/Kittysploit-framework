@@ -59,12 +59,17 @@ class Module(Scanner, Http_client):
             return False
         body = r.text or ""
         headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-        body_any = ('<configuration>', 'password=',)
-        header_any = ('filename=', 'application/octet-stream',)
-        if (any(m in body for m in body_any)) and (any(m in headers for m in header_any)):
+        body_any = ('<configuration>',)
+        header_any = ('filename=', 'application/octet-stream')
+        # Require ASPX/config shape + download headers; avoid lone "password=" matches.
+        if (
+            '<configuration>' in body
+            and 'password=' in body.lower()
+            and any(m in headers for m in header_any)
+        ):
             self.set_info(
                 severity='high',
-                reason="Jinhe OA C6 download.jsp - Arbitary File Read detected",
+                reason="Jinhe OA C6 download.asp - Arbitrary File Read detected",
                 path='/C6/Jhsoft.Web.module/testbill/dj/download.asp?filename=/c6/web.config',
             )
             return True

@@ -8,10 +8,10 @@ from lib.protocols.http.http_client import Http_client
 
 class Module(Scanner, Http_client):
     __info__ = {
-        'name': 'Apache Hadoop YARN ResourceManager - Remote Code Execution Detection',
+        'name': 'Apache Hadoop YARN ResourceManager - Unauthenticated API Detection',
         'description': 'Apache Hadoop YARN ResourceManager is susceptible to remote code execution. An attacker can execute malware, obtain sensitive information, modify data, and/or gain full control over a compromised system without entering necessary credentials.',
         'author': ['KittySploit Team'],
-        'severity': 'critical',
+        'severity': 'high',
         'tags': ['web', 'scanner', 'misconfiguration', 'vulhub', 'apache', 'hadoop', 'unauth', 'rce', 'msf', 'misconfig', 'vuln'],
         'agent': {
             'risk': 'active',
@@ -42,7 +42,7 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
+                        'capability': 'risk_signal',
                         'from_detail': '',
                     },
                 ],
@@ -69,7 +69,7 @@ class Module(Scanner, Http_client):
         if any(m in body for m in body_any):
             self.set_info(
                 severity='critical',
-                reason='Apache Hadoop YARN ResourceManager - Remote Code Execution detected',
+                reason='Hadoop YARN unauth new-application API (RCE surface, not confirmed exec)',
                 path=path,
             )
             return True

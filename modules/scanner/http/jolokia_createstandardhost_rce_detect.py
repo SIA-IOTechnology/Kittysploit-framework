@@ -11,7 +11,7 @@ class Module(Scanner, Http_client):
         'name': 'Jolokia file write to RCE jfr Detection',
         'description': 'File read and file write to RCE by deploying a vhost with MBeanFactory/createStandardHost and DiagnosticCommand/jfrStart',
         'author': ['KittySploit Team'],
-        'severity': 'critical',
+        'severity': 'high',
         'tags': ['web', 'scanner', 'vulnerability', 'jolokia', 'rce', 'vuln'],
         'agent': {
             'risk': 'active',
@@ -64,7 +64,7 @@ class Module(Scanner, Http_client):
             if (all(m in body for m in body_all)):
                 self.set_info(
                     severity='critical',
-                    reason="Jolokia file write to RCE jfr detected",
+                    reason="Jolokia CreateStandardHost/diagnostic MBeans exposed (RCE surface)",
                     path=path,
                 )
                 return True

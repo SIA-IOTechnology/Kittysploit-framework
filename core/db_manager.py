@@ -107,7 +107,15 @@ class DatabaseManager:
             return
         
         # Import models that use encryption
-        from core.models.models import Credential, Loot, Session, CommandHistory, C2Task, VaultCredentialEntry
+        from core.models.models import (
+            Credential,
+            Loot,
+            Session,
+            CommandHistory,
+            C2Task,
+            VaultCredentialEntry,
+            ServiceSecret,
+        )
         try:
             from core.models.kittycluster_models import KittyClusterCommandRun, KittyClusterNode
         except Exception:
@@ -115,7 +123,15 @@ class DatabaseManager:
             KittyClusterNode = None
         
         # Set encryption manager for each model
-        models = [Credential, Loot, Session, CommandHistory, C2Task, VaultCredentialEntry]
+        models = [
+            Credential,
+            Loot,
+            Session,
+            CommandHistory,
+            C2Task,
+            VaultCredentialEntry,
+            ServiceSecret,
+        ]
         if KittyClusterNode is not None:
             models.append(KittyClusterNode)
         if KittyClusterCommandRun is not None:

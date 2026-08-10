@@ -908,3 +908,18 @@ class C2Task(Base, EncryptedFieldMixin):
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }
 
+
+class ServiceSecret(Base, EncryptedFieldMixin):
+    """Framework-level encrypted service secrets (API keys), master-password protected."""
+    __tablename__ = 'service_secrets'
+
+    id = Column(Integer, primary_key=True)
+    service = Column(String(64), unique=True, nullable=False, index=True)
+    secret = Column(EncryptedText, nullable=False)
+    settings = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<ServiceSecret(service={self.service!r})>"
+

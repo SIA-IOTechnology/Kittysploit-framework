@@ -24,7 +24,7 @@ class MobileCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Pair and manage the KittySploit mobile app"
+        return "Pair and manage the KittySploit mobile app (under construction)"
 
     @property
     def usage(self) -> str:
@@ -37,6 +37,9 @@ class MobileCommand(BaseCommand):
     def help_text(self) -> str:
         return """
 Pair the KittySploit mobile app with this running framework.
+
+Note: the mobile feature is under construction — pairing UI and QR work, but the app
+experience is still incomplete.
 
 Subcommands:
     pair      Start the local mobile API if needed and display a one-time QR code
@@ -61,6 +64,9 @@ Examples:
         return ["pair", "status", "revoke", "help"]
 
     def execute(self, args: List[str], **kwargs) -> bool:
+        print_warning(
+            "Mobile is under construction — QR pairing works, but the feature is not finished yet."
+        )
         if not args:
             return self._pair([])
         subcommand = args[0].lower()

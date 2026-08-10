@@ -83,7 +83,7 @@ class ShowCommand(BaseCommand):
         return (
             "show [options|advanced|info|modules|exploits|auxiliary|payloads|post|"
             "analysis|listeners|encoders|transforms|docker|backdoors|"
-            "browser_auxiliary|browser_exploits]"
+            "browser_auxiliary|browser_exploits|plugins]"
         )
     
     def get_subcommands(self) -> List[str]:
@@ -120,6 +120,8 @@ class ShowCommand(BaseCommand):
             "browser_aux",  # alias
             "browser_exploits",
             "browser_exploit",  # alias
+            "plugins",
+            "plugin",  # alias
         ]
         
         # Add module-specific options if a module is loaded
@@ -155,6 +157,7 @@ Arguments:
     nops                 Show available NOP types
     workspaces           Show available workspaces
     backdoors            Show backdoor modules
+    plugins              Show available plugins (same as 'plugin')
 
 Examples:
     show                    # Show current module information
@@ -168,6 +171,7 @@ Examples:
     show docker             # List Docker environments
     show backdoors          # List backdoor modules
     show listeners          # List all available listeners
+    show plugins            # List available plugins
     show nops               # Show available NOP types
         """
     
@@ -244,13 +248,15 @@ Examples:
                 self._show_nops()
             elif show_type == "workspaces":
                 self._show_workspaces()
+            elif show_type in ("plugin", "plugins"):
+                return self._show_plugins(**kwargs)
             else:
                 print_error(f"Unknown show type: {show_type}")
                 print_info(
                     "Use 'show options', 'show advanced', 'show info', 'show modules', "
                     "'show analysis', 'show browser_auxiliary', 'show browser_exploits', "
                     "'show listeners', 'show encoders', 'show transforms', "
-                    "'show nops', 'show workspaces', or 'show backdoors'"
+                    "'show nops', 'show workspaces', 'show plugins', or 'show backdoors'"
                 )
                 return False
             
@@ -259,6 +265,16 @@ Examples:
         except Exception as e:
             print_error(f"Error showing information: {str(e)}")
             return False
+
+    def _show_plugins(self, **kwargs) -> bool:
+        """Show available plugins (same output as the 'plugin' command)."""
+        command_registry = kwargs.get("command_registry")
+        if command_registry:
+            plugin_cmd = command_registry.get_command("plugin")
+            if plugin_cmd:
+                return bool(plugin_cmd.execute([]))
+        print_error("Plugin command not available")
+        return False
     
     def _show_info(self, module):
         """Show module information"""

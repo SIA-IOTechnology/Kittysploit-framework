@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_spring_loggers, validate_spring_json_probe
 
 
 class Module(Scanner, Http_client):
@@ -54,20 +55,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/loggers', '/actuator/loggers'):
-            r = self.http_request(method='GET', path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = (r.text or "").lower()
-            content_type = (r.headers.get("Content-Type") or r.headers.get("content-type") or "").lower()
-            body_any = ('"levels"', '"configuredlevel"', '"effectivelevel"',)
-            ctype_any = ('application/json', 'application/vnd.spring-boot',)
-            if (any(m in body for m in body_any)) and (any(m in content_type for m in ctype_any)):
-                self.set_info(
-                    severity='low',
-                    reason='Springboot Loggers - Exposure detected',
-                    path=path,
-                )
-                return True
-        return False
+        matched_path, _response = validate_spring_json_probe(
+            self.http_request,
+            ('/loggers', '/actuator/loggers'),
+            looks_like_spring_loggers,
+        )
+        if not matched_path:
+            return False
+        self.set_info(
+            severity='low',
+            reason='Springboot Loggers - Exposure detected',
+            path=matched_path,
+        )
+        return True
 

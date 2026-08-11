@@ -4,6 +4,8 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_prometheus_config_api, validate_json_probe
+from lib.scanner.http.response_validation import is_html_response
 
 
 class Module(Scanner, Http_client):
@@ -54,18 +56,30 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/config', '/api/v1/status/config'):
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = r.text or ""
-            body_all = ('global:', 'scrape_configs:', 'scrape_interval',)
-            if (all(m in body for m in body_all)):
+        for path in ('/api/v1/status/config',):
+            data, _response = validate_json_probe(
+                self.http_request,
+                path,
+                looks_like_prometheus_config_api,
+            )
+            if data:
                 self.set_info(
                     severity='high',
                     reason="Prometheus Monitoring System - Unauthenticated detected",
                     path=path,
                 )
                 return True
+
+        r = self.http_request(method="GET", path='/config', allow_redirects=False)
+        if not r or r.status_code != 200 or is_html_response(r):
+            return False
+        body = r.text or ""
+        if all(token in body for token in ('global:', 'scrape_configs:', 'scrape_interval')):
+            self.set_info(
+                severity='high',
+                reason="Prometheus Monitoring System - Unauthenticated detected",
+                path='/config',
+            )
+            return True
         return False
 

@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.response_validation import csp_header_value, is_weak_csp
 
 
 class Module(Scanner, Http_client):
@@ -64,9 +65,8 @@ class Module(Scanner, Http_client):
         r = self.http_request(method='GET', path=path, allow_redirects=False)
         if not r or r.status_code != 200:
             return False
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items()).lower()
-        header_any = ('content-security-policy:', 'script-src', 'default-src', 'object-src',)
-        if any(m in headers for m in header_any):
+        policy = csp_header_value(r)
+        if policy and is_weak_csp(policy):
             self.set_info(
                 severity='info',
                 reason='Weak Content Security Policy detected',

@@ -72,7 +72,7 @@ class Module(Auxiliary, Http_client, Wordpress):
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "scanner/http/planyo_cve_2026_3576",
+                    "auxiliary/admin/http/planyo_cve_2026_3576_file_read",
                 ],
             },
         },

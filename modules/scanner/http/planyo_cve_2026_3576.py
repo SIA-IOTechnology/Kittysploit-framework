@@ -35,6 +35,7 @@ class Module(Scanner, Http_client, Wordpress):
         ],
         "modules": [
             "auxiliary/admin/http/planyo_cve_2026_3576_ssrf",
+            "auxiliary/admin/http/planyo_cve_2026_3576_file_read",
         ],
         "tags": [
             "web",
@@ -79,6 +80,7 @@ class Module(Scanner, Http_client, Wordpress):
                 "option_bindings": {},
                 "suggested_followups": [
                     "auxiliary/admin/http/planyo_cve_2026_3576_ssrf",
+                    "auxiliary/admin/http/planyo_cve_2026_3576_file_read",
                 ],
             },
         },

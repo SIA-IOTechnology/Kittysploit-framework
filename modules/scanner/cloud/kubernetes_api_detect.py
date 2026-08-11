@@ -4,6 +4,12 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.response_validation import (
+    looks_like_kubernetes_health,
+    looks_like_kubernetes_resource_list,
+    looks_like_kubernetes_version,
+    parse_json_response,
+)
 
 
 class Module(Scanner, Http_client):
@@ -51,15 +57,18 @@ class Module(Scanner, Http_client):
             r = self.http_request(method="GET", path=path, allow_redirects=False)
             if not r or r.status_code not in (200, 401, 403):
                 continue
-            t = r.text
-            # /version returns gitVersion, major, minor
-            if "gitVersion" in t and ("major" in t or "minor" in t):
+            if path in ("/healthz", "/readyz"):
+                if r.status_code == 200 and looks_like_kubernetes_health(r.text or "", r):
+                    self.set_info(severity="high", reason=f"Kubernetes health at {path}")
+                    return True
+                continue
+            data, err = parse_json_response(r)
+            if err or not data:
+                continue
+            if path == "/version" and looks_like_kubernetes_version(data):
                 self.set_info(severity="high", reason=f"Kubernetes API at {path}")
                 return True
-            if path.startswith("/api/v1") and ("items" in t or "kind" in t and "List" in t):
+            if path.startswith("/api/v1") and looks_like_kubernetes_resource_list(data):
                 self.set_info(severity="high", reason=f"Kubernetes API at {path}")
-                return True
-            if path in ("/healthz", "/readyz") and r.status_code == 200 and r.text.strip() in ("ok", "success"):
-                self.set_info(severity="high", reason=f"Kubernetes health at {path}")
                 return True
         return False

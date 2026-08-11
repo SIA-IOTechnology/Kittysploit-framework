@@ -4,6 +4,8 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import validate_spring_json_probe
+from lib.scanner.http.response_validation import looks_like_spring_actuator_env
 
 
 class Module(Scanner, Http_client):
@@ -54,21 +56,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/env', '/actuator/env', '/actuator;/env;', '/message-api/actuator/env'):
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = r.text or ""
-            headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-            server = r.headers.get("Server") or r.headers.get("server") or ""
-            body_any = ('applicationConfig', 'activeProfiles', 'server.port', 'local.server.port',)
-            header_any = ('application/json', 'application/vnd.spring-boot.actuator', 'application/vnd.spring-boot.actuator.v1+json', 'application/vnd.spring-boot.actuator.v2+json', 'application/vnd.spring-boot.actuator.v3+json',)
-            if (any(m in body for m in body_any)) and (any(m in headers for m in header_any)):
-                self.set_info(
-                    severity='low',
-                    reason="Springboot Env Actuator detected",
-                    path=path,
-                )
-                return True
-        return False
+        matched_path, _response = validate_spring_json_probe(
+            self.http_request,
+            ('/env', '/actuator/env', '/actuator;/env;', '/message-api/actuator/env'),
+            looks_like_spring_actuator_env,
+        )
+        if not matched_path:
+            return False
+        self.set_info(
+            severity='low',
+            reason="Springboot Env Actuator detected",
+            path=matched_path,
+        )
+        return True
 

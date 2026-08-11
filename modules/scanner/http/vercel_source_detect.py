@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.response_validation import looks_like_vercel_source_exposure
 
 
 class Module(Scanner, Http_client):
@@ -59,8 +60,7 @@ class Module(Scanner, Http_client):
         if not r or r.status_code != 200:
             return False
         body = r.text or ""
-        body_any = ('Deployment Source</title>', 'Deployment Source – Dashboard – Vercel', '<title>Login – Vercel</title>',)
-        if (any(m in body for m in body_any)):
+        if looks_like_vercel_source_exposure(body):
             self.set_info(
                 severity='medium',
                 reason="Vercel Source Code Exposure detected",

@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/windows/http/wac_cve_2026_26119_rce',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': ['https://github.com/microsoft/Windows-admin-center'],
@@ -65,8 +68,9 @@ class Module(Scanner, Http_client):
         if any(m in body for m in markers):
             self.set_info(
                 severity='info',
-                reason="Windows Admin Center Panelion detected",
+                reason="Windows Admin Center panel detected",
                 path='/',
+                tech_hints=['windows-admin-center', 'wac'],
             )
             return True
         return False

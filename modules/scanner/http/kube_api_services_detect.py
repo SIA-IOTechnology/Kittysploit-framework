@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_kubernetes_service_list, validate_json_probe
 
 
 class Module(Scanner, Http_client):
@@ -54,17 +55,18 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/api/v1/namespaces/default/services', allow_redirects=False)
-        if not r or r.status_code != 200:
+        path = '/api/v1/namespaces/default/services'
+        data, _response = validate_json_probe(
+            self.http_request,
+            path,
+            looks_like_kubernetes_service_list,
+        )
+        if not data:
             return False
-        body = r.text or ""
-        body_markers = ('"ServiceList":', '"items":',)
-        if any(m in body for m in body_markers):
-            self.set_info(
-                severity='info',
-                reason="Kube API Services detected",
-                path='/api/v1/namespaces/default/services',
-            )
-            return True
-        return False
+        self.set_info(
+            severity='info',
+            reason="Kube API Services detected",
+            path=path,
+        )
+        return True
 

@@ -4,6 +4,8 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import validate_json_probe
+from lib.scanner.http.response_validation import looks_like_kubernetes_version
 
 
 class Module(Scanner, Http_client):
@@ -58,17 +60,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/version', allow_redirects=False)
-        if not r or r.status_code != 200:
+        data, _response = validate_json_probe(
+            self.http_request,
+            "/version",
+            looks_like_kubernetes_version,
+        )
+        if not data:
             return False
-        body = r.text or ""
-        body_markers = ('gitVersion', 'goVersion', 'platform',)
-        if any(m in body for m in body_markers):
-            self.set_info(
-                severity='info',
-                reason="Kubernetes Version Exposure detected",
-                path='/version',
-            )
-            return True
-        return False
+        self.set_info(
+            severity='info',
+            reason="Kubernetes Version Exposure detected",
+            path='/version',
+        )
+        return True
 

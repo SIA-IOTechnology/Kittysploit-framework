@@ -63,7 +63,8 @@ class Module(Scanner, Http_client):
                 '<title>Odoo</title>',
                 'odoo.session_info',
                 'web.layout.odooscript',
-                'Log in',
+                '/web/static/src/',
+                'o_main_navbar',
             )
             body_hit = any(m in body for m in body_markers)
             if body_hit:

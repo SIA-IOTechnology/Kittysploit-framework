@@ -4,6 +4,8 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import validate_spring_json_probe
+from lib.scanner.http.response_validation import looks_like_spring_actuator_links
 
 
 class Module(Scanner, Http_client):
@@ -54,17 +56,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/', '/actuator', '/actuator%72', '/favicon.ico', '/actuator/favicon.ico'):
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = r.text or ""
-            body_markers = ('"_links":', '"self":', '"health"',)
-            if any(m in body for m in body_markers):
+        for path in ('/actuator', '/actuator%72'):
+            matched_path, _response = validate_spring_json_probe(
+                self.http_request,
+                (path,),
+                looks_like_spring_actuator_links,
+            )
+            if matched_path:
                 self.set_info(
                     severity='info',
                     reason="Detect Springboot Actuators detected",
-                    path=path,
+                    path=matched_path,
                 )
                 return True
         return False

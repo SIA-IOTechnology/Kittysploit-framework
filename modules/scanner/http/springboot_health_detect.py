@@ -4,6 +4,8 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import validate_spring_json_probe
+from lib.scanner.http.response_validation import looks_like_spring_actuator_health
 
 
 class Module(Scanner, Http_client):
@@ -54,20 +56,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        return False  # disabled: corrupted matchers
-        for path in ('/health', '/actuator/health'):
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = (r.text or "").lower()
-            body_any = ('application/json', 'application/vnd.spring-boot', '"components"', '"diskspace"', '"mongo"', '"jms"', '"ping"', '"db"', '"redis"', '"livenessstate"', '"readinessstate"',)
-            body_all = ()
-            if (any(m in body for m in body_any)) and (all(m in body for m in body_all)):
-                self.set_info(
-                    severity='info',
-                    reason="Spring Boot Health Actuator Panel detected",
-                    path=path,
-                )
-                return True
-        return False
+        matched_path, _response = validate_spring_json_probe(
+            self.http_request,
+            ('/health', '/actuator/health'),
+            looks_like_spring_actuator_health,
+        )
+        if not matched_path:
+            return False
+        self.set_info(
+            severity='info',
+            reason="Spring Boot Health Actuator Panel detected",
+            path=matched_path,
+        )
+        return True
 

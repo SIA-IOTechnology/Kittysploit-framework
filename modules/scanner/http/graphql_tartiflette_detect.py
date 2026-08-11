@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import is_spa_catchall
 
 
 class Module(Scanner, Http_client):
@@ -55,13 +56,21 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/graphql', '/api/graphql', '/query', '/'):
-            r = self.http_request(method='POST', path=path, allow_redirects=True, headers={'Content-Type': 'application/json'}, data='{"query":"query @a { __typename }"}')
+        home = self.http_request(method="GET", path="/", allow_redirects=False)
+        for path in ('/graphql', '/api/graphql', '/query'):
+            r = self.http_request(
+                method='POST',
+                path=path,
+                allow_redirects=False,
+                headers={'Content-Type': 'application/json'},
+                data='{"query":"query @a { __typename }"}',
+            )
             if not r or r.status_code not in (200, 400):
                 continue
+            if is_spa_catchall(r, home):
+                continue
             body = r.text or ""
-            body_any = ('Unknow Directive < @a >.',)
-            if any(m in body for m in body_any):
+            if 'Unknow Directive < @a >.' in body:
                 self.set_info(
                     severity='info',
                     reason='Graphql Tartiflette detected',

@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_netdata_info, validate_json_probe
 
 
 class Module(Scanner, Http_client):
@@ -55,21 +56,13 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        for path in ('/api/v1/info', '/api/v2/info', '/sign-in'):
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code != 200:
-                continue
-            body = (r.text or "").lower()
-            body_markers = (
-                'netdata',
-                '<title>netdata console</title>',
+        for path in ('/api/v1/info', '/api/v2/info'):
+            data, _response = validate_json_probe(
+                self.http_request,
+                path,
+                looks_like_netdata_info,
             )
-            body_hit = any(m in body for m in body_markers)
-            headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items()).lower()
-            header_markers = (
-                'application/json',
-            )
-            if body_hit and any(m in headers for m in header_markers):
+            if data:
                 self.set_info(
                     severity='info',
                     reason="Netdata Panel detected",

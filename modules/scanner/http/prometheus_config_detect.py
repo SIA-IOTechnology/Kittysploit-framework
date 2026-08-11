@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_prometheus_config_api, validate_json_probe
 
 
 class Module(Scanner, Http_client):
@@ -55,18 +56,17 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        r = self.http_request(method="GET", path='/api/v1/status/config', allow_redirects=False)
-        if not r or r.status_code != 200:
-            return False
-        body = r.text or ""
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-        body_all = ('"status": "success":', '"data":', '"yaml":',)
-        header_any = ('application/json',)
-        if (all(m in body for m in body_all)) and (any(m in headers for m in header_any)):
+        path = '/api/v1/status/config'
+        data, _response = validate_json_probe(
+            self.http_request,
+            path,
+            looks_like_prometheus_config_api,
+        )
+        if data:
             self.set_info(
                 severity='info',
                 reason="Prometheus Config API Endpoint Discovery detected",
-                path='/api/v1/status/config',
+                path=path,
             )
             return True
         return False

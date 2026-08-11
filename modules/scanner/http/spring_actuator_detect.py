@@ -4,6 +4,13 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import is_spa_catchall, validate_json_probe
+from lib.scanner.http.response_validation import (
+    is_html_response,
+    looks_like_spring_actuator_env,
+    looks_like_spring_actuator_health,
+    looks_like_spring_actuator_links,
+)
 
 
 class Module(Scanner, Http_client):
@@ -49,20 +56,22 @@ class Module(Scanner, Http_client):
 
     def run(self):
         probes = [
-            ("/actuator", ["_links", "actuator"], "info"),
-            ("/actuator/health", ['"status"', "UP", "DOWN"], "info"),
-            ("/actuator/env", ["propertySources", "systemProperties"], "high"),
-            ("/actuator/heapdump", [], "critical"),
+            ("/actuator", looks_like_spring_actuator_links, "info"),
+            ("/actuator/health", looks_like_spring_actuator_health, "info"),
+            ("/actuator/env", looks_like_spring_actuator_env, "high"),
         ]
-        for path, markers, severity in probes:
-            r = self.http_request(method="GET", path=path, allow_redirects=False)
-            if not r or r.status_code not in (200, 401, 403):
-                continue
-            body = (r.text or "").lower()
-            if path.endswith("heapdump") and r.status_code == 200 and len(r.content or b"") > 1024:
-                self.set_info(severity="critical", reason="Spring Actuator heapdump exposed", path=path)
-                return True
-            if any(marker.lower() in body for marker in markers):
+        for path, validator, severity in probes:
+            data, response = validate_json_probe(self.http_request, path, validator)
+            if data:
                 self.set_info(severity=severity, reason=f"Spring Boot Actuator exposed at {path}", path=path)
                 return True
+
+        r = self.http_request(method="GET", path="/actuator/heapdump", allow_redirects=False)
+        home = self.http_request(method="GET", path="/", allow_redirects=False)
+        if r and home and int(r.status_code or 0) == 200 and not is_html_response(r):
+            if not is_spa_catchall(r, home):
+                content = r.content or b""
+                if len(content) > 1024 and content[:2] == b"PK":
+                    self.set_info(severity="critical", reason="Spring Actuator heapdump exposed", path="/actuator/heapdump")
+                    return True
         return False

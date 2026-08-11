@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.probe_guard import looks_like_localstack_health, validate_json_probe
 
 
 class Module(Scanner, Http_client):
@@ -59,17 +60,17 @@ class Module(Scanner, Http_client):
 
     def run(self):
         path = '/_localstack/health'
-        r = self.http_request(method='GET', path=path, allow_redirects=False)
-        if not r or r.status_code != 200:
+        data, _response = validate_json_probe(
+            self.http_request,
+            path,
+            looks_like_localstack_health,
+        )
+        if not data:
             return False
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items()).lower()
-        header_any = ('application/json',)
-        if any(m in headers for m in header_any):
-            self.set_info(
-                severity='info',
-                reason='LocalStack detected',
-                path=path,
-            )
-            return True
-        return False
+        self.set_info(
+            severity='info',
+            reason='LocalStack detected',
+            path=path,
+        )
+        return True
 

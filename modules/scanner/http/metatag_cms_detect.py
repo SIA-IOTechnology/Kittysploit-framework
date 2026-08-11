@@ -61,14 +61,17 @@ class Module(Scanner, Http_client):
         if not r or r.status_code != 200:
             return False
         body = r.text or ""
-        body_regexes = ('(?i)<meta\\s+?name="?generator"?\\s+?content="[^"]+?"',)
-        body_re_hit = any(re.search(rx, body, 0) for rx in body_regexes)
-        if body_re_hit:
-            self.set_info(
-                severity='info',
-                reason="Metatag CMS detected",
-                path='/',
-            )
-            return True
-        return False
+        match = re.search(r'(?i)<meta\s+name="?generator"?\s+content="([^"]+)"', body)
+        if not match:
+            return False
+        generator = match.group(1).strip()
+        if not generator or len(generator) < 2:
+            return False
+        self.set_info(
+            severity='info',
+            reason=f"Metatag CMS detected: {generator}",
+            path='/',
+            generator=generator,
+        )
+        return True
 

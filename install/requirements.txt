@@ -35,7 +35,7 @@ PySocks>=1.7.1
 
 # System utilities
 psutil>=5.8.0
-pywin32>=301; sys_platform == "win32"
+pywin32>=312; sys_platform == "win32"
 winshell>=0.6; sys_platform == "win32"
 pyreadline3>=3.4.0; sys_platform == "win32"
 

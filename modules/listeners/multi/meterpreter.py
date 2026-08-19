@@ -7,7 +7,7 @@ from kittysploit import Listener
 from modules.listeners.multi.meterpreter_reverse_tcp import Module as _MeterpreterReverseTcp
 
 
-class Module(Listener, _MeterpreterReverseTcp):
+class Module(_MeterpreterReverseTcp):
     """Alias for listeners/multi/meterpreter_reverse_tcp."""
 
     __info__ = {

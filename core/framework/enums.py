@@ -96,12 +96,14 @@ class Platform(Enum):
     LINUX = "linux"
     WINDOWS = "windows"
     MACOS = "macos"
+    MAC = "macos"
     UNIX = "unix"
     ANDROID = "android"
     IOS = "ios"
     JAVASCRIPT = "javascript"
     PHP = "php"
     PYTHON = "python"
+    PERL = "perl"
     OTHER = "other"
     MULTI = "multi"
     ALL = "all"
@@ -127,6 +129,7 @@ class PayloadCategory(Enum):
 
 class Arch(Enum):
     """Architecture types"""
+    CMD = {"name": "cmd", "value": "cmd"}
     PYTHON = {"name": "Python", "value": "python"}
     PHP = {"name": "PHP", "value": "php"}
     PERL = {"name": "Perl", "value": "perl"}

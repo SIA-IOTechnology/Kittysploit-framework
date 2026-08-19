@@ -25,6 +25,7 @@ from core.framework import (
     VagrantEnvironment,
     Post,
     Backdoor,
+    Prestage,
     BrowserAuxiliary,
     Plugin,
     ModuleArgumentParser,
@@ -49,6 +50,7 @@ from core.framework.option import (
     OptBool,
     OptIP,
     OptChoice,
+    OptEnum,
     OptFile,
     OptFloat
 )
@@ -107,6 +109,7 @@ __all__ = [
     'VagrantEnvironment',
     'Post',
     'Backdoor',
+    'Prestage',
     'Encoder',
     'Transform',
     'Obfuscator',
@@ -131,6 +134,7 @@ __all__ = [
     'OptBool',
     'OptIP',
     'OptChoice',
+    'OptEnum',
     'OptFile',
     'OptFloat',
     'OptPayload',

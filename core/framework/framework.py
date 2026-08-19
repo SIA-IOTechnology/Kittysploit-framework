@@ -77,7 +77,7 @@ class Framework:
         self.last_scanner_findings: List[Dict[str, Any]] = []
         self.version = Config.VERSION
         self.session = Session()
-        self.module_loader = ModuleLoader()
+        self.module_loader = None
         self.output_handler = OutputHandler()
         self.shell_manager = ShellManager()
         self.metrics_collector = MetricsCollector()
@@ -170,6 +170,16 @@ class Framework:
         
         # Initialize plugin manager
         self.plugin_manager = PluginManager(self)
+
+        from core.session_triggers import SessionTriggerManager
+        from core.session_job_manager import SessionJobManager
+
+        self.session_trigger_manager = SessionTriggerManager(self)
+        self.session_job_manager = SessionJobManager(self)
+
+        from core.offload_listener_manager import OffloadListenerManager
+
+        self.offload_listener_manager = OffloadListenerManager(self)
         
         # Registry for active listeners (by listener_id)
         self.active_listeners: Dict[str, Any] = {}
@@ -643,6 +653,7 @@ class Framework:
                 ('modules/encoders', 'encoders'),
                 ('modules/transforms', 'transforms'),
                 ('modules/backdoors', 'backdoors'),
+                ('modules/prestage', 'prestage'),
                 ('modules/shortcut', 'shortcut'),
                 ('modules/analysis', 'analysis'),
             ]
@@ -732,7 +743,7 @@ class Framework:
         """
         try:
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'prestage', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
             counts = {}
             
             # Récupérer les comptages depuis la base de données
@@ -801,7 +812,7 @@ class Framework:
                 return counts
             
             # Types de modules supportés
-            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
+            module_types = ['exploits', 'auxiliary', 'payloads', 'encoders', 'transforms', 'listeners', 'backdoors', 'prestage', 'workflow', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 'environments', 'post', 'scanner', 'shortcut', 'analysis']
             
             for module_type in module_types:
                 # Map module_type to directory name
@@ -1325,6 +1336,9 @@ class Framework:
 
             if hasattr(self, 'observability') and self.observability:
                 self.observability.update_workspace(name)
+
+            if hasattr(self, 'session_trigger_manager') and self.session_trigger_manager:
+                self.session_trigger_manager.reload_for_workspace(name)
         
         return success
     

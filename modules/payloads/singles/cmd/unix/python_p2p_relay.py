@@ -59,4 +59,4 @@ class Module(Payload):
         import base64 as b64
 
         encoded = b64.b64encode(script.encode("utf-8")).decode("ascii")
-        return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+        return self._encode_python_one_liner(script, self.python_binary)

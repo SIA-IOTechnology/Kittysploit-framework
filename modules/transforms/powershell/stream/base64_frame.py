@@ -3,11 +3,10 @@
 
 from typing import Optional
 
-from kittysploit import Transform
 from modules.transforms.python.stream.base64_frame import Module as PythonBase64FrameTransform
 
 
-class Module(Transform, PythonBase64FrameTransform):
+class Module(PythonBase64FrameTransform):
     """PowerShell Base64 framed stream transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["powershell"]

@@ -5,8 +5,9 @@ from core.framework.base_module import BaseModule
 from core.framework.enums import Handler, SessionType, Arch, Platform, Protocol
 from core.framework.option.option_string import OptString
 from core.framework.option.option_bool import OptBool
+from core.framework.option.option_file import OptFile
 from core.output_handler import print_info, print_success, print_error, print_warning
-from typing import Optional, Any
+from typing import Optional, Any, List, Dict
 import struct
 import socket
 import importlib
@@ -20,8 +21,29 @@ class Payload(BaseModule):
     # Payloads that support stream transforms set this; transform must support this language via generate_client_code(lang).
     CLIENT_LANGUAGE: Optional[str] = None
 
+    # Explicit override: True/False, or None to infer from CLIENT_LANGUAGE == "python".
+    PRESTAGE_SUPPORTED: Optional[bool] = None
+
     # Optional C2 stream transform: must match the listener's transform (and options) so both sides encode/decode the same way
     transform = OptString("", "C2 stream transform - same as listener (e.g. transforms/python/stream/xor)", False, advanced=True)
+    prestage = OptString(
+        "",
+        "Offline pre-stage modules for Python payloads (comma-separated ids, e.g. check_vm,extract_zip)",
+        False,
+        advanced=True,
+    )
+    prestage_archive = OptFile(
+        "",
+        "ZIP archive embedded when using prestage extract_zip (prestage/zip/extract_embedded)",
+        False,
+        advanced=True,
+    )
+    prestage_extract_to = OptString(
+        "",
+        "Target directory for ZIP extract prestage (optional)",
+        False,
+        advanced=True,
+    )
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -44,14 +66,14 @@ class Payload(BaseModule):
         if self._transform_instance is not None and self._transform_path == path_str:
             return
         try:
-            mod_path = "modules." + path_str.replace("/", ".")
-            mod = importlib.import_module(mod_path)
-            xf_cls = getattr(mod, "Module", None)
-            if not xf_cls:
+            from core.framework.transform import load_transform_chain
+
+            inst = load_transform_chain(path_str, framework=getattr(self, "framework", None))
+            if inst is None or not (hasattr(inst, "encode") or hasattr(inst, "decode")):
                 self._transform_instance = None
                 self._transform_path = ""
                 return
-            self._transform_instance = xf_cls(framework=getattr(self, "framework", None))
+            self._transform_instance = inst
             self._transform_path = path_str
         except Exception:
             self._transform_instance = None
@@ -66,6 +88,154 @@ class Payload(BaseModule):
         """Return the language of the generated client code (e.g. 'python', 'powershell')."""
         return getattr(self.__class__, "CLIENT_LANGUAGE", None)
 
+    def supports_prestage(self) -> bool:
+        from core.payload_generation.prestage_support import payload_supports_prestage
+
+        return payload_supports_prestage(self)
+
+    def _get_prestage_platform(self) -> str:
+        info = getattr(self.__class__, "__info__", {}) or {}
+        platform = info.get("platform")
+        if hasattr(platform, "value"):
+            return str(platform.value or "all").lower()
+        return str(platform or "all").lower()
+
+    def _get_prestage_scriptlet_names(self) -> List[str]:
+        raw = ""
+        opt = getattr(self, "prestage", None)
+        if opt is not None and hasattr(opt, "value"):
+            raw = str(opt.value or "")
+        else:
+            raw = str(opt or "")
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+    def _build_prestage_context(self) -> Dict[str, Any]:
+        import base64
+        import os
+
+        context: Dict[str, Any] = {}
+        names = {n.lower() for n in self._get_prestage_scriptlet_names()}
+        needs_zip = any(
+            token in names
+            for token in ("extract_zip", "prestage/zip/extract_embedded", "zip/extract_embedded")
+        )
+        if not needs_zip:
+            return context
+
+        archive = ""
+        archive_opt = getattr(self, "prestage_archive", None)
+        if archive_opt is not None and hasattr(archive_opt, "value"):
+            archive = str(archive_opt.value or "").strip()
+        else:
+            archive = str(archive_opt or "").strip()
+        if archive and os.path.isfile(archive):
+            with open(archive, "rb") as fh:
+                context["zip_b64"] = base64.b64encode(fh.read()).decode("ascii")
+
+        extract_to = ""
+        extract_opt = getattr(self, "prestage_extract_to", None)
+        if extract_opt is not None and hasattr(extract_opt, "value"):
+            extract_to = str(extract_opt.value or "").strip()
+        else:
+            extract_to = str(extract_opt or "").strip()
+        if extract_to:
+            context["extract_to"] = extract_to
+        return context
+
+    def _get_prestage_language(self) -> str:
+        lang = self._get_client_language()
+        if lang:
+            return str(lang).strip().lower()
+        return "python"
+
+    def _apply_prestage_to_script(self, script: str) -> str:
+        names = self._get_prestage_scriptlet_names()
+        if not names:
+            return script
+        if not self.supports_prestage():
+            from core.payload_generation.prestage_support import payload_prestage_unsupported_message
+            from core.output_handler import print_warning
+
+            print_warning(payload_prestage_unsupported_message(self))
+            return script
+        lang = self._get_prestage_language()
+        context = self._build_prestage_context()
+        platform = self._get_prestage_platform()
+        framework = getattr(self, "framework", None)
+        if lang == "zig":
+            from core.payload_generation.scriptlets import wrap_zig_source
+
+            return wrap_zig_source(
+                script,
+                names,
+                platform=platform,
+                framework=framework,
+                context=context,
+            )
+        if lang == "powershell":
+            from core.payload_generation.scriptlets import wrap_powershell_script
+
+            return wrap_powershell_script(
+                script,
+                names,
+                platform=platform,
+                framework=framework,
+                context=context,
+            )
+        from core.payload_generation.scriptlets import wrap_python_script
+
+        return wrap_python_script(
+            script,
+            names,
+            platform=platform,
+            framework=framework,
+            context=context,
+        )
+
+    def _finalize_python_script(self, script: str) -> str:
+        """Apply offline prestage blocks to a Python implant script."""
+        return self._apply_prestage_to_script(script or "")
+
+    def _finalize_powershell_script(self, script: str) -> str:
+        """Apply offline prestage blocks to a PowerShell implant script."""
+        return self._apply_prestage_to_script(script or "")
+
+    def _encode_powershell_command(self, script: str, *, window_style: str = "") -> str:
+        """Return powershell -nop [-w hidden] -EncodedCommand ... with prestage applied."""
+        import base64
+
+        final_script = self._finalize_powershell_script(script or "")
+        encoded_script = base64.b64encode(final_script.encode("utf-16le")).decode("utf-8")
+        flags = "-nop"
+        style = str(window_style or "").strip()
+        if style:
+            flags += f" -w {style}"
+        return f"powershell {flags} -EncodedCommand {encoded_script}"
+
+    def _encode_python_one_liner(
+        self,
+        script: str,
+        python_binary=None,
+        *,
+        force_base64: bool = True,
+    ) -> str:
+        """Embed a Python script in a one-liner, applying prestage first."""
+        import base64
+
+        final_script = self._finalize_python_script(script or "")
+        py = python_binary
+        if py is None:
+            py = getattr(getattr(self, "python_binary", None), "value", None)
+        if py is None:
+            py = getattr(self, "python_binary", "python3")
+        py = str(py or "python3")
+
+        if not force_base64 and "\n" not in final_script and '"' not in final_script:
+            return f'{py} -c "{final_script}"'
+
+        encoded = base64.b64encode(final_script.encode("utf-8")).decode("ascii")
+        return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+
     def _is_transform_compatible(self, xf) -> bool:
         """Return True if the transform supports this payload's client language."""
         if xf is None:
@@ -79,6 +249,12 @@ class Payload(BaseModule):
     def get_options(self) -> dict:
         """Return payload options merged with transform options when transform is set."""
         opts = super().get_options()
+        if not self.supports_prestage():
+            opts = {
+                key: value
+                for key, value in opts.items()
+                if key not in ("prestage", "prestage_archive", "prestage_extract_to")
+            }
         path_str = self._get_transform_path()
         if not path_str:
             return opts
@@ -98,6 +274,22 @@ class Payload(BaseModule):
         from core.framework.transform import LEGACY_OPTION
         if name == LEGACY_OPTION:
             name = "transform"
+        if name == "prestage":
+            if not self.supports_prestage():
+                from core.payload_generation.prestage_support import payload_prestage_unsupported_message
+                from core.output_handler import print_error
+
+                print_error(payload_prestage_unsupported_message(self))
+                return False
+            try:
+                from core.payload_generation.prestage_support import validate_prestage_value
+
+                validate_prestage_value(self, str(value))
+            except (ValueError, KeyError) as exc:
+                from core.output_handler import print_error
+
+                print_error(str(exc))
+                return False
         own_opts = getattr(self, "exploit_attributes", {})
         if name in own_opts:
             return super().set_option(name, value)

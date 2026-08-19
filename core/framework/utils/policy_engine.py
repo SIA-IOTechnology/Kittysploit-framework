@@ -18,6 +18,8 @@ import ast
 import hashlib
 import json
 import time
+import atexit
+import shutil
 from typing import Dict, List, Any, Optional, Set, Tuple, Callable
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -89,6 +91,25 @@ class DependencyNode:
 
 class PolicyEngine:
     """Moteur de politique de sécurité pour les modules"""
+
+    _instances_by_store: Dict[str, "PolicyEngine"] = {}
+    _PERSIST_BATCH_SIZE = 25
+    _LOAD_RETRIES = 3
+
+    def __new__(
+        cls,
+        encryption_manager: Optional[EncryptionManager] = None,
+        policy_level: PolicyLevel = PolicyLevel.STANDARD,
+        store_path: Optional[str] = None,
+    ):
+        resolved_store = store_path or os.path.expanduser("~/.kittysploit/module_store")
+        existing = cls._instances_by_store.get(resolved_store)
+        if existing is not None:
+            return existing
+        instance = super().__new__(cls)
+        cls._instances_by_store[resolved_store] = instance
+        instance._policy_engine_initialized = False
+        return instance
     
     def __init__(
         self,
@@ -96,19 +117,15 @@ class PolicyEngine:
         policy_level: PolicyLevel = PolicyLevel.STANDARD,
         store_path: Optional[str] = None
     ):
-        """
-        Initialise le moteur de politique
-        
-        Args:
-            encryption_manager: Instance d'EncryptionManager pour les signatures
-            policy_level: Niveau de politique de sécurité
-            store_path: Chemin vers le store de modules signés
-        """
+        """Initialise le moteur de politique (singleton par store_path)."""
+        if getattr(self, "_policy_engine_initialized", False):
+            return
+
         self.encryption_manager = encryption_manager or EncryptionManager()
         self.policy_level = policy_level
         self.store_path = store_path or os.path.expanduser("~/.kittysploit/module_store")
         os.makedirs(self.store_path, exist_ok=True)
-        
+
         # Composants du moteur (imports différés pour éviter les dépendances circulaires)
         self.ast_analyzer = None
         self.sandbox_executor = None
@@ -121,7 +138,10 @@ class PolicyEngine:
         # Cache des manifestes
         self.manifest_cache: Dict[str, ModuleManifest] = {}
         self.manifest_file = os.path.join(self.store_path, "manifests.json")
+        self._dirty_persist_count = 0
         self._load_manifests()
+        atexit.register(self.flush_manifests)
+        self._policy_engine_initialized = True
     
     def validate_module(
         self,
@@ -414,35 +434,71 @@ class PolicyEngine:
             return self.manifest_cache[module_path]
         return None
     
-    def _save_manifest(self, manifest: ModuleManifest):
+    def _save_manifest(self, manifest: ModuleManifest, *, force_persist: bool = False):
         self.manifest_cache[manifest.module_path] = manifest
-        self._persist_manifests()
+        self._dirty_persist_count += 1
+        if force_persist or self._dirty_persist_count >= self._PERSIST_BATCH_SIZE:
+            self._persist_manifests()
+            self._dirty_persist_count = 0
+
+    def flush_manifests(self):
+        """Write pending manifest updates to disk."""
+        if self._dirty_persist_count:
+            self._persist_manifests()
+            self._dirty_persist_count = 0
     
     def _load_manifests(self):
         if not os.path.exists(self.manifest_file):
             return
-        
-        try:
-            with open(self.manifest_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+
+        last_error = None
+        for attempt in range(self._LOAD_RETRIES):
+            try:
+                with open(self.manifest_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
                 for path, manifest_data in data.items():
-                    # Reconstruire le manifeste depuis les données JSON
                     manifest = self._manifest_from_dict(manifest_data)
                     self.manifest_cache[path] = manifest
-        except Exception as e:
-            print_warning(f"Erreur lors du chargement des manifestes: {e}")
+                return
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                if attempt + 1 < self._LOAD_RETRIES:
+                    time.sleep(0.05)
+            except Exception as exc:
+                last_error = exc
+                break
+
+        backup_path = f"{self.manifest_file}.corrupt.{int(time.time())}"
+        try:
+            shutil.move(self.manifest_file, backup_path)
+            print_warning(
+                f"Manifest store was unreadable ({last_error}); "
+                f"starting fresh (backup: {backup_path})"
+            )
+        except Exception:
+            print_warning(f"Manifest store was unreadable ({last_error}); starting fresh")
     
     def _persist_manifests(self):
-        """Persiste les manifestes sur le disque"""
+        """Persiste les manifestes sur le disque (écriture atomique)."""
         try:
             data = {}
             for path, manifest in list(self.manifest_cache.items()):
                 data[path] = self._manifest_to_dict(manifest)
-            
-            with open(self.manifest_file, 'w', encoding='utf-8') as f:
+
+            tmp_path = f"{self.manifest_file}.tmp"
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.manifest_file)
         except Exception as e:
             print_error(f"Erreur lors de la sauvegarde des manifestes: {e}")
+            try:
+                tmp_path = f"{self.manifest_file}.tmp"
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
     
     def _manifest_to_dict(self, manifest: ModuleManifest) -> Dict[str, Any]:
         """Convertit un manifeste en dictionnaire"""

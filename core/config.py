@@ -66,7 +66,7 @@ class Config:
     VALID_MODULE_TYPES = [
         'exploit', 'payload', 'encoder', 'nop', 'auxiliary',
         'post', 'listener', 'browser_exploits', 'browser_auxiliary',
-        'workflow', 'backdoor'
+        'workflow', 'backdoor', 'prestage'
     ]
     
     # Global instance

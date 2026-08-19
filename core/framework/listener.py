@@ -126,14 +126,14 @@ class Listener(BaseModule):
         if self._transform_instance is not None and self._transform_path == path_str:
             return
         try:
-            mod_path = "modules." + path_str.replace("/", ".")
-            mod = importlib.import_module(mod_path)
-            xf_cls = getattr(mod, "Module", None)
-            if not xf_cls or not (hasattr(xf_cls, "encode") or hasattr(xf_cls, "decode")):
+            from core.framework.transform import load_transform_chain
+
+            inst = load_transform_chain(path_str, framework=getattr(self, "framework", None))
+            if inst is None or not (hasattr(inst, "encode") or hasattr(inst, "decode")):
                 self._transform_instance = None
                 self._transform_path = ""
                 return
-            self._transform_instance = xf_cls(framework=getattr(self, "framework", None))
+            self._transform_instance = inst
             self._transform_path = path_str
         except Exception:
             self._transform_instance = None

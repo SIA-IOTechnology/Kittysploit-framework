@@ -37,8 +37,8 @@ class Http_crawler(BaseModule):
     follow_forms = OptBool(True, "Enqueue form action URLs", True, advanced=True)
     follow_scripts = OptBool(True, "Enqueue same-origin script URLs", True, advanced=True)
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
         self._output = []
 
     def crawler_start(self):

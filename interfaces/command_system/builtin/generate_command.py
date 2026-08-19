@@ -88,6 +88,16 @@ Examples:
                           help="Number of encoding iterations (default: 1)")
         parser.add_argument("--preview", "-p", action="store_true", help="Preview the payload without generating")
         parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed generation information")
+        parser.add_argument(
+            "--prestage",
+            metavar="<scriptlets>",
+            help="Comma-separated offline pre-stage scriptlets (e.g. check_vm,daemonize)",
+        )
+        parser.add_argument(
+            "--list-prestage",
+            action="store_true",
+            help="List available pre-stage scriptlets and exit",
+        )
         
         return parser
     
@@ -97,7 +107,11 @@ Examples:
             parsed_args = self.parser.parse_args(args)
         except SystemExit:
             return True
-        
+
+        if parsed_args.list_prestage:
+            current_module = getattr(self.framework, "current_module", None) if hasattr(self, "framework") else None
+            return self._list_prestage_scriptlets(current_module)
+
         # Check if a payload module is selected
         if not hasattr(self.framework, 'current_module') or not self.framework.current_module:
             print_error("No module selected. Use 'use <payload>' first.")
@@ -116,6 +130,26 @@ Examples:
             return False
         
         try:
+            if parsed_args.prestage:
+                if not hasattr(current_module, "set_option"):
+                    print_error("Current module does not support the prestage option")
+                    return False
+                if not current_module.set_option("prestage", parsed_args.prestage):
+                    return False
+
+            if getattr(current_module, "supports_prestage", lambda: False)():
+                names = []
+                if hasattr(current_module, "_get_prestage_scriptlet_names"):
+                    names = current_module._get_prestage_scriptlet_names()
+                if names:
+                    from core.payload_generation.prestage_support import validate_prestage_names
+
+                    try:
+                        validate_prestage_names(current_module, names)
+                    except (ValueError, KeyError) as exc:
+                        print_error(str(exc))
+                        return False
+
             # Show generation info
             if parsed_args.verbose:
                 self._show_generation_info(current_module, parsed_args)
@@ -130,6 +164,36 @@ Examples:
         except Exception as e:
             print_error(f"Error generating payload: {str(e)}")
             return False
+
+    def _list_prestage_scriptlets(self, payload_module=None) -> bool:
+        from core.payload_generation.scriptlets import list_scriptlets
+        from core.payload_generation.prestage_support import (
+            list_compatible_scriptlets,
+            payload_prestage_unsupported_message,
+            payload_supports_prestage,
+        )
+
+        if payload_module is not None and getattr(payload_module, "type", None) == "payload":
+            if not payload_supports_prestage(payload_module):
+                print_error(payload_prestage_unsupported_message(payload_module))
+                print_info("Select a Python payload to list embeddable prestage scriptlets.")
+                return False
+            items = list_compatible_scriptlets(payload_module)
+            label = getattr(payload_module, "name", "current payload")
+            print_info(f"Prestage scriptlets compatible with {label}:")
+        else:
+            print_info("Available prestage scriptlets (Python payloads only):")
+            items = list_scriptlets()
+
+        if not items:
+            print_info("No compatible pre-stage scriptlets for this payload/platform")
+            return True
+        for item in items:
+            platforms = ", ".join(sorted(item.platforms))
+            module_path = getattr(item, "module_path", "") or getattr(item, "source_path", "")
+            suffix = f"  ({module_path})" if module_path else ""
+            print_info(f"  {item.name:<16} [{platforms}]  {item.description}{suffix}")
+        return True
     
     def _show_generation_info(self, payload_module, parsed_args):
         """Show detailed generation information"""
@@ -204,6 +268,25 @@ Examples:
                     print_error("Not all required options are set")
                 print_info("Use 'show options' to see required options")
                 return False
+
+            if getattr(payload_module, "_get_prestage_scriptlet_names", lambda: [])():
+                from core.payload_generation.prestage_support import (
+                    payload_supports_prestage,
+                    payload_prestage_unsupported_message,
+                    validate_prestage_names,
+                )
+
+                if not payload_supports_prestage(payload_module):
+                    print_error(payload_prestage_unsupported_message(payload_module))
+                    return False
+                try:
+                    validate_prestage_names(
+                        payload_module,
+                        payload_module._get_prestage_scriptlet_names(),
+                    )
+                except (ValueError, KeyError) as exc:
+                    print_error(str(exc))
+                    return False
             
             # Generate the raw payload
             raw_payload = payload_module.generate()

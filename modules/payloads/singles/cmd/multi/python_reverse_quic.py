@@ -65,9 +65,4 @@ class Module(Payload):
 
             print_warning("EXE compilation failed, falling back to Python command")
 
-        import base64
-
-        encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-        return (
-            f"{py} -c \"import base64;exec(base64.b64decode('{encoded}').decode())\""
-        )
+        return self._encode_python_one_liner(script, self.python_binary)

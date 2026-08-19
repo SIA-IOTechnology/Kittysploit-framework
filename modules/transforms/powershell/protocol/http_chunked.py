@@ -3,11 +3,10 @@
 
 from typing import Optional
 
-from kittysploit import Transform
 from modules.transforms.python.protocol.http_chunked import Module as PythonHttpChunkedTransform
 
 
-class Module(Transform, PythonHttpChunkedTransform):
+class Module(PythonHttpChunkedTransform):
     """PowerShell HTTP chunked transfer mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["powershell"]

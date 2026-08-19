@@ -280,7 +280,7 @@ class DatabaseManager:
             # Liste complète des types de modules attendus
             expected_types = ['exploits', 'auxiliary', 'scanner', 'post', 'payloads', 'workflow', 
                             'listeners', 'browser_exploits', 'browser_auxiliary', 'docker_environment', 
-                            'encoders', 'transform', 'backdoors', 'shortcut', 'analysis']
+                            'encoders', 'transform', 'backdoors', 'prestage', 'shortcut', 'analysis']
             
             # Check if constraint already includes all expected types
             with engine.connect() as conn:

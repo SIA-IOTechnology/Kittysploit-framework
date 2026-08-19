@@ -302,6 +302,9 @@ def print_success(message="", **kwargs):
     else:
         print(f"[+] {message}", **kwargs)
 
+# Metasploit-compatible alias used by several post modules.
+print_good = print_success
+
 def print_warning(message="", **kwargs):
     if is_thread_output_quiet():
         return

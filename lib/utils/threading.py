@@ -16,8 +16,8 @@ class Thread_module(BaseModule):
         
     max_threads = OptInteger(48, "Number of max threads", required=True, advanced=False)
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, framework=None):
+        super().__init__(framework)
         self.lock = Lock()
 
     def run_in_threads(self, func, iterable):

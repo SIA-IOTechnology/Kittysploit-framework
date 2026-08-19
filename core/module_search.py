@@ -18,6 +18,7 @@ SUPPORTED_TYPES = {
     "analysis",
     "auxiliary",
     "backdoors",
+    "prestage",
     "browser_auxiliary",
     "browser_exploits",
     "docker_environment",

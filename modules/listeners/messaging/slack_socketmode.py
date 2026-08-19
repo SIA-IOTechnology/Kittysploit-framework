@@ -23,7 +23,7 @@ class Module(Listener):
         "handler": Handler.REVERSE,
         "session_type": "polling",
         "protocol": "slack_socketmode",
-        "dependencies": ["slack-bolt"],
+        "optional_dependencies": ["slack-bolt"],
     }
 
     bot_token = OptString("", "Slack bot token (xoxb-...)", True)

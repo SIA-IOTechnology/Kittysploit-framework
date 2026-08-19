@@ -3,11 +3,10 @@
 
 from typing import Optional
 
-from kittysploit import Transform
 from modules.transforms.python.stream.xor import Module as PythonXorTransform
 
 
-class Module(Transform, PythonXorTransform):
+class Module(PythonXorTransform):
     """PowerShell XOR stream transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["powershell"]

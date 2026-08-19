@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
-from lib.protocols.kerberos.krb_relay.clients import PROTOCOL_CLIENTS
-from lib.protocols.kerberos.krb_relay.config import KrbRelayxConfig
 from lib.protocols.kerberos.krb_relay.native_runner import (
     build_native_relay_config,
     native_relay_available,
     pysmb_available,
     start_native_relay,
 )
-from lib.protocols.kerberos.krb_relay.servers.smbrelayserver import SMBRelayServer
 
 
 def relay_stack_available(relay_target: str) -> bool:
@@ -75,9 +72,12 @@ def build_relay_config(
     adcs_template: str = "DomainController",
     mssql_queries: Optional[list] = None,
     dc_ip: Optional[str] = None,
-) -> KrbRelayxConfig:
+) -> Any:
     from impacket.examples.ntlmrelayx.attacks import PROTOCOL_ATTACKS
     from impacket.examples.ntlmrelayx.utils.targetsutils import TargetsProcessor
+
+    from lib.protocols.kerberos.krb_relay.clients import PROTOCOL_CLIENTS
+    from lib.protocols.kerberos.krb_relay.config import KrbRelayxConfig
 
     hostname = _relay_hostname(relay_target)
     if not hostname:
@@ -110,7 +110,9 @@ def build_relay_config(
     return config
 
 
-def start_smb_relay_server(config: KrbRelayxConfig) -> SMBRelayServer:
+def start_smb_relay_server(config: Any) -> Any:
+    from lib.protocols.kerberos.krb_relay.servers.smbrelayserver import SMBRelayServer
+
     server = SMBRelayServer(config)
     server.start()
     return server

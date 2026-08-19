@@ -575,12 +575,49 @@ class SessionManager:
                 callback('session_created', session_id, self.sessions[session_id])
             except Exception as e:
                 print(f"Error in session callback: {e}")
+
+        self._publish_session_event("session.created", session_id, self.sessions[session_id])
         
         # Play sound notification if enabled
         self._play_session_sound()
         self._maybe_show_assistant_for_session(session_id, session_type)
 
         return session_id
+
+    def _publish_session_event(self, event_name: str, session_id: str, session, reason: str = "") -> None:
+        try:
+            if not self.framework:
+                return
+            bus = getattr(self.framework, "event_bus", None)
+            if not bus:
+                return
+            from core.framework.runtime.events import EventType
+
+            mapping = {
+                "session.created": EventType.SESSION_CREATED,
+                "session.closed": EventType.SESSION_CLOSED,
+                "session.reconnected": EventType.SESSION_RECONNECTED,
+            }
+            event_type = mapping.get(event_name)
+            if not event_type:
+                return
+            data = {
+                "session_id": session_id,
+                "session_type": getattr(session, "session_type", ""),
+                "host": getattr(session, "host", ""),
+                "port": getattr(session, "port", 0),
+            }
+            if isinstance(getattr(session, "data", None), dict):
+                data.update({
+                    "implant_id": session.data.get("implant_id") or session.data.get("client_id"),
+                    "listener_module": session.data.get("listener_module") or session.data.get("listener"),
+                    "platform": session.data.get("platform") or session.data.get("os"),
+                })
+            if reason:
+                data["reason"] = reason
+            bus.publish(event_type, data, source="session_manager")
+        except Exception:
+            pass
 
     def _maybe_show_assistant_for_session(self, session_id: str, session_type: str) -> None:
         """Show operator assistant suggestions when a new session is created."""
@@ -1005,6 +1042,8 @@ class SessionManager:
                     callback('session_removed', session_id, session)
                 except Exception as e:
                     print_error(f"Error in session callback: {e}")
+
+            self._publish_session_event("session.closed", session_id, session, reason="removed")
 
             return True
 

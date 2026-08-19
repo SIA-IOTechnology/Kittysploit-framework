@@ -143,7 +143,9 @@ class CommandRegistry:
             'campaign',
             'graph',
             'vault',
-            'workflows'
+            'workflows',
+            'triggers',
+            'offload',
         ]
         
         for command_name in builtin_commands:

@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """Minimal Kerberos ASN.1 definitions (pyasn1 only, no impacket)."""
 
-from pyasn1.type import namedtype, tag, univ
+from pyasn1.type import char, namedtype, tag, univ
+
+_GeneralString = char.GeneralString
 
 
 def _seq_component(name, tag_num, asn1_type):
@@ -14,7 +16,7 @@ def _seq_component(name, tag_num, asn1_type):
 
 
 class KerberosString(univ.SequenceOf):
-    componentType = univ.GeneralString()
+    componentType = _GeneralString()
 
 
 class PrincipalName(univ.Sequence):
@@ -27,7 +29,7 @@ class PrincipalName(univ.Sequence):
 class Ticket(univ.Sequence):
     componentType = namedtype.NamedTypes(
         _seq_component("tkt-vno", 0, univ.Integer()),
-        _seq_component("realm", 1, univ.GeneralString()),
+        _seq_component("realm", 1, _GeneralString()),
         _seq_component("sname", 2, PrincipalName()),
         _seq_component("enc-part", 3, univ.Sequence()),
     )

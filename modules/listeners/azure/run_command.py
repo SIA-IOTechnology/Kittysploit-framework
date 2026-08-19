@@ -47,7 +47,7 @@ class Module(Listener):
         "handler": Handler.BIND,
         "session_type": "azure_run_command",
         "protocol": "azure_run_command",
-        "dependencies": ["azure-identity", "azure-mgmt-compute"],
+        "optional_dependencies": ["azure-identity", "azure-mgmt-compute"],
     }
 
     subscription_id = OptString("", "Azure subscription ID", True)

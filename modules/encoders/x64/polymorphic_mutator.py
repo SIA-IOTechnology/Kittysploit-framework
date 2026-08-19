@@ -13,7 +13,7 @@ class Module(Encoder, MiniX64):
         "description": "A fully polymorphic XOR encoder that generates a randomized, dependency-free decoder stub on the fly to bypass static signatures.",
         "author": "KittySploit Team",
         "arch": Arch.X64,
-        "platform": Platform.LINUX | Platform.WINDOWS | Platform.MAC,
+        "platform": [Platform.LINUX, Platform.WINDOWS, Platform.MACOS],
     }
 
     def encode(self, payload):

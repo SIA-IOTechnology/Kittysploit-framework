@@ -12,6 +12,25 @@ from enum import Enum
 from core.framework.utils.policy_engine import PolicyLevel
 
 
+_BASE_CLASSES_WITH_RUN = {
+    "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
+    "Post", "Scanner", "Encoder", "Transform", "Backdoor", "Prestage",
+    "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
+}
+
+_RUN_INHERITANCE_SUFFIXES = (
+    "Transform", "Module", "ReverseTcp", "Listener", "Exploit", "Auxiliary", "Post",
+)
+
+
+def _base_class_inherits_run(name: str, module_aliases: Optional[Set[str]] = None) -> bool:
+    if name in _BASE_CLASSES_WITH_RUN:
+        return True
+    if module_aliases and name in module_aliases:
+        return True
+    return any(name.endswith(suffix) for suffix in _RUN_INHERITANCE_SUFFIXES)
+
+
 class RiskLevel(Enum):
     """Niveaux de risque"""
     LOW = "low"
@@ -87,7 +106,7 @@ class ASTAnalyzer:
             self.visitor.visit(tree)
             
             # Détecter si c'est un payload
-            is_payload = "payloads" in module_path.lower() or self.visitor.is_payload
+            is_payload = module_path.replace("\\", "/").lower().startswith("payloads/") or self.visitor.is_payload
             
             # Collecter les résultats
             result["dangerous_patterns"] = self.visitor.dangerous_patterns
@@ -167,6 +186,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
         self.has_info = False
         self.is_payload = False
         self.inherits_from_base_with_run = False
+        self.module_aliases: Set[str] = set()
     
     def visit_Import(self, node: ast.Import):
         for alias in node.names:
@@ -185,26 +205,24 @@ class SecurityASTVisitor(ast.NodeVisitor):
                 else:
                     full_import = f"{node.module}.{alias.name}"
                     self.imports.add(full_import)
+                    alias_name = alias.asname or alias.name
+                    if node.module.startswith("modules.") and (
+                        alias.name == "Module" or alias_name.endswith("Module")
+                    ):
+                        self.module_aliases.add(alias_name)
         self.generic_visit(node)
     
     def visit_ClassDef(self, node: ast.ClassDef):
         """Visite les définitions de classe"""
         if node.name == "Module":
             self.has_module_class = True
-            # Classes de base qui ont déjà une méthode run()
-            base_classes_with_run = [
-                "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
-                "Post", "Scanner", "Encoder", "Transform", "Backdoor",
-                "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
-            ]
-            
             # Vérifier si la classe hérite de Payload ou d'autres classes de base
             for base in node.bases:
                 if isinstance(base, ast.Name):
                     if base.id == "Payload":
                         self.is_payload = True
                         break
-                    elif base.id in base_classes_with_run:
+                    elif _base_class_inherits_run(base.id, self.module_aliases):
                         self.inherits_from_base_with_run = True
                         break
                 elif isinstance(base, ast.Attribute):
@@ -212,7 +230,7 @@ class SecurityASTVisitor(ast.NodeVisitor):
                     if base.attr == "Payload":
                         self.is_payload = True
                         break
-                    elif base.attr in base_classes_with_run:
+                    elif _base_class_inherits_run(base.attr, self.module_aliases):
                         self.inherits_from_base_with_run = True
                         break
                 # Gérer aussi les cas où la base est un nom simple (imports wildcard)

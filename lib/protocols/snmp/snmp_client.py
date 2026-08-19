@@ -16,16 +16,23 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 import time
 
-from pysnmp.hlapi import (
-    SnmpEngine,
-    CommunityData,
-    UdpTransportTarget,
-    ContextData,
-    ObjectType,
-    ObjectIdentity,
-    getCmd,
-    nextCmd,
-)
+try:
+    from pysnmp.hlapi import (
+        SnmpEngine,
+        CommunityData,
+        UdpTransportTarget,
+        ContextData,
+        ObjectType,
+        ObjectIdentity,
+        getCmd,
+        nextCmd,
+    )
+
+    PYSNMP_HLAPI_AVAILABLE = True
+except ImportError:
+    SnmpEngine = CommunityData = UdpTransportTarget = ContextData = None
+    ObjectType = ObjectIdentity = getCmd = nextCmd = None
+    PYSNMP_HLAPI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +85,11 @@ class SNMPClient:
         self.timeout = timeout
         self.retries = retries
         self.logger = logger
+
+        if not PYSNMP_HLAPI_AVAILABLE:
+            raise ImportError(
+                "pysnmp synchronous hlapi is unavailable (install pysnmp<7 or use a compatible build)"
+            )
 
         # engine réutilisable
         self._engine = SnmpEngine()
@@ -266,29 +278,3 @@ class SNMPClient:
 
     def test_connectivity(self) -> bool:
         return self.get(self.OIDS["system_description"]) is not None
-
-
-class Snmp_client(BaseModule):
-    snmp_host = OptString("", "Target IP or hostname", True)
-    snmp_port = OptPort(161, "Target SNMP port", True)
-    snmp_community = OptString("public", "Target SNMP community", True)
-    snmp_version = OptChoice("2", "Target SNMP version", True, choices=["1", "2"])
-    snmp_timeout = OptPort(5, "Target SNMP timeout", True, advanced=True)
-    snmp_retries = OptPort(1, "Target SNMP retries", True, advanced=True)
-
-    def __init__(self, framework=None):
-        super().__init__(framework)
-    
-    def open_snmp(self) -> SNMPClient:
-        """
-        Returns a configured SNMPClient instance.
-        """
-        # Convert user-friendly version to SNMPClient constants
-        if self.snmp_version.value == 1:
-            version = SNMPClient.V1
-        else:
-            version = SNMPClient.V2C
-
-        client = SNMPClient(host=self.snmp_host.value, port=self.snmp_port.value, community=self.snmp_community.value, version=version, timeout=int(self.snmp_timeout.value), retries=int(self.snmp_retries.value))
-
-        return client

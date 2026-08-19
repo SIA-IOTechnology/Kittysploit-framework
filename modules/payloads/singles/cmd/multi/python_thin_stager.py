@@ -1,5 +1,4 @@
 from kittysploit import *
-import base64
 
 
 class Module(Payload):
@@ -67,6 +66,4 @@ class Module(Payload):
 				print_success(f"EXE stager written: {out}")
 				return f"# compiled: {out}"
 			print_error("EXE compile failed; falling back to one-liner")
-		enc = base64.b64encode(script.encode()).decode("ascii")
-		py = str(self.python_binary)
-		return f'{py} -c "import base64;exec(base64.b64decode(\'{enc}\').decode())"'
+		return self._encode_python_one_liner(script, self.python_binary)

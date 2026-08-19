@@ -22,7 +22,7 @@ class Module(Listener):
         "handler": Handler.BIND,
         "session_type": "winrm",
         "protocol": "winrm",
-        "dependencies": ["pypsrp", "requests-kerberos"],
+        "optional_dependencies": ["pypsrp", "requests-kerberos"],
     }
 
     rhost = OptString("dc.example.local", "Target WinRM host", True)

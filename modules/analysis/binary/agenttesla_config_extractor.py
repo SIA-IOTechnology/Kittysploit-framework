@@ -29,7 +29,7 @@ class Module(Analysis):
             "https://malpedia.caad.fkie.fraunhofer.de/details/win.agent_tesla",
         ],
         "tags": ["malware", "agenttesla", "dotnet", "dfir", "ioc", "analysis"],
-        "dependencies": ["pythonnet"],
+        "optional_dependencies": ["pythonnet"],
     }
 
     file_path = OptString("", "Path to the AgentTesla .NET payload", required=True)

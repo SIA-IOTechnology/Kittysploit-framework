@@ -3,11 +3,10 @@
 
 from typing import Optional
 
-from kittysploit import Transform
 from modules.transforms.python.protocol.websocket_mimic import Module as PythonWebSocketTransform
 
 
-class Module(Transform, PythonWebSocketTransform):
+class Module(PythonWebSocketTransform):
     """PHP WebSocket binary frame mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["php"]

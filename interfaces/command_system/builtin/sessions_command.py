@@ -23,7 +23,7 @@ class SessionsCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "sessions [list|access|interact|kill|help] [session_id]"
+        return "sessions [list|access|interact|run|kill|help] [session_id]"
     
     @property
     def help_text(self) -> str:
@@ -38,6 +38,7 @@ Subcommands:
     list                    List all active sessions (default)
     access <session_id>     Access/view information about a specific session
     interact <session_id>   Create shell and interact with a session
+    run -c <command>        Run a command on selected sessions (parallel)
     kill <session_id>       Terminate a specific session
     kill all                Terminate all sessions
     help                    Show this help message
@@ -49,6 +50,8 @@ Examples:
     sessions interact abc123 # Create shell and interact with session
     sessions kill abc123    # Kill session with ID abc123
     sessions kill all       # Kill all sessions
+    sessions run -a -c whoami           # Run command on all sessions
+    sessions run -i <id> -c sysinfo       # Run on one session
     sessions help           # Show this help message
 
 Session Types:
@@ -79,6 +82,8 @@ Session Types:
                     print_info("Usage: sessions interact <session_id>")
                     return False
                 return self._interact_session(args[1])
+            elif subcommand == "run":
+                return self._run_on_sessions(args[1:])
             elif subcommand == "kill":
                 if len(args) < 2:
                     print_error("Session ID required for kill command")
@@ -761,6 +766,43 @@ Session Types:
         except Exception as e:
             print_error(f"Error killing all sessions: {str(e)}")
             return False
+
+    def _run_on_sessions(self, args: list) -> bool:
+        """Run a command on one or many sessions in parallel."""
+        import argparse
+        from core.session_job_manager import get_session_job_manager
+
+        parser = argparse.ArgumentParser(prog="sessions run", add_help=False)
+        parser.add_argument("-a", "--all", action="store_true", help="Target all active sessions")
+        parser.add_argument("-i", "--id", action="append", default=[], dest="session_ids", help="Session ID (repeatable)")
+        parser.add_argument("-c", "--command", required=True, help="Command to execute remotely")
+        parser.add_argument("--wait", action="store_true", help="Wait for all results before returning")
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:
+            return True
+
+        sm = self.framework.session_manager
+        targets = [sid.strip() for sid in (parsed.session_ids or []) if sid and sid.strip()]
+        if parsed.all:
+            targets = list(sm.sessions.keys())
+        elif not targets:
+            print_error("Specify -a/--all or at least one -i/--id <session_id>")
+            return False
+
+        mgr = getattr(self.framework, "session_job_manager", None) or get_session_job_manager(self.framework)
+        job = mgr.run_command_on_sessions(targets, parsed.command, wait=bool(parsed.wait))
+
+        if parsed.wait:
+            for sid, result in job.results.items():
+                label = sid[:8]
+                if result.status == "completed":
+                    print_success(f"[{label}] {result.output.strip()}")
+                else:
+                    print_error(f"[{label}] {result.error or result.output or result.status}")
+        else:
+            print_info(f"Started parallel session job {job.id[:8]} on {len(targets)} session(s)")
+        return True
     
     def _format_timestamp(self, timestamp: float) -> str:
         """Format timestamp for display"""

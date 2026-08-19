@@ -1,6 +1,4 @@
 from kittysploit import *
-import base64
-import shlex
 
 
 class Module(Payload):
@@ -49,5 +47,4 @@ class Module(Payload):
 
     def generate(self):
         script = self._build_script()
-        encoded = base64.b64encode(script.encode('utf-8')).decode('ascii')
-        return f"{shlex.quote(str(self.python_binary))} -c \"import base64;exec(base64.b64decode('{encoded}').decode())\""
+        return self._encode_python_one_liner(script, self.python_binary)

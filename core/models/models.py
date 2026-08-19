@@ -626,6 +626,33 @@ class Session(Base, EncryptedFieldMixin):
             'workspace_id': self.workspace_id
         }
 
+class SessionTriggerRule(Base, EncryptedFieldMixin):
+    """Workspace-scoped automatic session lifecycle actions (encrypted)."""
+
+    __tablename__ = 'session_trigger_rules'
+
+    id = Column(Integer, primary_key=True)
+    workspace_id = Column(Integer, ForeignKey('workspaces.id'), nullable=False, index=True)
+    name = Column(String(255), default='')
+    event = Column(String(64), nullable=False, index=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    session_types = Column(Text, default='')
+    listeners = Column(Text, default='')
+    platforms = Column(Text, default='')
+    actions = Column(EncryptedText, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    workspace = relationship("Workspace", backref="session_trigger_rules")
+
+    __table_args__ = (
+        Index('idx_session_trigger_rules_workspace', 'workspace_id'),
+        Index('idx_session_trigger_rules_event', 'event'),
+    )
+
+    def __repr__(self):
+        return f"<SessionTriggerRule(id={self.id}, event='{self.event}', workspace_id={self.workspace_id})>"
+
 class ProxyFlow(Base, EncryptedFieldMixin):
     """Proxy flow model - stores HTTP flows captured by kittyproxy"""
     __tablename__ = 'proxy_flows'

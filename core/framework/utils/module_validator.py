@@ -108,7 +108,8 @@ class ModuleValidator:
         is_payload = False
         
         # Method 1: Check path (most reliable)
-        if "payloads" in module_path.lower():
+        normalized_path = module_path.replace("\\", "/").lower()
+        if normalized_path.startswith("payloads/"):
             is_payload = True
         
         # Method 2: Check if Module class inherits from Payload
@@ -156,25 +157,28 @@ class ModuleValidator:
             if not has_generate:
                 errors.append("Payload modules must define a 'generate()' method")
         else:
-            # Check if Module class inherits from a base class that already has run()
+            from core.framework.utils.ast_analyzer import _base_class_inherits_run
+
+            module_aliases = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("modules."):
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        alias_name = alias.asname or alias.name
+                        if alias.name == "Module" or alias_name.endswith("Module"):
+                            module_aliases.add(alias_name)
+
             inherits_from_base_with_run = False
-            base_classes_with_run = [
-                "DockerEnvironment", "VagrantEnvironment", "Exploit", "Auxiliary", "Analysis", "Listener",
-                "Post", "Scanner", "Encoder", "Transform", "Backdoor",
-                "BrowserExploit", "BrowserAuxiliary", "LocalExploit", "Shortcut", "Workflow",
-            ]
-            
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef) and node.name == "Module":
                     for base in node.bases:
-                        # Check for direct class reference
                         if isinstance(base, ast.Name):
-                            if base.id in base_classes_with_run:
+                            if _base_class_inherits_run(base.id, module_aliases):
                                 inherits_from_base_with_run = True
                                 break
-                        # Check for class via attribute (e.g., from kittysploit import *)
                         elif isinstance(base, ast.Attribute):
-                            if base.attr in base_classes_with_run:
+                            if _base_class_inherits_run(base.attr, module_aliases):
                                 inherits_from_base_with_run = True
                                 break
                     if inherits_from_base_with_run:

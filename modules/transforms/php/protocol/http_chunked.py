@@ -7,7 +7,7 @@ from kittysploit import *
 from modules.transforms.python.protocol.http_chunked import Module as PythonHttpChunkedTransform
 
 
-class Module(Transform, PythonHttpChunkedTransform):
+class Module(PythonHttpChunkedTransform):
     """PHP HTTP chunked transfer mimic transform."""
 
     SUPPORTED_CLIENT_LANGUAGES = ["php"]

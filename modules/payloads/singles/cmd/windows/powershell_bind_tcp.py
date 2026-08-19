@@ -47,5 +47,4 @@ class Module(Payload):
         ) + body
 
     def generate(self):
-        encoded_script = base64.b64encode(self._build_script().encode('utf-16le')).decode('utf-8')
-        return f"powershell -nop -EncodedCommand {encoded_script}"
+        return self._encode_powershell_command(self._build_script())

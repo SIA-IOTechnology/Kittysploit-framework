@@ -27,6 +27,7 @@ SUPPORTED_MODULE_TYPES: Set[str] = {
     "analysis",
     "auxiliary",
     "backdoors",
+    "prestage",
     "browser_auxiliary",
     "browser_exploits",
     "docker_environment",
@@ -54,6 +55,9 @@ MODULE_TYPE_ALIASES: Dict[str, str] = {
     "obfuscators": "transform",
     "obfuscator": "transform",
     "backdoor": "backdoors",
+    "prestages": "prestage",
+    "scriptlet": "prestage",
+    "scriptlets": "prestage",
     "scan": "scanner",
     "scanners": "scanner",
 }
@@ -70,6 +74,7 @@ MODULE_BASE_TYPES: Dict[str, str] = {
     "Analysis": "analysis",
     "Auxiliary": "auxiliary",
     "Backdoor": "backdoors",
+    "Prestage": "prestage",
     "BrowserAuxiliary": "browser_auxiliary",
     "BrowserExploit": "browser_exploits",
     "DockerEnvironment": "docker_environment",
@@ -739,6 +744,7 @@ def infer_module_type_from_path(module_path: str) -> str:
         ("obfuscators/", "transform"),
         ("obfuscator/", "transform"),
         ("backdoors/", "backdoors"),
+        ("prestage/", "prestage"),
         ("shortcut/", "shortcut"),
     )
     for pref, mtype in ordered:

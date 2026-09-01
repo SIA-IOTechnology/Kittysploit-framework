@@ -8,6 +8,8 @@ __pycache__/
 venv/*
 .venv/*
 docs/*
+!docs/screenshots/
+!docs/screenshots/**
 docs/academy/secrets/
 docs/academy/secrets/**
 docs/academy/.env

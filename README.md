@@ -17,9 +17,7 @@ Local LLM. Scope-aware. Automation-ready.
 
 </div>
 
-<video src="docs/screenshots/demo.mp4" width="100%" controls autoplay muted loop playsinline>
-  <a href="docs/screenshots/demo.mp4">Watch the KittySploit demo</a>
-</video>
+<img src="docs/screenshots/demo.gif" alt="KittySploit demo — agent mission from recon to shell" width="100%">
 
 <img src="docs/screenshots/banner.png" alt="KittySploit offensive security framework" width="100%">
 

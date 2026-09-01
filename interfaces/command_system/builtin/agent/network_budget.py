@@ -55,6 +55,17 @@ class NetworkBudget:
             self.used += units
             self._notify()
 
+    def extend(self, units: int, *, reason: str = "budget extension") -> int:
+        """Raise the hard limit so a critical shell/auth chain can finish."""
+        add = max(0, int(units or 0))
+        if add <= 0:
+            return int(self.limit or 0)
+        with self._lock:
+            self.limit = int(self.limit or 0) + add
+            self.last_action = str(reason or "budget extension")[:240]
+            self._notify()
+            return int(self.limit)
+
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
             remaining = None

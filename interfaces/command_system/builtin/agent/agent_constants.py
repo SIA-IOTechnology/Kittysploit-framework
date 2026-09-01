@@ -84,6 +84,9 @@ WAF_BODY_MARKERS: Final[Tuple[str, ...]] = (
 
 # --- CMS & stack hints (blobs, specialization corpus, catalog notability) ---
 
+# True CMS markers only. Used to *skip* WordPress/Drupal/Joomla modules when there is
+# no CMS lock. Must NOT include lab/admin/API tokens (dvwa, api, phpmyadmin, …) — those
+# would starve the exact modules we need when the target is a lab app.
 CMS_HINT_TOKENS: Final[Tuple[str, ...]] = (
     "wordpress",
     "wp_",
@@ -98,6 +101,10 @@ CMS_HINT_TOKENS: Final[Tuple[str, ...]] = (
     "sites/default",
     "joomla!",
     "com_content",
+)
+
+# Broader stack tokens for fingerprint / display / specialization evidence blobs.
+STACK_HINT_TOKENS: Final[Tuple[str, ...]] = CMS_HINT_TOKENS + (
     "django",
     "flask",
     "fastapi",
@@ -110,6 +117,7 @@ CMS_HINT_TOKENS: Final[Tuple[str, ...]] = (
     "tomcat",
     "phpmyadmin",
     "dvwa",
+    "mutillidae",
     "api",
     "swagger",
     "graphql",

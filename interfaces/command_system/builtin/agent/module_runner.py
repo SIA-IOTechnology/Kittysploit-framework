@@ -24,6 +24,14 @@ class ModuleRunnerHooks(Protocol):
     def abort_batch_after_results(
         self, state: Any, results: List[Any], phase_name: str
     ) -> bool: ...
+    def execute_exploit_module(
+        self,
+        state: Any,
+        module: Dict[str, Any],
+        target_info: Dict[str, Any],
+        phase_name: str,
+        verbose: bool,
+    ) -> List[Dict[str, Any]]: ...
 
 
 class WorkflowModuleRunnerHooks:
@@ -53,6 +61,11 @@ class WorkflowModuleRunnerHooks:
     def abort_batch_after_results(self, state, results, phase_name):
         return self._core._abort_module_batch_early(state, results, phase_name)
 
+    def execute_exploit_module(self, state, module, target_info, phase_name, verbose):
+        return self._core._execute_agent_exploit_module(
+            state, module, target_info, phase_name, verbose
+        )
+
 
 class AgentModuleRunner:
     """Execute scanner modules under agent policy, budget, and pacing."""
@@ -66,6 +79,11 @@ class AgentModuleRunner:
             path = str(module.get("path", "")).lower()
             return "/http/" in f"/{path}/" or "/cloud/" in f"/{path}/"
         return callable(getattr(module, "http_request", None))
+
+    @staticmethod
+    def is_exploit_module_path(path: Any) -> bool:
+        low = str(path or "").strip().lower().replace("\\", "/")
+        return low.startswith(("exploit/", "exploits/"))
 
     @staticmethod
     def budget_skip_result(module: Dict[str, Any], phase_name: str) -> Dict[str, Any]:
@@ -168,8 +186,37 @@ class AgentModuleRunner:
         effective_threads = 1 if profile in ("safe", "discreet") else max(1, int(threads or 1))
         results: List[Dict[str, Any]] = list(skipped)
 
+        # Exploit modules need the reverse/bind listener wrapper. Scanner batches
+        # always use use_exploit_wrapper=False, which yields "confirmed" RCE without
+        # a session — fatal for obtain-shell on DVWA and similar labs.
+        exploit_mods = [
+            m for m in allowed if self.is_exploit_module_path(m.get("path"))
+        ]
+        scan_mods = [
+            m for m in allowed if not self.is_exploit_module_path(m.get("path"))
+        ]
+
+        for module in exploit_mods:
+            if self._hooks.phase_stop_reason(state, phase_name):
+                break
+            self._hooks.sleep_between_agent_actions(
+                state, f"{phase_name}:{module.get('path', '')}"
+            )
+            batch_results = self._hooks.execute_exploit_module(
+                state, module, target_info, phase_name, verbose
+            )
+            results.extend(batch_results)
+            self._hooks.adapt_rate_limit_from_results(state, batch_results)
+            if self._hooks.record_waf_signals_from_results(state, batch_results, phase_name):
+                break
+            if self._hooks.abort_batch_after_results(state, batch_results, phase_name):
+                break
+
+        if not scan_mods:
+            return results
+
         if profile in ("safe", "discreet") or float(getattr(state, "phase_timeout", 0.0) or 0.0) > 0:
-            for module in allowed:
+            for module in scan_mods:
                 if self._hooks.phase_stop_reason(state, phase_name):
                     break
                 if not self.module_uses_http_client(module) and not self.consume_network_units(
@@ -195,7 +242,7 @@ class AgentModuleRunner:
 
         fallback_units = sum(
             module_budget_units(row, str(row.get("path", "")))
-            for row in allowed
+            for row in scan_mods
             if not self.module_uses_http_client(row)
         )
         if fallback_units and not self.consume_network_units(
@@ -204,15 +251,15 @@ class AgentModuleRunner:
             reason=f"{phase_name} module batch",
             phase=phase_name,
         ):
-            results.extend([self.budget_skip_result(module, phase_name) for module in allowed])
+            results.extend([self.budget_skip_result(module, phase_name) for module in scan_mods])
             return results
 
         # Sub-batches so goal/WAF stops can abort mid-wave without serializing everything.
-        chunk_size = max(2, min(len(allowed), max(2, int(effective_threads or 1) * 2)))
-        for offset in range(0, len(allowed), chunk_size):
+        chunk_size = max(2, min(len(scan_mods), max(2, int(effective_threads or 1) * 2)))
+        for offset in range(0, len(scan_mods), chunk_size):
             if self._hooks.phase_stop_reason(state, phase_name):
                 break
-            chunk = allowed[offset: offset + chunk_size]
+            chunk = scan_mods[offset: offset + chunk_size]
             self._hooks.sleep_between_agent_actions(state, f"{phase_name}:chunk{offset}")
             batch_results = scanner._execute_modules(chunk, target_info, effective_threads, verbose)
             if elite_auto_correct is not None:

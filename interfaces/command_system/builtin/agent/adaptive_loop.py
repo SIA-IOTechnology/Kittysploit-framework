@@ -218,6 +218,7 @@ class AdaptiveLoopEngine:
                     state.knowledge_base = kb
             except Exception:
                 similar_episodes = []
+        catalog = self._seed_catalog_with_shell_followups(state, catalog, kb if isinstance(kb, dict) else {})
         return {
             "phase": getattr(state, "current_phase", ""),
             "goal": getattr(state, "campaign_goal", ""),
@@ -232,12 +233,18 @@ class AdaptiveLoopEngine:
             HierarchicalPlannerEngine,
             hierarchical_planner_enabled,
         )
-        if hierarchical_planner_enabled(state):
-            return HierarchicalPlannerEngine(self.services).plan_actions(state, observation)
-
         kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
         modules = observation.get("catalog_modules") or []
+        if hierarchical_planner_enabled(state):
+            actions = HierarchicalPlannerEngine(self.services).plan_actions(state, observation)
+            if not actions:
+                actions = self._fallback_shell_auth_actions(state, kb)
+            self._record_plan_preferences(state, actions, modules)
+            return actions
+
         actions = self._heuristic_plan_actions(modules, kb, state=state)
+        if not actions:
+            actions = self._fallback_shell_auth_actions(state, kb)
         self._record_plan_preferences(state, actions, modules)
         from interfaces.command_system.builtin.agent.shadow_planner import (
             shadow_mode_enabled,
@@ -297,6 +304,118 @@ class AdaptiveLoopEngine:
                 continue
             filtered.append(row)
         return filtered
+
+    def _seed_catalog_with_shell_followups(
+        self,
+        state: Any,
+        catalog: Sequence[Any],
+        kb: Mapping[str, Any],
+    ) -> List[Any]:
+        """Prepend DVWA/auth chain modules that the first-48 slice would otherwise drop."""
+        rows = [row for row in (catalog or []) if isinstance(row, dict) and row.get("path")]
+        by_path = {str(row.get("path") or "").strip(): row for row in rows}
+        wanted: List[str] = []
+        try:
+            from interfaces.command_system.builtin.agent.goal_planner import (
+                product_auth_shell_followups,
+                suggest_shell_plan_followups,
+            )
+
+            for path in list(product_auth_shell_followups(kb, state)) + list(
+                suggest_shell_plan_followups(kb, state=state)
+            ):
+                if path and path not in wanted:
+                    wanted.append(path)
+        except Exception:
+            wanted = []
+        nxt = kb.get("attack_graph_next_action") if isinstance(kb, Mapping) else None
+        if isinstance(nxt, dict):
+            graph_path = str(nxt.get("action") or "").strip()
+            if graph_path and graph_path not in wanted:
+                wanted.insert(0, graph_path)
+        prepended: List[Any] = []
+        seen = set()
+        full_index = {}
+        try:
+            expanded = bool(getattr(state, "expanded_surface", False))
+            for row in self.services.module_catalog.discover_campaign_modules(expanded=expanded) or []:
+                if isinstance(row, dict) and row.get("path"):
+                    full_index[str(row.get("path")).strip()] = row
+        except Exception:
+            full_index = {}
+        observed = {
+            str(item).strip()
+            for item in (kb.get("observed_modules") or [])
+            if str(item).strip()
+        }
+        for path in wanted:
+            if path in observed or path in seen:
+                continue
+            row = by_path.get(path) or full_index.get(path) or {
+                "path": path,
+                "name": path.rsplit("/", 1)[-1],
+            }
+            prepended.append(row)
+            seen.add(path)
+            if len(prepended) >= 8:
+                break
+        rest = [row for row in rows if str(row.get("path") or "").strip() not in seen]
+        return prepended + rest
+
+    def _fallback_shell_auth_actions(self, state: Any, kb: Mapping[str, Any]) -> List[AgentAction]:
+        """When the catalog slice/planner is empty, still chase login→shell."""
+        from interfaces.command_system.builtin.agent.goal_planner import (
+            ADMIN_LOGIN_BRUTEFORCE_MODULE,
+            product_auth_shell_followups,
+            suggest_shell_plan_followups,
+        )
+
+        observed = {
+            str(item).strip()
+            for item in ((kb or {}).get("observed_modules") or [])
+            if str(item).strip()
+        }
+        paths: List[str] = []
+        nxt = kb.get("attack_graph_next_action") if isinstance(kb, Mapping) else None
+        if isinstance(nxt, dict):
+            graph_path = str(nxt.get("action") or "").strip()
+            if graph_path:
+                paths.append(graph_path)
+        for path in list(product_auth_shell_followups(kb if isinstance(kb, dict) else {}, state)) + list(
+            suggest_shell_plan_followups(kb if isinstance(kb, dict) else {}, state=state)
+        ):
+            if path and path not in paths:
+                paths.append(path)
+        if ADMIN_LOGIN_BRUTEFORCE_MODULE not in paths:
+            login_paths = [
+                p for p in ((kb or {}).get("login_paths") or [])
+                if isinstance(p, str) and p.startswith("/")
+            ]
+            signals = {str(s).lower() for s in ((kb or {}).get("risk_signals") or [])}
+            if login_paths or signals.intersection({
+                "login_surface_detected",
+                "login_redirect_detected",
+                "login_form_detected",
+            }):
+                paths.insert(0, ADMIN_LOGIN_BRUTEFORCE_MODULE)
+        actions: List[AgentAction] = []
+        for path in paths:
+            if not path or path in observed:
+                continue
+            action_type = "run_exploit" if path.startswith(("exploit/", "exploits/")) else "run_followup"
+            actions.append(
+                AgentAction(
+                    type=action_type,
+                    path=path,
+                    priority=max(1, 10 - len(actions)),
+                    risk="intrusive" if "exploit" in path else "active",
+                    reason="adaptive_loop:shell_auth_fallback",
+                    status="planned",
+                )
+            )
+            if len(actions) >= 5:
+                break
+        return actions
 
     def _heuristic_plan_actions(
         self,

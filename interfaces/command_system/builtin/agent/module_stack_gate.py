@@ -241,6 +241,8 @@ def is_hard_stack_skip_reason(reason: str, module_path: str = "") -> bool:
         return False
     if "incompatible" in text or "stack mismatch" in text:
         return True
+    if "product-focus" in text:
+        return True
     path = str(module_path or "").lower()
     if "requires tech hint" in text:
         # ``*_detect`` modules may establish the missing hint; specialized
@@ -269,6 +271,14 @@ def hard_stack_skip_reason(
     has_nextjs_evidence: Optional[Callable[[], bool]] = None,
 ) -> str:
     """Return mismatch reason only when it warrants a hard pre-launch skip."""
+    try:
+        from interfaces.command_system.builtin.agent.goal_planner import product_focus_skip_reason
+
+        focus = product_focus_skip_reason(module_path, kb if isinstance(kb, dict) else {})
+        if focus:
+            return focus
+    except Exception:
+        pass
     reason = resolve_module_stack_mismatch(
         module_path,
         kb,

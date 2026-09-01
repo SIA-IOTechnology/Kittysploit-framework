@@ -100,12 +100,20 @@ class AgentServices:
             self.core._emit_phase_operator_event(state, name)
             if state.error:
                 return state
-            stop = self.core._phase_stop_reason(state, name)
-            if stop:
-                state.campaign_stop_reason = stop
-                return state
+            # Analyze is offline (classify findings + exploit queue) — never skip it
+            # solely because scan already exhausted the request budget.
+            if name != "analyze":
+                stop = self.core._phase_stop_reason(state, name)
+                if stop:
+                    state.campaign_stop_reason = stop
+                    return state
             state = fn(state)
-            if state.error or state.campaign_stop_reason:
+            if state.error:
+                return state
+            if state.campaign_stop_reason and name == "scan":
+                # Finish classify/queue handoff, then let caller emit the report.
+                continue
+            if state.campaign_stop_reason:
                 return state
         state.current_phase = "act"
         return state
@@ -145,6 +153,13 @@ class AgentServices:
             if adaptive_loop_enabled(state):
                 state = self.bootstrap_recon_for_adaptive(state)
                 if state.error or state.campaign_stop_reason:
+                    # Always produce a report on early stop (budget/scope), otherwise
+                    # the CLI only prints a generic "Command 'agent' failed".
+                    if not state.report_path and not state.error:
+                        try:
+                            state = self.core._node_report(state)
+                        except Exception as exc:
+                            state.error = f"report: {exc}"
                     return state
                 return AdaptiveLoopEngine(self).run(state)
             return self.core._run_agent_flow(state)

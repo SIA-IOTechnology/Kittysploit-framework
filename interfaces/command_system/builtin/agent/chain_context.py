@@ -257,7 +257,7 @@ def build_chain_context_option_overrides(
                 mod_opts["technique"] = "blind_boolean"
             elif technique:
                 mod_opts["technique"] = "union"
-            mod_opts.setdefault("shell_sqli", True)
+            mod_opts.setdefault("shell_sqli", False)
 
         if "lfi_log_poison" in low:
             target = str(kb.get("target_url") or kb.get("raw_target") or "").strip()

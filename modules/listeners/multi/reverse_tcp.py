@@ -75,20 +75,44 @@ class Module(Listener):
                 client_socket, address = self.sock.accept()
                 print_success(f"Connection received from {address[0]}:{address[1]}")
 
+                pty_mode = bool(getattr(self, "session_pty_mode", False))
+                if not pty_mode:
+                    # Payloads with use_pty send KSPTY1 immediately; detect even when
+                    # the exploit forgot to stamp session_pty_mode on the listener.
+                    try:
+                        from lib.shell.pty_runtime import PTY_MAGIC
+
+                        old_to = client_socket.gettimeout()
+                        client_socket.settimeout(0.75)
+                        try:
+                            peek = client_socket.recv(len(PTY_MAGIC), socket.MSG_PEEK)
+                        finally:
+                            try:
+                                client_socket.settimeout(old_to)
+                            except Exception:
+                                pass
+                        if peek and peek.startswith(PTY_MAGIC):
+                            pty_mode = True
+                            self.session_pty_mode = True
+                    except Exception:
+                        pass
+
                 extra = {
                     "connection_type": "reverse",
                     "protocol": "tcp",
-                    "stager_line_mode": True,
                 }
+                if pty_mode:
+                    # PTY reverse shells must NOT use stager line framing — that
+                    # path treats the KSPTY1 banner as whoami and then times out.
+                    extra["pty_mode"] = True
+                    extra["stager_line_mode"] = False
+                else:
+                    extra["stager_line_mode"] = True
                 try:
                     from core.framework.stager_stage import pop_pending_stage, send_stage_over_socket
 
-                    lhost_key = getattr(self, "lhost", "") or ""
-                    if hasattr(lhost_key, "value"):
-                        lhost_key = lhost_key.value
-                    lhost_key = str(lhost_key or "")
-                    lport_raw = getattr(self, "lport", 0) or 0
-                    lport_key = int(getattr(lport_raw, "value", lport_raw) or 0)
+                    lhost_key = str(self.lhost or "")
+                    lport_key = int(self.lport or 0)
                     stage = pop_pending_stage(lhost_key, lport_key)
                     if stage:
                         send_stage_over_socket(client_socket, stage)

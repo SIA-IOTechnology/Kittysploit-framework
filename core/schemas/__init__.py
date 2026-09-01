@@ -18,6 +18,7 @@ ENTITY_SCHEMAS = {
     "target": "target.schema.json",
     "evidence": "evidence.schema.json",
     "finding": "finding.schema.json",
+    "exploit_queue_item": "exploit_queue_item.schema.json",
     "job": "job.schema.json",
     "session": "session.schema.json",
     "report": "report.schema.json",

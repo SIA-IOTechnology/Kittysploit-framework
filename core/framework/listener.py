@@ -623,20 +623,12 @@ class Listener(BaseModule):
             print_debug(f"Session type: {session_type}")
             
             if handler == "reverse":
-                lhost = getattr(self, 'lhost', '0.0.0.0')
-                lport = getattr(self, 'lport', 4444)
-                if hasattr(lhost, 'value'):
-                    lhost = lhost.value
-                if hasattr(lport, 'value'):
-                    lport = lport.value
+                lhost = self.lhost
+                lport = self.lport
                 print_info(f"Listening on {lhost}:{lport}")
             elif handler == "bind":
                 rhost = getattr(self, 'rhost', None) or getattr(self, 'host', '127.0.0.1')
                 rport = getattr(self, 'rport', None) or getattr(self, 'port', 21)
-                if hasattr(rhost, 'value'):
-                    rhost = rhost.value
-                if hasattr(rport, 'value'):
-                    rport = rport.value
                 print_info(f"Connecting to {rhost}:{rport}")
             
             # Reset control flags before launching the worker thread

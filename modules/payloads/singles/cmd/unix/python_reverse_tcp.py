@@ -34,7 +34,17 @@ class Module(Payload):
 	def _build_script(self, host: str, port: int, shell: str, xf_client_code: str = None) -> str:
 		"""Build the Python script (used by generate and get_python_script)."""
 		if bool(self.use_pty):
-			return build_unix_pty_script(host, port, shell, xf_code=xf_client_code)
+			from lib.shell.pty_runtime import local_terminal_winsize
+
+			rows, cols = local_terminal_winsize()
+			return build_unix_pty_script(
+				host,
+				port,
+				shell,
+				xf_code=xf_client_code,
+				rows=rows,
+				cols=cols,
+			)
 
 		if xf_client_code:
 			on_connect = ""

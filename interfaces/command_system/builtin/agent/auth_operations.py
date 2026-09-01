@@ -398,6 +398,52 @@ class AuthContextOperations:
             safe_overrides["cookies"] = nested
         return safe_overrides
 
+    def _dvwa_login_path_preference(self, knowledge_base: Any, candidates: List[str]) -> str:
+        """
+        Pick the real DVWA login surface.
+
+        Metasploitable-style indexes mention ``/dvwa/`` in HTML even when DVWA is
+        mounted at the web root (``/login.php``). Prefer a corroborated path:
+        - ``/dvwa/login.php`` only when endpoints actually live under ``/dvwa``
+        - otherwise ``/login.php`` / ``/login`` when present
+        """
+        kb = knowledge_base if isinstance(knowledge_base, dict) else {}
+        try:
+            dvwa_conf = float((kb.get("tech_confidence") or {}).get("dvwa", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            dvwa_conf = 0.0
+        hints = {str(h).lower() for h in (kb.get("tech_hints") or [])}
+        if dvwa_conf < 0.4 and "dvwa" not in hints:
+            return ""
+
+        norms = [str(c).split("?", 1)[0] for c in candidates if str(c).startswith("/")]
+        low_set = {c.lower() for c in norms}
+        endpoints = [
+            str(e).split("?", 1)[0].lower()
+            for e in (kb.get("discovered_endpoints") or [])
+            if str(e).startswith("/")
+        ]
+        # Corroborate /dvwa from real endpoints only — login_paths often contain
+        # invented "/dvwa/login.php" from HTML index mentions.
+        has_dvwa_prefix = any(
+            e == "/dvwa" or e.startswith("/dvwa/") for e in endpoints
+        )
+
+        if has_dvwa_prefix:
+            for preferred in ("/dvwa/login.php", "/dvwa/login", "/dvwa/"):
+                for candidate in norms:
+                    if candidate.lower() == preferred:
+                        return candidate
+            for candidate in norms:
+                if candidate.lower().startswith("/dvwa/") and "login" in candidate.lower():
+                    return candidate
+        for preferred in ("/login.php", "/login"):
+            if preferred in low_set:
+                for candidate in norms:
+                    if candidate.lower() == preferred:
+                        return candidate
+        return ""
+
     def select_best_login_path(self, knowledge_base: Any) -> str:
         kb = knowledge_base if isinstance(knowledge_base, dict) else {}
         auth_context = self.get_active_auth_context(kb)
@@ -408,8 +454,27 @@ class AuthContextOperations:
         if not candidates:
             return ""
 
+        endpoints = [
+            str(e).split("?", 1)[0].lower()
+            for e in (kb.get("discovered_endpoints") or [])
+            if str(e).startswith("/")
+        ]
+        has_dvwa_endpoint = any(e == "/dvwa" or e.startswith("/dvwa/") for e in endpoints)
+        if not has_dvwa_endpoint:
+            # Drop invented "/dvwa/…" login paths from HTML index noise.
+            candidates = [
+                c for c in candidates
+                if not str(c).lower().startswith("/dvwa/")
+            ]
+            if not candidates:
+                return ""
+
+        dvwa_pick = self._dvwa_login_path_preference(kb, candidates)
+        if dvwa_pick:
+            return dvwa_pick
+
         # Prefer scoped app paths over root-level aliases when both exist
-        # (e.g. "/dvwa/login.php" should beat "/login.php").
+        # (e.g. "/wordpress/wp-login.php" should beat a bare alias).
         for preferred in LOGIN_PATH_PRIORITY:
             scoped = [
                 candidate for candidate in candidates
@@ -456,6 +521,20 @@ class AuthContextOperations:
                     "max_attempts": bruteforce_attempt_cap(state),
                     **bf_extras,
                 }
+                # DVWA lab default is admin/password — seed first attempt so we
+                # do not burn budget on admin:admin before password.
+                try:
+                    dvwa_conf = float((kb.get("tech_confidence") or {}).get("dvwa", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    dvwa_conf = 0.0
+                login_low = login_path.lower()
+                if dvwa_conf >= 0.4 or "dvwa" in login_low or login_low in {"/login.php", "/login"}:
+                    hints = {str(h).lower() for h in (kb.get("tech_hints") or [])}
+                    if dvwa_conf >= 0.4 or "dvwa" in hints or "dvwa" in login_low:
+                        bf_opts.setdefault("username", "admin")
+                        bf_opts.setdefault("password", "password")
+                        bf_opts.setdefault("extra_fields", "Login=Login")
+                        bf_opts["max_attempts"] = min(int(bf_opts.get("max_attempts") or 24), 8)
                 if persona_usernames or persona_passwords:
                     ws = _safe_component(getattr(state, "workspace", "default") or "default")
                     agent_home = Path(
@@ -483,4 +562,11 @@ class AuthContextOperations:
                     )
                     bf_opts["max_attempts"] = attempt_cap
                 overrides[path] = bf_opts
+            elif "dvwa_sqli_shell" in path or path.endswith("/sqli_shell"):
+                # Never drop the agent into an interactive sql> REPL — confirm
+                # injection with a one-shot query, then continue toward OS shell.
+                overrides[path] = {
+                    "shell_sqli": False,
+                    "single_sql": "@@version",
+                }
         return overrides

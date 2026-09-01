@@ -3,35 +3,49 @@
 
 # KittySploit
 
-**A modular offensive security framework and C2 platform for pentesters, researchers and red teams.**
+**From recon to shell — in one console.**
 
-Scan targets, organize engagements, run security modules, operate C2
-listeners and sessions, and build AI-assisted testing plans from a single console.
+Autonomous agent for web/API testing. 8,000+ modules. Built-in C2.
+Local LLM. Scope-aware. Automation-ready.
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord\&logoColor=white)](https://discord.gg/RNskjwSW5W)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/RNskjwSW5W)
+[![GitHub stars](https://img.shields.io/github/stars/SIA-IOTechnology/Kittysploit-framework?style=social)](https://github.com/SIA-IOTechnology/Kittysploit-framework)
 
-**[Get started](#quick-start) · [Documentation](USAGE.md) · [Website](https://kittysploit.com) · [Discord](https://discord.gg/RNskjwSW5W)**
+**[Quick start](#quick-start) · [Docs](USAGE.md) · [Website](https://kittysploit.com) · [Discord](https://discord.gg/RNskjwSW5W)**
 
 </div>
 
+<video src="docs/screenshots/demo.mp4" width="100%" controls autoplay muted loop playsinline>
+  <a href="docs/screenshots/demo.mp4">Watch the KittySploit demo</a>
+</video>
+
 <img src="docs/screenshots/banner.png" alt="KittySploit offensive security framework" width="100%">
+
+```bash
+# Web/API mission (lab)
+kittysploit> agent https://lab.local --profile owasp-web-parallel
+
+# Go for a shell (authorized lab only)
+kittysploit> agent http://192.168.56.10 \
+  --profile internal-lab \
+  --goal obtain-shell \
+  --approve-risk intrusive \
+  --shell-hunter
+```
 
 ## Why KittySploit?
 
-Security testing often requires separate tools for scanning, exploitation, traffic analysis, automation and engagement tracking.
+Most stacks force you to jump between a scanner, an exploit framework, a C2, a proxy, and a notebook.
 
-KittySploit brings these workflows together in an extensible, Metasploit-inspired console built for modern security assessments.
+KittySploit keeps the engagement in one place — modules, sessions, scope, and an autonomous agent that plans and executes against authorized targets.
 
-* **Modular console** : search, configure and execute security modules.
-* **Built-in C2** : listeners, payloads, session management and post-exploitation from the same console.
-* **Scanner and workflows** : automate repeatable reconnaissance and testing tasks.
-* **Workspaces and scopes** : keep hosts, vulnerabilities and engagement boundaries organized.
-* **AI-assisted planning** : use local Ollama models to analyze targets and prepare testing plans.
-* **Extension ecosystem** : add proxy, OSINT, GUI and protocol-analysis capabilities.
-* **Automation ready** : interactive console, one-shot commands, RPC and API modes.
-* **Mobile companion** : pair the Flutter app with a one-time QR and monitor an engagement in read-only mode.
+| | |
+|---|---|
+| **Agent** | Local LLM (Ollama) plans and drives missions with safety profiles, evidence gates, and parallel web specialists |
+| **Modules + C2** | 8,000+ scanners/exploits/post modules, listeners, payloads, and live sessions in the same console |
+| **Automation** | CLI, RPC, REST API, and MCP for IDE / CI-style operators |
 
 ## Quick Start
 
@@ -44,7 +58,7 @@ cd Kittysploit-framework
 python3 kittyconsole.py
 ```
 
-A one-line installer is also available:
+One-line installer:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
@@ -59,89 +73,93 @@ install\install.bat
 python kittyconsole.py
 ```
 
-## Your First Session
-
-Verify the installation:
+## First 60 seconds
 
 ```text
 kittysploit> doctor
-```
-
-Pair the mobile companion (phone and workstation must be able to reach each other):
-
-```text
-kittysploit> mobile pair
-```
-
-Create a workspace and define the authorized scope:
-
-```text
-kittysploit> workspace create demo-lab
-kittysploit> scope enable
-kittysploit> scope allow ip 192.168.56.0/24
-```
-
-Search and inspect modules:
-
-```text
-kittysploit> search wordpress
-kittysploit> show exploits
-kittysploit> show auxiliary
-```
-
-Run a scanner against your local lab:
-
-```text
 kittysploit> scanner -u http://192.168.56.10
+kittysploit> search wordpress
+kittysploit> agent https://lab.local --profile owasp-web-parallel --plan-only
+kittysploit> agent http://192.168.56.10 --profile internal-lab --goal obtain-shell --approve-risk intrusive --shell-hunter
 ```
 
-## AI-Assisted Planning
+Use `--plan-only` / `--dry-run` until you are ready for live actions. Always test against systems you own or are authorized to assess.
 
-KittySploit can use a local Ollama model to prepare a testing plan without automatically launching intrusive actions:
+<img src="docs/screenshots/cli-interface.png" alt="KittySploit console" width="100%">
+
+## Autonomous agent
+
+Drive a mission with a local model — no cloud key required:
 
 ```bash
-kittysploit agent lab.local \
+# Plan only (safe preview)
+kittysploit> agent lab.local \
   --llm-local \
   --llm-model llama3.1:8b \
-  --plan-only \
-  --dry-run
+  --profile owasp-web-parallel \
+  --plan-only
+
+# Obtain a shell (lab / authorized targets only)
+kittysploit> agent http://192.168.56.10 \
+  --profile internal-lab \
+  --goal obtain-shell \
+  --approve-risk intrusive \
+  --shell-hunter \
+  --llm-local \
+  --llm-model llama3.1:8b
 ```
 
-The agent supports reconnaissance, analysis, planning, reporting and configurable safety profiles.
+| Flag | Role |
+| --- | --- |
+| `--goal obtain-shell` | Campaign objective is an interactive session |
+| `--approve-risk intrusive` | Required to run exploits (blocked otherwise) |
+| `--shell-hunter` | Push harder toward a shell |
+| `--approve-post-exploit` | Optional read-only collection after a session |
+| `--plan-only` / `--dry-run` | Preview without live intrusive actions |
 
-## KittySploit Ecosystem
+- Mission profiles (`safe-web`, `owasp-web-parallel`, `internal-lab`, `bug-bounty-safe`, …)
+- Evidence-gated exploit handoff (reduce speculative false positives)
+- Parallel specialists by OWASP class (injection, XSS, SSRF, auth, authz)
+- Scope, budgets, and risk approvals stay under operator control
 
-| Project                                                                | Purpose                             |
-| ---------------------------------------------------------------------- | ----------------------------------- |
-| [KittyProxy](https://github.com/SIA-IOTechnology/KittyProxy)           | Web traffic capture and analysis    |
-| [KittyCosmic](https://github.com/SIA-IOTechnology/KittyCosmic)         | Graphical interface and marketplace |
-| [KittyOsint](https://github.com/SIA-IOTechnology/KittyOsint)           | Visual OSINT investigation          |
-| [KittyProtocol](https://github.com/SIA-IOTechnology/KittyProtocol)     | Protocol analysis                   |
-| [KittyV8Debugger](https://github.com/SIA-IOTechnology/KittyV8Debugger) | V8 debugging and analysis           |
+## Core platform
 
-[View more screenshots](docs/screenshots/) · [Read the complete usage guide](USAGE.md)
+- **Modular console** — `search` / `use` / `set` / `run` across scanners, exploits, auxiliary, and post modules
+- **Built-in C2** — listeners, payloads, sessions, pivots, and post-exploitation
+- **Workspaces & scope** — engagement boundaries, hosts, and findings organized per job
+- **Workflows & playbooks** — repeatable recon and attack chains
+- **Extensions** — proxy, OSINT, GUI, protocols via the marketplace
+- **Mobile companion** — QR pair for read-only engagement monitoring
+
+## Ecosystem
+
+| Project | Purpose |
+| --- | --- |
+| [KittyProxy](https://github.com/SIA-IOTechnology/KittyProxy) | Web traffic capture and analysis |
+| [KittyCosmic](https://github.com/SIA-IOTechnology/KittyCosmic) | Graphical interface and marketplace |
+| [KittyOsint](https://github.com/SIA-IOTechnology/KittyOsint) | Visual OSINT investigation |
+| [KittyProtocol](https://github.com/SIA-IOTechnology/KittyProtocol) | Protocol analysis |
+| [KittyV8Debugger](https://github.com/SIA-IOTechnology/KittyV8Debugger) | V8 debugging and analysis |
+
+[Demo video](docs/screenshots/demo.mp4) · [More screenshots](docs/screenshots/) · [Full usage guide](USAGE.md)
 
 ## Documentation
 
-* [Usage guide](USAGE.md)
-* [Project wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
-* [Extension marketplace](https://kittysploit.com)
-* [Report a bug or request a feature](https://github.com/SIA-IOTechnology/Kittysploit-framework/issues)
+- [Usage guide](USAGE.md)
+- [Project wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
+- [Extension marketplace](https://kittysploit.com)
+- [Issues](https://github.com/SIA-IOTechnology/Kittysploit-framework/issues)
 
-## Project Status
+## Project status
 
-KittySploit 1.x provides the foundation for a broader offensive security platform.
-
-The framework is still evolving. Interfaces and workflows may change between releases, so validate new versions in a controlled lab before using them during an engagement.
+KittySploit 1.x is the foundation of a broader offensive platform and is still evolving. Validate new releases in a lab before using them on an engagement.
 
 ## Community
 
-KittySploit is open source and community-driven.
-
-* Give the repository a ⭐ to help others discover it.
-* Join the [Discord community](https://discord.gg/RNskjwSW5W).
-* Open an issue to report a bug or suggest an improvement.
-* Support development through [Liberapay](https://liberapay.com/KittySploit/donate).
+- Star the repo to help others discover it
+- Join [Discord](https://discord.gg/RNskjwSW5W)
+- Open an issue for bugs or ideas
+- Support development on [Liberapay](https://liberapay.com/KittySploit/donate)
 
 ## Acknowledgments
 

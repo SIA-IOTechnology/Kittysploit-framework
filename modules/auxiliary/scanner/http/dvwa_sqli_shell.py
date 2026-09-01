@@ -70,10 +70,14 @@ class Module(Auxiliary, Http_client, Http_login, Sqli):
         "Path to DVWA SQLi page (relative to base_path)",
         required=False,
     )
+    # Lab default is admin/password (Http_login historically defaulted password=admin).
+    username = OptString("admin", "DVWA username", required=False)
+    password = OptString("password", "DVWA password", required=False)
     force_security_low = OptBool(True, "POST security.php to set difficulty low", required=False)
     shell_sqli = OptBool(
-        True,
-        "After UNION confirmation, start Sqli pseudo-shell (set false for single_sql only)",
+        False,
+        "After UNION confirmation, start Sqli pseudo-shell (set true for interactive sql>; "
+        "agent forces false so obtain-shell can continue to dvwa_rce)",
         required=False,
     )
 

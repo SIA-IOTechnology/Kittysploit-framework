@@ -1033,11 +1033,16 @@ Examples:
                     family in ("http", "cloud")
                     and int(configured_port) == 80
                     and 443 in open_ports
+                    and str(target_info.get("scheme") or "").lower() != "http"
                 ):
                     return 443
                 return configured_port
             if family in ("http", "cloud") and configured_port in (80, 443, 8080, 8443, 8000, 8888):
-                if int(configured_port) == 80 and 443 in open_ports:
+                if (
+                    int(configured_port) == 80
+                    and 443 in open_ports
+                    and str(target_info.get("scheme") or "").lower() != "http"
+                ):
                     return 443
                 return configured_port
 
@@ -1463,9 +1468,22 @@ Examples:
                     if hasattr(module_instance, 'ssl'):
                         module_instance.set_option('ssl', (scheme == 'https'))
 
-                    # Set path if specified
-                    if target_info.get('path') and hasattr(module_instance, 'path'):
-                        module_instance.set_option('path', target_info['path'])
+                    # Site-root path from `http://host` must not wipe module-specific
+                    # defaults (admin_login_bruteforce uses /admin/login, not /).
+                    url_path = str(target_info.get('path') or '').strip()
+                    if url_path and url_path not in ('/', '') and hasattr(module_instance, 'path'):
+                        module_instance.set_option('path', url_path)
+
+                    extra_options = module_info.get('options') if isinstance(module_info, dict) else None
+                    if isinstance(extra_options, dict):
+                        for key, value in extra_options.items():
+                            if key in {'option_patch', 'module_path'}:
+                                continue
+                            if hasattr(module_instance, key):
+                                try:
+                                    module_instance.set_option(key, value)
+                                except Exception:
+                                    continue
 
                     execution = ModuleExecutor.execute(
                         self.framework,
@@ -1583,27 +1601,32 @@ Examples:
                         else:
                             result["message"] = f"{label} confirmed"
                     else:
-                        result["message"] = module_description
+                        # Negatives must not look like findings (description + CRITICAL severity
+                        # was ending up in agent "Notable findings").
+                        result["message"] = "No vulnerability detected"
                     result["module_description"] = module_description
 
-                    # Severity: structured report > dynamic > __info__
-                    if not result.get("severity"):
-                        result["severity"] = dynamic_info.get("severity") or module_info.get("severity")
+                    # Severity: only promote catalog severity on confirmed hits.
+                    if result.get("vulnerable"):
+                        if not result.get("severity"):
+                            result["severity"] = dynamic_info.get("severity") or module_info.get("severity") or "info"
+                    else:
+                        result["severity"] = "info"
 
-                    if module_info.get('cve'):
+                    if result.get("vulnerable") and module_info.get('cve'):
                         result['cve'] = module_info.get('cve')
 
                     # Version and other dynamic details
-                    if dynamic_info.get('version'):
+                    if result.get("vulnerable") and dynamic_info.get('version'):
                         result['version'] = dynamic_info['version']
 
-                    # Associated exploit/auxiliary module (from __info__)
-                    if module_info.get('module'):
+                    # Associated exploit/auxiliary module (from __info__) — hits only.
+                    if result.get("vulnerable") and module_info.get('module'):
                         result['exploit_module'] = module_info['module']
 
                     # Chained follow-up modules (e.g. admin_panel_detect -> bruteforce); used by agent.
                     raw_linked = module_info.get('modules') or []
-                    if isinstance(raw_linked, (list, tuple)):
+                    if result.get("vulnerable") and isinstance(raw_linked, (list, tuple)):
                         linked = []
                         seen = set()
                         for item in raw_linked:

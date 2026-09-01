@@ -215,7 +215,7 @@ class Http_client(BaseModule):
         elif hasattr(self, 'rhost'):
             target = get_option_value(self.rhost)
 
-        host, _url_port, url_ssl = normalize_scanner_target(str(target or ""))
+        host, url_port, url_ssl = normalize_scanner_target(str(target or ""))
         if host:
             target = host
 
@@ -223,6 +223,11 @@ class Http_client(BaseModule):
             port = get_option_value(self.port)
         elif hasattr(self, 'rport'):
             port = get_option_value(self.rport)
+
+        # Full URL in `target` carries its own port (http://127.0.0.1 → 80).
+        # Do not keep the Http_client default 443 when the URL disagrees.
+        if url_port is not None:
+            port = url_port
         
         if not target:
             raise ValueError("target not set. Please set target option (or rhost for compatibility).")

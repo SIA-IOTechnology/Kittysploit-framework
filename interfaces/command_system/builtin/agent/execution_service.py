@@ -30,6 +30,10 @@ from interfaces.command_system.builtin.agent.runtime_policy import (
     evaluate_module_catalog_policy,
     evaluate_module_policy,
 )
+from interfaces.command_system.builtin.agent.target_option_seed import (
+    apply_http_target_options,
+    apply_inferred_module_options,
+)
 
 
 class AgentModuleExecutionService:
@@ -105,6 +109,22 @@ class AgentModuleExecutionService:
                     "execution": None,
                     "policy_block": block.to_dict(),
                 })
+        apply_http_target_options(
+            module_instance, getattr(state, "target_info", None)
+        )
+        apply_inferred_module_options(module_instance, module_path, state)
+        try:
+            from interfaces.command_system.builtin.agent.auth_operations import AuthContextOperations
+            from interfaces.command_system.builtin.agent.target_option_seed import (
+                _normalize_relative_path,
+            )
+
+            AuthContextOperations(_normalize_relative_path).seed_http_session_from_auth(
+                module_instance, state
+            )
+        except Exception:
+            pass
+
         if getattr(state, "dry_run", False):
             iso = isolation_profile(module_path, module_instance)
             return self._finish(recorder, {
@@ -120,12 +140,19 @@ class AgentModuleExecutionService:
         if health is not None:
             kb = getattr(state, "knowledge_base", {}) or {}
             target_info = getattr(state, "target_info", {}) or {}
+            hostname = str(
+                target_info.get("hostname")
+                or target_info.get("host")
+                or target_info.get("ip")
+                or ""
+            )
             quarantine = evaluate_module_quarantine(
                 health,
                 module_path,
                 kb if isinstance(kb, dict) else {},
                 service=str(target_info.get("service") or ""),
                 os_name=str(target_info.get("os") or target_info.get("os_name") or ""),
+                hostname=hostname,
             )
             if quarantine.quarantined:
                 return self._finish(recorder, {

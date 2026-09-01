@@ -208,11 +208,25 @@ class SpecialistRegistry:
                 if vuln is not None:
                     _add(vuln)
 
-        if signals.intersection({"sqli", "xss", "lfi", "ssrf", "ssti", "auth"}):
+        if signals.intersection({"sqli", "xss", "lfi", "ssrf", "ssti", "auth", "authz", "bola", "idor", "owasp_web_parallel"}):
             for token in signals:
-                vuln = self._profiles.get(token)
+                mapped = token
+                if token in {"bola", "idor"}:
+                    mapped = "authz"
+                vuln = self._profiles.get(mapped)
                 if vuln is not None:
                     _add(vuln)
+            # Explicit parallel web mission: prefer full OWASP-class specialist set.
+            if "owasp_web_parallel" in signals or kb.get("owasp_web_mission"):
+                from interfaces.command_system.builtin.agent.owasp_mission import (
+                    specialist_keys_for_classes,
+                )
+
+                mission = kb.get("owasp_web_mission") if isinstance(kb.get("owasp_web_mission"), dict) else {}
+                for key in specialist_keys_for_classes(mission.get("classes") if mission else None):
+                    vuln = self._profiles.get(key)
+                    if vuln is not None:
+                        _add(vuln)
 
         if hints.intersection({"wordpress", "drupal", "joomla"}) and phase_l in {"analyze", "reason", "exploit"}:
             scanner = self._profiles.get("scanner")
@@ -267,6 +281,16 @@ class SpecialistRegistry:
             _add(coordinator)
 
         return matched[: max(1, int(limit or MAX_FAN_OUT))]
+
+
+def resolve_specialist_fan_out(state: Any = None, kb: Optional[Mapping[str, Any]] = None) -> int:
+    """Return specialist fan-out limit (OWASP parallel mission may raise above MAX_FAN_OUT)."""
+    from interfaces.command_system.builtin.agent.owasp_mission import mission_fan_out
+
+    payload = kb
+    if not isinstance(payload, Mapping) and state is not None:
+        payload = getattr(state, "knowledge_base", None)
+    return mission_fan_out(payload if isinstance(payload, Mapping) else None, default=MAX_FAN_OUT)
 
 
 DEFAULT_SPECIALIST_REGISTRY = SpecialistRegistry()

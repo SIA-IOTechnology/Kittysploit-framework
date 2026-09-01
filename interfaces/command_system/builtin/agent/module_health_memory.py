@@ -78,6 +78,8 @@ class ModuleHealthMemory:
         self._records: List[Dict[str, Any]] = []
         self._agg: Dict[Tuple[str, str, str], Dict[str, float]] = {}
         self._path_profile: Dict[Tuple[str, str], Dict[str, float]] = {}
+        # Host-scoped aggregates so one host's failures do not quarantine another.
+        self._path_profile_host: Dict[Tuple[str, str, str], Dict[str, float]] = {}
         self._load()
 
     def set_paths(self, paths: AgentPathService) -> None:
@@ -87,6 +89,7 @@ class ModuleHealthMemory:
         self._records = []
         self._agg.clear()
         self._path_profile.clear()
+        self._path_profile_host.clear()
         self._load()
 
     def export_summary(self) -> Dict[str, Any]:
@@ -110,12 +113,14 @@ class ModuleHealthMemory:
     def _rebuild_aggregates(self) -> None:
         self._agg.clear()
         self._path_profile.clear()
+        self._path_profile_host.clear()
         for row in self._records:
             if not isinstance(row, dict):
                 continue
             mod = str(row.get("module_path", "") or "")
             prof = str(row.get("target_profile", "") or "")
             kind = str(row.get("failure_kind", "") or "")
+            host = str(row.get("host", "") or "").lower()
             if mod and prof and kind:
                 key = (mod, prof, kind)
                 ent = self._agg.setdefault(key, {"count": 0.0, "weight": 0.0})
@@ -124,6 +129,12 @@ class ModuleHealthMemory:
                 pp = self._path_profile.setdefault((mod, prof), {"failures": 0.0, "weight": 0.0})
                 pp["failures"] += 1.0
                 pp["weight"] += float(row.get("weight", 1.0) or 1.0)
+                if host:
+                    ph = self._path_profile_host.setdefault(
+                        (mod, prof, host), {"failures": 0.0, "weight": 0.0}
+                    )
+                    ph["failures"] += 1.0
+                    ph["weight"] += float(row.get("weight", 1.0) or 1.0)
 
     def _save(self) -> None:
         payload = {
@@ -166,6 +177,13 @@ class ModuleHealthMemory:
         pp = self._path_profile.setdefault((module_path, profile), {"failures": 0.0, "weight": 0.0})
         pp["failures"] += 1.0
         pp["weight"] += float(weight)
+        host_key = str(hostname or "").lower()
+        if host_key:
+            ph = self._path_profile_host.setdefault(
+                (module_path, profile, host_key), {"failures": 0.0, "weight": 0.0}
+            )
+            ph["failures"] += 1.0
+            ph["weight"] += float(weight)
         if len(self._records) > MAX_RECORDS * 2:
             self._records = self._records[-MAX_RECORDS:]
             self._rebuild_aggregates()
@@ -228,16 +246,27 @@ class ModuleHealthMemory:
                 hostname=hostname,
             )
 
-    def health_multiplier(self, module_path: str, kb: Dict[str, Any]) -> float:
+    def health_multiplier(
+        self,
+        module_path: str,
+        kb: Dict[str, Any],
+        *,
+        hostname: str = "",
+    ) -> float:
         """
         Deprioritize modules with repeated failures on this stack/profile.
 
         Returns ~1.0 when unknown; floor ~0.32 for chronic mismatches.
+        When ``hostname`` is set, only that host's failures contribute.
         """
         if not module_path:
             return 1.0
         profile = classify_target_profile(kb if isinstance(kb, dict) else {})
-        pp = self._path_profile.get((module_path, profile))
+        host_key = str(hostname or "").lower()
+        if host_key:
+            pp = self._path_profile_host.get((module_path, profile, host_key))
+        else:
+            pp = self._path_profile.get((module_path, profile))
         if not pp:
             return 1.0
         failures = float(pp.get("failures", 0) or 0)
@@ -246,11 +275,24 @@ class ModuleHealthMemory:
             return 1.0
 
         stack_fails = 0.0
-        for (mod, prof, kind), ent in self._agg.items():
-            if mod != module_path or prof != profile:
-                continue
-            if kind == "stack_mismatch":
-                stack_fails += float(ent.get("count", 0) or 0)
+        if not host_key:
+            for (mod, prof, kind), ent in self._agg.items():
+                if mod != module_path or prof != profile:
+                    continue
+                if kind == "stack_mismatch":
+                    stack_fails += float(ent.get("count", 0) or 0)
+        else:
+            for row in self._records:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("module_path", "") or "") != module_path:
+                    continue
+                if str(row.get("target_profile", "") or "") != profile:
+                    continue
+                if str(row.get("host", "") or "").lower() != host_key:
+                    continue
+                if str(row.get("failure_kind", "") or "") == "stack_mismatch":
+                    stack_fails += 1.0
 
         avg_weight = weight / max(1.0, failures)
         mult = 1.0
@@ -269,6 +311,24 @@ class ModuleHealthMemory:
             mult = min(mult, 0.55)
 
         return max(0.32, min(1.0, mult))
+
+    def failure_count_for_host(
+        self,
+        module_path: str,
+        kb: Dict[str, Any],
+        *,
+        hostname: str = "",
+    ) -> int:
+        """Count failures for module+profile, optionally scoped to hostname."""
+        if not module_path:
+            return 0
+        profile = classify_target_profile(kb if isinstance(kb, dict) else {})
+        host_key = str(hostname or "").lower()
+        if host_key:
+            pp = self._path_profile_host.get((module_path, profile, host_key))
+            return int((pp or {}).get("failures", 0) or 0)
+        pp = self._path_profile.get((module_path, profile))
+        return int((pp or {}).get("failures", 0) or 0)
 
     def top_failures_for_profile(
         self,

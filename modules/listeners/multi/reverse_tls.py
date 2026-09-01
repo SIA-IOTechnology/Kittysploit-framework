@@ -115,12 +115,8 @@ class Module(Listener):
                 try:
                     from core.framework.stager_stage import pop_pending_stage, send_stage_over_socket
 
-                    lhost_key = getattr(self, "lhost", "") or ""
-                    if hasattr(lhost_key, "value"):
-                        lhost_key = lhost_key.value
-                    lhost_key = str(lhost_key or "")
-                    lport_raw = getattr(self, "lport", 0) or 0
-                    lport_key = int(getattr(lport_raw, "value", lport_raw) or 0)
+                    lhost_key = str(self.lhost or "")
+                    lport_key = int(self.lport or 0)
                     stage = pop_pending_stage(lhost_key, lport_key)
                     if stage:
                         send_stage_over_socket(tls, stage)

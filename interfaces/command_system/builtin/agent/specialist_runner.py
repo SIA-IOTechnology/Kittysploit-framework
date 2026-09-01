@@ -22,6 +22,7 @@ from interfaces.command_system.builtin.agent.specialist_registry import (
     MAX_FAN_OUT,
     SpecialistProfile,
     SpecialistRegistry,
+    resolve_specialist_fan_out,
 )
 from interfaces.command_system.builtin.agent.specialist_chaos import (
     SpecialistResilienceGuard,
@@ -215,7 +216,7 @@ def dedupe_proposals(proposals: Sequence[SpecialistProposal]) -> List[Specialist
     return ranked
 
 
-SPECIALIST_VULN_KEYS = frozenset({"sqli", "lfi", "xss", "ssrf", "ssti", "auth"})
+SPECIALIST_VULN_KEYS = frozenset({"sqli", "lfi", "xss", "ssrf", "ssti", "auth", "authz"})
 
 
 class SequentialSpecialistRunner:
@@ -250,8 +251,9 @@ class SequentialSpecialistRunner:
             gate_host_specialist,
         )
 
+        fan_limit = resolve_specialist_fan_out(state, kb)
         specialists = [
-            row for row in collect_specialists_for_phase(self.registry, state, observation, limit=MAX_FAN_OUT)
+            row for row in collect_specialists_for_phase(self.registry, state, observation, limit=fan_limit)
             if row.read_only
         ]
         ctx = SpecialistRunContext(phase=phase, kb=dict(kb), strategic=strategic)
@@ -276,6 +278,7 @@ class SequentialSpecialistRunner:
                 phase=phase,
                 llm_available=llm_available,
                 propose_only=True,
+                max_fan_out=fan_limit,
             )
             if not decision.allowed:
                 continue
@@ -383,8 +386,9 @@ class ParallelSpecialistScheduler:
             gate_host_specialist,
         )
 
+        fan_limit = resolve_specialist_fan_out(state, kb)
         specialists = [
-            row for row in collect_specialists_for_phase(self.registry, state, observation, limit=MAX_FAN_OUT)
+            row for row in collect_specialists_for_phase(self.registry, state, observation, limit=fan_limit)
             if row.read_only
         ]
         ctx = SpecialistRunContext(phase=phase, kb=dict(kb), strategic=strategic)
@@ -407,6 +411,7 @@ class ParallelSpecialistScheduler:
                 phase=phase,
                 llm_available=llm_available,
                 propose_only=True,
+                max_fan_out=fan_limit,
             )
             if not decision.allowed:
                 continue
@@ -451,7 +456,7 @@ class ParallelSpecialistScheduler:
                     duration_ms=round((time.monotonic() - started) * 1000.0, 2),
                 )
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as pool:
+        with ThreadPoolExecutor(max_workers=max(self.max_workers, fan_limit, 1)) as pool:
             futures = {
                 pool.submit(_worker, dispatch_order, specialist, task): (dispatch_order, specialist, task)
                 for dispatch_order, specialist, task in jobs

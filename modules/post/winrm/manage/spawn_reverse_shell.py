@@ -57,8 +57,7 @@ class Module(Post, Reverse):
 		if self.framework and hasattr(self.framework, "session_manager"):
 			if not self.framework.session_manager.get_session(str(sid).strip()):
 				return False
-		lhost_val = (self.lhost.value if hasattr(self.lhost, "value") else str(self.lhost) or "").strip()
-		return bool(lhost_val)
+		return bool(str(self.lhost or "").strip())
 
 	def _load_payload_module(self, import_path: str):
 		mod = importlib.import_module(import_path)
@@ -90,8 +89,8 @@ class Module(Post, Reverse):
 				print_error("Session ID and lhost are required")
 				return False
 
-			lhost_val = str(self.lhost.value if hasattr(self.lhost, "value") else self.lhost).strip()
-			lport_val = int(self.lport.value if hasattr(self.lport, "value") else self.lport)
+			lhost_val = str(self.lhost).strip()
+			lport_val = int(self.lport)
 			wait_s = int(
 				self.wait_seconds.value
 				if hasattr(self.wait_seconds, "value")

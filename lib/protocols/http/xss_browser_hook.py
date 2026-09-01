@@ -31,13 +31,6 @@ class XssBrowserHookMixin:
             return server
         return None
 
-    def _opt_value(self, option) -> str:
-        if hasattr(option, "value"):
-            return str(option.value or "").strip()
-        if option is not None:
-            return str(option or "").strip()
-        return ""
-
     def resolve_hook_base_url(self, callback_host: str = "") -> str:
         manual = str(callback_host or "").strip()
         if manual:
@@ -53,7 +46,7 @@ class XssBrowserHookMixin:
 
         for attr in ("callback_host", "lhost"):
             if hasattr(self, attr):
-                text = self._opt_value(getattr(self, attr))
+                text = str(getattr(self, attr) or "").strip()
                 if text:
                     return f"http://{text}:8080"
 

@@ -40,7 +40,7 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
     "internal-lab": {
         "safety_profile": "normal",
         "approved_risks": ["read", "active", "intrusive"],
-        "request_budget": 80,
+        "request_budget": 160,
         "http_replay": "safe",
         "catalog_policy": "internal-lab",
         "description": "Lab environment with broader approvals.",
@@ -111,6 +111,23 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "description": (
             "Network service and panel discovery with verification pass — scanner modules only. "
             "Recommended chain: network-services → devops-panels/saas-panels → verification."
+        ),
+    },
+    "owasp-web-parallel": {
+        "safety_profile": "discreet",
+        "approved_risks": ["read", "active", "intrusive"],
+        "request_budget": 140,
+        "http_replay": "safe",
+        "campaign_goal": "exploit",
+        "catalog_policy": "safe-web",
+        "specialist_parallel": True,
+        "hierarchical_planner": True,
+        "owasp_web_parallel": True,
+        "owasp_classes": ["injection", "xss", "ssrf", "auth", "authz"],
+        "fan_out": 5,
+        "description": (
+            "Parallel OWASP web/API mission: injection, XSS, SSRF, auth, and authz specialists "
+            "fan out concurrently; only evidence-gate-approved exploit-queue items are promoted."
         ),
     },
 }

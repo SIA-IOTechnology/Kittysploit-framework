@@ -50,6 +50,12 @@ SPECIALIST_HINTS: Dict[str, str] = {
         "awareness, session fixation, JWT alg=none/weak-secret, OAuth redirect abuse, "
         "and credential stuffing from OSINT persona when approved."
     ),
+    "authz": (
+        "AUTHZ SPECIALIST: prove broken access control — IDOR/BOLA on object IDs, "
+        "horizontal/vertical privilege escalation, forced browsing to admin APIs, "
+        "mass assignment on role/isAdmin fields, and OAuth scope confusion. "
+        "Require cross-user differential proof (victim vs attacker identity), not 200-only heuristics."
+    ),
 }
 
 _PATH_CATEGORY_MAP: Dict[str, str] = {
@@ -70,6 +76,12 @@ _PATH_CATEGORY_MAP: Dict[str, str] = {
     "bruteforce": "auth",
     "credential": "auth",
     "jwt": "auth",
+    "authz": "authz",
+    "bola": "authz",
+    "idor": "authz",
+    "broken_access": "authz",
+    "api_bola": "authz",
+    "mass_assignment": "authz",
 }
 
 

@@ -411,15 +411,51 @@ class ClassicShell(BaseShell):
             return line
         return ""
 
+    def _mark_session_flag(self, key: str, value: Any) -> None:
+        if not self.framework or not hasattr(self.framework, "session_manager"):
+            return
+        session = self.framework.session_manager.get_session(self.session_id)
+        if not session:
+            return
+        if not isinstance(session.data, dict):
+            session.data = {}
+        session.data[key] = value
+
+    def _detect_live_pty_banner(self) -> bool:
+        """True when the remote payload already advertised KSPTY1 on the socket."""
+        try:
+            from lib.shell.pty_runtime import PTY_MAGIC
+        except Exception:
+            return False
+        peek = self._peek_socket_prefix(len(PTY_MAGIC) + 8)
+        if peek.startswith(PTY_MAGIC):
+            self._mark_session_flag("pty_mode", True)
+            self._mark_session_flag("stager_line_mode", False)
+            return True
+        return False
+
     def _sync_remote_identity(self) -> bool:
         """Populate prompt fields from the remote host (stager / line-mode shells)."""
         if not self.connection or getattr(self, "_identity_synced", False):
             return bool(getattr(self, "_identity_synced", False))
 
+        # Never run line-mode whoami against a pending PTY banner — that consumes
+        # KSPTY1 as the username and then every command times out waiting for markers.
+        if self._detect_live_pty_banner() or self._session_pty_mode():
+            self._identity_synced = True
+            return True
+
         user = self._first_response_line(self._send_command_raw("whoami", timeout=3.0))
         host = self._first_response_line(self._send_command_raw("hostname", timeout=3.0))
         cwd_raw = self._send_command_raw("pwd", timeout=3.0)
         cwd = self._clean_path(cwd_raw) if cwd_raw else ""
+
+        # Reject PTY magic / noise mistaken for identity.
+        junk_names = {"kspty1", "kspty", "__ks_cmd_end__"}
+        if user and user.lower() in junk_names:
+            user = ""
+        if host and host.lower() in junk_names:
+            host = ""
 
         if user and " " not in user and "/" not in user:
             self.username = user
@@ -442,6 +478,9 @@ class ClassicShell(BaseShell):
         self._normalize_connection()
         if not self._connection_alive():
             return False
+        if self._detect_live_pty_banner() or self._session_pty_mode():
+            self._identity_synced = True
+            return True
         if self._sync_remote_identity():
             return True
         time.sleep(0.1)
@@ -704,7 +743,13 @@ class ClassicShell(BaseShell):
     
     def _use_command_marker(self) -> bool:
         """Framed Unix commands use a trailing marker; raw stagers use echo + idle recv."""
-        return not self.is_windows and not self._session_stager_line_mode()
+        if self.is_windows:
+            return False
+        if self._session_stager_line_mode():
+            return False
+        if self._session_pty_mode():
+            return False
+        return True
 
     def _wrap_unix_command(self, command: str) -> str:
         cmd = (command or "").strip()
@@ -1410,13 +1455,18 @@ class ClassicShell(BaseShell):
         """True only for payloads that explicitly negotiated PTY mode."""
         if not self.connection:
             return False
-        if self._session_stager_line_mode():
-            return False
         from lib.shell.pty_runtime import terminal_raw_supported
 
         if not terminal_raw_supported():
             return False
-        return self._session_pty_mode()
+        # Live banner wins over a wrong stager_line_mode stamp from reverse_tcp.
+        if self._detect_live_pty_banner():
+            return True
+        if self._session_pty_mode():
+            return True
+        if self._session_stager_line_mode():
+            return False
+        return False
 
     def _peek_socket_prefix(self, max_len: int = 72) -> bytes:
         """Non-destructively inspect pending socket bytes (stager-safe)."""
@@ -1455,6 +1505,8 @@ class ClassicShell(BaseShell):
         Persistent PTY/ConPTY relay — full terminal (tab completion, sudo, pagers).
 
         Ctrl+] returns to KittySploit without killing the remote session.
+        Returns False when PTY is unavailable or the remote stays silent so the
+        caller can fall back to line mode.
         """
         if not self.connection:
             print_error("No socket connection available for PTY mode.")
@@ -1481,6 +1533,8 @@ class ClassicShell(BaseShell):
             if peek.startswith(PTY_MAGIC):
                 consumed = self.connection.recv(len(PTY_MAGIC))
                 peek = peek[len(consumed) :]
+                self._mark_session_flag("pty_mode", True)
+                self._mark_session_flag("stager_line_mode", False)
             hello_prefix = f"{HELLO_MAGIC}:".encode()
             if peek.startswith(hello_prefix) and b"\n" in peek:
                 line, _, rest = peek.partition(b"\n")
@@ -1500,13 +1554,16 @@ class ClassicShell(BaseShell):
                 except Exception:
                     pass
 
-        label = "ConPTY" if self.is_windows or self._session_pty_mode() else "PTY"
+        label = "ConPTY" if self.is_windows else "PTY"
         print_info(f"Interactive {label} mode — tab completion, sudo, full TTY.")
-        print_info("Press Ctrl+] to return to KittySploit (session stays open).")
+        print_info("Ctrl+C interrupts the remote job; Ctrl+] or back/background/exit + Enter returns to KittySploit (session stays open).")
 
-        ok = relay_socket_terminal(self.connection)
+        ok = relay_socket_terminal(self.connection, alive_timeout=3.0)
         if not ok:
-            print_error("PTY relay failed (non-interactive console?). Falling back to line mode.")
+            print_error(
+                "PTY produced no output (dead or broken implant). "
+                "Falling back to line mode."
+            )
             return False
         print_info("Returned from PTY mode.")
         return True

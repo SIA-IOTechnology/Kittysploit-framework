@@ -110,12 +110,165 @@ AUTH_OPERATOR_GOALS = frozenset({"obtain-auth"})
 EXPLOIT_OPERATOR_GOALS = frozenset({"obtain-shell", "post-auth", "obtain-auth", "exploit"})
 DRUPAL_CVE_2014_3704_SQLI_MODULE = "exploits/multi/http/drupal_cve_2014_3704_sqli"
 DRUPAL_DRUPALGEDDON2_MODULE = "exploits/http/drupal_rce"
+ADMIN_LOGIN_BRUTEFORCE_MODULE = "auxiliary/scanner/http/login/admin_login_bruteforce"
+DVWA_SQLI_SHELL_MODULE = "auxiliary/scanner/http/dvwa_sqli_shell"
+DVWA_RCE_MODULE = "exploits/ctf/dvwa_rce"
+DVWA_FILE_UPLOAD_MODULE = "exploits/ctf/dvwa_file_upload"
+
+# Lab/product chains that must beat metadata CVE noise when the stack is known.
+# Order matters for obtain-shell: auth → OS RCE/webshell first; SQLi REPL is optional last.
+_PRODUCT_SHELL_CHAINS: Dict[str, Tuple[str, ...]] = {
+    "dvwa": (
+        ADMIN_LOGIN_BRUTEFORCE_MODULE,
+        DVWA_RCE_MODULE,
+        DVWA_FILE_UPLOAD_MODULE,
+        DVWA_SQLI_SHELL_MODULE,
+    ),
+}
 SHELL_CAPABILITY_NAMES = frozenset({"shell", "rce", "session", "interactive_shell"})
 AUTH_TERMINAL_SIGNALS = frozenset({
     "authenticated_session",
     "credentials_obtained",
     "auth_obtained",
 })
+
+# Lab apps with a known auth→OS-shell ladder. While this focus is active, unrelated
+# CMS/plugin CVE spray is deferred (product-first, then backtrack).
+_LAB_PRODUCT_FOCUS = frozenset({"dvwa", "mutillidae", "bwapp", "webgoat", "juiceshop"})
+_FOREIGN_CMS_PATH_TOKENS = (
+    "wordpress",
+    "wp_",
+    "wp-",
+    "wpvivid",
+    "wp_plugin",
+    "drupal",
+    "joomla",
+    "ninja_forms",
+    "blocksy",
+    "balbooa",
+    "elementor",
+    "woocommerce",
+    "wpforms",
+    "gravityforms",
+)
+
+
+def focused_lab_product(kb: Mapping[str, Any]) -> str:
+    """Dominant lab product with confidence, or empty when focus should lift."""
+    if not isinstance(kb, Mapping):
+        return ""
+    try:
+        from interfaces.command_system.builtin.agent.module_performance_memory import (
+            dominant_product_stack,
+        )
+    except Exception:
+        return ""
+    dominant = str(dominant_product_stack(dict(kb), threshold=0.45) or "").lower()
+    if dominant not in _LAB_PRODUCT_FOCUS:
+        return ""
+    signals = {str(s).lower() for s in (kb.get("risk_signals") or [])}
+    if signals.intersection({"interactive_shell", "shell_obtained"}):
+        return ""
+    return dominant
+
+
+def product_shell_chain_paths(product: str, *, include_sqli_shell: bool = False) -> Tuple[str, ...]:
+    paths = _PRODUCT_SHELL_CHAINS.get(str(product or "").lower(), ())
+    if include_sqli_shell:
+        return paths
+    return tuple(p for p in paths if "sqli_shell" not in p.lower())
+
+
+def product_chain_still_pending(kb: Mapping[str, Any]) -> str:
+    """
+    Return the lab product name while its focused shell chain is incomplete.
+
+    Exploit links only clear after a wrapper attempt (listener-enabled). Mere
+    scanner observation without a session must not lift focus into CVE spray.
+    Auth/aux links still clear on observation. Shell / explicit backtrack lift focus.
+    """
+    product = focused_lab_product(kb)
+    if not product:
+        return ""
+    if kb.get("product_shell_backtrack"):
+        return ""
+    chain = product_shell_chain_paths(product, include_sqli_shell=False)
+    if not chain:
+        return ""
+    wrapper_attempts = {
+        str(x).strip().lower()
+        for x in (kb.get("product_shell_wrapper_attempts") or [])
+        if str(x).strip()
+    }
+    wrapper_leaves = {a.rsplit("/", 1)[-1] for a in wrapper_attempts}
+    for path in chain:
+        leaf = path.rsplit("/", 1)[-1]
+        low = path.lower()
+        if low.startswith(("exploit/", "exploits/")):
+            if low not in wrapper_attempts and leaf.lower() not in wrapper_leaves:
+                return product
+            continue
+        if not _module_observed_in_kb(kb, path, leaf):
+            return product
+    return ""
+
+
+def product_focus_skip_reason(module_path: str, kb: Mapping[str, Any]) -> str:
+    """
+    Product-first gate: while DVWA (etc.) chain is pending, do not spray foreign
+    WordPress/plugin CVEs or unrelated exploits. Backtrack only after the chain
+    modules have been tried.
+    """
+    product = product_chain_still_pending(kb)
+    if not product:
+        return ""
+    path = str(module_path or "").strip()
+    if not path:
+        return ""
+    low = path.lower()
+    chain = product_shell_chain_paths(product, include_sqli_shell=False)
+    chain_basenames = {c.rsplit("/", 1)[-1].lower() for c in chain}
+    leaf = low.rsplit("/", 1)[-1]
+    if low in {c.lower() for c in chain} or leaf in chain_basenames:
+        return ""
+    if product in low:
+        return ""
+    if any(tok in low for tok in ("admin_login_bruteforce", "login_page_detector", "simple_login")):
+        return ""
+    if low.startswith(("exploit/", "exploits/")):
+        return (
+            f"product-focus: `{product}` shell chain pending "
+            f"(auth→RCE first); defer unrelated exploit"
+        )
+    if any(tok in low for tok in _FOREIGN_CMS_PATH_TOKENS):
+        return (
+            f"product-focus: `{product}` shell chain pending; "
+            f"defer foreign CMS module"
+        )
+    return ""
+
+
+def filter_paths_for_product_focus(
+    paths: Sequence[str],
+    kb: Mapping[str, Any],
+) -> List[str]:
+    """Keep paths allowed under the current product-focus gate (pass-through when none)."""
+    if not product_chain_still_pending(kb):
+        return [str(p) for p in paths or [] if str(p).strip()]
+    kept: List[str] = []
+    for path in paths or []:
+        token = str(path or "").strip()
+        if not token:
+            continue
+        if product_focus_skip_reason(token, kb):
+            continue
+        kept.append(token)
+    if kept:
+        return kept
+    # Ensure the pending chain itself remains reachable even if the input list
+    # only contained foreign CVEs.
+    product = product_chain_still_pending(kb)
+    return list(product_shell_chain_paths(product, include_sqli_shell=False))
 
 
 def is_shell_operator_goal(goal: Optional[str]) -> bool:
@@ -800,6 +953,73 @@ def _metadata_shell_followups(
     return out
 
 
+def _kb_login_surface_ready(kb: Mapping[str, Any]) -> bool:
+    if not isinstance(kb, Mapping):
+        return False
+    if kb_auth_terminal_reached(kb):
+        return False
+    if any(isinstance(p, str) and p.startswith("/") for p in (kb.get("login_paths") or [])):
+        return True
+    signals = {str(s).lower() for s in (kb.get("risk_signals") or [])}
+    return bool(signals.intersection({
+        "login_surface_detected",
+        "login_redirect_detected",
+        "login_form_detected",
+    }))
+
+
+def product_auth_shell_followups(kb: Mapping[str, Any], state: Any = None) -> List[str]:
+    """
+    Known lab/product + login chains that must run before metadata CVE noise.
+
+    Used by scan pinning and the adaptive catalog so DVWA/auth is not starved
+    when opportunistic scoring prefers unrelated detectors.
+
+    For ``obtain-shell``, omit SQLi pseudo-shell modules — chase OS RCE/webshell.
+    """
+    if not isinstance(kb, dict):
+        return []
+    out: List[str] = []
+    seen: set = set()
+    shell_goal = is_shell_operator_goal(
+        operator_goal_from_mapping(kb)
+        or (normalize_goal(getattr(state, "operator_goal", None) or getattr(state, "campaign_goal", None)) if state is not None else "")
+        or ""
+    ) or bool(state is not None and getattr(state, "shell_hunter", False))
+
+    def _add(path: str) -> None:
+        if not path or path in seen:
+            return
+        if shell_goal and "sqli_shell" in path.lower():
+            return
+        if not _module_observed_in_kb(kb, path, path.rsplit("/", 1)[-1]):
+            seen.add(path)
+            out.append(path)
+
+    conf = kb.get("tech_confidence", {}) or {}
+
+    def _conf(name: str) -> float:
+        try:
+            return float(conf.get(name, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    if _kb_login_surface_ready(kb):
+        _add(ADMIN_LOGIN_BRUTEFORCE_MODULE)
+
+    ranked = sorted(
+        (( _conf(name), name, paths) for name, paths in _PRODUCT_SHELL_CHAINS.items()),
+        key=lambda row: row[0],
+        reverse=True,
+    )
+    for score, _name, paths in ranked:
+        if score < 0.45:
+            continue
+        for path in paths:
+            _add(path)
+    return out
+
+
 def suggest_shell_plan_followups(
     kb: Mapping[str, Any],
     state: Any = None,
@@ -815,9 +1035,20 @@ def suggest_shell_plan_followups(
     out: List[str] = []
     seen_paths: set = set()
     protocol = _forced_protocol(kb, state)
+    shell_goal = is_shell_operator_goal(
+        operator_goal_from_mapping(kb)
+        or (
+            normalize_goal(getattr(state, "operator_goal", None) or getattr(state, "campaign_goal", None))
+            if state is not None
+            else ""
+        )
+        or ""
+    ) or bool(state is not None and getattr(state, "shell_hunter", False))
 
     def _add(path: str) -> None:
         if not path or path in seen_paths:
+            return
+        if shell_goal and "sqli_shell" in path.lower():
             return
         if not path_matches_forced_protocol(path, protocol):
             return
@@ -840,27 +1071,68 @@ def suggest_shell_plan_followups(
             return out
 
     conf = kb.get("tech_confidence", {}) or {}
-    for path in _metadata_shell_followups(kb, state, catalog_modules):
-        _add(path)
 
-    # Prefer concrete CMS/web stacks over generic "api" swagger noise for shell goals.
-    if float(conf.get("drupal", 0.0) or 0.0) >= 0.45:
+    def _conf(name: str) -> float:
+        try:
+            return float(conf.get(name, 0.0) or 0.0)
+        except Exception:
+            return 0.0
+
+    def _add_drupal_chain() -> None:
+        if _conf("drupal") < 0.45:
+            return
         if not _module_observed_in_kb(kb, "drupal_scanner", "drupal_detect"):
             _add("auxiliary/scanner/http/drupal_scanner")
         if not _module_observed_in_kb(kb, "drupal_cve_2014_3704_sqli"):
             _add(DRUPAL_CVE_2014_3704_SQLI_MODULE)
         if not _module_observed_in_kb(kb, "drupal_rce"):
             _add(DRUPAL_DRUPALGEDDON2_MODULE)
-    if float(conf.get("phpmyadmin", 0.0) or 0.0) >= 0.4:
+
+    def _add_phpmyadmin_chain() -> None:
+        if _conf("phpmyadmin") < 0.4:
+            return
         if not _module_observed_in_kb(kb, "phpmyadmin_setup_detect", "phpmyadmin_detect"):
             _add("scanner/http/phpmyadmin_setup_detect")
         if not _module_observed_in_kb(kb, "php_injection", "php_rce"):
             _add("auxiliary/scanner/http/php_injection")
-    if float(conf.get("dvwa", 0.0) or 0.0) >= 0.45:
-        if not _module_observed_in_kb(kb, "admin_login_bruteforce", "login_page_detector"):
-            _add("auxiliary/scanner/http/login/admin_login_bruteforce")
-        if not _module_observed_in_kb(kb, "dvwa_sqli_shell"):
-            _add("auxiliary/scanner/http/dvwa_sqli_shell")
+
+    def _add_dvwa_chain() -> None:
+        if _conf("dvwa") < 0.45:
+            return
+        # Prefer real OS shell (RCE / upload) over SQLi pseudo-shell.
+        if not _module_observed_in_kb(kb, "admin_login_bruteforce"):
+            _add(ADMIN_LOGIN_BRUTEFORCE_MODULE)
+        if not _module_observed_in_kb(kb, "dvwa_rce"):
+            _add(DVWA_RCE_MODULE)
+        if not _module_observed_in_kb(kb, "dvwa_file_upload"):
+            _add(DVWA_FILE_UPLOAD_MODULE)
+        # SQLi pseudo-shell is not an OS shell — skip when chasing obtain-shell.
+        shell_goal = is_shell_operator_goal(
+            operator_goal_from_mapping(kb)
+            or (normalize_goal(getattr(state, "operator_goal", None) or getattr(state, "campaign_goal", None)) if state is not None else "")
+            or ""
+        ) or bool(state is not None and getattr(state, "shell_hunter", False))
+        if not shell_goal and not _module_observed_in_kb(kb, "dvwa_sqli_shell"):
+            _add(DVWA_SQLI_SHELL_MODULE)
+
+    # Known product/auth chains first — metadata CVE catalogs used to steal these slots.
+    for path in product_auth_shell_followups(kb, state):
+        _add(path)
+
+    # Highest-confidence product chain first (DVWA must beat co-hosted phpMyAdmin noise).
+    for _score, _adder in sorted(
+        (
+            (_conf("dvwa"), _add_dvwa_chain),
+            (_conf("drupal"), _add_drupal_chain),
+            (_conf("phpmyadmin"), _add_phpmyadmin_chain),
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    ):
+        _adder()
+
+    for path in _metadata_shell_followups(kb, state, catalog_modules):
+        _add(path)
 
     # Confirmed SQLi beats generic API/OSINT noise for shell and exploit chase.
     signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}

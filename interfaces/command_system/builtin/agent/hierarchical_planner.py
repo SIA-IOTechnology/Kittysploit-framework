@@ -23,6 +23,7 @@ from interfaces.command_system.builtin.agent.specialist_registry import (
     DEFAULT_SPECIALIST_REGISTRY,
     MAX_FAN_OUT,
     SpecialistRegistry,
+    resolve_specialist_fan_out,
 )
 from interfaces.command_system.builtin.agent.typed_models import (
     AgentAction,
@@ -164,11 +165,12 @@ class MissionCommander:
             gate_host_specialist,
         )
 
+        fan_limit = resolve_specialist_fan_out(state, kb)
         specialists = collect_specialists_for_phase(
             self.registry,
             state,
             observation,
-            limit=MAX_FAN_OUT,
+            limit=fan_limit,
         )
         proposals: List[SpecialistProposal] = []
         fan_out = 0
@@ -184,6 +186,7 @@ class MissionCommander:
                 fan_out=fan_out,
                 phase=phase,
                 llm_available=llm_available,
+                max_fan_out=fan_limit,
             )
             if not decision.allowed:
                 continue

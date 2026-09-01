@@ -138,7 +138,7 @@ class DVWAAuthOverrideStrategy:
 
     def supports(self, module_path: str) -> bool:
         low = module_path.lower()
-        return "dvwa_" in low or "/dvwa" in low
+        return "dvwa_" in low or "/dvwa" in low or low.endswith("/dvwa_rce") or "dvwa_file_upload" in low
 
     def _set_base_options(self, ctx: AuthOverrideBuildContext, out: Dict[str, Any], base_path: str) -> Dict[str, Any]:
         """Populate whichever base-path option names the target module actually exposes."""
@@ -146,6 +146,18 @@ class DVWAAuthOverrideStrategy:
             out["base_path"] = base_path
         if hasattr(ctx.module_instance, "path"):
             out["path"] = base_path
+        # Lab default credentials (Http_login historically defaulted password=admin).
+        if hasattr(ctx.module_instance, "username") and not ctx.username:
+            out.setdefault("username", "admin")
+        if hasattr(ctx.module_instance, "password") and not ctx.password:
+            out.setdefault("password", "password")
+        if ctx.username:
+            out.setdefault("username", ctx.username)
+        if ctx.password:
+            out.setdefault("password", ctx.password)
+        # Agent must not block on interactive SQLi REPL when chasing OS shell.
+        if hasattr(ctx.module_instance, "shell_sqli"):
+            out.setdefault("shell_sqli", False)
         return out
 
     def build(self, ctx: AuthOverrideBuildContext) -> Dict[str, Any]:
@@ -159,7 +171,29 @@ class DVWAAuthOverrideStrategy:
                 return self._set_base_options(ctx, out, "/dvwa")
         if login_path.startswith("/login.php") or final_path.startswith("/index.php"):
             return self._set_base_options(ctx, out, "/")
+        # DVWA detected but login path unknown: prefer web-root install.
+        if self.supports(ctx.module_path):
+            return self._set_base_options(ctx, out, "/")
         return out
+
+
+class DvwaLoginBruteforceStrategy:
+    """DVWA login form uses username/password + Login submit control."""
+
+    def supports(self, login_path: str) -> bool:
+        low = (login_path or "").lower().split("?", 1)[0]
+        return (
+            low.endswith("/login.php")
+            or low.endswith("login.php")
+            or "/dvwa/" in low
+        )
+
+    def build(self) -> Dict[str, Any]:
+        return {
+            "username_field": "username",
+            "password_field": "password",
+            "extra_fields": "Login=Login",
+        }
 
 
 AUTH_OVERRIDE_STRATEGIES: Tuple[AuthOverrideStrategy, ...] = (
@@ -214,6 +248,7 @@ class DrupalLoginBruteforceStrategy:
 BRUTEFORCE_FIELD_STRATEGIES: Tuple[BruteforceFieldStrategy, ...] = (
     WordPressLoginBruteforceStrategy(),
     DrupalLoginBruteforceStrategy(),
+    DvwaLoginBruteforceStrategy(),
 )
 
 

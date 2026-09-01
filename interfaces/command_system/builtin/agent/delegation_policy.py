@@ -54,10 +54,12 @@ class DelegationPolicy:
         contradiction: bool = False,
         llm_available: bool = True,
         propose_only: bool = False,
+        max_fan_out: Optional[int] = None,
     ) -> DelegationDecision:
+        limit = MAX_FAN_OUT if max_fan_out is None else max(1, int(max_fan_out))
         if depth > MAX_SUBAGENT_DEPTH:
             return DelegationDecision(False, profile.key, "depth_limit", mode="blocked")
-        if fan_out >= MAX_FAN_OUT:
+        if fan_out >= limit:
             return DelegationDecision(False, profile.key, "fan_out_limit", mode="blocked")
         if profile.maturity == "planned":
             return DelegationDecision(False, profile.key, "specialist_not_ready", mode="blocked")

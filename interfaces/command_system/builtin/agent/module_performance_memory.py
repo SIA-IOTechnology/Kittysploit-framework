@@ -28,26 +28,107 @@ FILE_NAME = "module_performance.json"
 RECENT_REWARD_WINDOW = 10
 
 
+# Product stacks used for quarantine profile keys and CMS-lock dominance.
+# Order within a confidence tier does not matter; scores decide.
+_LAB_STACK_NAMES = ("dvwa", "mutillidae", "bwapp", "webgoat", "juiceshop")
+_ADMIN_STACK_NAMES = (
+    "phpmyadmin", "grafana", "jenkins", "tomcat", "roundcube", "kibana",
+)
+_CMS_STACK_NAMES = ("wordpress", "drupal", "joomla")
+_FRAMEWORK_STACK_NAMES = (
+    "nextjs", "django", "flask", "fastapi", "nodejs", "react", "angular", "vue",
+)
+_DATA_STACK_NAMES = ("elasticsearch", "mongodb", "redis")
+_PRODUCT_STACK_NAMES = (
+    _LAB_STACK_NAMES
+    + _ADMIN_STACK_NAMES
+    + _CMS_STACK_NAMES
+    + _FRAMEWORK_STACK_NAMES
+    + _DATA_STACK_NAMES
+)
+# Non-CMS products that should suppress CMS lock when they dominate the target.
+_CMS_LOCK_BLOCKERS = _LAB_STACK_NAMES + _ADMIN_STACK_NAMES + (
+    "nextjs", "django", "flask", "fastapi", "nodejs",
+)
+
+
+def _confidence_map(kb: Dict[str, Any]) -> Dict[str, float]:
+    conf = (kb or {}).get("tech_confidence", {}) or {}
+    out: Dict[str, float] = {}
+    for name, raw in conf.items():
+        try:
+            out[str(name).lower()] = float(raw or 0.0)
+        except Exception:
+            continue
+    return out
+
+
+def ranked_product_stacks(
+    kb: Dict[str, Any],
+    *,
+    threshold: float = 0.45,
+) -> List[Tuple[str, float]]:
+    """Return ``(name, score)`` for known products at/above ``threshold``, highest first."""
+    if not isinstance(kb, dict):
+        return []
+    conf = _confidence_map(kb)
+    rows: List[Tuple[str, float]] = []
+    for name in _PRODUCT_STACK_NAMES:
+        score = conf.get(name, 0.0)
+        if score >= threshold:
+            rows.append((name, score))
+    rows.sort(key=lambda item: (-item[1], item[0]))
+    return rows
+
+
+def dominant_product_stack(
+    kb: Dict[str, Any],
+    *,
+    threshold: float = 0.45,
+) -> Optional[str]:
+    """Single highest-confidence known product, or ``None``."""
+    rows = ranked_product_stacks(kb, threshold=threshold)
+    return rows[0][0] if rows else None
+
+
+def _hint_fallback_stack(kb: Dict[str, Any]) -> Optional[str]:
+    hints = [str(h).lower() for h in (kb.get("tech_hints", []) or [])]
+    if not hints:
+        return None
+    # Prefer specific lab/admin over generic CMS when only hints exist.
+    for group in (_LAB_STACK_NAMES, _ADMIN_STACK_NAMES, _CMS_STACK_NAMES, _FRAMEWORK_STACK_NAMES):
+        for name in group:
+            if any(name in h for h in hints):
+                return name
+    return None
+
+
 def classify_target_profile(kb: Dict[str, Any]) -> str:
     """
-    Compact context key for aggregation, e.g. ``drupal+wordpress_login`` or ``unknown_nologin``.
+    Compact context key for aggregation, e.g. ``dvwa_login`` or ``grafana_nologin``.
+
+    Uses the dominant product stack so quarantine memory does not bleed across
+    unrelated products that would otherwise collapse into ``unknown_*``.
     """
     if not isinstance(kb, dict):
         return "unknown_unknown"
-    conf = kb.get("tech_confidence", {}) or {}
-    tags: List[str] = []
-    for name in ("wordpress", "drupal", "joomla"):
-        try:
-            if float(conf.get(name, 0) or 0) >= 0.45:
+
+    ranked = ranked_product_stacks(kb, threshold=0.45)
+    if ranked:
+        top_name, top_score = ranked[0]
+        # Keep near-ties only when both are CMS (multi-CMS rare); otherwise single tag.
+        tags = [top_name[:5]]
+        for name, score in ranked[1:]:
+            if name in _CMS_STACK_NAMES and top_name in _CMS_STACK_NAMES and (top_score - score) <= 0.05:
                 tags.append(name[:5])
-        except Exception:
-            continue
-    if not tags:
-        for name in ("wordpress", "drupal", "joomla"):
-            for h in kb.get("tech_hints", []) or []:
-                if name in str(h).lower():
-                    tags.append(name[:5])
-                    break
+            break
+        # Lab/admin dominance: never mix CMS into the key.
+        if top_name in _LAB_STACK_NAMES or top_name in _ADMIN_STACK_NAMES:
+            tags = [top_name[:5]]
+    else:
+        hint = _hint_fallback_stack(kb)
+        tags = [hint[:5]] if hint else []
+
     stack = "+".join(sorted(set(tags))) or "unknown"
     signals = {str(s).lower() for s in kb.get("risk_signals", []) or []}
     if "authenticated_session" in signals:
@@ -61,6 +142,33 @@ def classify_target_profile(kb: Dict[str, Any]) -> str:
     else:
         auth = "nologin"
     return f"{stack}_{auth}"
+
+
+def should_suppress_cms_lock(kb: Dict[str, Any], *, threshold: float = 0.7) -> bool:
+    """True when a non-CMS product dominates and CMS lock would starve its modules."""
+    ranked = ranked_product_stacks(kb, threshold=threshold)
+    if not ranked:
+        return False
+    top_name, _ = ranked[0]
+    return top_name in _CMS_LOCK_BLOCKERS
+
+
+def cms_lock_targets(kb: Dict[str, Any], *, threshold: float = 0.7) -> set:
+    """
+    CMS names to hard-lock on, or empty.
+
+    Only the dominant CMS at/above ``threshold`` — never specialization noise alone.
+    """
+    if should_suppress_cms_lock(kb, threshold=threshold):
+        return set()
+    ranked = ranked_product_stacks(kb, threshold=threshold)
+    if not ranked:
+        return set()
+    top_name, _ = ranked[0]
+    if top_name in _CMS_STACK_NAMES:
+        return {top_name}
+    return set()
+
 
 
 def kb_metrics_snapshot(kb: Dict[str, Any]) -> Dict[str, float]:

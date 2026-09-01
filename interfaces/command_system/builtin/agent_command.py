@@ -737,6 +737,11 @@ Examples:
                     "--approve-risk intrusive (or --profile internal-lab). "
                     "Without that flag the agent can recon/plan but will skip RCE/shell modules."
                 )
+            # Lab shell chase needs headroom after fingerprint/probes.
+            if request_budget > 0 and request_budget < 160:
+                request_budget = 160
+            elif request_budget <= 0:
+                request_budget = 160
         replay_max = max(0, int(parsed.http_replay_max))
         if shell_goal and replay_max <= 3:
             replay_max = 8
@@ -846,7 +851,28 @@ Examples:
                 apply_intelligence_defaults,
             )
 
+            # Mission profile may force parallel OWASP-class specialists before defaults freeze flags.
+            if profile_overrides.get("owasp_web_parallel") or profile_overrides.get("specialist_parallel"):
+                from interfaces.command_system.builtin.agent.owasp_mission import (
+                    apply_owasp_web_parallel_to_state,
+                )
+
+                apply_owasp_web_parallel_to_state(
+                    state,
+                    classes=profile_overrides.get("owasp_classes"),
+                )
+                if profile_overrides.get("hierarchical_planner"):
+                    state.hierarchical_planner_enabled = True
             intel = apply_intelligence_defaults(state)
+            # Re-assert parallel after defaults when mission profile demands it.
+            if profile_overrides.get("owasp_web_parallel") or profile_overrides.get("specialist_parallel"):
+                state.specialist_parallel_enabled = True
+                state.specialist_sequential_enabled = False
+                if isinstance(state.knowledge_base, dict):
+                    planner = dict(state.knowledge_base.get("planner_intelligence") or {})
+                    planner["specialists"] = "parallel"
+                    planner["owasp_web_parallel"] = bool(profile_overrides.get("owasp_web_parallel"))
+                    state.knowledge_base["planner_intelligence"] = planner
             if parsed.verbose:
                 print_info(
                     "Planner intelligence: "
@@ -854,6 +880,11 @@ Examples:
                     f"adaptive={intel.get('adaptive_loop')} "
                     f"specialists={intel.get('specialists')}"
                 )
+                if profile_overrides.get("owasp_web_parallel"):
+                    print_info(
+                        "OWASP web-parallel mission enabled "
+                        f"(classes={','.join(profile_overrides.get('owasp_classes') or [])})."
+                    )
         except Exception:
             pass
         try:
@@ -925,7 +956,14 @@ Examples:
                         answer = ""
                     if answer in {"y", "yes"}:
                         self._open_interactive_session(final_state)
+                if final_state.campaign_stop_reason:
+                    print_warning(f"Campaign stop: {final_state.campaign_stop_reason}")
                 return True
+            stop = str(final_state.campaign_stop_reason or "").strip()
+            if stop:
+                print_error(f"Agent finished without a report ({stop})")
+            else:
+                print_error("Agent finished without a report")
             return False
         finally:
             restore_module_context(self.framework, previous_module, announce=False)

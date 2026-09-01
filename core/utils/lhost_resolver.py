@@ -222,6 +222,9 @@ def resolve_callback_lhost(
         if docker_target:
             # Fallback when docker SDK is unavailable: common docker0 gateway.
             return "172.17.0.1"
+        # Same-host loopback target without a Docker publish mapping: callback
+        # to loopback so native lab stacks (DVWA on 127.0.0.1) reach the listener.
+        return "127.0.0.1"
 
     lan_ip = discover_primary_lan_ip()
     if lan_ip:

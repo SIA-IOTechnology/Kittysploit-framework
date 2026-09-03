@@ -33,7 +33,7 @@ from core.output_handler import print_error, print_info, print_success, print_wa
 
 init(autoreset=True)
 
-DEFAULT_REGISTRY_URL = "https://app.kittysploit.com"
+from core.registry.urls import DEFAULT_REGISTRY_URL, normalize_registry_url
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".kittysploit")
 REGISTRY_CONFIG = os.path.join(CONFIG_DIR, "registry_config.json")
 
@@ -1024,14 +1024,14 @@ class KittyApiClient:
             for key in ("base_url", "registry_url"):
                 url = config.get(key)
                 if url:
-                    return str(url).rstrip("/")
+                    return normalize_registry_url(url)
         try:
             from core.config import Config
 
             cfg = Config.get_instance()
             url = cfg.get_config_value_by_path("registry.url")
             if url:
-                return str(url).rstrip("/")
+                return normalize_registry_url(url)
         except Exception:
             pass
         return DEFAULT_REGISTRY_URL

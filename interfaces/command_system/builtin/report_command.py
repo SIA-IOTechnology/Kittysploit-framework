@@ -37,7 +37,7 @@ class ReportCommand(BaseCommand):
     @property
     def help_text(self) -> str:
         return """
-Push results to KittySploit Reports (app.kittysploit.com)
+Push results to KittySploit Reports (report.kittysploit.com)
 
 Interactive flow (recommended):
     report --push
@@ -72,7 +72,7 @@ Examples:
     def __init__(self, framework, session, output_handler):
         super().__init__(framework, session, output_handler)
         self.parser = self._create_parser()
-        self.reports_url = "https://app.kittysploit.com"
+        self.reports_url = "https://report.kittysploit.com"
         self.api_key = None
         self.project_id = None
         self.project_name = None
@@ -124,7 +124,8 @@ Examples:
                     self.project_name = config.get('project_name')
                     url = config.get('reports_url') or config.get('portal_url')
                     if url:
-                        self.reports_url = url
+                        from core.registry.urls import normalize_registry_url
+                        self.reports_url = normalize_registry_url(url)
 
                 if config_path == self._legacy_config_file and self.api_key:
                     self._save_config()
@@ -226,7 +227,7 @@ Examples:
         print_info("Push hosts and vulnerabilities to KittySploit Reports.")
         print_info("")
         print_info("Setup")
-        print_info("  1. Create an API key in Reports (app.kittysploit.com).")
+        print_info("  1. Create an API key in Reports (report.kittysploit.com).")
         print_info("  2. Save it once:")
         print_info("       report --api-key <KEY>")
         print_info("     Stored in ~/.kittysploit/report_config.json (permissions 600).")

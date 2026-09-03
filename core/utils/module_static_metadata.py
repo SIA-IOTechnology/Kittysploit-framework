@@ -124,6 +124,20 @@ def is_valid_cve_storage_value(cve: Any) -> bool:
 def _string_ast_value(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts: List[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            elif isinstance(value, ast.FormattedValue):
+                parts.append(_string_ast_value(value.value) or "")
+        joined = "".join(parts)
+        return joined if joined.strip() else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _string_ast_value(node.left)
+        right = _string_ast_value(node.right)
+        if left is not None and right is not None:
+            return left + right
     return None
 
 

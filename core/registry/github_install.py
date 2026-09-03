@@ -36,6 +36,10 @@ DEFAULT_GITHUB_SOURCES: Dict[str, Dict[str, str]] = {
         "repo": "SIA-IOTechnology/KittyCosmic",
         "ref": "main",
     },
+    "kittyops": {
+        "repo": "SIA-IOTechnology/KittyOps",
+        "ref": "main",
+    },
     "kittyv8": {
         "repo": "SIA-IOTechnology/KittyV8Debugger",
         "ref": "main",

@@ -362,6 +362,6 @@ class Marimo(BaseModule):
             output = self.marimo_execute(cmd)
         except Exception as exc:
             raise exc
-        if cmd == "id":
+        if re.search(r"\bid\b", cmd):
             return ("uid=" in output, output)
         return (bool(output.strip()), output)

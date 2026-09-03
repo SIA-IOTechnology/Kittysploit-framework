@@ -168,12 +168,14 @@ def _zig_version(zig_path: str) -> str:
 
 
 def _registry_url() -> str:
+    from core.registry.urls import DEFAULT_REGISTRY_URL, normalize_registry_url
+
     try:
         from core.config import Config
 
         url = Config.get_instance().get_config_value_by_path("registry.url")
         if url:
-            return str(url).rstrip("/")
+            return normalize_registry_url(url)
     except Exception:
         pass
 
@@ -184,7 +186,7 @@ def _registry_url() -> str:
                 data = tomllib.load(handle)
             url = (data.get("registry") or {}).get("url")
             if url:
-                return str(url).rstrip("/")
+                return normalize_registry_url(url)
         except Exception:
             pass
 
@@ -197,11 +199,11 @@ def _registry_url() -> str:
                 data = json.load(handle)
             url = data.get("base_url")
             if url:
-                return str(url).rstrip("/")
+                return normalize_registry_url(url)
         except Exception:
             pass
 
-    return "https://app.kittysploit.com"
+    return DEFAULT_REGISTRY_URL
 
 
 def _extensions_dir(root: Path) -> Path:

@@ -22,17 +22,20 @@ class Module(Listener):
     password = OptString("", "SSH password", True)
     
     def run(self):
-        """Run the SSH client listener - ultra-simple implementation"""
+        """Connect once to the SSH server."""
+        if getattr(self, '_connect_done', False):
+            return None
+        self._connect_done = True
         try:
             print_status(f"Trying connect to {self.rhost}:{self.rport}")
             
             ssh_channel = paramiko.SSHClient()
             ssh_channel.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh_channel.connect(self.rhost, self.rport, self.username, self.password)
+            self.ssh_channel = ssh_channel
             
             print_success(f"Connected to SSH server {self.rhost}:{self.rport}")
             
-            # Return connection data - framework extracts info from __info__
             return (ssh_channel, self.rhost, self.rport)
             
         except KeyboardInterrupt:

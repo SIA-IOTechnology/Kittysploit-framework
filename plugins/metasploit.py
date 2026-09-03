@@ -9,20 +9,182 @@ from typing import Dict, List, Optional, Tuple
 import msgpack
 import requests
 import os
+import queue
 import shlex
 import json
 import shutil
 import subprocess
-import select
+import threading
 import time
-import signal
 import re
-import termios
 
 from core.utils.paths import data_dir
 import shlex as shell_lex
 from requests import HTTPError
 from requests.exceptions import RequestException
+
+try:
+    import select as _select
+except ImportError:
+    _select = None
+try:
+    import termios as _termios
+except ImportError:  # Windows: termios is POSIX-only
+    _termios = None
+
+
+def _msfconsole_argv(resolved: str, extra_args: Optional[List[str]] = None) -> List[str]:
+    extra = list(extra_args or [])
+    if os.name == "nt" and resolved.lower().endswith((".bat", ".cmd")):
+        return ["cmd.exe", "/c", resolved, *extra]
+    return [resolved, *extra]
+
+
+class _MsfConsoleIO:
+    """Persistent msfconsole I/O: POSIX PTY, or pipes on Windows."""
+
+    def __init__(self) -> None:
+        self.process: Optional[subprocess.Popen] = None
+        self._mode = ""
+        self._fd: Optional[int] = None
+        self._queue: Optional[queue.Queue] = None
+        self._stop = threading.Event()
+        self._reader: Optional[threading.Thread] = None
+
+    @classmethod
+    def spawn(cls, command: List[str]) -> "_MsfConsoleIO":
+        session = cls()
+        if hasattr(os, "openpty"):
+            session._spawn_pty(command)
+        else:
+            session._spawn_pipes(command)
+        return session
+
+    def _spawn_pty(self, command: List[str]) -> None:
+        master_fd, slave_fd = os.openpty()
+        if _termios is not None:
+            attrs = _termios.tcgetattr(slave_fd)
+            attrs[3] = attrs[3] & ~_termios.ECHO
+            _termios.tcsetattr(slave_fd, _termios.TCSANOW, attrs)
+        process = subprocess.Popen(
+            command,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            text=False,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+        self.process = process
+        self._fd = master_fd
+        self._mode = "pty"
+
+    def _spawn_pipes(self, command: List[str]) -> None:
+        kwargs: dict = dict(
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=False,
+            bufsize=0,
+        )
+        if os.name == "nt":
+            kwargs["close_fds"] = False
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            kwargs["startupinfo"] = startupinfo
+        else:
+            kwargs["close_fds"] = True
+        process = subprocess.Popen(command, **kwargs)
+        self.process = process
+        self._mode = "pipes"
+        self._queue = queue.Queue()
+        self._reader = threading.Thread(target=self._pipe_reader, daemon=True)
+        self._reader.start()
+
+    def _pipe_reader(self) -> None:
+        stdout = getattr(self.process, "stdout", None)
+        if stdout is None:
+            self._queue.put(None)
+            return
+        fd = stdout.fileno()
+        while not self._stop.is_set():
+            try:
+                data = os.read(fd, 4096)
+            except OSError:
+                break
+            if not data:
+                break
+            self._queue.put(data)
+        self._queue.put(None)
+
+    def write(self, data: bytes) -> None:
+        if self._mode == "pty":
+            os.write(self._fd, data)
+            return
+        stdin = getattr(self.process, "stdin", None)
+        if stdin is None:
+            raise RuntimeError("msfconsole stdin is closed")
+        stdin.write(data)
+        stdin.flush()
+
+    def read(self, timeout: float) -> bytes:
+        if self._mode == "pty":
+            if _select is None or self._fd is None:
+                return b""
+            ready, _, _ = _select.select([self._fd], [], [], timeout)
+            if not ready:
+                return b""
+            try:
+                return os.read(self._fd, 4096)
+            except OSError:
+                return b""
+        if self._queue is None:
+            return b""
+        try:
+            data = self._queue.get_nowait() if timeout <= 0 else self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return b""
+        if data is None:
+            return b""
+        chunks = [data]
+        total = len(data)
+        while total < 4096:
+            try:
+                more = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if more is None:
+                break
+            chunks.append(more)
+            total += len(more)
+        return b"".join(chunks)
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._mode == "pty" and self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        if self._mode == "pipes":
+            stdin = getattr(self.process, "stdin", None)
+            if stdin is not None:
+                try:
+                    stdin.close()
+                except OSError:
+                    pass
+            stdout = getattr(self.process, "stdout", None)
+            if stdout is not None:
+                try:
+                    stdout.close()
+                except OSError:
+                    pass
+        if self._reader is not None:
+            self._reader.join(timeout=0.5)
+            self._reader = None
+        self._queue = None
 
 
 
@@ -162,8 +324,8 @@ class MetasploitPlugin(Plugin):
         super().__init__(framework)
         self.client: Optional[MetasploitRpcClient] = None
         self.config_path = str(data_dir().joinpath(*self.DEFAULT_CONFIG))
-        self.msfconsole_process: Optional[subprocess.Popen] = None
-        self.msfconsole_fd: Optional[int] = None
+        self.msfconsole_process = None
+        self._console_io: Optional[_MsfConsoleIO] = None
         self.msfconsole_path: Optional[str] = None
         self.integrated_mode = False
         self.current_msf_module: Optional[str] = None
@@ -293,15 +455,8 @@ class MetasploitPlugin(Plugin):
                 extra_args.append(token)
                 i += 1
 
-        resolved = shutil.which(msfconsole_path) if os.path.basename(msfconsole_path) == msfconsole_path else msfconsole_path
-        if not resolved:
-            raise RuntimeError(
-                "msfconsole not found in PATH. Use `plugin run metasploit shell --path /full/path/to/msfconsole`."
-            )
-        if not os.path.exists(resolved):
-            raise RuntimeError(f"msfconsole not found at '{resolved}'")
-
-        command = [resolved, *extra_args]
+        resolved = self._resolve_msfconsole_path(msfconsole_path)
+        command = _msfconsole_argv(resolved, extra_args)
         print_info("Switching to Metasploit console. Exit `msfconsole` to return to KittySploit.")
         try:
             return_code = subprocess.call(command)
@@ -319,33 +474,34 @@ class MetasploitPlugin(Plugin):
         return input(prompt)
 
     def _resolve_msfconsole_path(self, requested: str = "msfconsole") -> str:
-        resolved = shutil.which(requested) if os.path.basename(requested) == requested else requested
-        if not resolved:
-            raise RuntimeError(
-                "msfconsole not found in PATH. Use `plugin run metasploit mode --path /full/path/to/msfconsole`."
-            )
-        if not os.path.exists(resolved):
-            raise RuntimeError(f"msfconsole not found at '{resolved}'")
-        return resolved
+        candidates = [requested]
+        if (
+            os.name == "nt"
+            and os.path.basename(requested) == requested
+            and not requested.lower().endswith((".bat", ".cmd", ".exe"))
+        ):
+            candidates.extend([f"{requested}.bat", f"{requested}.cmd", f"{requested}.exe"])
+        for name in candidates:
+            resolved = shutil.which(name) if os.path.basename(name) == name else name
+            if resolved and os.path.exists(resolved):
+                return resolved
+        raise RuntimeError(
+            "msfconsole not found in PATH. Use `plugin run metasploit mode --path /full/path/to/msfconsole` "
+            "(on Windows this is typically msfconsole.bat)."
+        )
 
     def _console_alive(self) -> bool:
         return self.msfconsole_process is not None and self.msfconsole_process.poll() is None
 
     def _read_console_output(self, duration: float = 0.15) -> None:
-        if self.msfconsole_fd is None:
+        if self._console_io is None:
             return
         end = time.time() + duration
         chunks: List[str] = []
         while time.time() < end:
-            ready, _, _ = select.select([self.msfconsole_fd], [], [], 0.05)
-            if not ready:
-                continue
-            try:
-                data = os.read(self.msfconsole_fd, 4096)
-            except OSError:
-                break
+            data = self._console_io.read(0.05)
             if not data:
-                break
+                continue
             chunks.append(data.decode("utf-8", errors="replace"))
             if len(data) < 4096:
                 break
@@ -355,38 +511,26 @@ class MetasploitPlugin(Plugin):
                 print(cleaned, end="", flush=True)
 
     def _drain_console_output(self) -> None:
-        if self.msfconsole_fd is None:
+        if self._console_io is None:
             return
         while True:
-            ready, _, _ = select.select([self.msfconsole_fd], [], [], 0)
-            if not ready:
-                break
-            try:
-                data = os.read(self.msfconsole_fd, 4096)
-            except OSError:
-                break
+            data = self._console_io.read(0)
             if not data:
                 break
 
     def _collect_console_output(self, duration: float = 0.5) -> str:
-        if self.msfconsole_fd is None:
+        if self._console_io is None:
             return ""
         end = time.time() + max(duration, 1.5)
         idle_deadline = time.time() + 0.25
         chunks: List[str] = []
         prompt_pattern = re.compile(r"\n\s*msf(?:6)?(?:\s+[^\n>]*)?\s>\s*$", re.IGNORECASE)
         while time.time() < end:
-            ready, _, _ = select.select([self.msfconsole_fd], [], [], 0.05)
-            if not ready:
+            data = self._console_io.read(0.05)
+            if not data:
                 if chunks and time.time() >= idle_deadline:
                     break
                 continue
-            try:
-                data = os.read(self.msfconsole_fd, 4096)
-            except OSError:
-                break
-            if not data:
-                break
             chunks.append(data.decode("utf-8", errors="replace"))
             joined = "".join(chunks)
             idle_deadline = time.time() + 0.20
@@ -424,32 +568,19 @@ class MetasploitPlugin(Plugin):
             return
 
         resolved = self._resolve_msfconsole_path(path)
-        master_fd, slave_fd = os.openpty()
-        attrs = termios.tcgetattr(slave_fd)
-        attrs[3] = attrs[3] & ~termios.ECHO
-        termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
         provided_args = list(extra_args or [])
         if "-q" not in provided_args and "--quiet" not in provided_args:
             provided_args.insert(0, "-q")
-        command = [resolved, *provided_args]
-        process = subprocess.Popen(
-            command,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            text=False,
-            close_fds=True,
-        )
-        os.close(slave_fd)
-        self.msfconsole_process = process
-        self.msfconsole_fd = master_fd
+        session = _MsfConsoleIO.spawn(_msfconsole_argv(resolved, provided_args))
+        self._console_io = session
+        self.msfconsole_process = session.process
         self.msfconsole_path = resolved
         self._read_console_output(duration=1.0)
 
     def _send_console_line(self, line: str) -> None:
-        if self.msfconsole_fd is None:
+        if self._console_io is None:
             raise RuntimeError("msfconsole is not running")
-        os.write(self.msfconsole_fd, (line + "\n").encode("utf-8"))
+        self._console_io.write((line + "\n").encode("utf-8"))
 
     def _exec_console_command(self, line: str, read_duration: float = 0.7, display: bool = True) -> str:
         if not self._console_alive():
@@ -522,12 +653,9 @@ class MetasploitPlugin(Plugin):
             self._read_console_output(duration=0.6)
 
     def _cleanup_console_handles(self) -> None:
-        if self.msfconsole_fd is not None:
-            try:
-                os.close(self.msfconsole_fd)
-            except OSError:
-                pass
-        self.msfconsole_fd = None
+        if self._console_io is not None:
+            self._console_io.close()
+        self._console_io = None
         self.msfconsole_process = None
         self.msfconsole_path = None
 

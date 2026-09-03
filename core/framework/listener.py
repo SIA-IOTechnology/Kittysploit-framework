@@ -272,6 +272,9 @@ class Listener(BaseModule):
     def _create_session_from_connection_data(self, connection, target, port, additional_data):
         """Helper method to create session from connection data"""
         try:
+            if not self._keeps_accepting_connections() and self.session_count >= 1:
+                print_warning("Connect handler already has a session; not opening another")
+                return None
             # Extract protocol from __info__ if available
             protocol = 'tcp'  # default
             if hasattr(self, '__info__') and 'protocol' in self.__info__:
@@ -684,39 +687,44 @@ class Listener(BaseModule):
             print_error(f"Error stopping listener: {e}")
             return False
 
+    def _keeps_accepting_connections(self) -> bool:
+        """Reverse listeners accept many inbound sessions; connect handlers must not."""
+        return bool(self.is_reverse_handler()) and not self.is_bind_handler()
+
+    def _hold_until_stopped(self, interval: float = 0.5) -> None:
+        while not self.stop_flag.is_set() and self.running:
+            time.sleep(interval)
+
     def _run_listener(self):
-        """Run the listener in background thread"""
+        """Run the listener in background thread.
+
+        Reverse handlers keep accepting. Connect/bind handlers run ``run()``
+        once (one test), then either hold the session or stop.
+        """
+        accept_more = self._keeps_accepting_connections()
         try:
-            # Keep running until stop_flag is set
+            if not accept_more:
+                result = self.run()
+                if result:
+                    self._handle_listener_result(result)
+                    self._hold_until_stopped()
+                return
+
             while not self.stop_flag.is_set() and self.running:
                 try:
-                    # Call the actual listener implementation
                     result = self.run()
-                    
-                    # Handle the result automatically
                     if result:
                         self._handle_listener_result(result)
-                        # After handling a connection, continue listening for more
-                        # Only break if run() explicitly returns False or None
-                        if result is False:
-                            break
                     else:
-                        # If run() returns None/False, check if we should continue
-                        # For listeners that accept multiple connections, we should continue
-                        # Only break if stop_flag is set
-                        if self.stop_flag.is_set():
+                        if self.stop_flag.is_set() or not self.running:
                             break
-                        # Small delay before next iteration to avoid tight loop
                         time.sleep(0.1)
-                        
                 except Exception as e:
                     if not self.stop_flag.is_set():
                         print_error(f"Listener error in run(): {e}")
-                        # Continue listening unless stop_flag is set
                         time.sleep(1)
                     else:
                         break
-            
         except Exception as e:
             print_error(f"Listener thread error: {e}")
         finally:
@@ -724,6 +732,8 @@ class Listener(BaseModule):
     
     def _handle_listener_result(self, result):
         try:
+            if not self._keeps_accepting_connections() and self.session_count >= 1:
+                return
             if isinstance(result, tuple) and len(result) >= 3:
                 # Supported tuple formats:
                 # - (connection_obj, target_host, target_port, additional_data)  <-- FTP/SSH client/etc.
@@ -776,6 +786,9 @@ class Listener(BaseModule):
 
     def _create_session(self, handler: str, target: str, port: int, session_data: Dict[str, Any] = None):
         try:
+            if not self._keeps_accepting_connections() and self.session_count >= 1:
+                print_warning("Connect handler already has a session; not opening another")
+                return None
             if not session_data:
                 session_data = {}
             

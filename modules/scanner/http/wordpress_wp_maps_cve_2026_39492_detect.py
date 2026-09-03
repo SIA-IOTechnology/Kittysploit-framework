@@ -22,7 +22,7 @@ class Module(Scanner, Http_client, Wordpress, WpMaps):
             "Detects WP Maps (wp-google-map-plugin) <= 4.9.1 vulnerable to "
             "CVE-2026-39492: unauthenticated time-based blind SQLi in "
             "wpgmp_ajax_call via backtick-wrapped location_id bypassing esc_sql(). "
-            f"Fixed in {WP_MAPS_PATCHED_VERSION}."
+            "Fixed in 4.9.2."
         ),
         "author": ["Wordfence", "IONIX", "KittySploit Team"],
         "severity": "critical",

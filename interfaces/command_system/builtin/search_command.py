@@ -191,10 +191,9 @@ Examples:
                 # Hint when results likely came from a stale-index filesystem fallback
                 try:
                     sm = getattr(self.framework, "module_sync_manager", None)
-                    loader = getattr(self.framework, "module_loader", None)
-                    if sm and loader and getattr(loader, "sync_manager", None):
-                        db_only = sm.search_modules(filters=filters)
-                        if not db_only:
+                    if sm:
+                        stats = sm.get_module_stats()
+                        if isinstance(stats, dict) and stats.get("total", 0) == 0:
                             print_warning(
                                 "Results from filesystem (module index outdated). "
                                 "Run 'sync now' to refresh the database index."

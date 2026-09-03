@@ -17,7 +17,10 @@ class Module(Listener):
 	password = OptString("", "FTP password", False)
 
 	def run(self):
-		"""Connect to FTP server and create session"""
+		"""Connect once to the FTP server."""
+		if getattr(self, '_connect_done', False):
+			return None
+		self._connect_done = True
 		try:
 			print_status(f"Connecting to FTP server {self.host}:{self.port}...")
 			

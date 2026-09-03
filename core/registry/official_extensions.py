@@ -168,6 +168,41 @@ def get_official_marketplace_modules() -> List[Dict[str, Any]]:
         manifest = _resolve_manifest(ext_id, github, root)
         modules.append(_build_official_module(ext_id, github, manifest))
 
+    modules.extend(_local_official_modules(root, seen={str(item.get("id", "")).lower() for item in modules if item.get("id")}))
+    return modules
+
+
+def _local_official_modules(root: Optional[Path], seen: set[str]) -> List[Dict[str, Any]]:
+    """Apps shipped inside the framework repo without a GitHub release bundle."""
+    try:
+        from core.utils.marketplace_apps import OFFICIAL_APP_PACKAGES
+    except Exception:
+        return []
+
+    modules: List[Dict[str, Any]] = []
+    if root is None:
+        return modules
+
+    for ext_id in OFFICIAL_APP_PACKAGES:
+        key = str(ext_id).strip().lower()
+        if not key or key in seen:
+            continue
+        app_dir = root / "apps" / ext_id
+        manifest = _read_manifest_toml(app_dir)
+        if not manifest.get("name"):
+            continue
+        if not manifest.get("id"):
+            manifest["id"] = ext_id
+        modules.append(
+            {
+                **_build_official_module(ext_id, {"repo": "", "ref": "main"}, manifest),
+                "source": "local_official",
+                "github_repo": "",
+                "can_download": False,
+                "install_hint": f"./apps/{ext_id}",
+            }
+        )
+        seen.add(key)
     return modules
 
 

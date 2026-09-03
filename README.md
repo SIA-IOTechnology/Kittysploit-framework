@@ -19,8 +19,6 @@ Local LLM. Scope-aware. Automation-ready.
 
 <img src="docs/screenshots/demo.gif" alt="KittySploit demo — agent mission from recon to shell" width="100%">
 
-<img src="docs/screenshots/banner.png" alt="KittySploit offensive security framework" width="100%">
-
 ```bash
 # Web/API mission (lab)
 kittysploit> agent https://lab.local --profile owasp-web-parallel

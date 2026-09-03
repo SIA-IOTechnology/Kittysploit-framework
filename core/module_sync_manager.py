@@ -553,6 +553,74 @@ class ModuleSyncManager:
         except Exception:
             return ""
     
+    @staticmethod
+    def _is_missing_modules_table(error: Exception) -> bool:
+        message = str(error).lower()
+        return "no such table" in message and "modules" in message
+
+    def _search_modules_filesystem(self, filters: ModuleSearchFilters) -> List[Dict]:
+        loader = self.module_loader or self._get_module_loader()
+        return loader._search_modules_filesystem(filters)
+
+    def _query_modules_db(self, filters: ModuleSearchFilters) -> List[Dict]:
+        with self.db_manager.session_scope(self.workspace) as session:
+            query_obj = session.query(Module).filter(Module.is_active == True)
+
+            if filters.normalized_type():
+                query_obj = query_obj.filter(Module.type == filters.normalized_type())
+            if filters.author:
+                query_obj = query_obj.filter(Module.author.ilike(f"%{filters.author}%"))
+            if filters.cve:
+                query_obj = query_obj.filter(
+                    or_(
+                        Module.cve.ilike(f"%{filters.cve}%"),
+                        Module.path.ilike(f"%{filters.cve.lower()}%"),
+                    )
+                )
+            if filters.tag:
+                query_obj = query_obj.filter(Module.tags.ilike(f"%{filters.tag}%"))
+            if filters.platform:
+                query_obj = query_obj.filter(
+                    or_(
+                        Module.options.ilike(f"%{filters.platform.lower()}%"),
+                        Module.path.ilike(f"%{filters.platform.lower()}%"),
+                    )
+                )
+            if filters.protocol:
+                query_obj = query_obj.filter(
+                    or_(
+                        Module.options.ilike(f"%{filters.protocol.lower()}%"),
+                        Module.path.ilike(f"%/{filters.protocol.lower()}/%"),
+                    )
+                )
+            if filters.reliability:
+                query_obj = query_obj.filter(Module.options.ilike(f"%{filters.normalized_reliability()}%"))
+
+            if filters.since:
+                query_obj = query_obj.filter(Module.updated_at >= filters.since)
+            if filters.until:
+                query_obj = query_obj.filter(Module.updated_at <= filters.until)
+
+            if filters.query:
+                for raw_token in filters.query.replace(",", " ").split():
+                    token = raw_token.strip()
+                    if not token:
+                        continue
+                    pattern = f"%{token}%"
+                    query_obj = query_obj.filter(
+                        or_(
+                            Module.name.ilike(pattern),
+                            Module.description.ilike(pattern),
+                            Module.path.ilike(pattern),
+                            Module.tags.ilike(pattern),
+                        )
+                    )
+
+            fetch_limit = max(int(filters.limit or 50) * 4, 100)
+            modules = query_obj.order_by(Module.updated_at.desc(), Module.name).limit(fetch_limit).all()
+            records = [module.to_dict() for module in modules]
+            return apply_module_search_filters(records, filters)
+
     def search_modules(
         self,
         filters: ModuleSearchFilters = None,
@@ -573,66 +641,40 @@ class ModuleSyncManager:
                 tag=tags,
                 limit=limit,
             )
+
+        self.db_manager.ensure_workspace_schema(self.workspace)
+
         try:
-            with self.db_manager.session_scope(self.workspace) as session:
-                query_obj = session.query(Module).filter(Module.is_active == True)
-
-                if filters.normalized_type():
-                    query_obj = query_obj.filter(Module.type == filters.normalized_type())
-                if filters.author:
-                    query_obj = query_obj.filter(Module.author.ilike(f"%{filters.author}%"))
-                if filters.cve:
-                    query_obj = query_obj.filter(
-                        or_(
-                            Module.cve.ilike(f"%{filters.cve}%"),
-                            Module.path.ilike(f"%{filters.cve.lower()}%"),
-                        )
-                    )
-                if filters.tag:
-                    query_obj = query_obj.filter(Module.tags.ilike(f"%{filters.tag}%"))
-                if filters.platform:
-                    query_obj = query_obj.filter(
-                        or_(
-                            Module.options.ilike(f"%{filters.platform.lower()}%"),
-                            Module.path.ilike(f"%{filters.platform.lower()}%"),
-                        )
-                    )
-                if filters.protocol:
-                    query_obj = query_obj.filter(
-                        or_(
-                            Module.options.ilike(f"%{filters.protocol.lower()}%"),
-                            Module.path.ilike(f"%/{filters.protocol.lower()}/%"),
-                        )
-                    )
-                if filters.reliability:
-                    query_obj = query_obj.filter(Module.options.ilike(f"%{filters.normalized_reliability()}%"))
-
-                if filters.since:
-                    query_obj = query_obj.filter(Module.updated_at >= filters.since)
-                if filters.until:
-                    query_obj = query_obj.filter(Module.updated_at <= filters.until)
-
-                if filters.query:
-                    for raw_token in filters.query.replace(",", " ").split():
-                        token = raw_token.strip()
-                        if not token:
-                            continue
-                        pattern = f"%{token}%"
-                        query_obj = query_obj.filter(
-                            or_(
-                                Module.name.ilike(pattern),
-                                Module.description.ilike(pattern),
-                                Module.path.ilike(pattern),
-                                Module.tags.ilike(pattern),
-                            )
-                        )
-
-                fetch_limit = max(int(filters.limit or 50) * 4, 100)
-                modules = query_obj.order_by(Module.updated_at.desc(), Module.name).limit(fetch_limit).all()
-                records = [module.to_dict() for module in modules]
-                return apply_module_search_filters(records, filters)
-
+            records = self._query_modules_db(filters)
+            if records:
+                return records
+            fs_results = self._search_modules_filesystem(filters)
+            if fs_results:
+                logging.debug(
+                    "search_modules: database index empty; using filesystem fallback (%s hit(s))",
+                    len(fs_results),
+                )
+                return fs_results
+            return records
         except Exception as e:
+            if self._is_missing_modules_table(e):
+                if self.db_manager.ensure_workspace_schema(self.workspace):
+                    try:
+                        return self._query_modules_db(filters)
+                    except Exception as retry_error:
+                        e = retry_error
+
+            try:
+                fs_results = self._search_modules_filesystem(filters)
+                if fs_results:
+                    logging.debug(
+                        "search_modules: database search failed; using filesystem fallback (%s hit(s))",
+                        len(fs_results),
+                    )
+                    return fs_results
+            except Exception:
+                pass
+
             print_error(f"Error searching modules: {e}")
             return []
     

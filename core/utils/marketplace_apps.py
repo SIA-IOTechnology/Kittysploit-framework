@@ -15,16 +15,11 @@ OFFICIAL_APP_PACKAGES: Dict[str, str] = {
     "kittyosint": "kittyosint",
     "kittyprotocol": "kittyprotocol",
     "kittycluster": "kittycluster",
+    "kittyops": "kittyops",
 }
 
 
 def discover_app_src(root: Path, package_name: str) -> Optional[Path]:
-    extensions = root / "extensions"
-    if extensions.is_dir():
-        for src_dir in sorted(extensions.glob("**/src")):
-            if (src_dir / package_name / "__init__.py").is_file():
-                return src_dir
-
     apps_root = root / "apps"
     if apps_root.is_dir():
         for app_dir in sorted(apps_root.iterdir()):
@@ -33,6 +28,12 @@ def discover_app_src(root: Path, package_name: str) -> Optional[Path]:
             src = app_dir / "src"
             if (src / package_name / "__init__.py").is_file():
                 return src
+
+    extensions = root / "extensions"
+    if extensions.is_dir():
+        for src_dir in sorted(extensions.glob("**/src")):
+            if (src_dir / package_name / "__init__.py").is_file():
+                return src_dir
 
     return None
 

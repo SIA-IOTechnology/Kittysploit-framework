@@ -1104,15 +1104,17 @@ Examples:
     
     def _get_registry_url(self) -> str:
         """Get registry URL from config or use default"""
+        from core.registry.urls import DEFAULT_REGISTRY_URL, normalize_registry_url
+
         try:
             import toml
             config_path = os.path.join("config", "kittysploit.toml")
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
                     config = toml.load(f)
-                    registry_url = config.get('registry', {}).get('url', 'https://app.kittysploit.com')
+                    registry_url = config.get('registry', {}).get('url')
                     if registry_url:
-                        return registry_url.rstrip('/')
+                        return normalize_registry_url(registry_url)
         except Exception as e:
             # Silently fall back to default
             pass
@@ -1124,10 +1126,10 @@ Examples:
                     config = json.load(f)
                     base_url = config.get('base_url')
                     if base_url:
-                        return base_url.rstrip('/')
+                        return normalize_registry_url(base_url)
         except Exception:
             pass
-        return "https://app.kittysploit.com"
+        return DEFAULT_REGISTRY_URL
     
     def _load_account_config(self):
         """Load account configuration from file"""
@@ -1144,7 +1146,8 @@ Examples:
                     # Update registry_url from config if available
                     base_url = config.get('base_url')
                     if base_url:
-                        self.registry_url = base_url.rstrip('/')
+                        from core.registry.urls import normalize_registry_url
+                        self.registry_url = normalize_registry_url(base_url)
         except Exception:
             pass
     

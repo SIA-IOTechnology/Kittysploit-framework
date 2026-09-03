@@ -5,6 +5,7 @@
 SSH shell implementation for SSH sessions
 """
 
+import os
 import socket
 import threading
 import time
@@ -51,7 +52,9 @@ class SSHShell(BaseShell):
             'exit': self._cmd_exit,
             'disconnect': self._cmd_disconnect,
             'reconnect': self._cmd_reconnect,
-            'status': self._cmd_status
+            'status': self._cmd_status,
+            'download': self._cmd_download,
+            'get': self._cmd_download,
         }
     
     @property
@@ -553,6 +556,8 @@ class SSHShell(BaseShell):
   disconnect              Disconnect from SSH
   reconnect               Reconnect to SSH
   status                  Show connection status
+  download, get <remote> [local]
+                          Download a remote file over SFTP
 
 SSH Connection:
   Use connect() method to establish SSH connection
@@ -598,6 +603,95 @@ SSH Connection:
         if not self.is_connected or not self.connection:
             return {'output': '', 'status': 1, 'error': 'Not connected to SSH server. Cannot execute command.'}
         return self._execute_remote_command("pwd")
+
+    @staticmethod
+    def _parse_transfer_args(args: str) -> List[str]:
+        text = (args or "").strip()
+        if not text:
+            return []
+        parts: List[str] = []
+        buf: List[str] = []
+        quote = ""
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if quote:
+                if ch == quote:
+                    quote = ""
+                else:
+                    buf.append(ch)
+            elif ch in ('"', "'"):
+                quote = ch
+            elif ch.isspace():
+                if buf:
+                    parts.append("".join(buf))
+                    buf = []
+            else:
+                buf.append(ch)
+            i += 1
+        if buf:
+            parts.append("".join(buf))
+        return parts
+
+    def _paramiko_client(self):
+        conn = self.connection
+        if conn is None:
+            return None
+        if hasattr(conn, "open_sftp"):
+            return conn
+        inner = getattr(conn, "client", None)
+        if inner is not None and hasattr(inner, "open_sftp"):
+            return inner
+        return None
+
+    def _cmd_download(self, args: str) -> Dict[str, Any]:
+        parts = self._parse_transfer_args(args)
+        if not parts:
+            return {"output": "", "status": 1, "error": "Usage: download <remote_file> [local_file]"}
+        if not self.is_connected or not self.connection:
+            self._initialize_ssh_connection()
+        client = self._paramiko_client()
+        if client is None:
+            return {"output": "", "status": 1, "error": "SSH connection not available for SFTP"}
+
+        remote = parts[0]
+        local = parts[1] if len(parts) > 1 else os.path.basename(remote.replace("\\", "/")) or "download.bin"
+        parent = os.path.dirname(os.path.abspath(local))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        sftp = None
+        try:
+            sftp = client.open_sftp()
+            candidates = [remote]
+            if not remote.startswith("/") and self.current_directory:
+                candidates.append(f"{self.current_directory.rstrip('/')}/{remote.lstrip('./')}")
+            last_err = None
+            used = None
+            for cand in candidates:
+                try:
+                    sftp.stat(cand)
+                    used = cand
+                    break
+                except Exception as exc:
+                    last_err = exc
+            if not used:
+                raise last_err or FileNotFoundError(remote)
+
+            def _cb(transferred, total):
+                self._transfer_progress = {"transferred": int(transferred or 0), "total": int(total or 0)}
+
+            sftp.get(used, local, callback=_cb)
+            size = os.path.getsize(local) if os.path.isfile(local) else 0
+            return {"output": f"Downloaded {used} -> {local} ({size} bytes)\n", "status": 0, "error": ""}
+        except Exception as e:
+            return {"output": "", "status": 1, "error": f"SFTP download failed: {e}"}
+        finally:
+            if sftp is not None:
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
     
     def _cmd_ls(self, args: str) -> Dict[str, Any]:
         if not self.is_connected or not self.connection:

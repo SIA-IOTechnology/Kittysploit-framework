@@ -198,12 +198,14 @@ class ExtensionClient:
         Initialize the marketplace client
         
         Args:
-            registry_url: Remote registry server URL (default: from config or registry.kittysploit.com)
+            registry_url: Remote registry server URL (default: from config or report.kittysploit.com)
             extensions_dir: Local directory to install extensions
             signature_manager: Signature manager
         """
         if not REGISTRY_AVAILABLE:
             raise ImportError(f"Registry marketplace not available: {REGISTRY_IMPORT_ERROR}")
+
+        from core.registry.urls import DEFAULT_REGISTRY_URL, normalize_registry_url
         
         # Remote registry URL (centralized KittySploit service)
         if registry_url is None:
@@ -217,9 +219,9 @@ class ExtensionClient:
             
             # Default: centralized KittySploit service
             if not registry_url:
-                registry_url = "https://registry.kittysploit.com"
+                registry_url = DEFAULT_REGISTRY_URL
         
-        self.registry_url = registry_url.rstrip('/')
+        self.registry_url = normalize_registry_url(registry_url)
         
         # Ensure extensions_dir is absolute and at framework root
         if not os.path.isabs(extensions_dir):

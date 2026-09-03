@@ -145,6 +145,34 @@ class DatabaseManager:
         self.encryption_manager = encryption_manager
         self._setup_encryption_for_models()
     
+    def _import_model_metadata(self) -> None:
+        """Register optional ORM models with SQLAlchemy metadata."""
+        try:
+            import core.registry.models  # noqa: F401
+        except ImportError:
+            pass
+        try:
+            import core.models.kittycluster_models  # noqa: F401
+        except Exception:
+            pass
+        from core.models.models import Module  # noqa: F401
+
+    def ensure_workspace_schema(self, workspace: str = "default") -> bool:
+        """Ensure required tables exist (repairs partial or legacy databases)."""
+        try:
+            if workspace not in self.engines:
+                return self.init_workspace_db(workspace)
+
+            engine = self.engines[workspace]
+            if "modules" not in inspect(engine).get_table_names():
+                self._import_model_metadata()
+                Base.metadata.create_all(engine)
+                self.migrate_modules_table_constraint(workspace)
+            return True
+        except Exception as e:
+            print(f"Error ensuring database schema for workspace {workspace}: {str(e)}")
+            return False
+
     def get_session(self, workspace: str) -> Optional[object]:
         """Get database session for a workspace
         
@@ -157,6 +185,8 @@ class DatabaseManager:
         if workspace not in self.sessions:
             if not self.init_workspace_db(workspace):
                 return None
+        else:
+            self.ensure_workspace_schema(workspace)
         return self.sessions[workspace]
     
     @contextmanager

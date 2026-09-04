@@ -5,4 +5,4 @@
 Version information for KittySploit Framework
 """
 
-VERSION = "1.1.4"
+VERSION = "1.1.5"

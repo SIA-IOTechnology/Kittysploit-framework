@@ -137,7 +137,7 @@ exclude = ["examples*", "scripts*", "install*", "tests*", "venv*", "apps*"]
     "browser_static/icons/**/*.svg",
     "browser_static/icons/**/.gitkeep",
 ]
-"data" = ["**/*.json", "**/*.txt", "**/*.wav", "**/*.py"]
+"data" = ["**/*.json", "**/*.txt", "**/*.wav", "**/*.py", "**/*.jar", "**/*.class", "**/*.zip", "**/*.md"]
 "data.syscall" = ["*.json"]
 "interfaces.static" = ["img/**/*"]
 "docs" = ["screenshots/*", "*.md"]

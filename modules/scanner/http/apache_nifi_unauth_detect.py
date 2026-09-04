@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/multi/http/apache_nifi_executeprocess_rce',
+                    'exploits/multi/http/apache_nifi_cve_2023_34468_rce',
+                ],
             },
         },
         'references': ['https://github.com/jm0x0/apache_nifi_processor_rce'],

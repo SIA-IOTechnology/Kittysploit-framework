@@ -39,7 +39,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/hastymail_cve_2011_4542_rce'],
             },
         },
         'references': [

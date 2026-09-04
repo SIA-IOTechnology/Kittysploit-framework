@@ -43,7 +43,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'risk_signal', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/airlive_cve_2015_2279_rce'],
             },
         },
         'references': [

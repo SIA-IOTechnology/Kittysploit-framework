@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/opencpu_rce'],
             },
         },
         'references': ['https://pulsesecurity.co.nz/articles/R-Shells', 'https://github.com/opencpu/opencpu/'],

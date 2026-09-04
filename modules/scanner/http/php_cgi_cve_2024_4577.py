@@ -53,7 +53,7 @@ class Module(Scanner, Http_client):
         'chain':         {'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': []},
+         'suggested_followups': ['exploits/linux/http/php_cgi_cve_2024_4577_rce']},
     },
     }
 

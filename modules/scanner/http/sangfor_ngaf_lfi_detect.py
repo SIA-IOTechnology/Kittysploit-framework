@@ -43,13 +43,15 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'risk_signal',
+                        'capability': 'file_read',
                         'from_detail': '',
                     },
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/sangfor_ngaf_file_read',
+                ],
             },
         },
         'references': [

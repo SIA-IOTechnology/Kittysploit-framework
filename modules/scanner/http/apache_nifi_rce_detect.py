@@ -48,12 +48,14 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/multi/http/apache_nifi_executeprocess_rce',
+                    'exploits/multi/http/apache_nifi_cve_2023_34468_rce',
+                ],
             },
         },
         'references': [
             'https://github.com/imjdl/Apache-NiFi-Api-RCE',
-            'https://labs.withsecure.com/tools/metasploit-modules-for-rce-in-apache-nifi-and-kong-api-gateway',
             'https://packetstormsecurity.com/files/160260/apache_nifi_processor_rce.rb.txt',
         ],
     }

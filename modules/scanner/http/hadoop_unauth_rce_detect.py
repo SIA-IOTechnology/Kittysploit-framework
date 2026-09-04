@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Apache Hadoop YARN ResourceManager is susceptible to remote code execution. An attacker can execute malware, obtain sensitive information, modify data, and/or gain full control over a compromised system without entering necessary credentials.',
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'misconfiguration', 'vulhub', 'apache', 'hadoop', 'unauth', 'rce', 'msf', 'misconfig', 'vuln'],
+        'tags': ['web', 'scanner', 'misconfiguration', 'vulhub', 'apache', 'hadoop', 'unauth', 'rce', 'misconfig', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -42,13 +42,15 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'risk_signal',
+                        'capability': 'rce',
                         'from_detail': '',
                     },
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/hadoop_yarn_unauth_rce',
+                ],
             },
         },
         'references': [

@@ -42,7 +42,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'file_read', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/manageengine_sdp_filedownload_file_read',
+                ],
             },
         },
         'references': [

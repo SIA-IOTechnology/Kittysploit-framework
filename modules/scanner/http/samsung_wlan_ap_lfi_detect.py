@@ -43,13 +43,15 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
+                        'capability': 'file_read',
                         'from_detail': '',
                     },
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'auxiliary/admin/http/samsung_wlan_ap_file_read',
+                ],
             },
         },
         'references': ['https://omriinbar.medium.com/samsung-wlan-ap-wea453e-vulnerabilities-7aa4a57d4dba'],

@@ -42,7 +42,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/symantec_wg_cve_2012_2953_rce'],
             },
         },
         'references': [

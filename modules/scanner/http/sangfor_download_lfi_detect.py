@@ -43,13 +43,15 @@ class Module(Scanner, Http_client):
             'chain': {
                 'produces_capabilities': [
                     {
-                        'capability': 'admin_surface',
+                        'capability': 'file_read',
                         'from_detail': '',
                     },
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'auxiliary/admin/http/sangfor_download_file_read',
+                ],
             },
         },
         'references': [

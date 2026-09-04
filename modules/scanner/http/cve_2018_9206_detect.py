@@ -43,7 +43,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'risk_signal', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/jquery_file_upload_cve_2018_9206_rce'],
             },
         },
         'references': [

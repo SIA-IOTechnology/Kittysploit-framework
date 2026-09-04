@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/crushftp_cve_2023_43177_detect',
+                    'exploits/multi/http/crushftp_cve_2023_43177_rce',
+                ],
             },
         },
         'references': ['https://www.exploit-db.com/ghdb/6591'],

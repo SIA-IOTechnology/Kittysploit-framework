@@ -42,7 +42,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/esva_cve_2012_10046_rce',
+                ],
             },
         },
         'references': [

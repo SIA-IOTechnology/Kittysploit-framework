@@ -40,15 +40,12 @@ class Module(Scanner, Http_client):
                 'api_surface_ready': False,
             },
             'chain': {
-                'produces_capabilities': [
-                    {
-                        'capability': 'admin_surface',
-                        'from_detail': '',
-                    },
-                ],
+                'produces_capabilities': [{'capability': 'file_read', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'auxiliary/admin/http/coldfusion_cve_2010_2861_file_read',
+                ],
             },
         },
         'references': [

@@ -39,10 +39,12 @@ class Module(Scanner, Http_client):
                 'endpoint_pattern_any': [], 'param_any': [], 'api_surface_ready': False,
             },
             'chain': {
-                'produces_capabilities': [{'capability': 'credential', 'from_detail': ''}],
+                'produces_capabilities': [{'capability': 'file_read', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/dlink_cve_2017_12943_file_read',
+                ],
             },
         },
         'references': [

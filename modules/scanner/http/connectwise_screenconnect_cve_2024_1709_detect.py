@@ -53,7 +53,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/connectwise_screenconnect_cve_2024_1709_rce',
+                ],
             },
         },
         'references': [

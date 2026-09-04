@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/webmin_cve_2019_15107_rce'],
             },
         },
         'references': [

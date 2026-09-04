@@ -39,7 +39,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'file_read', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/nhttpd_cve_2011_0751_file_read',
+                ],
             },
         },
         'references': [

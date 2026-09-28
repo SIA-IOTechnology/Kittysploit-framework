@@ -42,6 +42,11 @@ def parse_arguments():
     parser.add_argument('-o', '--options', help='Module options in format "option1=value1,option2=value2"')
     parser.add_argument('-e', '--execute', action='store_true', help='Execute the module and exit')
     parser.add_argument('-v', '--version', action='store_true', help='Show version information')
+    parser.add_argument(
+        '--reset-key',
+        action='store_true',
+        help='Delete the master key files in ~/.kittysploit and exit (encrypted data becomes unreadable)',
+    )
 
     # Options for the RPC server
     parser.add_argument('-r', '--rpc', action='store_true', help='Start the RPC server')
@@ -165,8 +170,32 @@ def _ensure_encryption_unlocked(framework) -> bool:
     return True
 
 
+def _reset_master_key() -> bool:
+    """Delete master-key files without starting the console or asking for the password."""
+    from core.encryption_manager import EncryptionManager
+
+    manager = EncryptionManager()
+    targets = (manager.key_file, manager.salt_file, manager.config_file)
+    present = [path for path in targets if os.path.exists(path)]
+    if not present:
+        print_info("No master key is configured. Nothing to reset.")
+        return True
+
+    print_warning("Deleting the master key. Data encrypted with it will be unreadable.")
+    if not manager.reset_encryption():
+        return False
+    for path in present:
+        print_status(f"Removed {path}")
+    print_info("Restart KittySploit to choose a new master key.")
+    return True
+
+
 def main():
     args = parse_arguments()
+
+    # Before framework startup: a forgotten key cannot unlock the console.
+    if getattr(args, "reset_key", False):
+        sys.exit(0 if _reset_master_key() else 1)
 
     # Initialize the framework.
     clean_sessions = None

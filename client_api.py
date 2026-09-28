@@ -774,6 +774,8 @@ class KittyApiClient:
             self._register_account()
         elif action == "logout":
             self._logout_account()
+        elif action == "forgot":
+            self._forgot_password(*args[1:])
         else:
             self._show_marketplace_help()
 
@@ -784,6 +786,7 @@ class KittyApiClient:
         print(f"  {Fore.GREEN}market info <id>{Fore.WHITE}                - Extension details")
         print(f"  {Fore.GREEN}market install <id>{Fore.WHITE}             - Install (requires account)")
         print(f"  {Fore.GREEN}market register|login|logout{Fore.WHITE}     - Account management")
+        print(f"  {Fore.GREEN}market forgot [email]{Fore.WHITE}            - Email a reset link and open it")
         print()
 
     def _registry_headers(self) -> Dict[str, str]:
@@ -1015,6 +1018,66 @@ class KittyApiClient:
             with open(REGISTRY_CONFIG, "w", encoding="utf-8") as handle:
                 json.dump(config, handle, indent=2)
             print_success("Logged out of marketplace")
+        except Exception as exc:
+            print_error(str(exc))
+
+    def _forgot_password(self, *tokens):
+        """Email a marketplace password reset link and open the page to choose a new one."""
+        no_browser = "--no-browser" in tokens
+        email = next((token for token in tokens if token != "--no-browser"), "").strip()
+        try:
+            print(f"\n{Fore.CYAN}=== Marketplace password reset ===")
+            if not email:
+                config = self._load_registry_config() or {}
+                default_email = str(config.get("email") or "").strip()
+                prompt = f"{Fore.WHITE}Email [{default_email}]: " if default_email else f"{Fore.WHITE}Email: "
+                email = input(prompt).strip() or default_email
+            local, separator, domain = email.partition("@")
+            if not separator or not local or "." not in domain:
+                print_error("Enter a valid email address")
+                return
+
+            response = self.session.post(
+                f"{self.registry_url}/api/password-reset/request",
+                json={"email": email},
+                timeout=30,
+            )
+            payload = {}
+            try:
+                parsed = response.json()
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except Exception:
+                payload = {}
+
+            if response.status_code not in (200, 202):
+                print_error(self._error_text(response))
+                return
+
+            print_success(
+                str(payload.get("message") or "").strip()
+                or "If an account exists for that email, a reset link was sent."
+            )
+            print_info("Open the link in that email to choose a new password.")
+            print_info("Then connect again with: market login")
+            reset_url = ""
+            for key in ("url", "reset_url", "link", "reset_link"):
+                value = str(payload.get(key) or "").strip()
+                if value.startswith(("http://", "https://")):
+                    reset_url = value
+                    break
+            page = reset_url or self.registry_url
+            if no_browser:
+                print_info(f"Account page: {page}")
+                return
+            import webbrowser
+
+            try:
+                opened = bool(webbrowser.open(page))
+            except Exception:
+                opened = False
+            label = "Opened" if opened else "Open"
+            print_info(f"{label}: {page}")
         except Exception as exc:
             print_error(str(exc))
 

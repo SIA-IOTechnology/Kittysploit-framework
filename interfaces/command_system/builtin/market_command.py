@@ -50,11 +50,11 @@ class MarketCommand(BaseCommand):
     
     @property
     def usage(self) -> str:
-        return "market [create|publish|mine|versions|remove|status|list|search|install|update|uninstall|info|installed|launch|register|login|logout|buy]"
+        return "market [create|publish|mine|versions|remove|status|list|search|install|update|uninstall|info|installed|launch|register|login|logout|forgot|buy]"
     
     def get_subcommands(self) -> List[str]:
         """Get available subcommands for auto-completion"""
-        return ['create', 'publish', 'mine', 'versions', 'remove', 'status', 'list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'launch', 'register', 'login', 'logout', 'buy']
+        return ['create', 'publish', 'mine', 'versions', 'remove', 'status', 'list', 'search', 'install', 'update', 'uninstall', 'info', 'installed', 'launch', 'register', 'login', 'logout', 'forgot', 'buy']
 
     def _refresh_module_catalog(self) -> None:
         """Invalidate module discovery caches after marketplace changes."""
@@ -89,6 +89,7 @@ Subcommands:
     register      Register a new account
     login         Login to your account
     logout        Remove saved marketplace credentials
+    forgot [email] Send a password reset link and open it
     buy <id>      Purchase a module from the marketplace
 
 Examples:
@@ -100,6 +101,8 @@ Examples:
     market remove my-new-tool --version 1.0.0
     market status                    # Show current marketplace account status
     market logout                    # Remove saved marketplace credentials
+    market forgot                    # Email a reset link and open it
+    market forgot user@example.com   # Reset a specific account
     market list                      # List all modules
     market search "proxy"            # Search for proxy-related modules
     market install test-module       # Install module with ID test-module
@@ -352,6 +355,18 @@ Examples:
 
         # Logout command
         subparsers.add_parser('logout', help='Remove saved marketplace credentials')
+
+        # Forgot-password command
+        forgot_parser = subparsers.add_parser(
+            'forgot',
+            help='Send a password reset link and open it',
+        )
+        forgot_parser.add_argument('email', nargs='?', help='Account email')
+        forgot_parser.add_argument(
+            '--no-browser',
+            action='store_true',
+            help='Print the reset page instead of opening a browser',
+        )
         
         # Buy command
         buy_parser = subparsers.add_parser('buy', help='Purchase a module from the marketplace')
@@ -436,6 +451,8 @@ Examples:
                 return self._login_account()
             elif parsed_args.action == 'logout':
                 return self._logout_account()
+            elif parsed_args.action == 'forgot':
+                return self._forgot_password(parsed_args)
             elif parsed_args.action == 'buy':
                 return self._buy_module(parsed_args)
             else:
@@ -1282,6 +1299,7 @@ Examples:
                 error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
                 error = error_data.get('error', 'Invalid credentials')
                 print_error(f"Login failed: {error}")
+                print_info("Forgot your password? Run: market forgot")
                 return False
             elif response.status_code == 403:
                 error_data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
@@ -1305,6 +1323,102 @@ Examples:
                 else:
                     print_error(f"Login failed: {error}")
                 return False
+        except requests.exceptions.ConnectionError:
+            print_error("Failed to connect to marketplace server")
+            print_info(f"Server URL: {self.registry_url}")
+            return False
+        except Exception as e:
+            print_error(f"Error: {str(e)}")
+            return False
+
+    def _is_reset_email(self, email: str) -> bool:
+        """Return True when the address is complete enough to request a reset."""
+        local, separator, domain = str(email or "").strip().partition("@")
+        if not separator or not local or not domain:
+            return False
+        return "." in domain and not domain.startswith(".") and not domain.endswith(".")
+
+    def _password_reset_url(self, payload: Any) -> Optional[str]:
+        """Return a reset page from the API when the server provides one."""
+        if not isinstance(payload, dict):
+            return None
+        for key in ("url", "reset_url", "link", "reset_link"):
+            value = str(payload.get(key) or "").strip()
+            if value.startswith(("http://", "https://")):
+                return value
+        return None
+
+    def _open_password_reset_url(self, url: str, from_email: bool) -> None:
+        """Open the reset page, or print it when no browser is available."""
+        import webbrowser
+
+        try:
+            opened = bool(webbrowser.open(url))
+        except Exception:
+            opened = False
+        if from_email:
+            label = "Opened the reset link" if opened else "Open this reset link"
+        else:
+            label = "Opened the account page" if opened else "Open the account page"
+        print_info(f"{label}: {url}")
+
+    def _forgot_password(self, args=None) -> bool:
+        """Email a password reset link and open the page used to choose a new password."""
+        try:
+            print_info("\n=== Marketplace password reset ===")
+            email = ""
+            no_browser = False
+            if args is not None:
+                email = str(getattr(args, "email", "") or "").strip()
+                no_browser = bool(getattr(args, "no_browser", False))
+            if not email:
+                default_email = str(self.account_email or "").strip()
+                prompt = f"Email [{default_email}]: " if default_email else "Email: "
+                email = input(prompt).strip() or default_email
+            if not self._is_reset_email(email):
+                print_error("Enter a valid email address")
+                return False
+
+            response = requests.post(
+                f"{self.registry_url}/api/password-reset/request",
+                json={"email": email},
+                timeout=self.timeout,
+            )
+            payload = {}
+            content_type = response.headers.get("content-type", "")
+            if content_type.startswith("application/json"):
+                try:
+                    payload = response.json()
+                except Exception:
+                    payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+
+            if response.status_code in (200, 202):
+                message = str(payload.get("message") or "").strip()
+                print_success(
+                    message
+                    or "If an account exists for that email, a reset link was sent."
+                )
+                print_info("Open the link in that email to choose a new password.")
+                print_info("Then connect again with: market login")
+                reset_url = self._password_reset_url(payload)
+                page = reset_url or self.registry_url
+                if no_browser:
+                    print_info(f"Account page: {page}")
+                    return True
+                self._open_password_reset_url(page, from_email=bool(reset_url))
+                return True
+
+            error = payload.get("error") or payload.get("message") or response.text
+            if response.status_code == 429:
+                retry_after = payload.get("retry_after")
+                print_error(f"Rate limit exceeded: {error}")
+                if retry_after:
+                    print_info(f"Please try again after {retry_after} seconds")
+                return False
+            print_error(f"Password reset failed: {error}")
+            return False
         except requests.exceptions.ConnectionError:
             print_error("Failed to connect to marketplace server")
             print_info(f"Server URL: {self.registry_url}")

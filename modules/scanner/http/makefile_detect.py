@@ -60,7 +60,7 @@ class Module(Scanner, Http_client):
             if not r or r.status_code != 200:
                 continue
             body = r.text or ""
-            body_any = ('PHONY:', 'all:', 'clean:', '.SUFFIXES:', '$(MAKE)', '<!DOCTYPE', '<html', '<script>',)
+            body_any = ('.PHONY:', '.SUFFIXES:', '$(MAKE)', '$(CC)', '$(CFLAGS)')
             if any(m in body for m in body_any):
                 self.set_info(
                     severity='low',

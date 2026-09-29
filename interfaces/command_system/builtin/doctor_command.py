@@ -84,6 +84,9 @@ Examples:
         return parser
 
     def execute(self, args, **kwargs) -> bool:
+        if args and str(args[0]).strip().lower() == "payload":
+            return self._doctor_payload(args[1:])
+
         try:
             parsed = self.parser.parse_args(args)
         except SystemExit:
@@ -106,6 +109,17 @@ Examples:
 
         self._print_report(report, verbose=parsed.verbose)
         return report.healthy
+
+    def _doctor_payload(self, args) -> bool:
+        from core.payload_generation.payload_explain import explain_payload_module, format_payload_explain
+
+        module = getattr(self.framework, "current_module", None)
+        if module is None or getattr(module, "type", None) != "payload":
+            print_error("Select a payload module first: use <payload>")
+            return False
+        report = explain_payload_module(module, framework=self.framework)
+        print_info(format_payload_explain(report))
+        return report.valid
 
     def _print_report(self, report, verbose: bool = False) -> None:
         rows = []

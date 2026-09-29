@@ -127,7 +127,7 @@ class Module(Scanner, Http_client):
                     cve="CVE-2026-22241",
                     reason="OpenEclass detected but version could not be determined. Potentially vulnerable if < 4.2.",
                 )
-                return True
+                return False
 
         except Exception as e:
             print_error(f"Scanner failed: {e}")

@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """XWiki Platform is a generic wiki platform offering runtime services for applications built on top of it."""
 
+import re
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
@@ -60,13 +62,19 @@ class Module(Scanner, Http_client):
         r = self.http_request(method='GET', path=path, allow_redirects=False)
         if not r or r.status_code != 200:
             return False
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-        header_any = ('text/html',)
-        if any(m in headers for m in header_any):
+        content_type = (r.headers.get("Content-Type") or "").lower()
+        body = r.text or ""
+        reflected_javascript_url = re.search(
+            r"(?:href|src|action)\s*=\s*['\"]?javascript:alert\(document\.domain\)",
+            body,
+            re.I,
+        )
+        if "text/html" in content_type and reflected_javascript_url:
             self.set_info(
                 severity='medium',
-                reason='XWiki - Cross-Site Scripting detected',
+                reason='XWiki restore redirect reflected an executable javascript URL',
                 path=path,
+                confidence='high',
             )
             return True
         return False

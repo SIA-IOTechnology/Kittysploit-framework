@@ -348,4 +348,4 @@ class Module(Scanner, Http_client):
             confidence="low",
             version=version,
         )
-        return True
+        return False

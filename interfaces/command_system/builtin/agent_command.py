@@ -319,6 +319,18 @@ Examples:
             metavar="LEVEL",
             help="Explicitly approve read, active, intrusive, or destructive actions.",
         )
+        parser.add_argument(
+            "--deny-module",
+            action="append",
+            default=[],
+            metavar="PATH",
+            help="Refuse a module for this workspace. The refusal is replayed on the next run.",
+        )
+        parser.add_argument(
+            "--fresh",
+            action="store_true",
+            help="Ignore proven facts in the engagement graph and scan from the start.",
+        )
         parser.add_argument("--approve-active-replay", action="store_true")
         parser.add_argument("--approve-post-exploit", action="store_true")
         parser.add_argument("--tls-no-verify", action="store_true", help="Disable TLS verification and record it in the report.")
@@ -488,6 +500,25 @@ Examples:
         paths = AgentPathService(self.framework)
         run_id = str(parsed.resume or new_run_id())
         run_store = AgentRunStore(paths, run_id)
+        from interfaces.command_system.builtin.agent.campaign_memory import (
+            prepare_parsed_run,
+            record_operator_commands,
+            seed_state_from_graph,
+        )
+
+        requested_target = str(parsed.target or "")
+        engagement_graph = prepare_parsed_run(paths, parsed)
+        resumed_approvals = list(getattr(parsed, "_resumed_approvals", None) or [])
+        if resumed_approvals:
+            print_status(
+                "Engagement graph resumed operator approvals: " + ", ".join(resumed_approvals)
+            )
+        resumed_target = getattr(parsed, "_resumed_target_correction", None)
+        if isinstance(resumed_target, dict):
+            print_status(
+                "Engagement graph resumed target correction "
+                f"{resumed_target.get('from')} -> {resumed_target.get('to')}"
+            )
         self._agent.report.set_paths(paths)
         self._agent.core._module_perf.set_paths(paths)
         self._agent.core._module_ctx.set_paths(paths)
@@ -518,11 +549,22 @@ Examples:
         if parsed.http_replay == "active" and not runtime_policy.approve_active_replay:
             print_error("--http-replay active requires --approve-active-replay or policy approval")
             return False
+        for risk in sorted(runtime_policy.approved_risks):
+            engagement_graph.remember_approval(
+                run_id,
+                risk,
+                goal=str(getattr(parsed, "goal", "") or ""),
+            )
         if parsed.shell_hunter:
             from interfaces.command_system.builtin.agent.runtime_policy import shell_hunter_policy_decision
 
             block = shell_hunter_policy_decision(runtime_policy, phase="exploit")
             if block is not None:
+                engagement_graph.remember_refusal(
+                    run_id,
+                    reason=str(block.reason or "shell-hunter refused"),
+                    goal=str(getattr(parsed, "goal", "") or ""),
+                )
                 print_error(
                     f"--shell-hunter blocked: {block.reason} "
                     f"(phase={block.phase}, risk={block.risk}, approval_needed={block.approval_needed})"
@@ -710,6 +752,12 @@ Examples:
                 str(parsed.protocol or target_info.get("scheme") or "tcp"),
             )
         if not allowed:
+            engagement_graph.remember_refusal(
+                run_id,
+                reason=f"scope refused target: {reason}",
+                target=str(parsed.target or ""),
+                goal=str(getattr(parsed, "goal", "") or ""),
+            )
             print_error(f"Agent scope blocked target: {reason}")
             return False
 
@@ -745,6 +793,16 @@ Examples:
         replay_max = max(0, int(parsed.http_replay_max))
         if shell_goal and replay_max <= 3:
             replay_max = 8
+
+        record_operator_commands(
+            engagement_graph,
+            run_id=run_id,
+            approved_risks=sorted(runtime_policy.approved_risks),
+            denied_modules=list(getattr(parsed, "deny_module", None) or []),
+            requested_target=requested_target,
+            effective_target=str(parsed.target or ""),
+            goal=str(normalized_operator_goal or ""),
+        )
 
         state = AgentState(
             raw_target=parsed.target,
@@ -925,6 +983,16 @@ Examples:
             if isinstance(state.knowledge_base, dict):
                 state.knowledge_base["_vault_run_id"] = run_id
             state.checkpoint_enabled = True
+        resumed_fact = seed_state_from_graph(
+            state,
+            engagement_graph,
+            fresh=bool(getattr(parsed, "fresh", False) or parsed.resume),
+        )
+        if resumed_fact:
+            print_status(
+                "Engagement graph resumed from proven fact: "
+                f"{resumed_fact.get('summary') or resumed_fact.get('id')}"
+            )
         from core.vault.agent_bridge import bind_agent_runtime
 
         bind_agent_runtime(self.framework, state)
@@ -937,6 +1005,11 @@ Examples:
             except KeyboardInterrupt:
                 state.cancellation_token.cancel("operator_cancelled")
                 state.campaign_stop_reason = "operator_cancelled"
+                engagement_graph.remember_refusal(
+                    run_id,
+                    reason="operator cancelled the mission",
+                    goal=str(getattr(state, "operator_goal", "") or ""),
+                )
                 print_warning("Agent cancelled; generating a partial report.")
                 final_state = self._agent.core._node_report(state)
             if final_state.error:

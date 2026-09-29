@@ -98,6 +98,21 @@ Examples:
             action="store_true",
             help="List available pre-stage scriptlets and exit",
         )
+        parser.add_argument(
+            "--list-prestage-profiles",
+            action="store_true",
+            help="List named prestage profiles and exit",
+        )
+        parser.add_argument(
+            "--prestage-profile",
+            metavar="<profile>",
+            help="Named prestage profile (lab-safe, reliable, iot, durable-agent)",
+        )
+        parser.add_argument(
+            "--explain",
+            action="store_true",
+            help="Explain payload/listener/transform/prestage compatibility without generating",
+        )
         
         return parser
     
@@ -111,6 +126,9 @@ Examples:
         if parsed_args.list_prestage:
             current_module = getattr(self.framework, "current_module", None) if hasattr(self, "framework") else None
             return self._list_prestage_scriptlets(current_module)
+
+        if parsed_args.list_prestage_profiles:
+            return self._list_prestage_profiles()
 
         # Check if a payload module is selected
         if not hasattr(self.framework, 'current_module') or not self.framework.current_module:
@@ -130,6 +148,13 @@ Examples:
             return False
         
         try:
+            if parsed_args.prestage_profile:
+                if not hasattr(current_module, "set_option"):
+                    print_error("Current module does not support the prestage_profile option")
+                    return False
+                if not current_module.set_option("prestage_profile", parsed_args.prestage_profile):
+                    return False
+
             if parsed_args.prestage:
                 if not hasattr(current_module, "set_option"):
                     print_error("Current module does not support the prestage option")
@@ -142,13 +167,20 @@ Examples:
                 if hasattr(current_module, "_get_prestage_scriptlet_names"):
                     names = current_module._get_prestage_scriptlet_names()
                 if names:
-                    from core.payload_generation.prestage_support import validate_prestage_names
+                    from core.payload_generation.prestage_support import validate_prestage_selection
 
                     try:
-                        validate_prestage_names(current_module, names)
+                        validate_prestage_selection(
+                            current_module,
+                            prestage=getattr(getattr(current_module, "prestage", None), "value", "") or "",
+                            prestage_profile=getattr(getattr(current_module, "prestage_profile", None), "value", "") or "",
+                        )
                     except (ValueError, KeyError) as exc:
                         print_error(str(exc))
                         return False
+
+            if parsed_args.explain:
+                return self._explain_payload(current_module)
 
             # Show generation info
             if parsed_args.verbose:
@@ -193,6 +225,32 @@ Examples:
             module_path = getattr(item, "module_path", "") or getattr(item, "source_path", "")
             suffix = f"  ({module_path})" if module_path else ""
             print_info(f"  {item.name:<16} [{platforms}]  {item.description}{suffix}")
+        return True
+
+    def _explain_payload(self, payload_module) -> bool:
+        from core.payload_generation.payload_explain import explain_payload_module, format_payload_explain
+
+        report = explain_payload_module(payload_module, framework=self.framework)
+        print_info(format_payload_explain(report))
+        if report.valid:
+            print_success("Configuration looks compatible")
+            return True
+        print_error("Configuration has blocking issues")
+        return False
+
+    def _list_prestage_profiles(self) -> bool:
+        from core.payload_generation.prestage_profiles import list_prestage_profiles
+
+        rows = list_prestage_profiles()
+        if not rows:
+            print_info("No prestage profiles configured")
+            return True
+        print_info("Available prestage profiles:")
+        for row in rows:
+            modules = ", ".join(row.get("modules") or [])
+            print_info(f"  {row.get('name',''):<14}  {row.get('description','')}")
+            print_info(f"                 modules: {modules}")
+        print_info("Use: set prestage_profile <name>")
         return True
     
     def _show_generation_info(self, payload_module, parsed_args):

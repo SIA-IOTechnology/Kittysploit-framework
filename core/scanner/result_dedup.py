@@ -44,6 +44,54 @@ PORT_PROTOCOL = {
 }
 
 
+def _explicit_vulnerability_value(value: Dict[str, Any]) -> Optional[bool]:
+    """Return an explicit scanner verdict without losing a deliberate ``False``."""
+    for key in ("vulnerable", "vuln", "affected"):
+        if key in value:
+            verdict = value.get(key)
+            if isinstance(verdict, str):
+                normalized = verdict.strip().lower()
+                if normalized in {"false", "no", "safe", "patched", "0", ""}:
+                    return False
+                if normalized in {"true", "yes", "vulnerable", "affected", "1"}:
+                    return True
+            return bool(verdict)
+    status = str(value.get("status") or "").strip().lower()
+    if status in {"vulnerable", "affected", "confirmed"}:
+        return True
+    if status in {"safe", "patched", "not_vulnerable", "detected", "informational"}:
+        return False
+    return None
+
+
+def scanner_return_is_vulnerable(value: Any) -> bool:
+    """Resolve legacy scanner returns while honoring explicit negative verdicts.
+
+    ``ModuleResult.success`` can mean command success, whereas scanner booleans mean
+    vulnerability. When normalized data contains an explicit verdict, it takes
+    precedence over the generic success flag.
+    """
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        explicit = _explicit_vulnerability_value(value)
+        if explicit is not None:
+            return explicit
+        return bool(value.get("success")) if "success" in value else False
+    if isinstance(value, bool):
+        return value
+    if hasattr(value, "success"):
+        data = getattr(value, "data", None)
+        if isinstance(data, dict):
+            explicit = _explicit_vulnerability_value(data)
+            if explicit is not None:
+                return explicit
+            if getattr(value, "finding", None) is None:
+                return False
+        return bool(getattr(value, "success"))
+    return bool(value)
+
+
 @dataclass
 class ScannerFindingGroup:
     """Aggregated scanner finding spanning one or more detections."""
@@ -124,7 +172,14 @@ _NOISE_PATH_MARKERS = (
 
 
 def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
-    """Drop info-level technology fingerprints that are not actionable vulnerabilities."""
+    """Demote informational detections that are not actionable vulnerabilities.
+
+    Scanner modules historically use ``True`` both for "something was detected" and
+    "the target is vulnerable". An informational result without a CVE must not be
+    counted as a vulnerability merely because the legacy module returned ``True``.
+    Keep the detection visible through ``detected``/``detection_state`` while
+    clearing the vulnerability flag.
+    """
     item = dict(result or {})
     if not item.get("vulnerable"):
         return item
@@ -144,9 +199,22 @@ def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
     if severity not in _INFO_SEVERITIES:
         return item
 
-    if any(marker in path for marker in _NOISE_PATH_MARKERS):
+    # CVE rows are handled by suppress_speculative_finding(), which understands
+    # their confidence. Everything else at informational severity is a
+    # fingerprint/detection, not an actionable vulnerability.
+    if not extract_cve(item):
+        item["detected"] = True
+        item["detection_state"] = "informational"
         item["vulnerable"] = False
-        item["status"] = "safe"
+        item["status"] = "detected"
+        item["suppressed_reason"] = "classified as informational detection"
+        return item
+
+    if any(marker in path for marker in _NOISE_PATH_MARKERS):
+        item["detected"] = True
+        item["detection_state"] = "informational"
+        item["vulnerable"] = False
+        item["status"] = "detected"
         item["suppressed_reason"] = "suppressed info-level technology detection"
         return item
 
@@ -160,8 +228,10 @@ def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
 
     if any(marker in path for marker in PURE_DETECTION_PATH_MARKERS):
         if not any(phrase in message for phrase in STRONG_VULN_SIGNAL_PHRASES):
+            item["detected"] = True
+            item["detection_state"] = "informational"
             item["vulnerable"] = False
-            item["status"] = "safe"
+            item["status"] = "detected"
             item["suppressed_reason"] = "suppressed pure detection (info)"
     return item
 

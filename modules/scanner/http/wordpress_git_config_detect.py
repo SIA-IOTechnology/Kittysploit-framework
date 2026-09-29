@@ -60,8 +60,12 @@ class Module(Scanner, Http_client):
             if not r or r.status_code != 200:
                 continue
             body = (r.text or "").lower()
-            body_any = ('[core]', '<html', '<body',)
-            if (any(m in body for m in body_any)):
+            has_git_config = '[core]' in body and (
+                'repositoryformatversion' in body
+                or 'filemode' in body
+                or '[remote ' in body
+            )
+            if has_git_config:
                 self.set_info(
                     severity='info',
                     reason="Wordpress Git Config detected",

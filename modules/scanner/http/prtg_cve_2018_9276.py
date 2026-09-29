@@ -208,4 +208,4 @@ class Module(Scanner, Http_client):
             endpoint=self.LOGIN_PATH,
         )
         print_info("PRTG detected; supply valid credentials for stronger confirmation")
-        return True
+        return False

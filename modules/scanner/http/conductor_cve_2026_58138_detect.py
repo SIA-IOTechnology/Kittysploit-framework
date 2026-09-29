@@ -219,7 +219,7 @@ class Module(Scanner, Http_client):
                 evidence_path=evidence,
                 confidence="medium",
             )
-            return True
+            return False
 
         except Exception as exc:
             print_error(f"Scanner failed: {exc}")

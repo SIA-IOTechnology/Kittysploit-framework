@@ -58,9 +58,14 @@ class Module(Scanner, Http_client):
             r = self.http_request(method="GET", path=path, allow_redirects=False)
             if not r or r.status_code != 200:
                 continue
-            body = r.text or ""
-            body_markers = ('Validate', 'Welcome', 'Axis', 'deployed', 'installation')
-            if any(m in body for m in body_markers):
+            body = (r.text or "").lower()
+            axis_fingerprint = (
+                "apache axis" in body
+                or "axis2" in body
+                or ("axis" in body and "available services" in body)
+                or ("axis" in body and "validate" in body and "installation" in body)
+            )
+            if axis_fingerprint:
                 self.set_info(
                     severity='info',
                     reason="apache-axis-detect detected",

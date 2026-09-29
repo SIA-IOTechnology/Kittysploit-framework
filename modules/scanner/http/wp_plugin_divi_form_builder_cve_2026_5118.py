@@ -198,7 +198,7 @@ class Module(Scanner, Http_client, Wordpress):
                 reason=f"Divi Form Builder {version} appears patched (>= 5.1.3)",
             )
             print_success("Version appears patched for CVE-2026-5118")
-            return True
+            return False
 
         # No version — nonce alone is enough to suggest active exploit path
         if nonce_found:
@@ -212,7 +212,7 @@ class Module(Scanner, Http_client, Wordpress):
                 confidence="medium",
             )
             print_warning("Plugin markers + fb_nonce — version unknown")
-            return True
+            return False
 
         self.set_info(
             severity="medium",
@@ -221,4 +221,4 @@ class Module(Scanner, Http_client, Wordpress):
             confidence="low",
         )
         print_info("Plugin likely present; try more probe_paths or run the auxiliary")
-        return True
+        return False

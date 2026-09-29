@@ -229,12 +229,35 @@ class Scanner(BaseModule):
         self._scan_error = False
         try:
             raw = self.run()
-            detected = bool(raw) if raw is not None else False
+            from core.scanner.result_dedup import (
+                enrich_scanner_result,
+                scanner_return_is_vulnerable,
+            )
+
+            detected = scanner_return_is_vulnerable(raw)
+            vi = getattr(self, 'vulnerability_info', None) or {}
+            if detected and isinstance(vi, dict):
+                normalized = enrich_scanner_result(
+                    {
+                        "vulnerable": True,
+                        "severity": vi.get("severity") or info.get("severity") or "info",
+                        "cve": vi.get("cve") or info.get("cve"),
+                        "message": vi.get("reason") or str(label),
+                        "details": vi,
+                        "path": self.__class__.__module__.replace(".", "/"),
+                    }
+                )
+                detected = bool(normalized.get("vulnerable"))
+                if not detected and normalized.get("detected"):
+                    print_info(f"{label}: informational match (not a vulnerability).")
+                    return False
+                if not detected and normalized.get("suppressed_reason"):
+                    print_info(f"{label}: {normalized['suppressed_reason']}.")
+                    return False
 
             if detected:
                 # Console stays brief; structured report is for DB / KittyReport push.
                 title = None
-                vi = getattr(self, 'vulnerability_info', None) or {}
                 if isinstance(vi, dict):
                     title = vi.get("finding") or (vi.get("report") or {}).get("finding")
                 print_success(f"{title or label}: positive match (indicators detected).")

@@ -64,13 +64,15 @@ class Module(Scanner, Http_client):
         r = self.http_request(method='GET', path=path, allow_redirects=False)
         if not r or r.status_code != 200:
             return False
-        headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-        header_any = ('text/html',)
-        if any(m in headers for m in header_any):
+        content_type = (r.headers.get("Content-Type") or "").lower()
+        body = (r.text or "").lower()
+        reflected_payload = '<script>alert("document.domain")</script>' in body
+        if "text/html" in content_type and reflected_payload:
             self.set_info(
                 severity='medium',
-                reason='Base64 Encoder/Decoder <= 0.9.2 - Cross-Site Scripting detected',
+                reason='Base64 Encoder/Decoder reflected the decoded script payload',
                 path=path,
+                confidence='high',
             )
             return True
         return False

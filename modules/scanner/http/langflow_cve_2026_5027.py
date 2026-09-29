@@ -298,7 +298,15 @@ class Module(Scanner, Http_client):
                     version=version,
                     reason=f"Langflow {version} appears patched",
                 )
-            return True
+            return False
 
         print_info("Langflow found; CVE-2026-5027 not confirmed")
-        return True
+        if hasattr(self, "set_info"):
+            self.set_info(
+                severity="info",
+                cve="CVE-2026-5027",
+                version=version or None,
+                reason="Langflow detected; CVE-2026-5027 not confirmed",
+                confidence="low",
+            )
+        return False

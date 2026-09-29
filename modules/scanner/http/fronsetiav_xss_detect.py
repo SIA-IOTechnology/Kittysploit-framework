@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 """The fronsetiav1."""
 
+import re
+
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
 
@@ -64,12 +66,18 @@ class Module(Scanner, Http_client):
         if not r or r.status_code != 200:
             return False
         content_type = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
-        ctype_any = ('text/html',)
-        if any(m in content_type for m in ctype_any):
+        body = r.text or ""
+        reflected_payload = re.search(
+            r"<img\b[^>]*\bonerror\s*=\s*['\"]?alert\(document\.domain\)",
+            body,
+            re.I,
+        )
+        if "text/html" in content_type.lower() and reflected_payload:
             self.set_info(
                 severity='high',
-                reason='Fronsetiav1.1 - Cross-Site Scripting detected',
+                reason='Fronsetia reflected the unescaped event-handler payload',
                 path=path,
+                confidence='high',
             )
             return True
         return False

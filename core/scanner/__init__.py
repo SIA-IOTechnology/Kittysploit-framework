@@ -8,6 +8,7 @@ from core.scanner.result_dedup import (
     deduplicate_scanner_results,
     enrich_scanner_result,
     group_scanner_results,
+    scanner_return_is_vulnerable,
 )
 from core.scanner.evidence_capture import (
     collect_module_evidence,
@@ -32,6 +33,7 @@ __all__ = [
     "deduplicate_scanner_results",
     "enrich_scanner_result",
     "group_scanner_results",
+    "scanner_return_is_vulnerable",
     "collect_module_evidence",
     "evidence_dir_for_scan",
     "evidence_preview",

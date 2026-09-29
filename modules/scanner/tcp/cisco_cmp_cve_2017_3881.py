@@ -180,4 +180,4 @@ class Module(Scanner, Tcp_scanner_client):
             ),
             banner=banner,
         )
-        return True
+        return False

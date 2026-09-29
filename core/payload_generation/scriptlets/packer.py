@@ -11,17 +11,13 @@ from .registry import Scriptlet, resolve_scriptlet_names
 
 
 _WRAPPER = '''
-def __kitty_prestage_{idx}__():
-    try:
+try:
 {body}
+except Exception as _kitty_prestage_exc:
+    try:
+        _kitty_telemetry_record("prestage", "prestage_{idx}", str(_kitty_prestage_exc))
     except Exception:
         pass
-
-__kitty_prestage_{idx}__()
-try:
-    del __kitty_prestage_{idx}__
-except Exception:
-    pass
 '''
 
 
@@ -40,7 +36,7 @@ def build_prestage_block(scriptlets: List[Scriptlet]) -> str:
     blocks: List[str] = []
     for idx, scriptlet in enumerate(scriptlets):
         blocks.append(
-            _WRAPPER.format(idx=idx, body=_indent(scriptlet.code)).strip()
+            _WRAPPER.format(idx=idx, body=_indent(scriptlet.code, spaces=4)).strip()
         )
     return "\n\n".join(blocks) + "\n\n"
 
@@ -155,7 +151,9 @@ def build_powershell_prestage_block(scriptlets: List[Scriptlet]) -> str:
         if not body:
             continue
         blocks.append(
-            f"function __kitty_prestage_{idx}__ {{\n{body}\n}}\ntry {{ __kitty_prestage_{idx}__ }} catch {{}}\n"
+            f"try {{\n{body}\n}} catch {{\n"
+            f"  try {{ _KittyTelemetryRecord 'prestage' 'prestage_{idx}' $_.Exception.Message }} catch {{}}\n"
+            f"}}\n"
         )
     return "\n".join(blocks) + ("\n" if blocks else "")
 

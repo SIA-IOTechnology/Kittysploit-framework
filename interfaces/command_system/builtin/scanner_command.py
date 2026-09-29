@@ -36,6 +36,7 @@ from core.scanner.result_dedup import (
     deduplicate_scanner_results,
     enrich_scanner_result,
     group_scanner_results,
+    scanner_return_is_vulnerable,
 )
 from core.scanner.probe_failure import is_soft_probe_failure
 from core.framework.module_executor import ModuleExecutionRequest, ModuleExecutor
@@ -1520,7 +1521,7 @@ Examples:
 
                     # Prefer ModuleResult.success (scanner True = finding)
                     if hasattr(run_return, "success") and not isinstance(run_return, dict):
-                        result["vulnerable"] = bool(getattr(run_return, "success"))
+                        result["vulnerable"] = scanner_return_is_vulnerable(run_return)
                         nested = getattr(run_return, "data", None)
                         if isinstance(nested, dict):
                             for k, v in nested.items():
@@ -1532,11 +1533,11 @@ Examples:
                             if k in ('reason', 'version', 'severity', 'client'):
                                 continue
                             dynamic_info.setdefault(k, v)
-                        result['vulnerable'] = bool(run_return.get('vulnerable') or run_return.get('vuln') or run_return.get('success'))
+                        result['vulnerable'] = scanner_return_is_vulnerable(run_return)
                     elif isinstance(run_return, bool):
                         result['vulnerable'] = run_return
                     else:
-                        result['vulnerable'] = bool(run_return)
+                        result['vulnerable'] = scanner_return_is_vulnerable(run_return)
 
                     # Soft-404 / SPA catch-all: path hit mirrored the index page.
                     if result.get("vulnerable"):
@@ -1652,7 +1653,9 @@ Examples:
                             'evidence', 'impact', 'remediation',
                         ]
                     }
-                    enrich_scanner_result(result, target_info, port=port)
+                    # Keep the normalized copy even when deduplication is
+                    # disabled. Suppression must not depend on presentation.
+                    result = enrich_scanner_result(result, target_info, port=port)
 
                     # Prefer structured finding title / evidence preview after enrich.
                     if result.get("finding"):
@@ -1774,11 +1777,14 @@ Examples:
         raw_vulnerable = sum(1 for r in raw_results if r.get("vulnerable"))
         unique_vulnerable = sum(1 for r in results if r.get("vulnerable"))
         blocked = sum(1 for r in raw_results if r.get("status") == "blocked")
+        detected = sum(
+            1 for r in raw_results if r.get("status") == "detected"
+        )
         safe = sum(
             1
             for r in raw_results
             if not r.get("vulnerable")
-            and r.get("status") not in ("error", "blocked", "skipped")
+            and r.get("status") not in ("error", "blocked", "skipped", "detected")
         )
         skipped = sum(1 for r in raw_results if r.get("status") == "skipped")
         errors = sum(1 for r in raw_results if r.get("status") == "error")
@@ -1807,10 +1813,11 @@ Examples:
             print_success(f"Vulnerabilities found: {unique_vulnerable}")
         if raw_vulnerable > 0 and unique_vulnerable == 0:
             print_warning(
-                "All positive detections were removed by deduplication/suppression filters "
-                "(try scanner --no-dedup to inspect raw hits)"
+                "All positive detections were removed by validation/suppression filters"
             )
         print_info(f"Safe: {safe}")
+        if detected > 0:
+            print_info(f"Informational detections: {detected}")
         if blocked > 0:
             host = str(ti.get("hostname") or ti.get("host") or "target").strip()
             print_warning(
@@ -1824,12 +1831,11 @@ Examples:
         if suppressed_soft404 > 0:
             print_warning(
                 f"Soft-404 suppressed: {suppressed_soft404} positive hit(s) matched the homepage/canary "
-                f"(common on SPAs — try scanner --no-cache or --no-dedup)"
+                f"(common on SPAs; use --no-cache only for diagnostics)"
             )
         if suppressed_postprocess > 0:
             print_warning(
-                f"Post-process suppressed: {suppressed_postprocess} row(s) filtered as noise/speculative "
-                f"(try scanner --no-dedup to see raw positives)"
+                f"Post-process suppressed: {suppressed_postprocess} row(s) filtered as noise/speculative"
             )
         if timing:
             print_empty()

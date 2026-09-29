@@ -124,4 +124,4 @@ class Module(Scanner, Http_client, Wordpress):
             vulnerable=vulnerable,
             cve=CVE_ID,
         )
-        return True
+        return vulnerable

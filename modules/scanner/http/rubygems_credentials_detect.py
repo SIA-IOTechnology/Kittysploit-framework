@@ -63,7 +63,7 @@ class Module(Scanner, Http_client):
             if not r or r.status_code != 200:
                 continue
             body = r.text or ""
-            body_any = (':rubygems_api_key:', '<html', '<body', '<!DOCTYPE', '<script', '<?php',)
+            body_any = (':rubygems_api_key:', 'rubygems_api_key:')
             if (any(m in body for m in body_any)):
                 self.set_info(
                     severity='high',

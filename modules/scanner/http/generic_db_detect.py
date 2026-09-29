@@ -66,7 +66,7 @@ class Module(Scanner, Http_client):
             if not r or r.status_code != 200:
                 continue
             body = r.text or ""
-            body_any = ('CREATE TABLE', '<html',)
+            body_any = ('CREATE TABLE', 'CREATE DATABASE', 'INSERT INTO')
             if any(m in body for m in body_any):
                 self.set_info(
                     severity='high',

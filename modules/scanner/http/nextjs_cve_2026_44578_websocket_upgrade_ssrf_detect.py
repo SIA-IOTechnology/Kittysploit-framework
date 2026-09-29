@@ -281,7 +281,7 @@ class Module(Scanner, Http_client):
                     version=version,
                     reason=f"Next.js {version} appears patched",
                 )
-            return True
+            return False
 
         if hasattr(self, "set_info"):
             self.set_info(
@@ -290,4 +290,4 @@ class Module(Scanner, Http_client):
                 reason="Next.js detected; CVE-2026-44578 not confirmed",
                 confidence="low",
             )
-        return True
+        return False

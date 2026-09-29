@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from core.module_loader import ModuleLoader
+
+
+class PrestageResolutionError(ValueError):
+    """Raised when prestage dependency resolution fails."""
 
 
 _PLATFORM_ALIASES = {
@@ -263,6 +267,202 @@ def load_prestage_instance(module_path: str, framework=None):
     return _loader.load_module(module_path, framework=framework, silent=True, fast=True)
 
 
+def _resolve_prestage_ref_or_raise(name: str, *, language: str) -> PrestStageModuleRef:
+    key = _normalize_key(name)
+    if not key:
+        raise KeyError("Empty prestage module name")
+    ref = get_prestage_ref(key, language=language)
+    if ref is None:
+        raise KeyError(f"Unknown prestage module: {name}")
+    return _pick_ref_for_language(ref, language)
+
+
+def _prestage_dependency_ids(
+    ref: PrestStageModuleRef,
+    *,
+    language: str,
+    framework=None,
+) -> List[str]:
+    """Return prestage_ids that must execute before ``ref``."""
+    instance = load_prestage_instance(ref.module_path, framework=framework)
+    if instance is None or not hasattr(instance, "get_dependencies"):
+        return []
+
+    try:
+        raw_deps = list(instance.get_dependencies())
+    except Exception as exc:
+        raise PrestageResolutionError(
+            f"Could not read dependencies for prestage '{ref.prestage_id}': {exc}"
+        ) from exc
+
+    dep_ids: List[str] = []
+    for dep in raw_deps:
+        dep_key = _normalize_key(dep)
+        if not dep_key:
+            continue
+        dep_ref = get_prestage_ref(dep_key, language=language)
+        if dep_ref is None:
+            raise KeyError(
+                f"Unknown prestage dependency '{dep}' required by '{ref.prestage_id}'"
+            )
+        dep_ref = _pick_ref_for_language(dep_ref, language)
+        if dep_ref.prestage_id not in dep_ids:
+            dep_ids.append(dep_ref.prestage_id)
+    return dep_ids
+
+
+def _resolve_requested_prestage_refs(
+    names: List[str],
+    *,
+    language: str,
+) -> List[PrestStageModuleRef]:
+    """Resolve explicit request tokens and reject duplicate identifiers."""
+    refs: List[PrestStageModuleRef] = []
+    seen_keys: Set[str] = set()
+    seen_ids: Dict[str, str] = {}
+
+    for raw in names:
+        key = _normalize_key(raw)
+        if not key:
+            continue
+        if key in seen_keys:
+            raise PrestageResolutionError(f"Duplicate prestage entry: '{raw}'")
+        seen_keys.add(key)
+
+        ref = _resolve_prestage_ref_or_raise(raw, language=language)
+        first_key = seen_ids.get(ref.prestage_id)
+        if first_key is not None:
+            raise PrestageResolutionError(
+                f"Duplicate prestage identifier '{ref.prestage_id}' "
+                f"(via '{raw}' and '{first_key}')"
+            )
+        seen_ids[ref.prestage_id] = raw
+        refs.append(ref)
+
+    return refs
+
+
+def _expand_prestage_graph(
+    seed_refs: List[PrestStageModuleRef],
+    *,
+    language: str,
+    framework=None,
+) -> Tuple[Dict[str, PrestStageModuleRef], Dict[str, List[str]], Dict[str, int]]:
+    """Collect transitive dependencies and build a dependency map."""
+    nodes: Dict[str, PrestStageModuleRef] = {}
+    dependencies: Dict[str, List[str]] = {}
+    order_hint: Dict[str, int] = {}
+    queue = list(seed_refs)
+    hint = 0
+
+    while queue:
+        ref = queue.pop(0)
+        prestage_id = ref.prestage_id
+        if prestage_id in nodes:
+            continue
+
+        nodes[prestage_id] = ref
+        order_hint[prestage_id] = hint
+        hint += 1
+
+        dep_ids = _prestage_dependency_ids(ref, language=language, framework=framework)
+        dependencies[prestage_id] = dep_ids
+
+        for dep_id in dep_ids:
+            if dep_id in nodes:
+                continue
+            dep_ref = _resolve_prestage_ref_or_raise(dep_id, language=language)
+            queue.append(dep_ref)
+
+    return nodes, dependencies, order_hint
+
+
+def _find_prestage_dependency_cycle(
+    nodes: Set[str],
+    dependencies: Dict[str, List[str]],
+) -> List[str]:
+    """Return one dependency cycle if present."""
+    visited: Set[str] = set()
+    stack: Set[str] = set()
+    path: List[str] = []
+
+    def dfs(node: str) -> Optional[List[str]]:
+        if node in stack:
+            start = path.index(node)
+            return path[start:] + [node]
+        if node in visited:
+            return None
+        visited.add(node)
+        stack.add(node)
+        path.append(node)
+        for dep in dependencies.get(node, []):
+            if dep not in nodes:
+                continue
+            cycle = dfs(dep)
+            if cycle:
+                return cycle
+        path.pop()
+        stack.remove(node)
+        return None
+
+    for node in sorted(nodes):
+        cycle = dfs(node)
+        if cycle:
+            return cycle
+    return []
+
+
+def _topological_sort_prestage_ids(
+    nodes: Set[str],
+    dependencies: Dict[str, List[str]],
+    order_hint: Dict[str, int],
+) -> List[str]:
+    """Return prestage_ids ordered with dependencies before dependents."""
+    in_degree: Dict[str, int] = {node: 0 for node in nodes}
+    dependents: Dict[str, List[str]] = {node: [] for node in nodes}
+
+    for node in nodes:
+        for dep in dependencies.get(node, []):
+            if dep not in nodes:
+                raise PrestageResolutionError(
+                    f"Prestage '{node}' depends on '{dep}', which is not in the resolved set"
+                )
+            in_degree[node] += 1
+            dependents[dep].append(node)
+
+    def sort_key(prestage_id: str) -> Tuple[int, int, str]:
+        return (
+            0 if prestage_id == "telemetry_buffer" else 1,
+            order_hint.get(prestage_id, 9999),
+            prestage_id,
+        )
+
+    ready = sorted((node for node in nodes if in_degree[node] == 0), key=sort_key)
+    ordered: List[str] = []
+
+    while ready:
+        node = ready.pop(0)
+        ordered.append(node)
+        unlocked: List[str] = []
+        for child in dependents.get(node, []):
+            in_degree[child] -= 1
+            if in_degree[child] == 0:
+                unlocked.append(child)
+        if unlocked:
+            ready.extend(unlocked)
+            ready.sort(key=sort_key)
+
+    if len(ordered) != len(nodes):
+        cycle = _find_prestage_dependency_cycle(nodes, dependencies)
+        if cycle:
+            raise PrestageResolutionError(
+                f"Circular prestage dependency detected: {' -> '.join(cycle)}"
+            )
+        raise PrestageResolutionError("Could not resolve prestage dependency order")
+
+    return ordered
+
+
 def materialize_prestage(
     name: str,
     *,
@@ -311,30 +511,35 @@ def resolve_prestage_names(
     context: Optional[dict] = None,
 ) -> List[MaterializedPrestage]:
     discover_prestage_modules()
-    resolved: List[MaterializedPrestage] = []
-    seen: Set[str] = set()
-    queue = [_normalize_key(name) for name in names if _normalize_key(name)]
+    lang = str(language or "python").strip().lower()
 
-    while queue:
-        key = queue.pop(0)
-        ref = get_prestage_ref(key, language=language)
-        if ref is None:
-            raise KeyError(f"Unknown prestage module: {key}")
-        ref = _pick_ref_for_language(ref, language)
-        token = ref.module_path
-        if token in seen:
-            continue
-        item = materialize_prestage(
-            ref.module_path,
-            language=language,
-            platform=platform,
-            framework=framework,
-            context=context,
+    seed_refs = _resolve_requested_prestage_refs(names, language=lang)
+    if not seed_refs:
+        return []
+
+    nodes, dependencies, order_hint = _expand_prestage_graph(
+        seed_refs,
+        language=lang,
+        framework=framework,
+    )
+    ordered_ids = _topological_sort_prestage_ids(set(nodes), dependencies, order_hint)
+
+    resolved: List[MaterializedPrestage] = []
+    seen_paths: Set[str] = set()
+    for prestage_id in ordered_ids:
+        ref = nodes[prestage_id]
+        if ref.module_path in seen_paths:
+            raise PrestageResolutionError(
+                f"Duplicate prestage module path '{ref.module_path}' for identifier '{prestage_id}'"
+            )
+        seen_paths.add(ref.module_path)
+        resolved.append(
+            materialize_prestage(
+                ref.module_path,
+                language=lang,
+                platform=platform,
+                framework=framework,
+                context=context,
+            )
         )
-        seen.add(token)
-        resolved.append(item)
-        for dep in item.dependencies:
-            dep_key = _normalize_key(dep)
-            if dep_key and dep_key not in seen:
-                queue.append(dep_key)
     return resolved

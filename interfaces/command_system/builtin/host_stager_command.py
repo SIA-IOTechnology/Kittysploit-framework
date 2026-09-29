@@ -60,6 +60,10 @@ Examples:
         parser.add_argument("--bind", default="0.0.0.0")
         parser.add_argument("--from-payload", action="store_true")
         parser.add_argument("--name", default="stager.py")
+        parser.add_argument("--secure", action="store_true", help="Register one-time token URL")
+        parser.add_argument("--ttl", type=int, default=3600, help="Secure artifact TTL seconds")
+        parser.add_argument("--allow-ip", action="append", default=[], help="Restrict download to IP (repeatable)")
+        parser.add_argument("--ssl", action="store_true", help="Serve over HTTPS")
         try:
             ns = parser.parse_args(args or ["status"])
         except SystemExit:
@@ -91,7 +95,13 @@ Examples:
 
         if action == "start":
             try:
-                url = host.start(str(directory), host=ns.bind, port=ns.port)
+                url = host.start(
+                    str(directory),
+                    host=ns.bind,
+                    port=ns.port,
+                    use_ssl=bool(ns.ssl),
+                    default_ttl=float(ns.ttl or 3600),
+                )
             except Exception as exc:
                 print_error(str(exc))
                 return False
@@ -153,6 +163,19 @@ Examples:
         lhost = getattr(getattr(self.framework, "current_module", None), "lhost", None)
         lhost_val = getattr(lhost, "value", lhost) if lhost else "127.0.0.1"
         hint_url = build_stager_url(str(lhost_val or "127.0.0.1"), int(ns.port), f"/{out.name}")
+        if ns.secure:
+            if not host.running:
+                host.start(str(directory), port=ns.port, default_ttl=float(ns.ttl or 3600), use_ssl=bool(ns.ssl))
+            body = out.read_bytes() if out.is_file() else out.read_text(encoding="utf-8").encode("utf-8")
+            secure_url = host.publish_file(
+                out.name,
+                body,
+                ttl_seconds=float(ns.ttl or 3600),
+                one_time=True,
+                allowed_ips=set(ns.allow_ip or []),
+            )
+            print_success(f"Secure one-time URL: {secure_url}")
+            hint_url = secure_url
         print_info(f"Suggested: host_stager start --port {ns.port} --dir {directory}")
         print_info(f"           set stager_url {hint_url}")
         return True

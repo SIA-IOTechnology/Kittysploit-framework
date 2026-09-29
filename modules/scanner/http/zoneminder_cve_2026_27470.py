@@ -271,7 +271,7 @@ class Module(Scanner, Http_client):
                 confidence="low",
                 version=version,
             )
-            return True
+            return False
 
         self.set_info(
             severity="info",
@@ -280,4 +280,4 @@ class Module(Scanner, Http_client):
             confidence="low",
             version=version,
         )
-        return True
+        return False

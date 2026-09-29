@@ -32,6 +32,24 @@ class Payload(BaseModule):
         False,
         advanced=True,
     )
+    prestage_profile = OptString(
+        "",
+        "Named prestage profile (lab-safe, reliable, iot, durable-agent)",
+        False,
+        advanced=True,
+    )
+    prestage_scope = OptString(
+        "",
+        "Extra allowed hosts/CIDRs for scope_guard (comma-separated)",
+        False,
+        advanced=True,
+    )
+    prestage_stage_sha256 = OptString(
+        "",
+        "Expected SHA256 for stage_verify prestage",
+        False,
+        advanced=True,
+    )
     prestage_archive = OptFile(
         "",
         "ZIP archive embedded when using prestage extract_zip (prestage/zip/extract_embedded)",
@@ -41,6 +59,48 @@ class Payload(BaseModule):
     prestage_extract_to = OptString(
         "",
         "Target directory for ZIP extract prestage (optional)",
+        False,
+        advanced=True,
+    )
+    prestage_config = OptString(
+        "",
+        "JSON config for signed_config prestage",
+        False,
+        advanced=True,
+    )
+    prestage_config_file = OptFile(
+        "",
+        "JSON config file for signed_config prestage",
+        False,
+        advanced=True,
+    )
+    prestage_config_secret = OptString(
+        "",
+        "Encryption secret for signed_config prestage",
+        False,
+        advanced=True,
+    )
+    prestage_config_sign_key = OptString(
+        "",
+        "HMAC signing key for signed_config prestage",
+        False,
+        advanced=True,
+    )
+    prestage_stage_url = OptString(
+        "",
+        "Default stage URL for stage_cache prestage",
+        False,
+        advanced=True,
+    )
+    prestage_cache_dir = OptString(
+        "",
+        "Cache directory for stage_cache prestage (optional)",
+        False,
+        advanced=True,
+    )
+    prestage_cache_ttl = OptString(
+        "86400",
+        "Stage cache TTL in seconds for stage_cache prestage",
         False,
         advanced=True,
     )
@@ -101,45 +161,96 @@ class Payload(BaseModule):
         return str(platform or "all").lower()
 
     def _get_prestage_scriptlet_names(self) -> List[str]:
-        raw = ""
-        opt = getattr(self, "prestage", None)
+        from core.payload_generation.prestage_profiles import resolve_prestage_selection
+
+        raw = self._opt_str("prestage")
+        profile = self._opt_str("prestage_profile")
+        if not raw and not profile:
+            return []
+        try:
+            return resolve_prestage_selection(prestage=raw, prestage_profile=profile)
+        except KeyError:
+            return [part.strip() for part in raw.split(",") if part.strip()]
+
+    def _opt_str(self, name: str) -> str:
+        opt = getattr(self, name, None)
         if opt is not None and hasattr(opt, "value"):
-            raw = str(opt.value or "")
-        else:
-            raw = str(opt or "")
-        return [part.strip() for part in raw.split(",") if part.strip()]
+            return str(opt.value or "").strip()
+        return str(opt or "").strip()
 
     def _build_prestage_context(self) -> Dict[str, Any]:
         import base64
         import os
 
-        context: Dict[str, Any] = {}
-        names = {n.lower() for n in self._get_prestage_scriptlet_names()}
-        needs_zip = any(
-            token in names
-            for token in ("extract_zip", "prestage/zip/extract_embedded", "zip/extract_embedded")
-        )
-        if not needs_zip:
-            return context
+        from core.payload_generation.prestage.payload_context import resolve_payload_prestage_context
 
-        archive = ""
-        archive_opt = getattr(self, "prestage_archive", None)
-        if archive_opt is not None and hasattr(archive_opt, "value"):
-            archive = str(archive_opt.value or "").strip()
-        else:
-            archive = str(archive_opt or "").strip()
-        if archive and os.path.isfile(archive):
-            with open(archive, "rb") as fh:
-                context["zip_b64"] = base64.b64encode(fh.read()).decode("ascii")
+        context: Dict[str, Any] = dict(resolve_payload_prestage_context(self))
+        names = {n.lower().split("/")[-1] for n in self._get_prestage_scriptlet_names()}
+        needs_scope = "scope_guard" in names
+        needs_preflight = "network_preflight" in names
+        needs_stage_verify = "stage_verify" in names
+        needs_zip = "extract_zip" in names
+        needs_signed_config = "signed_config" in names
+        needs_stage_cache = "stage_cache" in names
 
-        extract_to = ""
-        extract_opt = getattr(self, "prestage_extract_to", None)
-        if extract_opt is not None and hasattr(extract_opt, "value"):
-            extract_to = str(extract_opt.value or "").strip()
-        else:
-            extract_to = str(extract_opt or "").strip()
-        if extract_to:
-            context["extract_to"] = extract_to
+        if needs_zip:
+            archive = self._opt_str("prestage_archive")
+            if archive and os.path.isfile(archive):
+                with open(archive, "rb") as fh:
+                    context["zip_b64"] = base64.b64encode(fh.read()).decode("ascii")
+
+            extract_to = self._opt_str("prestage_extract_to")
+            if extract_to:
+                context["extract_to"] = extract_to
+
+        if needs_signed_config:
+            config_json = self._opt_str("prestage_config")
+            if config_json:
+                context["prestage_config"] = config_json
+            config_file = self._opt_str("prestage_config_file")
+            if config_file and os.path.isfile(config_file):
+                context["prestage_config_file"] = config_file
+            config_secret = self._opt_str("prestage_config_secret")
+            if config_secret:
+                context["prestage_config_secret"] = config_secret
+            config_sign_key = self._opt_str("prestage_config_sign_key")
+            if config_sign_key:
+                context["prestage_config_sign_key"] = config_sign_key
+
+        if needs_stage_cache or needs_stage_verify:
+            stage_url = self._opt_str("prestage_stage_url")
+            if stage_url:
+                context["prestage_stage_url"] = stage_url
+            cache_dir = self._opt_str("prestage_cache_dir")
+            if cache_dir:
+                context["prestage_cache_dir"] = cache_dir
+            cache_ttl = self._opt_str("prestage_cache_ttl")
+            if cache_ttl:
+                context["prestage_cache_ttl"] = cache_ttl
+
+        if needs_scope:
+            scope = self._opt_str("prestage_scope")
+            if scope:
+                context["prestage_scope"] = scope
+
+        if needs_stage_verify:
+            stage_sha = self._opt_str("prestage_stage_sha256")
+            if stage_sha:
+                context["prestage_stage_sha256"] = stage_sha
+
+        if needs_preflight or needs_scope:
+            if not context.get("c2_host"):
+                lhost = self._opt_str("lhost") or self._opt_str("LHOST")
+                if lhost:
+                    context["c2_host"] = lhost
+            if needs_preflight and "c2_port" not in context:
+                lport = self._opt_str("lport") or self._opt_str("LPORT")
+                if lport:
+                    try:
+                        context["c2_port"] = int(lport)
+                    except (TypeError, ValueError):
+                        pass
+
         return context
 
     def _get_prestage_language(self) -> str:
@@ -274,7 +385,7 @@ class Payload(BaseModule):
         from core.framework.transform import LEGACY_OPTION
         if name == LEGACY_OPTION:
             name = "transform"
-        if name == "prestage":
+        if name in ("prestage", "prestage_profile"):
             if not self.supports_prestage():
                 from core.payload_generation.prestage_support import payload_prestage_unsupported_message
                 from core.output_handler import print_error
@@ -282,10 +393,22 @@ class Payload(BaseModule):
                 print_error(payload_prestage_unsupported_message(self))
                 return False
             try:
-                from core.payload_generation.prestage_support import validate_prestage_value
+                from core.payload_generation.prestage_support import validate_prestage_selection
+                from core.payload_generation.prestage_loader import PrestageResolutionError
 
-                validate_prestage_value(self, str(value))
-            except (ValueError, KeyError) as exc:
+                if name == "prestage_profile":
+                    validate_prestage_selection(
+                        self,
+                        prestage=self._opt_str("prestage"),
+                        prestage_profile=str(value),
+                    )
+                else:
+                    validate_prestage_selection(
+                        self,
+                        prestage=str(value),
+                        prestage_profile=self._opt_str("prestage_profile"),
+                    )
+            except (ValueError, KeyError, PrestageResolutionError) as exc:
                 from core.output_handler import print_error
 
                 print_error(str(exc))

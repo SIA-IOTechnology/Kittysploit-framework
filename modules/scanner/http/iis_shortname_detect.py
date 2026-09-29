@@ -29,30 +29,48 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        # Classic technique: /*~1*/ vs /1234567890*~1*/ different status => vulnerable
-        r_valid = self.http_request(method="OPTIONS", path="/*~1*/a.aspx", allow_redirects=False)
-        r_invalid = self.http_request(
-            method="OPTIONS", path="/1234567890*~1*/a.aspx", allow_redirects=False
+        # Require an IIS fingerprint and a repeatable differential. A single
+        # status-code difference is commonly caused by WAFs and route catch-alls.
+        valid_paths = ("/*~1*/a.aspx", "/*~1*/b.aspx")
+        invalid_paths = (
+            "/1234567890*~1*/a.aspx",
+            "/9876543210*~1*/b.aspx",
         )
-        if not r_valid or not r_invalid:
-            # Fallback GET
-            r_valid = self.http_request(method="GET", path="/*~1*/a.aspx", allow_redirects=False)
-            r_invalid = self.http_request(
-                method="GET", path="/1234567890*~1*/a.aspx", allow_redirects=False
-            )
-        if not r_valid or not r_invalid:
+        valid = [
+            self.http_request(method="OPTIONS", path=path, allow_redirects=False)
+            for path in valid_paths
+        ]
+        invalid = [
+            self.http_request(method="OPTIONS", path=path, allow_redirects=False)
+            for path in invalid_paths
+        ]
+        responses = valid + invalid
+        if any(response is None for response in responses):
             return False
-        code_a = int(r_valid.status_code)
-        code_b = int(r_invalid.status_code)
+
+        headers = {
+            str(key).lower(): str(value).lower()
+            for response in responses
+            for key, value in (getattr(response, "headers", None) or {}).items()
+        }
+        server_hint = headers.get("server", "")
+        powered_by = headers.get("x-powered-by", "")
+        if "microsoft-iis" not in server_hint and "asp.net" not in powered_by:
+            return False
+
+        valid_codes = [int(response.status_code) for response in valid]
+        invalid_codes = [int(response.status_code) for response in invalid]
+        if len(set(valid_codes)) != 1 or len(set(invalid_codes)) != 1:
+            return False
+        code_a = valid_codes[0]
+        code_b = invalid_codes[0]
         if code_a == code_b:
             return False
-        # Extra confirmation with another method difference pattern
-        if code_a not in (404, 400) and code_b not in (404, 400) and code_a == 404:
-            pass
         self.set_info(
             severity="medium",
-            reason="IIS shortname (~) differential response detected",
+            reason="Repeatable IIS shortname (~) differential response detected",
             status_existing_probe=code_a,
             status_missing_probe=code_b,
+            confidence="high",
         )
         return True

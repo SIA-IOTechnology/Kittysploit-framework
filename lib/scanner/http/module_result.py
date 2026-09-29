@@ -151,7 +151,7 @@ def finalize_http_scanner_run(
     if not hits_out:
         if hasattr(module, "vulnerability_info"):
             module.vulnerability_info = {}
-        return module_result(success=True)
+        return module_result(success=False)
 
     summary_reason = reason.strip()
     if not summary_reason:

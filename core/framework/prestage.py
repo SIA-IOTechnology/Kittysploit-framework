@@ -58,7 +58,7 @@ class Prestage(BaseModule):
 
     def get_dependencies(self) -> List[str]:
         info = getattr(self.__class__, "__info__", {}) or {}
-        deps = info.get("dependencies") or info.get("prestage_dependencies") or []
+        deps = info.get("prestage_dependencies") or []
         return [str(dep).strip() for dep in deps if str(dep).strip()]
 
     def generate(self, language: str = "python", context: Optional[Dict[str, Any]] = None) -> str:

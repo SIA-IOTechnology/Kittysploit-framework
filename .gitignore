@@ -100,6 +100,7 @@ artifacts/*
 TODO.md
 
 tests/*
+!tests/test_scanner_false_positive_guards.py
 docs/academy/*
 data/loot/*
 lib/vulners/__init__.py

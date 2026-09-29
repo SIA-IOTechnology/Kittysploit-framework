@@ -60,8 +60,9 @@ class Module(Scanner, Http_client):
                 continue
             body = (r.text or "").lower()
             server = (r.headers.get("Server") or r.headers.get("server") or "").lower()
-            body_any = ('runtime:', 'spring:', 'datasource:', 'platform:', 'server:', 'job:', '<html', '<body', '</h1>', '</h2>', '</h3>', '<?xml',)
-            if (any(m in body for m in body_any)):
+            yaml_markers = ('runtime:', 'spring:', 'datasource:', 'platform:', 'server:', 'job:')
+            marker_count = sum(1 for marker in yaml_markers if marker in body)
+            if marker_count >= 2:
                 self.set_info(
                     severity='info',
                     reason="application.yaml detection detected",

@@ -66,7 +66,7 @@ class Module(Scanner, Http_client):
         if not r or r.status_code != 200:
             return False
         body = (r.text or "").lower()
-        body_any = ('<html', 'begin rsa private key',)
+        body_any = ('-----begin rsa private key-----', '-----begin private key-----')
         if (any(m in body for m in body_any)):
             self.set_info(
                 severity='high',

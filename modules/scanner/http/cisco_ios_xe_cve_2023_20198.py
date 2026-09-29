@@ -163,7 +163,7 @@ class Module(Scanner, Http_client):
             ),
             version=version,
         )
-        return True
+        return False
 
     def _retrieve_token(self) -> Optional[str]:
         response = self.http_request(
@@ -240,7 +240,7 @@ class Module(Scanner, Http_client):
                 severity="info",
                 reason="IOS XE Web UI detected but version could not be determined",
             )
-            return True
+            return False
 
         wsma_body = self._wsma_show_version(token)
         version = self._extract_version(wsma_body)
@@ -258,4 +258,4 @@ class Module(Scanner, Http_client):
             severity="medium",
             reason="IOS XE Web UI with WSMA token exposed; exploitability not confirmed",
         )
-        return True
+        return False

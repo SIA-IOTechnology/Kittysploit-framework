@@ -291,6 +291,23 @@ def module_utility(
     return u
 
 
+def _apply_module_confidence(score: Optional[float], path: str, kb: Dict[str, Any]) -> Optional[float]:
+    """Down-rank unverified modules and drop operator-refused paths."""
+    if score is None or score < 0:
+        return score
+    from interfaces.command_system.builtin.agent.module_confidence import (
+        ModuleConfidenceIndex,
+        normalize_module_path,
+    )
+
+    catalog = ModuleConfidenceIndex.current()
+    key = normalize_module_path(path)
+    refused = {normalize_module_path(item) for item in (kb.get("operator_refusals") or [])}
+    if key and (key in refused or catalog.is_refused(key)):
+        return -1.0
+    return float(score) * catalog.weight(key)
+
+
 def unified_module_score(
     module: Dict[str, Any],
     kb: Dict[str, Any],
@@ -335,11 +352,12 @@ def unified_module_score(
             include_pre_cost_bonuses=True,
             include_chain_observation_penalty=False,
         )
-        return g
-    return module_utility(
+        return _apply_module_confidence(g, path, kb)
+    scored = module_utility(
         module, kb, tech_hints, executed_paths, performance_memory, context_memory, health_memory,
         learning_store, learning_state,
     )
+    return _apply_module_confidence(scored, module_path_lower(module), kb)
 
 
 def select_opportunistic_batch(

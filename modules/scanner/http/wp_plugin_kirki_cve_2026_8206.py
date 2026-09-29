@@ -207,7 +207,7 @@ class Module(Scanner, Http_client, Wordpress):
                     reason=f"Kirki {version} appears outside vulnerable window / patched",
                 )
                 print_success("Version appears not affected (need 6.0.7+ for the fix)")
-                return True
+                return False
 
         self.set_info(
             severity="high",
@@ -219,4 +219,4 @@ class Module(Scanner, Http_client, Wordpress):
             confidence="medium",
         )
         print_warning("Kirki present; version unknown")
-        return True
+        return False

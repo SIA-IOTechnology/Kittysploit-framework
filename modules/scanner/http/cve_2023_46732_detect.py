@@ -60,13 +60,15 @@ class Module(Scanner, Http_client):
             r = self.http_request(method='GET', path=path, allow_redirects=False)
             if not r or r.status_code != 200:
                 continue
-            headers = "\n".join(f"{k}: {v}" for k, v in r.headers.items())
-            header_any = ('text/html',)
-            if any(m in headers for m in header_any):
+            content_type = (r.headers.get("Content-Type") or "").lower()
+            body = (r.text or "").lower()
+            reflected_payload = "<script>alert(document.domain)</script>" in body
+            if "text/html" in content_type and reflected_payload and "xwiki" in body:
                 self.set_info(
                     severity='medium',
-                    reason='XWiki < 14.10.14 - Cross-Site Scripting detected',
+                    reason='XWiki reflected the unescaped script payload',
                     path=path,
+                    confidence='high',
                 )
                 return True
         return False

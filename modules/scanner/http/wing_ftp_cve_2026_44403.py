@@ -160,4 +160,4 @@ class Module(Scanner, Http_client, WingFtp):
             panel_path=probe.get("path"),
         )
         print_info("Panel detected; supply USERNAME/PASSWORD for stronger confirmation")
-        return True
+        return False

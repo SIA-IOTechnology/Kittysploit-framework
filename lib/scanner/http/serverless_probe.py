@@ -50,7 +50,7 @@ def probe_function_endpoint(
     path: str,
 ) -> Optional[Dict[str, Any]]:
     response = http_request(method="GET", path=path, allow_redirects=True, timeout=12)
-    if not response:
+    if response is None:
         return None
     status = int(getattr(response, "status_code", 0) or 0)
     if status not in (200, 201, 204, 401, 403):
@@ -70,13 +70,15 @@ def probe_function_endpoint(
             indicators.append("serverless_body_marker")
         try:
             data = json.loads(body)
-            if isinstance(data, dict):
-                indicators.append("json_api_response")
+            if (
+                path == "/.well-known/openapi.json"
+                and isinstance(data, dict)
+                and (data.get("openapi") or data.get("swagger"))
+                and isinstance(data.get("paths"), dict)
+            ):
+                indicators.append("openapi_document")
         except Exception:
             pass
-    if status in (200, 201, 204) and not indicators:
-        if len(body) < 5000 and body.strip():
-            indicators.append("unauthenticated_http_200")
     if not indicators:
         return None
     return {

@@ -60,7 +60,7 @@ class Module(Scanner, Http_client):
                 continue
             body = r.text or ""
             content_type = r.headers.get("Content-Type") or r.headers.get("content-type") or ""
-            body_any = ('"><injectable>', "'><injectable>", '<title>Access Denied</title>', "You don't have permission to access",)
+            body_any = ('"><injectable>', "'><injectable>")
             ctype_any = ('text/html',)
             if (any(m in body for m in body_any)) and (any(m in content_type for m in ctype_any)):
                 self.set_info(

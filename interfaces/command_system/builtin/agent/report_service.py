@@ -31,6 +31,14 @@ from core.playbooks.coverage import (
 from interfaces.command_system.builtin.agent.run_store import AgentPathService, new_run_id
 
 
+def _discovery_report(knowledge_base):
+    from interfaces.command_system.builtin.agent.discovery import discovery_summary
+
+    if not isinstance(knowledge_base, dict):
+        return {"enabled": False}
+    return discovery_summary(knowledge_base)
+
+
 class ReportService:
     """Persist campaign reports and rolling per-path detection scores."""
 
@@ -209,6 +217,7 @@ class ReportService:
             "why_it_matters": why_it_matters,
             "attack_graph": attack_graph,
             "chain_memory": chain_memory,
+            "discovery": _discovery_report(knowledge_base),
         }
 
     def load_history_scores(self) -> Dict[str, Any]:

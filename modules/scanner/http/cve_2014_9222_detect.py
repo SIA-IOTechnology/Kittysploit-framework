@@ -40,7 +40,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/rompager_cve_2014_9222_auth_bypass',
+                ],
             },
         },
         'references': [

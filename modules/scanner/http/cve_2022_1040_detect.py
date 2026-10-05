@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/sophos_cve_2022_1040_rce'],
             },
         },
         'references': [

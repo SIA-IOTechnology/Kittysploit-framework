@@ -52,7 +52,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['scanner/http/cve_2020_9054_detect'],
+                'suggested_followups': ['exploits/linux/http/zyxel_nas_cve_2023_27992_rce'],
             },
         },
         'references': [

@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': ['exploits/windows/http/citrix_sharefile_cve_2020_8982_lfi'],
             },
         },
         'references': [

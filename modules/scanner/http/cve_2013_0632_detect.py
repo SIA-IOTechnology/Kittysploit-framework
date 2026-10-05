@@ -42,7 +42,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/coldfusion_cve_2013_0632_auth_bypass',
+                ],
             },
         },
         'references': [

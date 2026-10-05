@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/dlink_dir868l_cve_2019_17506_credential_leak'],
             },
         },
         'references': [

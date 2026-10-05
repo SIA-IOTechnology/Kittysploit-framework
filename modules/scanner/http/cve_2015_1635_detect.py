@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/windows/http/iis_cve_2015_1635_rce',
+                ],
             },
         },
         'references': [

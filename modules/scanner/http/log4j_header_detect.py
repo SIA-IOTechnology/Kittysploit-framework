@@ -59,7 +59,8 @@ class Module(Scanner, Http_client):
                                    {'capability': 'cve_indicator', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': ['scanner/http/spring_actuator_detect',
+         'suggested_followups': ['exploits/multi/http/log4shell_cve_2021_44228_rce',
+                                 'scanner/http/spring_actuator_detect',
                                  'auxiliary/scanner/http/java_deserialization']},
     },
     }

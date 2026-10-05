@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/citrix_netscaler_cve_2023_3519_rce',
+                    'exploits/multi/http/citrix_adc_cve_2019_19781_rce',
+                ],
             },
         },
         'references': [

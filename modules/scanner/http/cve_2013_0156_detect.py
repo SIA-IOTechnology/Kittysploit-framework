@@ -40,7 +40,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/rails_cve_2013_0156_rce',
+                ],
             },
         },
         'references': [

@@ -57,6 +57,7 @@ class Module(Scanner, Http_client):
                     {"capability": "admin_access", "from_detail": "join JWT admin token"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/jfrog_artifactory_cve_2026_82329_rce",
                     "scanner/http/jfrog_artifactory_detect",
                 ],
             },

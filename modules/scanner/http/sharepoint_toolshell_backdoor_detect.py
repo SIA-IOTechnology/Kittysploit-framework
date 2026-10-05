@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/windows/http/sharepoint_toolshell_cve_2025_53770_rce',
+                    'scanner/http/sharepoint_toolshell_cve_2025_53770_detect',
+                ],
             },
         },
         'references': ['https://research.eye.security/sharepoint-under-siege/'],

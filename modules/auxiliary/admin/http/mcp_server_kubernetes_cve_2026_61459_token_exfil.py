@@ -57,6 +57,7 @@ class Module(Auxiliary, Http_client, Http_server):
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
+                    "exploits/multi/http/mcp_server_kubernetes_cve_2026_61459_rce",
                     "post/kubernetes/gather/whoami",
                     "post/kubernetes/gather/secrets",
                 ],

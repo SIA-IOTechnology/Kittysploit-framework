@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/netis_cve_2024_48455_info_disclosure'],
             },
         },
         'references': [
@@ -60,14 +60,18 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        return False  # disabled: corrupted matchers
         path = '/cgi-bin/skk_get.cgi'
-        r = self.http_request(method='POST', path=path, allow_redirects=False, headers={'Content-Type': 'application/x-www-form-urlencoded'}, data='mode_name=skk_get&wl_link=0\n')
+        r = self.http_request(
+            method='POST',
+            path=path,
+            allow_redirects=False,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            data='mode_name=skk_get&wl_link=0',
+        )
         if not r or r.status_code != 200:
             return False
-        body = r.text or ""
-        body_all = ('version\\', ':', 'statsList\\')
-        if all(m in body for m in body_all):
+        body = (r.text or '').lower()
+        if 'version' in body and ('statslist' in body or ':' in body):
             self.set_info(severity='high', reason='Netis Wifi Router - Information Disclosure detected', path=path)
             return True
         return False

@@ -367,6 +367,7 @@ def build_planner_llm_context(
         "persistent_vault_count": int(persistent_vault.get("entry_count") or 0),
         "plan_revision": int((kb.get("plan_recalc") or {}).get("revision") or 0),
         "plan_recalc_pending": bool((kb.get("plan_recalc") or {}).get("replan_required")),
+        "discovery": _discovery_context(kb),
     })
     text = str(payload)
     if len(text) > MAX_HOST_CONTEXT_CHARS:
@@ -374,6 +375,12 @@ def build_planner_llm_context(
         payload["similar_episodes"] = episodes[:2]
         payload["playbook_hints"] = playbooks[:2]
     return payload
+
+
+def _discovery_context(kb: Mapping[str, Any]) -> Dict[str, Any]:
+    from interfaces.command_system.builtin.agent.discovery import discovery_summary
+
+    return discovery_summary(kb)
 
 
 def attach_planner_context(

@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/razer_cve_2022_29014_lfi'],
             },
         },
         'references': [

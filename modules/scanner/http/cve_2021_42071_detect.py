@@ -49,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/visualtools_dvr_cve_2021_42071_rce',
+                ],
             },
         },
         'references': [

@@ -44,7 +44,9 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'risk_signal', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/gitlab_cve_2021_22205_rce',
+                ],
             },
         },
         'references': [

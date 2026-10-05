@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'scanner/http/cisco_sdwan_cve_2026_76504_detect',
+                    'exploits/multi/http/cisco_sdwan_cve_2026_76504_auth_bypass',
+                ],
             },
         },
         'references': [

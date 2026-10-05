@@ -60,6 +60,7 @@ class Module(Scanner, Http_client):
                     {"capability": "risk_signal", "from_detail": "pitboss log injection"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/citrix_netscaler_cve_2026_88771_rce",
                     "scanner/http/netscaler_gateway_detect",
                     "scanner/http/citrix_netscaler_cve_2026_8451",
                 ],

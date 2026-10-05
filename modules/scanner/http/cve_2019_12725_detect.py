@@ -49,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/linux/http/zeroshell_cve_2019_12725_rce',
+                ],
             },
         },
         'references': [

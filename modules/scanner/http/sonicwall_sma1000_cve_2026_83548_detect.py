@@ -60,6 +60,7 @@ class Module(Scanner, Http_client):
                     {"capability": "ssrf", "from_detail": "WorkPlace forward proxy"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/sonicwall_sma1000_cve_2026_83548_ssrf",
                     "scanner/http/sonicwall_sma_detect",
                 ],
             },

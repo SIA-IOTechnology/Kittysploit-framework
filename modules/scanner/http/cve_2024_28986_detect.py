@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/windows/http/solarwinds_whd_cve_2024_28986_rce'],
             },
         },
         'references': [

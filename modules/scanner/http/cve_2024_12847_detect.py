@@ -42,7 +42,7 @@ class Module(Scanner, Http_client):
                 'produces_capabilities': [{'capability': 'rce', 'from_detail': ''}],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/netgear_dgn_cve_2024_12847_rce'],
             },
         },
         'references': [

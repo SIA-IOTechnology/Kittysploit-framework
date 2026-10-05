@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': ['exploits/multi/http/vmware_vcenter_cve_2021_21972_rce'],
             },
         },
         'references': [

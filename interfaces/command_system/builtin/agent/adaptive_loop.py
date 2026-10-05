@@ -671,6 +671,13 @@ class AdaptiveLoopEngine:
         if action.path and action.path not in observed:
             observed.append(action.path)
 
+        try:
+            from interfaces.command_system.builtin.agent.discovery import sync_discovery
+
+            sync_discovery(state)
+        except Exception:
+            pass
+
         learning = getattr(self.services, "learning", None)
         if learning is None:
             return

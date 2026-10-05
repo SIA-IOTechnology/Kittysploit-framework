@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/ivanti_csa_cve_2021_44529_rce',
+                ],
             },
         },
         'references': [

@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': ['exploits/linux/http/dlink_dir850_cve_2021_46379_open_redirect'],
             },
         },
         'references': [

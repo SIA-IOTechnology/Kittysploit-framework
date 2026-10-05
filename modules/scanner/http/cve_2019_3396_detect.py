@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/confluence_cve_2019_3396_rce',
+                ],
             },
         },
         'references': [

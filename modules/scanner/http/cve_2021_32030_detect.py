@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/asus_gt_ac2900_cve_2021_32030_auth_bypass',
+                ],
             },
         },
         'references': [

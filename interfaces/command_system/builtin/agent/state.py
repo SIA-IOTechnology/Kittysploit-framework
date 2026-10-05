@@ -132,6 +132,8 @@ class AgentState:
     shadow_mode_enabled: bool = False
     specialist_sequential_enabled: bool = False
     specialist_parallel_enabled: bool = False
+    # None = follow the mission profile; True/False = force discovery mode.
+    discovery_enabled: Optional[bool] = None
     adaptive_loop: Any = None
 
 
@@ -235,6 +237,7 @@ def agent_state_to_dict(state: AgentState) -> Dict[str, Any]:
         "shadow_mode_enabled": state.shadow_mode_enabled,
         "specialist_sequential_enabled": state.specialist_sequential_enabled,
         "specialist_parallel_enabled": state.specialist_parallel_enabled,
+        "discovery_enabled": state.discovery_enabled,
     }
 
 
@@ -364,6 +367,9 @@ def agent_state_from_dict(d: Dict[str, Any]) -> AgentState:
         shadow_mode_enabled=bool(d.get("shadow_mode_enabled", False)),
         specialist_sequential_enabled=bool(d.get("specialist_sequential_enabled", False)),
         specialist_parallel_enabled=bool(d.get("specialist_parallel_enabled", False)),
+        discovery_enabled=(
+            None if d.get("discovery_enabled") is None else bool(d.get("discovery_enabled"))
+        ),
     )
 
 

@@ -55,7 +55,9 @@ class Module(Scanner, Http_client):
                 "produces_capabilities": [
                     {"capability": "auth_bypass_surface", "from_detail": "Edge cert auth"},
                 ],
-                "suggested_followups": [],
+                "suggested_followups": [
+                    "exploits/multi/http/arista_velocloud_cve_2026_93952_auth_bypass",
+                ],
             },
         },
     }

@@ -38,6 +38,10 @@ from interfaces.command_system.builtin.agent.typed_models import (
     Hypothesis,
     StopDecision,
 )
+from interfaces.command_system.builtin.agent.discovery import (
+    discovery_mode_enabled,
+    sync_discovery,
+)
 from interfaces.command_system.builtin.agent.workflow_core import AgentWorkflowCore
 
 __all__ = [
@@ -63,7 +67,9 @@ __all__ = [
     "StopDecision",
     "TargetResolver",
     "adaptive_loop_enabled",
+    "discovery_mode_enabled",
     "hierarchical_planner_enabled",
+    "sync_discovery",
     "shadow_mode_enabled",
     "specialist_execution_mode",
 ]

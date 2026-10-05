@@ -49,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/geoserver_cve_2022_24816_rce',
+                ],
             },
         },
         'references': [

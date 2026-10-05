@@ -49,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/dlink_dar8000_cve_2023_4542_rce',
+                ],
             },
         },
         'references': [

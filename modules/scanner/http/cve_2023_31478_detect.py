@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/gl_inet_cve_2023_31478_info_disclosure'],
             },
         },
         'references': ['https://www.gl-inet.com'],

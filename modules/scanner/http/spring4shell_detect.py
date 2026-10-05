@@ -48,7 +48,8 @@ class Module(Scanner, Http_client):
                                    {'capability': 'cve_indicator', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': ['scanner/http/spring_actuator_detect',
+         'suggested_followups': ['exploits/multi/http/spring4shell_cve_2022_22965_rce',
+                                 'scanner/http/spring_actuator_detect',
                                  'auxiliary/scanner/http/java_deserialization']},
     },
     }

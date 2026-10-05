@@ -24,6 +24,11 @@ class Module(Scanner, Http_client):
             "cost": 1.0,
             "noise": 0.2,
             "value": 1.0,
+            "chain": {
+                "suggested_followups": [
+                    "exploits/multi/http/progress_loadmaster_cve_2026_8037_rce",
+                ],
+            },
         },
         "references": ['https://community.progress.com/s/article/LoadMaster-Critical-Security-Bulletin-June-2026-CVE-2026-8037-CVE-2026-33691', 'https://labs.watchtowr.com/enterprise-tech-in-shell-out-progress-kemp-loadmaster-uninitialized-heap-to-pre-auth-rce-cve-2026-8037/', 'https://nvd.nist.gov/vuln/detail/CVE-2026-8037'],
     }

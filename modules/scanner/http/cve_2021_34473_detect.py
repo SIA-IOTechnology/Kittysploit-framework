@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/windows/http/exchange_proxyshell_cve_2021_34473_rce',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': [

@@ -54,6 +54,7 @@ class Module(Scanner, Http_client, Tcp_scanner_client):
                     {"capability": "rce_surface", "from_detail": "management upload"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/checkpoint_cve_2026_93616_rce",
                     "scanner/http/checkpoint_detect",
                 ],
             },

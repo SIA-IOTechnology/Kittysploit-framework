@@ -87,6 +87,7 @@ class Module(Scanner, Http_client):
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
+                    "exploits/windows/http/sharepoint_cve_2026_50522_rce",
                     "scanner/http/sharepoint_detect",
                     "scanner/http/sharepoint_toolshell_backdoor_detect",
                 ],

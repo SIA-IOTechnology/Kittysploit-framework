@@ -53,7 +53,9 @@ class Module(Scanner, Http_client):
                 "produces_capabilities": [
                     {"capability": "rce_surface", "from_detail": "OAuth UserInfo overflow"},
                 ],
-                "suggested_followups": [],
+                "suggested_followups": [
+                    "exploits/multi/http/f5_bigip_cve_2026_94127_rce",
+                ],
             },
         },
     }

@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': ['exploits/linux/http/brother_cve_2024_51977_info_disclosure'],
             },
         },
         'references': ['https://github.com/sfewer-r7/BrotherVulnerabilities/blob/main/CVE-2024-51977.rb'],

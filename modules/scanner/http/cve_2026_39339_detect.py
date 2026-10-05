@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/churchcrm_cve_2026_39339_auth_bypass',
+                ],
             },
         },
         'references': ['https://github.com/ChurchCRM/CRM/security/advisories/GHSA-v3p2-mx78-pxhc'],

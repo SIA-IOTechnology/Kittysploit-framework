@@ -53,6 +53,7 @@ class Module(Scanner, Http_client):
                     {"capability": "admin_surface", "from_detail": "N-central login"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/nable_ncentral_cve_2026_86218_rce",
                     "scanner/http/ncentral_detect",
                 ],
             },

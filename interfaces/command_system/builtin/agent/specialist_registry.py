@@ -136,6 +136,23 @@ def _situational_specialist_profiles() -> Dict[str, SpecialistProfile]:
             maturity="stable",
             mitre_tactics=("discovery", "credential-access"),
         ),
+        "discovery": SpecialistProfile(
+            key="discovery",
+            name="Discovery Specialist",
+            description=(
+                "Ranks module-free hypotheses already stored by discovery mode. "
+                "Does not select modules or confirm a finding without a differential oracle."
+            ),
+            capabilities=("hypothesis", "differential_oracle"),
+            module_families=(),
+            triggers=("discovery",),
+            inputs=("knowledge_base",),
+            outputs=("hypothesis",),
+            budget_requests=2,
+            read_only=True,
+            maturity="stable",
+            mitre_tactics=("discovery",),
+        ),
         "session_post": SpecialistProfile(
             key="session_post",
             name="Session/Post Specialist",
@@ -280,7 +297,15 @@ class SpecialistRegistry:
         if coordinator is not None and phase_l in {"reason", "plan", "init"}:
             _add(coordinator)
 
-        return matched[: max(1, int(limit or MAX_FAN_OUT))]
+        extra = 0
+        discovery_kb = kb.get("discovery") if isinstance(kb.get("discovery"), dict) else {}
+        if discovery_kb.get("enabled"):
+            discovery = self._profiles.get("discovery")
+            if discovery is not None:
+                _add(discovery)
+                extra = 1
+
+        return matched[: max(1, int(limit or MAX_FAN_OUT)) + extra]
 
 
 def resolve_specialist_fan_out(state: Any = None, kb: Optional[Mapping[str, Any]] = None) -> int:

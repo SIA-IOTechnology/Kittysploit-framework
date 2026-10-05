@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/dlink_nas_cve_2024_3272_backdoor_rce'],
             },
         },
         'references': ['https://github.com/netsecfish/dlink', 'https://nvd.nist.gov/vuln/detail/cve-2024-3272'],

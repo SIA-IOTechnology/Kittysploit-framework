@@ -55,6 +55,7 @@ class Module(Scanner, Http_client):
                     {"capability": "lfi", "from_detail": "file.path multipart"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/gitlab_cve_2026_85706_file_read",
                     "scanner/http/gitlab_detect",
                 ],
             },

@@ -170,6 +170,8 @@ def propose_for_specialist(
     limit: int = 2,
 ) -> List[SpecialistProposal]:
     """Read-only specialist proposal — never executes modules."""
+    if profile.key == "discovery":
+        return []
     ranked = sorted(
         [row for row in catalog if row.admissible],
         key=lambda row: _specialist_score(profile, row, ctx),

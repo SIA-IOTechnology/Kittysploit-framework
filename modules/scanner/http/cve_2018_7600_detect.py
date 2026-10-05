@@ -52,7 +52,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/drupal_cve_2018_7600_rce',
+                    'exploits/http/drupal_rce',
+                ],
             },
         },
         'references': [

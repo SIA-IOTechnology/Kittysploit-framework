@@ -55,6 +55,7 @@ class Module(Scanner, Http_client):
                     {"capability": "dos", "from_detail": "CVE-2026-71269 candidate"},
                 ],
                 "suggested_followups": [
+                    "exploits/linux/http/nodered_unauth_flow_rce",
                     "auxiliary/dos/http/nodered_cve_2026_71269_library_dos",
                 ],
             },

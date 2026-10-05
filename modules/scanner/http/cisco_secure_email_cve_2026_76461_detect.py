@@ -55,6 +55,7 @@ class Module(Scanner, Http_client):
                     {"capability": "rce_surface", "from_detail": "SMTP email parsing SQLi"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/cisco_secure_email_cve_2026_76461_rce",
                     "scanner/http/cisco_esa_detect",
                 ],
             },

@@ -28,6 +28,7 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "request_budget": 40,
         "http_replay": "safe",
         "reuse_proxy_auth": True,
+        "discovery_mode": True,
         "description": "Authenticated review using approved proxy cookies.",
     },
     "api-review": {
@@ -35,6 +36,7 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "approved_risks": ["read", "active"],
         "request_budget": 30,
         "http_replay": "safe",
+        "discovery_mode": True,
         "description": "API surface validation without destructive actions.",
     },
     "internal-lab": {
@@ -51,6 +53,7 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "request_budget": 30,
         "http_replay": "safe",
         "catalog_policy": "bug-bounty-safe",
+        "discovery_mode": True,
         "description": "Bug-bounty-safe validation; no post-exploit, payloads, DoS, persistence, or brute force.",
     },
     "detection-validation": {
@@ -65,7 +68,21 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "approved_risks": ["read", "active"],
         "request_budget": 15,
         "plan_only": True,
+        "discovery_mode": True,
         "description": "Training mode: plan without exploitation.",
+    },
+    "discovery": {
+        "safety_profile": "safe",
+        "approved_risks": ["read"],
+        "request_budget": 20,
+        "http_replay": "off",
+        "plan_only": True,
+        "catalog_policy": "bug-bounty-safe",
+        "discovery_mode": True,
+        "description": (
+            "Read-only application model and differential hypotheses. "
+            "No exploit execution; catalog matches do not count as novel findings."
+        ),
     },
     "ot-safe-assessment": {
         "safety_profile": "safe",

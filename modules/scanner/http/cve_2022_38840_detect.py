@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/linux/http/guralp_cve_2022_38840_xxe_lfi'],
             },
         },
         'references': ['https://www.exploit-db.com/exploits/51037', 'https://nvd.nist.gov/vuln/detail/CVE-2022-38840'],

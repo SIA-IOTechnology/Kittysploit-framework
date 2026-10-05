@@ -58,6 +58,16 @@ from interfaces.command_system.builtin.agent.agent_constants import (
 from core.framework.module_context import capture_module_context, restore_module_context
 
 
+_RECOMMENDED_PROFILES = (
+    "safe-web",
+    "bug-bounty-safe",
+    "api-review",
+    "authenticated-audit",
+    "passive",
+    "discovery",
+)
+
+
 class AgentCommand(BaseCommand):
     """Autonomous command to scan, exploit and report."""
 
@@ -71,18 +81,47 @@ class AgentCommand(BaseCommand):
 
     @property
     def usage(self) -> str:
-        return "agent <target> [options] | agent <doctor|explain|replay|retest|profiles|metadata|benchmark> ..."
+        return "agent <target> [--profile NAME] | agent profiles | agent help advanced"
 
     def get_subcommands(self):
-        return ["doctor", "explain", "replay", "retest", "profiles", "metadata", "benchmark"]
+        return ["doctor", "explain", "replay", "retest", "profiles", "help", "metadata", "benchmark"]
 
     @property
     def help_text(self) -> str:
+        return f"""
+{self.description}
+
+Start with a target. The agent asks before anything intrusive.
+
+    agent example.com
+    agent https://example.com --profile safe-web
+    agent example.com --profile bug-bounty-safe
+    agent example.com --dry-run
+
+Choose a preset instead of stacking flags:
+    --profile NAME          See the short list with: agent profiles
+    --goal recon            Look only. Also: validate, obtain-auth
+    --no-exploit            Stop before exploitation
+    --verbose               Show more of what the agent is doing
+
+After a run:
+    agent explain <run_id>
+    agent doctor
+
+Everything else (benchmarks, metadata, timeouts, TLS, LLM):
+    agent help advanced
+"""
+
+    @property
+    def advanced_help_text(self) -> str:
         profile_lines = "\n".join(
             f"    {name:<22} {desc}"
             for name, desc in list_mission_profiles().items()
         )
         return f"""
+Full reference. For a run, prefer: agent <target> --profile NAME
+Day-to-day help: agent
+
 {self.description}
 
 Usage:
@@ -431,11 +470,34 @@ Examples:
         parser.add_argument("--help", "-h", action="store_true")
         return parser
 
+    def _print_profiles(self, args) -> bool:
+        profiles = list_mission_profiles()
+        show_all = any(str(arg).lower() in {"--all", "all"} for arg in args)
+        if show_all:
+            names = list(profiles)
+            print_info("All mission profiles:")
+        else:
+            names = [name for name in _RECOMMENDED_PROFILES if name in profiles]
+            print_info("Profiles to start with:")
+        for name in names:
+            print_info(f"  {name}: {profiles[name]}")
+        if not show_all:
+            hidden = len(profiles) - len(names)
+            if hidden > 0:
+                print_info(f"{hidden} more profiles: agent profiles --all")
+        return True
+
     def execute(self, args, **kwargs) -> bool:
         if not args:
             print_info(self.help_text)
             return True
         sub = str(args[0]).lower()
+        if sub == "help":
+            if len(args) > 1 and str(args[1]).lower() in {"advanced", "all"}:
+                print_info(self.advanced_help_text)
+            else:
+                print_info(self.help_text)
+            return True
         if sub == "doctor":
             return self._run_doctor(args[1:])
         if sub == "explain" and len(args) >= 2:
@@ -445,9 +507,7 @@ Examples:
         if sub == "retest" and len(args) >= 2:
             return self._run_retest(args[1])
         if sub == "profiles":
-            for name, description in list_mission_profiles().items():
-                print_info(f"{name}: {description}")
-            return True
+            return self._print_profiles(args[1:])
         if sub == "metadata":
             if len(args) >= 2 and str(args[1]).lower() == "annotate":
                 return self._run_metadata_annotate(args[2:])

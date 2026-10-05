@@ -52,6 +52,7 @@ class Module(Scanner, Http_client):
             },
             "chain": {
                 "suggested_followups": [
+                    "exploits/multi/http/citrix_netscaler_cve_2026_88771_rce",
                     "scanner/http/citrix_netscaler_cve_2026_88771_detect",
                 ],
             },

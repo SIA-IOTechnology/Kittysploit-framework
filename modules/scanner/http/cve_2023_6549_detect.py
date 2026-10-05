@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/scanner/http/citrix_bleed_cve_2023_4966_steal',
+                ],
             },
         },
         'references': [

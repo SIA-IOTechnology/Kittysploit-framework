@@ -51,7 +51,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/ivanti_connect_secure_cve_2024_21887_rce',
+                ],
             },
         },
         'references': [

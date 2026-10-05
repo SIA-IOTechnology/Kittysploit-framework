@@ -41,7 +41,10 @@ class Module(Scanner, Http_client):
         'chain':         {'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': []},
+         'suggested_followups': [
+             'scanner/http/moveit_cve_2023_34362_detect',
+             'exploits/multi/http/moveit_cve_2023_34362_rce',
+         ]},
     },
     }
 

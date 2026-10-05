@@ -51,7 +51,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/multi/http/sap_netweaver_cve_2025_31324_rce',
+                ],
             },
         },
         'references': [

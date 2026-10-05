@@ -52,7 +52,9 @@ class Module(Scanner, Http_client):
                 "produces_capabilities": [
                     {"capability": "network_device", "from_detail": "gs1900 cgi"},
                 ],
-                "suggested_followups": [],
+                "suggested_followups": [
+                    "exploits/linux/http/zyxel_gs1900_cve_2026_7273_rce",
+                ],
             },
         },
     }

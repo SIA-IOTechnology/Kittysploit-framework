@@ -52,7 +52,9 @@ class Module(Scanner, Http_client):
                     {"capability": "auth_bypass", "from_detail": "MCP OAuth fallback"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/litellm_cve_2026_59822_rce",
                     "scanner/http/litellm_cve_2026_42208_detect",
+                    "auxiliary/admin/http/litellm_cve_2026_42208_sqli",
                 ],
             },
         },

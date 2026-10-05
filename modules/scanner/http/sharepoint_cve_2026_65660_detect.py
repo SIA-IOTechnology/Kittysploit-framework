@@ -60,6 +60,7 @@ class Module(Scanner, Http_client):
                     {"capability": "rce_surface", "from_detail": "ToolPane MSOTlPn_DWP"},
                 ],
                 "suggested_followups": [
+                    "exploits/windows/http/sharepoint_cve_2026_65660_rce",
                     "exploits/windows/http/sharepoint_cve_2026_26114_rce",
                     "scanner/http/sharepoint_detect",
                 ],

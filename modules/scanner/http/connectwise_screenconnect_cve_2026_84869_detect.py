@@ -53,7 +53,8 @@ class Module(Scanner, Http_client):
                     {"capability": "rce_surface", "from_detail": "unauth file transfer"},
                 ],
                 "suggested_followups": [
-                    "scanner/http/connectwise_screenconnect_cve_2024_1709_detect",
+                    "exploits/multi/http/connectwise_screenconnect_cve_2026_84869_rce",
+                    "exploits/multi/http/connectwise_screenconnect_cve_2024_1709_rce",
                 ],
             },
         },

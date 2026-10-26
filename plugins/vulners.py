@@ -14,7 +14,6 @@ from kittysploit import *
 from core.output_handler import table_render_width
 from core.service_secrets import SERVICE_VULNERS, get_service_secret_store
 from lib.vulners.client import (
-    PLUGIN_VERSION,
     VulnersClient,
     VulnersError,
     bulletin_display_title,
@@ -28,7 +27,7 @@ class VulnersPlugin(Plugin):
     __info__ = {
         "name": "vulners",
         "description": "Query Vulners and export the KittySploit module feed",
-        "version": PLUGIN_VERSION,
+        "version": "1.1.0",
         "author": "KittySploit Team",
         "dependencies": ["requests"],
     }

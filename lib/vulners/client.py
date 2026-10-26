@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
 
 import requests
 
-PLUGIN_VERSION = "1.2.1"
+PLUGIN_VERSION = "1.1.0"
 BASE_URL = "https://vulners.com"
 
 LUCENE_URL = f"{BASE_URL}/api/v3/search/lucene"

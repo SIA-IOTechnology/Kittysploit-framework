@@ -26,6 +26,7 @@ class Module(Post):
                 "consumes_capabilities": ["shell"],
                 "produces_capabilities": ["root"],
                 "suggested_followups": [
+                    "post/shell/linux/manage/kernel_lpe_2026_router",
                     "post/shell/linux/gather/suid_sgid_hunt",
                     "post/shell/multi/manage/pivot_autoroute",
                 ],
@@ -139,8 +140,14 @@ class Module(Post):
             if any(x in joined for x in ("python3", "python", "gcc", "make")):
                 out.append({"severity": "low", "title": "Build/runtime tooling available", "detail": "Compilers or interpreters may support custom exploit staging."})
             if "nt authority\\system" not in joined and "uid=0" not in joined:
-                if "4.4" in data.get("kernel", "") or "5." in data.get("kernel", ""):
-                    out.append({"severity": "low", "title": "Kernel version collected", "detail": "Cross-check kernel against known public LPEs for this distro."})
+                if "4.4" in data.get("kernel", "") or "5." in data.get("kernel", "") or "6." in data.get("kernel", ""):
+                    out.append(
+                        {
+                            "severity": "medium",
+                            "title": "Kernel LPE router (2026)",
+                            "detail": "Run post/shell/linux/manage/kernel_lpe_2026_router (auto_run=false to rank, then auto_run=true).",
+                        }
+                    )
         else:
             privs = data.get("privileges", "").lower()
             if "impersonate" in privs or "assignprimarytoken" in privs:

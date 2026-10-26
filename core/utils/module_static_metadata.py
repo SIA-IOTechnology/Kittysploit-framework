@@ -515,7 +515,15 @@ def parse_static_module_info(file_path: str) -> Dict[str, Any]:
                 out["tags"] = [str(x) for x in tgs if str(x).strip()]
             refs = ev.get("references") or []
             if isinstance(refs, (list, tuple)):
-                out["references"] = [str(x) for x in refs if str(x).strip()]
+                normalized_refs: List[str] = []
+                for entry in refs:
+                    if isinstance(entry, str) and entry.strip():
+                        normalized_refs.append(entry.strip())
+                    elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                        url = str(entry[1] or "").strip()
+                        if url.lower().startswith(("http://", "https://")):
+                            normalized_refs.append(url)
+                out["references"] = normalized_refs
             elif isinstance(refs, str) and refs.strip():
                 out["references"] = [refs.strip()]
             opts = ev.get("options")

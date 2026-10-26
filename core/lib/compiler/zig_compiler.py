@@ -259,7 +259,8 @@ class ZigCompiler:
                 strip: bool = True,
                 static: bool = True,
                 windows_subsystem: Optional[str] = None,
-                extra_args: Optional[List[str]] = None) -> bool:
+                extra_args: Optional[List[str]] = None,
+                include_dir: Optional[str] = None) -> bool:
         """
         Compile Zig source code to executable
 
@@ -295,6 +296,7 @@ class ZigCompiler:
             static=static,
             windows_subsystem=windows_subsystem,
             extra_args=extra_args,
+            include_dir=include_dir,
         )
 
     def _compile_source(self,
@@ -370,6 +372,12 @@ class ZigCompiler:
             else:
                 # Use -femit-bin to output directly to target path (avoids move + Windows file lock)
                 emit_bin_path = output_path.replace('\\', '/')
+                zig_extra = list(extra_args or [])
+                if include_dir and os.path.isdir(include_dir):
+                    i_flag = '-I' + self.temp_dir.replace('\\', '/')
+                    if not any(a.startswith('-I') for a in zig_extra):
+                        zig_extra.append(i_flag)
+
                 cmd = [
                     self.zig_path,
                     'build-exe',
@@ -393,10 +401,10 @@ class ZigCompiler:
                 if target_platform.lower() == 'windows' and windows_subsystem == 'windows':
                     cmd.extend(['--subsystem', 'windows'])
 
-                if extra_args:
-                    cmd.extend(extra_args)
+                if zig_extra:
+                    cmd.extend(zig_extra)
 
-                if target_platform.lower() == 'linux' and not any(a == '-lc' for a in extra_args or []):
+                if target_platform.lower() == 'linux' and not any(a == '-lc' for a in zig_extra):
                     cmd.append('-lc')
 
             # Remove existing output file - lld-link on Windows often fails with "Permission denied"

@@ -30,6 +30,7 @@ class Module(Scanner, Http_client, Wordpress):
             "https://nefariousplan.com/posts/divi-form-builder-cve-2026-5118-administrator-existed",
         ],
         "modules": [
+            "exploits/multi/http/wp_plugin_divi_form_builder_cve_2026_5118",
             "auxiliary/admin/http/wp_plugin_divi_form_builder_cve_2026_5118",
         ],
         "tags": [

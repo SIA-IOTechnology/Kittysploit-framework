@@ -108,9 +108,22 @@ class ReportPhaseMixin:
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            phase = str(row.get("phase", "?"))
+            phase = str(row.get("phase") or row.get("kind") or "?")
+            actor = str(row.get("actor") or "").strip()
+            prefix = f"{phase}/{actor}" if actor else phase
             summary = self._shorten_text(row.get("summary", ""), 140)
-            print_info(f"- {phase}: {summary}")
+            print_info(f"- {prefix}: {summary}")
+
+    def _print_run_journal_debrief(self, state: AgentState, tail: int = 8) -> None:
+        journal = getattr(state, "run_journal", None) or []
+        adhoc = [r for r in journal if isinstance(r, dict) and str(r.get("kind", "")).startswith("adhoc")]
+        if not adhoc:
+            return
+        print_status("Ad hoc operator steps")
+        for row in adhoc[-tail:]:
+            kind = str(row.get("kind") or "step")
+            summary = self._shorten_text(row.get("summary", ""), 160)
+            print_info(f"- [{kind}] {summary}")
 
     _DEBRIEF_NOISE_SIGNALS = frozenset({
         "vulnerability_detected",

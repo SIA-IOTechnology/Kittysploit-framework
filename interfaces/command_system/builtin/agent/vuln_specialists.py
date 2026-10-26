@@ -56,6 +56,37 @@ SPECIALIST_HINTS: Dict[str, str] = {
         "mass assignment on role/isAdmin fields, and OAuth scope confusion. "
         "Require cross-user differential proof (victim vs attacker identity), not 200-only heuristics."
     ),
+    "xxe": (
+        "XXE SPECIALIST: confirm parser with benign external entity, then escalate to "
+        "file read and SSRF-via-XXE. Test parameter entities, UTF-16 wrappers, and XInclude."
+    ),
+    "rce": (
+        "RCE SPECIALIST: classify injection sink (template, OGNL, SpEL, shell metacharacters). "
+        "Prefer confirm-only probes before weaponized chains; chain only with explicit authorization."
+    ),
+    "upload": (
+        "UPLOAD SPECIALIST: test extension/double-extension, Content-Type bypass, path traversal "
+        "in filename, and execution via secondary lfi or script handler misconfig."
+    ),
+    "deser": (
+        "DESERIALIZATION SPECIALIST: fingerprint format (Java, PHP, Python pickle, .NET ViewState). "
+        "Use known gadget modules; never run blind ysoserial without scope approval."
+    ),
+    "graphql_agent": (
+        "GRAPHQL SPECIALIST: introspection, batch/alias DoS, field-level authz on mutations, "
+        "and IDOR via node/global IDs."
+    ),
+    "jwt_agent": (
+        "JWT SPECIALIST: alg none, HS256 with public key, kid injection, and claim tampering "
+        "with differential session behavior."
+    ),
+    "cloud_aws": (
+        "AWS SPECIALIST: metadata SSRF, S3 ACL/policy, IAM overpermission modules; stay in declared account scope."
+    ),
+    "active_directory": (
+        "AD SPECIALIST: LDAP signing, Kerberos roast paths, SMB signing, and cert template abuse "
+        "when domain controllers are in scope."
+    ),
 }
 
 _PATH_CATEGORY_MAP: Dict[str, str] = {
@@ -82,6 +113,15 @@ _PATH_CATEGORY_MAP: Dict[str, str] = {
     "broken_access": "authz",
     "api_bola": "authz",
     "mass_assignment": "authz",
+    "xxe": "xxe",
+    "xml": "xxe",
+    "upload": "upload",
+    "file_upload": "upload",
+    "deserialization": "deser",
+    "pickle": "deser",
+    "command_injection": "rce",
+    "spring4shell": "rce",
+    "graphql": "graphql_agent",
 }
 
 

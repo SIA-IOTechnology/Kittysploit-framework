@@ -246,7 +246,16 @@ def collect_specialists_for_phase(
             continue
         seen.add(row.key)
         merged.append(row)
-    return merged[: max(1, int(limit or MAX_FAN_OUT))]
+    merged = merged[: max(1, int(limit or MAX_FAN_OUT))]
+    try:
+        from interfaces.command_system.builtin.agent.mission_orchestrator import (
+            filter_specialists_by_delegation,
+        )
+
+        merged = filter_specialists_by_delegation(merged, state)
+    except Exception:
+        pass
+    return merged
 
 
 def path_matches_host_specialist(profile: SpecialistProfile, path: str) -> bool:

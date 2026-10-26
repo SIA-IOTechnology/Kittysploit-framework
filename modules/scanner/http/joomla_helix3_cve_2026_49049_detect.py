@@ -72,7 +72,10 @@ class Module(Scanner, Http_client, Joomla):
                 ],
                 "consumes_capabilities": [],
                 "option_bindings": {},
-                "suggested_followups": [],
+                "suggested_followups": [
+                    "exploits/multi/http/joomla_helix3_cve_2026_49049_file_write",
+                    "auxiliary/admin/http/joomla_helix3_cve_2026_49049_file_write",
+                ],
             },
         },
     }

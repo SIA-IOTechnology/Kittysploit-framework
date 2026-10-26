@@ -57,6 +57,7 @@ class Module(Scanner, Http_client):
                     {"capability": "admin_access", "from_detail": "admin API scope"},
                 ],
                 "suggested_followups": [
+                    "exploits/multi/http/wso2_cve_2026_5430_jwt_bypass",
                     "auxiliary/admin/http/wso2_cve_2026_5430_jwt_bypass",
                 ],
             },

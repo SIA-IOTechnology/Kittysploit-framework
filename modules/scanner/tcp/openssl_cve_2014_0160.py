@@ -58,7 +58,10 @@ class Module(Scanner, Tcp_scanner_client):
         'chain':         {'produces_capabilities': [{'capability': 'admin_surface', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': []},
+         'suggested_followups': [
+             'exploits/multi/tcp/openssl_cve_2014_0160_heartbleed',
+             'auxiliary/scanner/tcp/openssl_cve_2014_0160_memory_dump',
+         ]},
     },
     }
 

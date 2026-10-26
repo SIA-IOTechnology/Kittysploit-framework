@@ -848,6 +848,14 @@ class ReportService:
                 else:
                     report_md.write("- None\n")
 
+                journal_md = ""
+                if isinstance(knowledge_base, dict):
+                    journal_md = str(knowledge_base.get("agent_run_journal_md") or "").strip()
+                if journal_md:
+                    report_md.write("\n## Ad Hoc Operator Journal\n")
+                    report_md.write(journal_md)
+                    report_md.write("\n")
+
                 report_md.write("## New Sessions\n")
                 if new_sessions:
                     for session_id in new_sessions:

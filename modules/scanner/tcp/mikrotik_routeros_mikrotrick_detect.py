@@ -59,6 +59,7 @@ class Module(Scanner, Tcp_scanner_client):
                     {"capability": "memory_disclosure_surface", "from_detail": "btest TCP/2000"},
                 ],
                 "suggested_followups": [
+                    "exploits/linux/ssh/mikrotik_routeros_cve_2026_67279_ssh_session",
                     "scanner/tcp/mikrotik_ftp_detect",
                 ],
             },

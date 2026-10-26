@@ -117,6 +117,7 @@ kittysploit> agent http://192.168.56.10 \
 - Evidence-gated exploit handoff (reduce speculative false positives)
 - Parallel specialists by OWASP class (injection, XSS, SSRF, auth, authz)
 - Scope, budgets, and risk approvals stay under operator control
+- Scanner → exploit chains via `agent.chain.suggested_followups` (see [exploit-watch archive index](docs/agent/exploit-watch-archive-index.md) for PoCs synced from [exploit-watch-archive](https://github.com/dinosn/exploit-watch-archive))
 
 ## Core platform
 

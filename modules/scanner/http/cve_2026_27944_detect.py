@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'auxiliary/admin/http/nginx_ui_cve_2026_27944_backup_leak',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': [

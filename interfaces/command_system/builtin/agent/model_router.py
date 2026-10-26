@@ -18,6 +18,8 @@ TASK_EXTRACTION = "extraction"
 TASK_TACTICAL_RANK = "tactical_rank"
 TASK_STRATEGIC_PLAN = "strategic_plan"
 TASK_HTTP_RECON = "http_recon"
+TASK_SQL_DOMAIN = "sql_domain"
+TASK_AD_DOMAIN = "ad_domain"
 
 DEFAULT_SMALL_MODEL = "llama3.1:8b"
 DEFAULT_STRONG_MODEL = "llama3.3:latest"
@@ -161,6 +163,20 @@ class ModelRouter:
                 model=operator_model or small_model_name(),
                 tier="operator" if operator_model else "small",
                 reason="http_recon_specialist",
+            )
+        if task == TASK_SQL_DOMAIN:
+            return ModelRoute(
+                task=task,
+                model=operator_model or small_model_name(),
+                tier="operator" if operator_model else "small",
+                reason="sql_domain_specialist",
+            )
+        if task == TASK_AD_DOMAIN:
+            return ModelRoute(
+                task=task,
+                model=operator_model or strong_model_name(),
+                tier="operator" if operator_model else "strong",
+                reason="ad_domain_specialist",
             )
         if task in {TASK_CLASSIFICATION, TASK_EXTRACTION, TASK_TACTICAL_RANK}:
             return ModelRoute(

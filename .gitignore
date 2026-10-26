@@ -103,7 +103,5 @@ tests/*
 !tests/test_scanner_false_positive_guards.py
 docs/academy/*
 data/loot/*
-lib/vulners/__init__.py
-lib/vulners/client.py
-plugins/vulners.py
-
+demo/*
+dev/*

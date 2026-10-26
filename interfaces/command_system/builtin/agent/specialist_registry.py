@@ -167,6 +167,54 @@ def _situational_specialist_profiles() -> Dict[str, SpecialistProfile]:
             maturity="stable",
             mitre_tactics=("privilege-escalation", "collection"),
         ),
+        "database_service": SpecialistProfile(
+            key="database_service",
+            name="Database Service Specialist",
+            description=(
+                "DBMS-oriented enumeration and injection modules when SQL ports or "
+                "database banners are observed."
+            ),
+            capabilities=("db_enum", "sqli_validation", "db_fingerprint"),
+            module_families=(
+                "auxiliary/scanner/mssql",
+                "auxiliary/scanner/mysql",
+                "auxiliary/scanner/postgres",
+                "scanner/mssql",
+                "scanner/mysql",
+                "scanner/postgres",
+                "auxiliary/scanner/http",
+            ),
+            triggers=("mysql", "mssql", "postgres", "mariadb", "oracle", "1433", "3306", "5432"),
+            inputs=("knowledge_base", "catalog_actions", "finding"),
+            outputs=("specialist_proposal", "hypothesis"),
+            budget_requests=4,
+            read_only=True,
+            maturity="stable",
+            mitre_tactics=("discovery", "credential-access"),
+        ),
+        "active_directory": SpecialistProfile(
+            key="active_directory",
+            name="Active Directory Specialist",
+            description=(
+                "LDAP/Kerberos/AD attack surface: domain enum, credential attacks, "
+                "and relay-adjacent module selection."
+            ),
+            capabilities=("ldap_enum", "kerberos", "ad_cs", "bloodhound_prep"),
+            module_families=(
+                "auxiliary/scanner/ldap",
+                "auxiliary/scanner/kerberos",
+                "auxiliary/scanner/smb",
+                "auxiliary/gather",
+                "scanner/ldap",
+            ),
+            triggers=("ldap", "kerberos", "active_directory", "domain", "adcs", "389", "636", "88"),
+            inputs=("knowledge_base", "catalog_actions"),
+            outputs=("specialist_proposal",),
+            budget_requests=5,
+            read_only=True,
+            maturity="stable",
+            mitre_tactics=("discovery", "credential-access", "lateral-movement"),
+        ),
     }
 
 
@@ -177,6 +225,12 @@ class SpecialistRegistry:
         base = {key: _profile_from_archetype(profile) for key, profile in ARCHETYPE_PROFILES.items()}
         base.update(_vuln_specialist_profiles())
         base.update(_situational_specialist_profiles())
+        try:
+            from interfaces.command_system.builtin.agent.specialist_army import ARMY_PROFILES
+
+            base.update(dict(ARMY_PROFILES))
+        except Exception:
+            pass
         if profiles:
             base.update(dict(profiles))
         self._profiles = base
@@ -225,7 +279,11 @@ class SpecialistRegistry:
                 if vuln is not None:
                     _add(vuln)
 
-        if signals.intersection({"sqli", "xss", "lfi", "ssrf", "ssti", "auth", "authz", "bola", "idor", "owasp_web_parallel"}):
+        _VULN_SIGNALS = {
+            "sqli", "xss", "lfi", "ssrf", "ssti", "auth", "authz", "bola", "idor",
+            "owasp_web_parallel", "xxe", "rce", "upload", "deser", "csrf", "cors", "graphql",
+        }
+        if signals.intersection(_VULN_SIGNALS):
             for token in signals:
                 mapped = token
                 if token in {"bola", "idor"}:
@@ -287,6 +345,28 @@ class SpecialistRegistry:
             if ssh is not None:
                 _add(ssh)
 
+        db_ports = {str(p) for p in (kb.get("open_ports") or [])}
+        if (
+            signals.intersection({"sql_signal", "sqli_confirmed", "sqli"})
+            or hints.intersection({"mysql", "mssql", "postgres", "mariadb", "oracle"})
+            or any(tok in services for tok in ("mysql", "mssql", "postgres", "mariadb"))
+            or db_ports.intersection({"1433", "3306", "5432", "1521"})
+        ):
+            db = self._profiles.get("database_service")
+            if db is not None:
+                _add(db)
+
+        if (
+            hints.intersection({"domain", "ad", "ldap", "kerberos", "active_directory"})
+            or signals.intersection({"ldap", "kerberos", "active_directory", "domain_controller"})
+            or db_ports.intersection({"389", "636", "88", "3268", "3269"})
+            or "ldap" in services
+            or "kerberos" in services
+        ):
+            ad = self._profiles.get("active_directory")
+            if ad is not None:
+                _add(ad)
+
         sessions = kb.get("verified_session_ids") or kb.get("verified_sessions") or kb.get("sessions") or []
         if sessions and phase_l in {"post", "act", "reason", "exploit", ""}:
             post = self._profiles.get("session_post")
@@ -305,6 +385,29 @@ class SpecialistRegistry:
                 _add(discovery)
                 extra = 1
 
+        try:
+            from interfaces.command_system.builtin.agent.specialist_army import (
+                army_fan_out_limit,
+                match_army_specialists,
+                specialist_army_enabled,
+            )
+
+            army_on = specialist_army_enabled(kb=kb) or bool(kb.get("specialist_army"))
+            army_limit = army_fan_out_limit(kb=kb) if army_on else int(limit or MAX_FAN_OUT)
+            for key in match_army_specialists(
+                kb,
+                phase=phase_l,
+                army_mode=army_on,
+                limit=army_limit,
+            ):
+                profile = self._profiles.get(key)
+                if profile is not None:
+                    _add(profile)
+            if army_on:
+                limit = max(int(limit or MAX_FAN_OUT), army_limit)
+        except Exception:
+            pass
+
         return matched[: max(1, int(limit or MAX_FAN_OUT)) + extra]
 
 
@@ -315,7 +418,18 @@ def resolve_specialist_fan_out(state: Any = None, kb: Optional[Mapping[str, Any]
     payload = kb
     if not isinstance(payload, Mapping) and state is not None:
         payload = getattr(state, "knowledge_base", None)
-    return mission_fan_out(payload if isinstance(payload, Mapping) else None, default=MAX_FAN_OUT)
+    base = mission_fan_out(payload if isinstance(payload, Mapping) else None, default=MAX_FAN_OUT)
+    try:
+        from interfaces.command_system.builtin.agent.specialist_army import (
+            army_fan_out_limit,
+            specialist_army_enabled,
+        )
+
+        if specialist_army_enabled(state, payload if isinstance(payload, Mapping) else None):
+            return max(base, army_fan_out_limit(state, payload if isinstance(payload, Mapping) else None))
+    except Exception:
+        pass
+    return base
 
 
 DEFAULT_SPECIALIST_REGISTRY = SpecialistRegistry()

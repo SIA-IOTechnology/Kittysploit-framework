@@ -140,6 +140,16 @@ def _path_matches_specialist(profile: SpecialistProfile, path: str, kb: Mapping[
         return "scanner" in low or "auxiliary/scanner" in low
     if profile.key == "coordinator":
         return True
+    if profile.key == "database_service":
+        return any(tok in low for tok in ("mysql", "mssql", "postgres", "sqli", "sql_injection", "oracle"))
+    if profile.key == "active_directory":
+        return any(tok in low for tok in ("ldap", "kerberos", "domain", "adcs", "bloodhound", "smb"))
+    if profile.key == "web_recon":
+        return any(tok in low for tok in ("http", "api", "graphql", "swagger", "scanner/http"))
+    for trig in profile.triggers:
+        token = str(trig or "").lower()
+        if len(token) >= 3 and token in low:
+            return True
     return False
 
 
@@ -168,10 +178,44 @@ def propose_for_specialist(
     ctx: SpecialistRunContext,
     *,
     limit: int = 2,
+    state: Any = None,
 ) -> List[SpecialistProposal]:
     """Read-only specialist proposal — never executes modules."""
     if profile.key == "discovery":
         return []
+    if state is not None:
+        ranked_pre = sorted(
+            [row for row in catalog if row.admissible],
+            key=lambda row: _specialist_score(profile, row, ctx),
+            reverse=True,
+        )
+        try:
+            from interfaces.command_system.builtin.agent.specialist_llm import (
+                propose_for_specialist_llm,
+                specialist_llm_enabled,
+            )
+
+            skip_llm = False
+            if ranked_pre:
+                top_score = _specialist_score(profile, ranked_pre[0], ctx)
+                if top_score >= 85.0 and _path_matches_specialist(profile, ranked_pre[0].module_path, ctx.kb):
+                    skip_llm = True
+                elif len(ranked_pre) >= 2:
+                    gap = top_score - _specialist_score(profile, ranked_pre[1], ctx)
+                    if gap >= 38.0 and _path_matches_specialist(profile, ranked_pre[0].module_path, ctx.kb):
+                        skip_llm = True
+            if specialist_llm_enabled(state) and not skip_llm:
+                llm_batch = propose_for_specialist_llm(
+                    profile,
+                    catalog,
+                    ctx,
+                    state=state,
+                    limit=limit,
+                )
+                if llm_batch:
+                    return llm_batch
+        except Exception:
+            pass
     ranked = sorted(
         [row for row in catalog if row.admissible],
         key=lambda row: _specialist_score(profile, row, ctx),
@@ -295,7 +339,7 @@ class SequentialSpecialistRunner:
             )
             started = time.monotonic()
             try:
-                batch = propose_for_specialist(specialist, catalog, ctx)
+                batch = propose_for_specialist(specialist, catalog, ctx, state=state)
                 outcome = ActionOutcome(
                     action_id=task.id,
                     verdict="proposal_only",
@@ -438,7 +482,7 @@ class ParallelSpecialistScheduler:
             started = time.monotonic()
             try:
                 local_ctx = copy.deepcopy(ctx)
-                batch = propose_for_specialist(specialist, catalog, local_ctx)
+                batch = propose_for_specialist(specialist, catalog, local_ctx, state=state)
                 return SpecialistRunRecord(
                     mode="parallel",
                     specialist=specialist.key,
@@ -565,7 +609,14 @@ def run_specialists(
             llm_available=llm_available,
         )
     if mode == "parallel":
-        return ParallelSpecialistScheduler().run(
+        workers = MAX_FAN_OUT
+        try:
+            from interfaces.command_system.builtin.agent.specialist_army import army_fan_out_limit
+
+            workers = army_fan_out_limit(state)
+        except Exception:
+            pass
+        return ParallelSpecialistScheduler(max_workers=workers).run(
             state,
             observation,
             catalog,

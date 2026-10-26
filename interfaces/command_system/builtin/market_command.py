@@ -13,10 +13,85 @@ import sys
 import getpass
 import logging
 import time
+import stat
+import shutil
+import uuid
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning, print_empty
+
+
+_LOCAL_INSTALL_IGNORES = (
+    '.git',
+    '.hg',
+    '.svn',
+    '__pycache__',
+    '.pytest_cache',
+    '*.pyc',
+    '*.pyo',
+    '.DS_Store',
+)
+
+
+def _remove_tree_with_readonly_files(path: str) -> None:
+    """Remove an install tree, retrying Windows read-only files as writable."""
+
+    def handle_remove_error(function, failed_path, exc_info):
+        error = exc_info[1]
+        if not isinstance(error, PermissionError):
+            raise error
+        os.chmod(failed_path, stat.S_IREAD | stat.S_IWRITE)
+        function(failed_path)
+
+    shutil.rmtree(path, onerror=handle_remove_error)
+
+
+def _replace_local_extension_tree(source_dir: str, target_dir: str) -> None:
+    """Stage and atomically replace a locally installed extension tree."""
+    target_parent = os.path.dirname(target_dir)
+    os.makedirs(target_parent, exist_ok=True)
+    swap_token = uuid.uuid4().hex[:10]
+    staging_dir = os.path.join(target_parent, f".latest-install-{swap_token}")
+    backup_dir = os.path.join(target_parent, f".latest-backup-{swap_token}")
+
+    try:
+        shutil.copytree(
+            source_dir,
+            staging_dir,
+            ignore=shutil.ignore_patterns(*_LOCAL_INSTALL_IGNORES),
+        )
+    except Exception:
+        if os.path.exists(staging_dir):
+            _remove_tree_with_readonly_files(staging_dir)
+        raise
+
+    moved_existing = False
+    try:
+        if os.path.exists(target_dir):
+            try:
+                os.replace(target_dir, backup_dir)
+            except PermissionError as exc:
+                raise PermissionError(
+                    "The installed extension is currently in use. Stop it, then retry the installation."
+                ) from exc
+            moved_existing = True
+        os.replace(staging_dir, target_dir)
+    except Exception:
+        # Restore the previous complete installation if the swap fails.
+        if moved_existing and not os.path.exists(target_dir) and os.path.exists(backup_dir):
+            os.replace(backup_dir, target_dir)
+        if os.path.exists(staging_dir):
+            _remove_tree_with_readonly_files(staging_dir)
+        raise
+
+    if moved_existing and os.path.exists(backup_dir):
+        try:
+            _remove_tree_with_readonly_files(backup_dir)
+        except PermissionError:
+            print_warning(
+                f"Previous extension files are still in use; backup retained at {backup_dir}"
+            )
 
 
 class _ExtensionLaunchHandle:
@@ -3905,7 +3980,6 @@ Examples:
     def _install_from_local_path(self, module: Dict, local_path: str, version: str) -> bool:
         """Install extension from a local path (for local updates)"""
         try:
-            import shutil
             from core.registry.client import ExtensionClient
             from core.registry.manifest import ManifestParser
             
@@ -3977,20 +4051,24 @@ Examples:
             
             # Create target directory: extensions/{marketplace_id}/{manifest_id}/latest/
             target_dir = os.path.join(extensions_dir, marketplace_id, manifest.id, "latest")
-            os.makedirs(target_dir, exist_ok=True)
-            
-            # Copy all files from local_path to target_dir
+
+            # A local project can itself be a Git repository. Repository metadata
+            # is not part of an extension package and Git object files are commonly
+            # read-only on Windows, which used to make reinstalling fail here.
+            source_root = os.path.realpath(local_path)
+            target_root = os.path.realpath(target_dir)
+            extensions_root = os.path.realpath(extensions_dir)
+            if os.path.commonpath([extensions_root, target_root]) != extensions_root:
+                raise ValueError("Extension target escapes the configured extensions directory")
+            common_source_target = os.path.commonpath([source_root, target_root])
+            if common_source_target in (source_root, target_root):
+                raise ValueError("Local extension source and install target must not overlap")
+
+            # Build the replacement beside the active version, then swap the
+            # directories. This prevents a running/locked extension from being
+            # left half-deleted when Windows refuses to remove its entry point.
             print_info(f"Copying extension files to {target_dir}...")
-            for item in os.listdir(local_path):
-                src = os.path.join(local_path, item)
-                dst = os.path.join(target_dir, item)
-                
-                if os.path.isdir(src):
-                    if os.path.exists(dst):
-                        shutil.rmtree(dst)
-                    shutil.copytree(src, dst)
-                else:
-                    shutil.copy2(src, dst)
+            _replace_local_extension_tree(local_path, target_dir)
             
             # Use ExtensionClient to create stubs/launchers
             from core.registry.client import install_extension_python_dependencies

@@ -436,6 +436,21 @@ class HierarchicalPlannerEngine:
 
     def plan_actions(self, state: Any, observation: Mapping[str, Any]) -> List[AgentAction]:
         tactical = self.plan_shadow_cycle(state, observation, mutate_state=True)
+        try:
+            from interfaces.command_system.builtin.agent.performance_planner import (
+                build_turbo_action_batch,
+                turbo_mode_enabled,
+            )
+
+            if turbo_mode_enabled(state):
+                catalog = getattr(state, "_last_admissible_catalog", None) or []
+                proposals_raw = getattr(state, "_last_specialist_proposals", []) or []
+                batch = build_turbo_action_batch(state, tactical, catalog, proposals_raw)
+                if batch:
+                    state.last_plan_batch_size = len(batch)  # type: ignore[attr-defined]
+                    return batch
+        except Exception:
+            pass
         return self.tactical.select(tactical)
 
     def plan_shadow_cycle(
@@ -448,14 +463,33 @@ class HierarchicalPlannerEngine:
         kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
         modules = observation.get("catalog_modules") or []
         strategic = self.strategic.plan(state, observation)
-        catalog = build_admissible_catalog(
-            modules=modules,
-            kb=kb,
-            goal=getattr(state, "campaign_goal", ""),
-            executed_actions=getattr(state, "executed_actions", []) or [],
-            state=state,
-            learning_store=getattr(self.services, "learning", None),
-        )
+        try:
+            from interfaces.command_system.builtin.agent.performance_planner import (
+                catalog_cache_key,
+                get_cached_catalog,
+                store_catalog_cache,
+                turbo_mode_enabled,
+            )
+
+            cache_key = catalog_cache_key(state, modules)
+            catalog = get_cached_catalog(state, cache_key) if turbo_mode_enabled(state) else None
+        except Exception:
+            catalog = None
+            cache_key = None
+        if catalog is None:
+            catalog = build_admissible_catalog(
+                modules=modules,
+                kb=kb,
+                goal=getattr(state, "campaign_goal", ""),
+                executed_actions=getattr(state, "executed_actions", []) or [],
+                state=state,
+                learning_store=getattr(self.services, "learning", None),
+            )
+            try:
+                if cache_key is not None:
+                    store_catalog_cache(state, cache_key, catalog)
+            except Exception:
+                pass
         from interfaces.command_system.builtin.agent.planner_context import (
             attach_planner_context,
             calibrate_proposals,
@@ -468,6 +502,25 @@ class HierarchicalPlannerEngine:
             findings=getattr(state, "contextual_findings", None) or getattr(state, "vulnerable_results", None),
             learning_store=getattr(self.services, "learning", None),
         )
+        try:
+            from interfaces.command_system.builtin.agent.mission_orchestrator import (
+                domain_orchestrator_enabled,
+                run_domain_orchestrator,
+            )
+
+            if domain_orchestrator_enabled(state):
+                state._orchestrator_action_hints = [  # type: ignore[attr-defined]
+                    {
+                        "action_id": row.action_id,
+                        "module_path": row.module_path,
+                        "action_type": row.action.type,
+                        "heuristic_score": row.heuristic_score,
+                    }
+                    for row in sorted(catalog, key=lambda r: float(r.heuristic_score or 0.0), reverse=True)[:12]
+                ]
+                run_domain_orchestrator(state, observation, admissible_count=len(catalog))
+        except Exception:
+            pass
         from interfaces.command_system.builtin.agent.model_router import (
             TASK_HTTP_RECON,
             TASK_TACTICAL_RANK,
@@ -486,6 +539,56 @@ class HierarchicalPlannerEngine:
             llm_available=llm_available,
         )
         proposals = calibrate_proposals(proposals, kb)
+        state._last_specialist_proposals = list(proposals)  # type: ignore[attr-defined]
+        state._last_admissible_catalog = list(catalog)  # type: ignore[attr-defined]
+
+        try:
+            from interfaces.command_system.builtin.agent.performance_planner import (
+                consensus_to_tactical,
+                fast_path_consensus,
+                llm_skip_on_consensus_enabled,
+                resolve_orchestrator_direct_action,
+            )
+
+            direct = resolve_orchestrator_direct_action(state, catalog, gateway=self.gateway)
+            if direct is not None and direct.selected_action is not None:
+                tactical = direct
+                if mutate_state:
+                    self._record_blackboard(state, strategic, tactical, catalog, proposals)
+                    state.hierarchical_plan = tactical.to_dict()
+                    state.goal_progress = GoalProgress(
+                        goal=strategic.goal,
+                        completion_ratio=self._completion_ratio(strategic.capability_rung),
+                        milestones=strategic.sub_goals,
+                        blockers=[],
+                    )
+                    state.planning_fast_path = "orchestrator_direct"  # type: ignore[attr-defined]
+                return tactical
+
+            if llm_skip_on_consensus_enabled(state):
+                consensus = fast_path_consensus(proposals, catalog)
+                if consensus is not None:
+                    fast_tactical = consensus_to_tactical(
+                        consensus,
+                        catalog,
+                        gateway=self.gateway,
+                        state=state,
+                    )
+                    if fast_tactical is not None and fast_tactical.selected_action is not None:
+                        tactical = fast_tactical
+                        if mutate_state:
+                            self._record_blackboard(state, strategic, tactical, catalog, proposals)
+                            state.hierarchical_plan = tactical.to_dict()
+                            state.goal_progress = GoalProgress(
+                                goal=strategic.goal,
+                                completion_ratio=self._completion_ratio(strategic.capability_rung),
+                                milestones=strategic.sub_goals,
+                                blockers=[],
+                            )
+                        state.planning_fast_path = "consensus"  # type: ignore[attr-defined]
+                        return tactical
+        except Exception:
+            pass
 
         task = TASK_TACTICAL_RANK
         try:

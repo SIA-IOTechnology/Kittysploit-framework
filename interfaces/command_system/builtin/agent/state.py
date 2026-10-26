@@ -101,6 +101,11 @@ class AgentState:
     potential_findings: List[Any] = field(default_factory=list)
     campaign_goal: Optional[str] = None
     operator_goal: Optional[str] = None
+    until_session: bool = False
+    session_pursuit_enabled: Optional[bool] = None
+    adhoc_autonomy: Optional[bool] = None
+    approve_shell_exec: bool = False
+    run_journal: List[Any] = field(default_factory=list)
     target_reachable: Optional[bool] = None
     reachability_reason: Optional[str] = None
     decision_timeline: List[Any] = field(default_factory=list)

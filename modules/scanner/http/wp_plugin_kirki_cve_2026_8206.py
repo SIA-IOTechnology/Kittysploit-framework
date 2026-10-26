@@ -30,6 +30,7 @@ class Module(Scanner, Http_client, Wordpress):
             "https://wordpress.org/plugins/kirki/",
         ],
         "modules": [
+            "exploits/multi/http/wp_plugin_kirki_cve_2026_8206",
             "auxiliary/admin/http/wp_plugin_kirki_cve_2026_8206",
         ],
         "tags": [

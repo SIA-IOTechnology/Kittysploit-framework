@@ -97,9 +97,14 @@ class PluginManager:
             print_warning(f"Plugin '{plugin_name}' not found")
             return False
     
+    def _evict_plugin_module(self, plugin_name: str) -> None:
+        """Drop the import cache so the next load reads the .py file from disk."""
+        sys.modules.pop(plugin_name, None)
+
     def reload_plugin(self, plugin_name: str) -> bool:
         if plugin_name in self.plugins:
             self.unload_plugin(plugin_name)
+        self._evict_plugin_module(plugin_name)
         return self.load_plugin(plugin_name)
     
     def get_plugin(self, plugin_name: str) -> Optional[Plugin]:

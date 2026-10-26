@@ -58,6 +58,7 @@ class AdaptiveLoopState:
     stop: Optional[StopDecision] = None
     goal_progress: Optional[GoalProgress] = None
     actions_since_checkpoint: int = 0
+    micro_loops: int = 0
 
 
 class AdaptiveLoopEngine:
@@ -87,9 +88,29 @@ class AdaptiveLoopEngine:
         loop_state = AdaptiveLoopState()
         state.adaptive_loop = loop_state
         pending: List[AgentAction] = []
+        adhoc_stride = max(4, int(os.environ.get("KITTYSPLOIT_AGENT_ADHOC_STRIDE", "6") or "6"))
+        try:
+            from interfaces.command_system.builtin.agent.session_pursuit import (
+                loop_limits_for_session_pursuit,
+                session_pursuit_active,
+            )
+
+            if session_pursuit_active(state):
+                limits = loop_limits_for_session_pursuit(state)
+                self.config = AdaptiveLoopConfig(
+                    max_iterations=limits.max_iterations,
+                    max_replans=limits.max_replans,
+                    checkpoint_each_action=self.config.checkpoint_each_action,
+                    checkpoint_every_n=self.config.checkpoint_every_n,
+                )
+                state._session_check_core = getattr(self.services, "core", None)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         while loop_state.iteration < self.config.max_iterations:
             loop_state.iteration += 1
+            if not pending:
+                loop_state.micro_loops = 0
             observation = self._observe(state)
             loop_state.goal_progress = self._goal_progress(state, observation)
 
@@ -101,6 +122,34 @@ class AdaptiveLoopEngine:
 
             if not pending:
                 pending = self._plan(state, observation)
+                if not pending:
+                    try:
+                        from interfaces.command_system.builtin.agent.session_pursuit import (
+                            has_verified_session,
+                            plan_session_pursuit_wave,
+                            session_pursuit_active,
+                        )
+
+                        if session_pursuit_active(state) and not has_verified_session(state):
+                            wave = plan_session_pursuit_wave(state, observation, self.services)
+                            if wave:
+                                pending = wave
+                                loop_state.replans += 1
+                                loop_state.pivots.append("session_pursuit_wave")
+                    except Exception:
+                        pass
+                if not pending:
+                    try:
+                        from interfaces.command_system.builtin.agent.agent_tool_loop import (
+                            try_adhoc_recovery_actions,
+                        )
+
+                        recovery = try_adhoc_recovery_actions(state, self.services, observation)
+                        if recovery:
+                            pending = recovery
+                            loop_state.pivots.append("adhoc_tool_recovery")
+                    except Exception:
+                        pass
                 if not pending:
                     stop = StopDecision(
                         stop=True,
@@ -146,9 +195,40 @@ class AdaptiveLoopEngine:
                 loop_state.pivots.append(f"plan_recalc:{replan_reasons[0]}")
 
             if raw.get("http_intel_replan"):
-                pending.clear()
-                loop_state.replans += 1
-                loop_state.pivots.append("http_intel_update")
+                chained = False
+                try:
+                    from interfaces.command_system.builtin.agent.tool_micro_loop import (
+                        handle_http_intel_micro_loop,
+                    )
+
+                    decision = handle_http_intel_micro_loop(
+                        state,
+                        observation,
+                        action,
+                        raw,
+                        pending,
+                        micro_loops_done=int(loop_state.micro_loops or 0),
+                    )
+                    if decision.chained:
+                        for followup in reversed(decision.prepend_actions):
+                            pending.insert(0, followup)
+                        loop_state.micro_loops = int(loop_state.micro_loops or 0) + 1
+                        loop_state.pivots.append(f"micro_loop:{decision.reason}")
+                        chained = True
+                        state.last_micro_loop = {  # type: ignore[attr-defined]
+                            "reason": decision.reason,
+                            "modules": [str(a.path or "") for a in decision.prepend_actions],
+                        }
+                    elif decision.clear_pending:
+                        pending.clear()
+                        loop_state.replans += 1
+                        loop_state.pivots.append(
+                            decision.reason if decision.reason.startswith("micro_loop") else "http_intel_update"
+                        )
+                except Exception:
+                    pending.clear()
+                    loop_state.replans += 1
+                    loop_state.pivots.append("http_intel_update")
 
             if outcome.verdict in {"confirmed"} and self._goal_reached(state, loop_state):
                 loop_state.stop = StopDecision(
@@ -159,15 +239,52 @@ class AdaptiveLoopEngine:
                 )
                 break
 
+            try:
+                from interfaces.command_system.builtin.agent.adhoc_autonomy import adhoc_autonomy_enabled
+                from interfaces.command_system.builtin.agent.agent_tool_loop import run_adhoc_tool_turn
+                from interfaces.command_system.builtin.agent.session_pursuit import (
+                    has_verified_session,
+                    session_pursuit_active,
+                )
+
+                if (
+                    adhoc_autonomy_enabled(state)
+                    and loop_state.iteration % adhoc_stride == 0
+                    and not (session_pursuit_active(state) and has_verified_session(state))
+                ):
+                    if run_adhoc_tool_turn(state, self.services, observation, actor="adhoc_interleave"):
+                        loop_state.pivots.append("adhoc_interleave")
+                        pending.clear()
+            except Exception:
+                pass
+
             if outcome.verdict in {"module_error", "refuted", "no_signal", "blocked"}:
                 if loop_state.replans >= self.config.max_replans:
-                    loop_state.stop = StopDecision(
-                        stop=True,
-                        kind="soft",
-                        reason="branch_exhausted",
-                        detail="Max replans reached after failures",
-                    )
-                    break
+                    recovered = False
+                    try:
+                        from interfaces.command_system.builtin.agent.session_pursuit import (
+                            has_verified_session,
+                            plan_session_pursuit_wave,
+                            session_pursuit_active,
+                        )
+
+                        if session_pursuit_active(state) and not has_verified_session(state):
+                            wave = plan_session_pursuit_wave(state, observation, self.services)
+                            if wave:
+                                pending = wave + list(pending)
+                                loop_state.replans = max(0, loop_state.replans - 4)
+                                loop_state.pivots.append("session_pursuit_replan_recovery")
+                                recovered = True
+                    except Exception:
+                        recovered = False
+                    if not recovered:
+                        loop_state.stop = StopDecision(
+                            stop=True,
+                            kind="soft",
+                            reason="branch_exhausted",
+                            detail="Max replans reached after failures",
+                        )
+                        break
                 recovery_actions = self._recovery.suggest(
                     outcome,
                     hypotheses=self._hypotheses(state),
@@ -187,6 +304,13 @@ class AdaptiveLoopEngine:
                     self._checkpoint_action(state, action, outcome)
                     loop_state.actions_since_checkpoint = 0
 
+        try:
+            from interfaces.command_system.builtin.agent.agent_tool_loop import run_adhoc_tool_tail
+
+            self.services.adaptive_engine = self  # type: ignore[attr-defined]
+            run_adhoc_tool_tail(state, self.services, loop_state)
+        except Exception:
+            pass
         self._finalize_state(state, loop_state)
         return state
 
@@ -719,6 +843,18 @@ class AdaptiveLoopEngine:
         if budget > 0:
             used = int(getattr(metrics, "network_units_used", 0) or 0) if metrics else 0
             if used >= budget:
+                try:
+                    from interfaces.command_system.builtin.agent.session_pursuit import (
+                        extend_session_pursuit_budget,
+                        has_verified_session,
+                        session_pursuit_active,
+                    )
+
+                    if session_pursuit_active(state) and not has_verified_session(state):
+                        if extend_session_pursuit_budget(state, self.services):
+                            return StopDecision(stop=False)
+                except Exception:
+                    pass
                 return StopDecision(stop=True, kind="hard", reason="budget_exhausted")
         # Avoid premature low-novelty soft-stop while chasing auth/shell with room to replan.
         if loop_state.iteration > 1 and not loop_state.pivots and loop_state.replans == 0:
@@ -729,6 +865,17 @@ class AdaptiveLoopEngine:
                     or goal in {"obtain-auth", "post-auth"}
                     or bool(getattr(state, "shell_hunter", False))
                 )
+                try:
+                    from interfaces.command_system.builtin.agent.session_pursuit import (
+                        has_verified_session,
+                        session_pursuit_active,
+                    )
+
+                    if session_pursuit_active(state) and not has_verified_session(state):
+                        if loop_state.iteration < max(12, self.config.max_iterations - 2):
+                            return StopDecision(stop=False)
+                except Exception:
+                    pass
                 if pursuing and loop_state.iteration < max(4, self.config.max_iterations // 3):
                     return StopDecision(stop=False)
                 return StopDecision(stop=True, kind="soft", reason="low_novelty")
@@ -802,8 +949,13 @@ class AdaptiveLoopEngine:
         if goal in {"recon", "validate"}:
             return len(loop_state.outcomes) >= 2 and any(row.verdict == "confirmed" for row in loop_state.outcomes)
         if "shell" in goal:
-            sessions = getattr(state, "new_sessions", []) or []
-            return bool(sessions)
+            try:
+                from interfaces.command_system.builtin.agent.session_pursuit import has_verified_session
+
+                return has_verified_session(state)
+            except Exception:
+                sessions = getattr(state, "new_sessions", []) or []
+                return bool(sessions)
         if goal in {"obtain-auth", "obtain_auth"} or goal.endswith("-auth") or goal.endswith("_auth"):
             from interfaces.command_system.builtin.agent.goal_planner import kb_auth_terminal_reached
             return kb_auth_terminal_reached(kb)
@@ -868,6 +1020,14 @@ class AdaptiveLoopEngine:
         if not hasattr(state, "adaptive_loop") or state.adaptive_loop is None:
             state.adaptive_loop = loop_state
         try:
+            from interfaces.command_system.builtin.agent.agent_run_journal import journal_summary_markdown
+
+            kb = getattr(state, "knowledge_base", None)
+            if isinstance(kb, dict) and getattr(state, "run_journal", None):
+                kb["agent_run_journal_md"] = journal_summary_markdown(state)
+        except Exception:
+            pass
+        try:
             from interfaces.command_system.builtin.agent.network_budget import (
                 sync_metrics_from_budget,
             )
@@ -928,6 +1088,10 @@ class AdaptiveLoopEngine:
                 state.knowledge_base = kb
             try:
                 core._print_timeline_preview(state)
+            except Exception:
+                pass
+            try:
+                core._print_run_journal_debrief(state)
             except Exception:
                 pass
             core._print_session_discoveries_debrief(state)

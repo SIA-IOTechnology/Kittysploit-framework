@@ -332,6 +332,32 @@ Examples:
             ),
         )
         parser.add_argument("--shell-hunter", action="store_true", help="Aggressively pursue interactive shells")
+        parser.add_argument(
+            "--until-session",
+            action="store_true",
+            help=(
+                "Keep planning with LLM until a verified session/shell exists "
+                "(sets obtain-shell when no --goal; extends adaptive replans)."
+            ),
+        )
+        parser.add_argument(
+            "--adhoc",
+            action="store_true",
+            help=(
+                "Enable ad hoc tool loop (terminal, browser, framework CLI, off-catalog search) "
+                "when LLM is active."
+            ),
+        )
+        parser.add_argument(
+            "--no-adhoc",
+            action="store_true",
+            help="Disable ad hoc tool loop even during session pursuit.",
+        )
+        parser.add_argument(
+            "--approve-shell-exec",
+            action="store_true",
+            help="Allow ad hoc local shell_exec beyond the allowlisted prefixes.",
+        )
         parser.add_argument("--dry-run", action="store_true", help="Build a bounded plan without network traffic or module execution.")
         parser.add_argument("--plan-only", action="store_true", help="Run reconnaissance and planning, but never execute exploitation.")
         parser.add_argument("--checkpoint", action="store_true", help="Persist a redacted checkpoint after every completed phase.")
@@ -827,7 +853,14 @@ Examples:
         normalized_operator_goal = (
             normalize_goal(raw_operator_goal) if str(raw_operator_goal).strip() else None
         )
+        until_session = bool(getattr(parsed, "until_session", False))
+        if until_session and not normalized_operator_goal:
+            normalized_operator_goal = normalize_goal("obtain-shell")
         shell_goal = is_shell_operator_goal(normalized_operator_goal)
+        if until_session:
+            shell_goal = True
+            if not getattr(parsed, "shell_hunter", False):
+                parsed.shell_hunter = True
         if shell_goal:
             from interfaces.command_system.builtin.agent.runtime_policy import ModuleRisk
 
@@ -904,6 +937,13 @@ Examples:
             },
             campaign_goal=normalized_operator_goal,
             operator_goal=normalized_operator_goal,
+            until_session=until_session,
+            adhoc_autonomy=(
+                False
+                if bool(getattr(parsed, "no_adhoc", False))
+                else (True if bool(getattr(parsed, "adhoc", False)) else None)
+            ),
+            approve_shell_exec=bool(getattr(parsed, "approve_shell_exec", False)),
             llm_plan={"selected_paths": [], "rationale": "No LLM plan generated."},
             knowledge_base={
                 "tech_hints": [],
@@ -951,6 +991,24 @@ Examples:
             run_store=run_store,
         )
         state.framework = self.framework
+        try:
+            from interfaces.command_system.builtin.agent.session_pursuit import (
+                apply_session_pursuit_defaults,
+            )
+
+            apply_session_pursuit_defaults(
+                state,
+                explicit_goal=normalized_operator_goal,
+                until_session=until_session,
+                no_exploit=bool(parsed.no_exploit),
+                plan_only=bool(parsed.plan_only),
+                safety_profile=str(runtime_policy.safety_profile or "normal"),
+            )
+            if state.campaign_goal and not normalized_operator_goal:
+                normalized_operator_goal = str(state.campaign_goal)
+                state.knowledge_base["operator_campaign_goal"] = normalized_operator_goal
+        except Exception:
+            pass
         # Operator --protocol always wins over any lab-hint KB seed.
         # Otherwise seed from inferred URL scheme so planners filter local RF modules.
         if parsed.protocol:

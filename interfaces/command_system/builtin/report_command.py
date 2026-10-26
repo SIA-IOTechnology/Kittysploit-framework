@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Report command — push engagement data to KittySploit Reports SaaS.
+Report command — push engagement data to KittySploit Reports (cloud or local desktop agent).
 """
 
 import argparse
@@ -14,6 +14,16 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from interfaces.command_system.base_command import BaseCommand
 from core.output_handler import print_info, print_success, print_error, print_warning, print_table
+from core.report_local_agent import (
+    CLOUD_TRANSPORT,
+    LOCAL_TRANSPORT,
+    LOCAL_AGENT_CLIENT_HEADER,
+    ReportLocalAgentError,
+    local_report_agent_discovery_path,
+    ping_local_report_agent,
+    resolve_local_report_agent,
+)
+from core.version import VERSION
 
 
 class ReportCommand(BaseCommand):
@@ -30,7 +40,8 @@ class ReportCommand(BaseCommand):
     @property
     def usage(self) -> str:
         return (
-            "report [--tuto] [--api-key <key>] [--list] [--use <n>] [--project <id>] "
+            "report [--tuto] [--api-key <key>] [--local|--desktop] [--local-url <url>] "
+            "[--list] [--use <n>] [--project <id>] "
             "[--push|--push-hosts|--push-vulns|--push-evidence|--push-all] [--yes] [--status] [--config]"
         )
 
@@ -59,12 +70,17 @@ Options:
     --yes               Skip confirmation prompt
     --status            Check connection / API key
     --config            Show current configuration
+    --local             Sync via KittyReports Desktop (loopback agent, no cloud E2EE)
+    --desktop           Alias for --local
+    --local-url <url>   Override agent URL (token still read from discovery file)
 
 Examples:
     report --api-key YOUR_KEY
     report --list
     report --use 2
     report --push
+    report --push --local
+    report --local --list
     report --push-evidence --yes
     report --project abc123 --push --yes
         """
@@ -72,7 +88,10 @@ Examples:
     def __init__(self, framework, session, output_handler):
         super().__init__(framework, session, output_handler)
         self.parser = self._create_parser()
-        self.reports_url = "https://report.kittysploit.com"
+        self._cloud_reports_url = "https://report.kittysploit.com"
+        self.api_base_url = self._cloud_reports_url
+        self.transport = CLOUD_TRANSPORT
+        self.local_token = None
         self.api_key = None
         self.project_id = None
         self.project_name = None
@@ -107,6 +126,17 @@ Examples:
         parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
         parser.add_argument('--status', action='store_true', help='Check connection status and API key')
         parser.add_argument('--config', action='store_true', help='Show current configuration')
+        parser.add_argument(
+            '--local',
+            action='store_true',
+            help='Use KittyReports Desktop loopback agent (enable CLI sync in the app)',
+        )
+        parser.add_argument('--desktop', action='store_true', help='Alias for --local')
+        parser.add_argument(
+            '--local-url',
+            dest='local_url',
+            help='Override local agent base URL (http://127.0.0.1:port)',
+        )
         return parser
 
     def _load_config(self):
@@ -125,7 +155,9 @@ Examples:
                     url = config.get('reports_url') or config.get('portal_url')
                     if url:
                         from core.registry.urls import normalize_registry_url
-                        self.reports_url = normalize_registry_url(url)
+                        self._cloud_reports_url = normalize_registry_url(url)
+                        if self.transport == CLOUD_TRANSPORT:
+                            self.api_base_url = self._cloud_reports_url
 
                 if config_path == self._legacy_config_file and self.api_key:
                     self._save_config()
@@ -141,7 +173,7 @@ Examples:
 
             config = {
                 'api_key': self.api_key,
-                'reports_url': self.reports_url,
+                'reports_url': self._cloud_reports_url,
                 'project_id': self.project_id,
                 'project_name': self.project_name,
                 'updated_at': datetime.now().isoformat()
@@ -167,6 +199,13 @@ Examples:
         try:
             if parsed_args.tuto:
                 return self._show_tuto()
+
+            use_local = bool(
+                parsed_args.local or parsed_args.desktop or parsed_args.local_url
+            )
+            if use_local:
+                if not self._activate_local_transport(parsed_args.local_url):
+                    return False
 
             want_push = (
                 parsed_args.push or parsed_args.push_all
@@ -247,6 +286,11 @@ Examples:
         print_info("  report --config            Show local configuration")
         print_info("  export [-o file.json]      Offline JSON export for manual Reports import")
         print_info("")
+        print_info("Local desktop (no cloud E2EE)")
+        print_info("  1. Enable CLI sync in KittyReports Desktop.")
+        print_info(f"  2. Agent writes {local_report_agent_discovery_path()}")
+        print_info("  3. report --local --push   (no vault passphrase)")
+        print_info("")
         print_info("Security")
         print_info("  - API key: authentication only; saved locally.")
         print_info("  - Passphrase: never stored and never sent to the server.")
@@ -283,18 +327,60 @@ Examples:
         print_success("Local vault unlocked for this command (passphrase not transmitted)")
         return True
 
+    def _framework_version(self) -> str:
+        return str(getattr(self.framework, "version", None) or VERSION)
+
+    def _is_local_transport(self) -> bool:
+        return self.transport == LOCAL_TRANSPORT
+
+    def _activate_local_transport(self, local_url: Optional[str] = None) -> bool:
+        try:
+            base_url, token, _discovery = resolve_local_report_agent(local_url)
+            ping_local_report_agent(
+                base_url,
+                token,
+                framework_version=self._framework_version(),
+            )
+        except ReportLocalAgentError as exc:
+            print_error(str(exc))
+            return False
+
+        self.transport = LOCAL_TRANSPORT
+        self.api_base_url = base_url
+        self.local_token = token
+        print_success(f"Local Report Agent ready at {base_url}")
+        return True
+
     def _auth_headers(self) -> Dict[str, str]:
-        return {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json',
-            'User-Agent': 'KittySploit-Framework/1.0.0'
+        version = self._framework_version()
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": f"KittySploit-Framework/{version}",
+            "X-KittySploit-Client": LOCAL_AGENT_CLIENT_HEADER,
         }
+        if self._is_local_transport():
+            headers["Authorization"] = f"Bearer {self.local_token}"
+            headers["X-KittySploit-Transport"] = LOCAL_TRANSPORT
+        else:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["X-KittySploit-Transport"] = CLOUD_TRANSPORT
+        return headers
 
     def _require_api_key(self) -> bool:
         if self.api_key:
             return True
         print_error("API key not set. Use 'report --api-key <key>' (see report --tuto)")
         return False
+
+    def _require_credentials(self) -> bool:
+        if self._is_local_transport():
+            if self.local_token:
+                return True
+            print_error(
+                "Local agent not connected. Use report --local (enable CLI sync in KittyReports Desktop)."
+            )
+            return False
+        return self._require_api_key()
 
     def _normalize_report_item(self, item: Dict, fallback_index: int = 0) -> Dict[str, Any]:
         rid = (
@@ -340,13 +426,18 @@ Examples:
         for path in endpoints:
             try:
                 response = requests.get(
-                    f"{self.reports_url}{path}",
+                    f"{self.api_base_url}{path}",
                     headers=self._auth_headers(),
                     timeout=15,
                     params={'status': 'in_progress'},
                 )
                 if response.status_code == 401:
-                    print_error("Authentication failed. Check your API key.")
+                    if self._is_local_transport():
+                        print_error(
+                            "Local agent authentication failed. Re-enable CLI sync in KittyReports Desktop."
+                        )
+                    else:
+                        print_error("Authentication failed. Check your API key.")
                     return []
                 if response.status_code == 404:
                     continue
@@ -393,7 +484,7 @@ Examples:
         print_table(headers, rows)
 
     def _list_reports(self, unlock: bool = False) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
         if unlock and not self._prompt_passphrase():
             return False
@@ -412,7 +503,7 @@ Examples:
         return True
 
     def _use_report_index(self, index: int, unlock: bool = False) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
         if unlock and not self._prompt_passphrase():
             return False
@@ -438,7 +529,7 @@ Examples:
             print_error("Project id cannot be empty")
             return False
         name = project_id
-        if self.api_key:
+        if self.api_key or self._is_local_transport():
             for item in self._fetch_reports():
                 if item['id'] == project_id:
                     name = item['name']
@@ -455,7 +546,10 @@ Examples:
     def _pick_report_interactively(self, prefer_index: Optional[int] = None) -> Optional[Dict[str, Any]]:
         reports = self._fetch_reports()
         if not reports:
-            print_warning("No reports found — create one in KittySploit Reports first")
+            if self._is_local_transport():
+                print_warning("No local reports found — create one in KittyReports Desktop first")
+            else:
+                print_warning("No reports found — create one in KittySploit Reports first")
             return None
 
         self._print_reports_table(reports)
@@ -510,13 +604,15 @@ Examples:
         skip_confirm: bool = False,
         prefer_index: Optional[int] = None,
     ) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
 
-        # Same UX as requested: passphrase → table → number → confirm → push
-        # Passphrase stays local (E2EE). List is fetched with API key.
-        if not self._prompt_passphrase():
-            return False
+        if self._is_local_transport():
+            print_info("Local sync — no cloud vault passphrase required")
+        else:
+            # Passphrase stays local (E2EE). List is fetched with API key.
+            if not self._prompt_passphrase():
+                return False
 
         print_info("Loading in-progress reports...")
         chosen = self._pick_report_interactively(prefer_index=prefer_index)
@@ -566,8 +662,24 @@ Examples:
     def _show_config(self) -> bool:
         print_info("Reports Configuration")
         print_info("=" * 80)
-        print_info(f"Reports URL: {self.reports_url}")
-        if self.api_key:
+        print_info(f"Transport: {self.transport}")
+        print_info(f"Sync URL: {self.api_base_url}")
+        if self._is_local_transport():
+            print_info(f"Cloud URL (saved): {self._cloud_reports_url}")
+            print_info(f"Local discovery: {local_report_agent_discovery_path()}")
+        else:
+            print_info(f"Cloud Reports URL: {self._cloud_reports_url}")
+        if self._is_local_transport():
+            if self.local_token:
+                masked = (
+                    f"{self.local_token[:8]}...{self.local_token[-4:]}"
+                    if len(self.local_token) > 12
+                    else "***"
+                )
+                print_info(f"Local agent token: {masked}")
+            else:
+                print_warning("Local agent token: not connected (use report --local)")
+        elif self.api_key:
             masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else "***"
             print_info(f"API Key: {masked_key}")
         else:
@@ -576,19 +688,43 @@ Examples:
             print_info(f"Target report: {self.project_name or '-'} ({self.project_id})")
         else:
             print_warning("Target report: Not set (will ask on --push)")
-        print_info("Passphrase: never stored in config (prompted locally when needed)")
+        if self._is_local_transport():
+            print_info("Passphrase: not used for local desktop sync")
+        else:
+            print_info("Passphrase: never stored in config (prompted locally when needed)")
         print_info(f"Config File: {self.config_file}")
         print_info("=" * 80)
         return True
 
     def _check_status(self) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
+
+        if self._is_local_transport():
+            print_info("Checking local Report Agent...")
+            try:
+                data = ping_local_report_agent(
+                    self.api_base_url,
+                    self.local_token or "",
+                    framework_version=self._framework_version(),
+                )
+            except ReportLocalAgentError as exc:
+                print_error(str(exc))
+                return False
+            print_success("Local Report Agent is reachable")
+            agent_version = data.get("version") or data.get("agent_version")
+            if agent_version:
+                print_info(f"Agent version: {agent_version}")
+            if data.get("client"):
+                print_info(f"Agent client: {data.get('client')}")
+            if self.project_id:
+                print_info(f"Target report: {self.project_name or self.project_id}")
+            return True
 
         print_info("Checking connection to Reports...")
         try:
             response = requests.get(
-                f"{self.reports_url}/api/v1/status",
+                f"{self.api_base_url}/api/v1/status",
                 headers=self._auth_headers(),
                 timeout=10
             )
@@ -629,7 +765,7 @@ Examples:
         return self.framework.get_db_session()
 
     def _push_hosts(self) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
         if not self.project_id:
             print_error("No target report selected")
@@ -677,7 +813,7 @@ Examples:
             return False
 
     def _push_vulnerabilities(self) -> bool:
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
         if not self.project_id:
             print_error("No target report selected")
@@ -728,7 +864,7 @@ Examples:
 
     def _push_evidence(self) -> bool:
         """Push scanner evidence loot (schema Evidence JSON) to Reports."""
-        if not self._require_api_key():
+        if not self._require_credentials():
             return False
         if not self.project_id:
             print_error("No target report selected")
@@ -821,19 +957,29 @@ Examples:
     def _send_to_reports(self, endpoint: str, data: List[Dict]) -> bool:
         """Send data to Reports API. Passphrase is never included in the payload."""
         try:
+            fw_version = self._framework_version()
             payload = {
                 'data': data,
                 'project_id': self.project_id,
                 'workspace': self.framework.workspace_manager.get_current_workspace().name if hasattr(self.framework, 'workspace_manager') else 'default',
                 'timestamp': datetime.now().isoformat(),
-                'framework_version': self.framework.version if hasattr(self.framework, 'version') else '1.0.0'
+                'framework_version': fw_version,
+                'transport': self.transport,
+                'encryption': {
+                    'mode': 'none' if self._is_local_transport() else 'e2ee',
+                },
+                'client': {
+                    'id': LOCAL_AGENT_CLIENT_HEADER,
+                    'version': fw_version,
+                },
             }
             # Intentionally omit passphrase / crypto key from the request.
 
-            print_info(f"Sending {len(data)} {endpoint} → project {self.project_id}...")
+            dest = "local agent" if self._is_local_transport() else "Reports cloud"
+            print_info(f"Sending {len(data)} {endpoint} → {dest} project {self.project_id}...")
 
             response = requests.post(
-                f"{self.reports_url}/api/v1/{endpoint}/sync",
+                f"{self.api_base_url}/api/v1/{endpoint}/sync",
                 headers=self._auth_headers(),
                 json=payload,
                 timeout=30
@@ -853,7 +999,12 @@ Examples:
                     pass
                 return True
             if response.status_code == 401:
-                print_error("Authentication failed. Please check your API key")
+                if self._is_local_transport():
+                    print_error(
+                        "Local agent authentication failed. Re-enable CLI sync in KittyReports Desktop."
+                    )
+                else:
+                    print_error("Authentication failed. Please check your API key")
                 return False
             if response.status_code == 400:
                 print_error(f"Bad request: {response.text[:200]}")
@@ -863,7 +1014,12 @@ Examples:
             return False
 
         except requests.exceptions.ConnectionError:
-            print_error("Failed to connect to Reports. Please check your internet connection")
+            if self._is_local_transport():
+                print_error(
+                    "Failed to connect to the local Report Agent. Enable CLI sync in KittyReports Desktop."
+                )
+            else:
+                print_error("Failed to connect to Reports. Please check your internet connection")
             return False
         except requests.exceptions.Timeout:
             print_error("Connection timeout. Please try again later")

@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""SQLi detection techniques — minimal request budget, early exit."""
+"""SQLi detection techniques — context-aware, budget-aware."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .column_count import find_union_column_count
+from .comparison import boolean_evidence, union_reflection_marker
 from .constants import DETECTION_CONFIDENCE, TECHNIQUE_LABELS
 from .fingerprint import evidence_snippet, fingerprint_dbms, match_sqli_error
+from .injection_context import InjectionContext, infer_context_from_value, refine_context_with_oracle
 from .oracle import HttpParameterOracle, ProbeResponse
-from .payloads import (
-    boolean_numeric_probes,
-    boolean_probes,
-    error_probes,
-    time_probe,
-    union_probe,
-)
+from .payloads import boolean_probes, error_probes, time_probe, union_probe
+from .tamper import expand_probe_list
 
 
 @dataclass
@@ -32,43 +30,28 @@ class TechniqueHit:
     status_code: int = 0
     response_time: float = 0.0
     response_length: int = 0
+    column_count: Optional[int] = None
 
 
-def boolean_evidence(baseline: ProbeResponse, true_resp: ProbeResponse, false_resp: ProbeResponse) -> str:
-    if not baseline.text and baseline.status_code == 0:
-        return ""
-    if not true_resp.text and true_resp.status_code == 0:
-        return ""
-    if not false_resp.text and false_resp.status_code == 0:
-        return ""
-
-    baseline_len = baseline.length
-    true_len = true_resp.length
-    false_len = false_resp.length
-    delta_true = abs(true_len - baseline_len)
-    delta_false = abs(false_len - true_len)
-
-    if (
-        baseline.status_code == true_resp.status_code
-        and abs(false_resp.status_code - baseline.status_code) <= 1
-        and delta_true <= max(60, int(baseline_len * 0.08))
-        and delta_false >= max(120, int(max(true_len, false_len) * 0.12))
-    ):
-        return (
-            "Boolean response drift detected "
-            f"(baseline={baseline_len}, true={true_len}, false={false_len})"
-        )
-    return ""
-
-
-def probe_error(oracle: HttpParameterOracle) -> Optional[TechniqueHit]:
-    original = oracle.original_value or "1"
-    for payload, label in error_probes(original):
+def probe_error(
+    oracle: HttpParameterOracle,
+    ctx: Optional[InjectionContext] = None,
+    *,
+    waf_detected: bool = False,
+) -> Optional[TechniqueHit]:
+    context = ctx or infer_context_from_value(oracle.original_value or "1")
+    payloads = expand_probe_list(
+        [p for p, _ in error_probes(context)],
+        waf=waf_detected,
+    )
+    labels = {p: lbl for p, lbl in error_probes(context)}
+    for payload in payloads:
         resp = oracle.send(payload)
         token = match_sqli_error(resp.text)
         if not token:
             continue
         dbms = fingerprint_dbms(resp.text)
+        label = labels.get(payload, "error probe")
         return TechniqueHit(
             technique="error",
             payload=payload,
@@ -84,9 +67,13 @@ def probe_error(oracle: HttpParameterOracle) -> Optional[TechniqueHit]:
     return None
 
 
-def probe_boolean(oracle: HttpParameterOracle, baseline: ProbeResponse) -> Optional[TechniqueHit]:
-    original = oracle.original_value or "1"
-    (true_payload, true_label), (false_payload, false_label) = boolean_probes(original)
+def probe_boolean(
+    oracle: HttpParameterOracle,
+    baseline: ProbeResponse,
+    ctx: Optional[InjectionContext] = None,
+) -> Optional[TechniqueHit]:
+    context = ctx or infer_context_from_value(oracle.original_value or "1")
+    (true_payload, true_label), (false_payload, false_label) = boolean_probes(context)
     true_resp = oracle.send(true_payload)
     false_resp = oracle.send(false_payload)
     evidence = boolean_evidence(baseline, true_resp, false_resp)
@@ -105,16 +92,23 @@ def probe_boolean(oracle: HttpParameterOracle, baseline: ProbeResponse) -> Optio
     )
 
 
-def probe_boolean_numeric(oracle: HttpParameterOracle, baseline: ProbeResponse) -> Optional[TechniqueHit]:
-    original = oracle.original_value or "1"
-    true_p, false_p, numeric_base = boolean_numeric_probes(original)
-    true_payload, true_label = true_p
-    false_payload, false_label = false_p
+def probe_boolean_numeric(
+    oracle: HttpParameterOracle,
+    baseline: ProbeResponse,
+    ctx: Optional[InjectionContext] = None,
+) -> Optional[TechniqueHit]:
+    context = ctx or infer_context_from_value(oracle.original_value or "1")
+    if not context.numeric:
+        numeric_ctx = infer_context_from_value(
+            context.original if context.original.strip().isdigit() else "1"
+        )
+        numeric_ctx.numeric = True
+        context = numeric_ctx
 
-    if numeric_base != (original or "1").strip():
-        base_resp = oracle.send(numeric_base)
-    else:
-        base_resp = baseline
+    (true_payload, true_label), (false_payload, false_label) = boolean_probes(context)
+    base_resp = baseline
+    if (oracle.original_value or "").strip() != context.original:
+        base_resp = oracle.send(context.original)
 
     true_resp = oracle.send(true_payload)
     false_resp = oracle.send(false_payload)
@@ -127,7 +121,7 @@ def probe_boolean_numeric(oracle: HttpParameterOracle, baseline: ProbeResponse) 
         label=false_label,
         confidence=DETECTION_CONFIDENCE["boolean_numeric"],
         evidence=evidence,
-        indicators=[f"Numeric boolean: base={numeric_base}"],
+        indicators=[f"Numeric boolean: base={context.original}"],
         status_code=false_resp.status_code,
         response_time=false_resp.elapsed,
         response_length=false_resp.length,
@@ -141,12 +135,13 @@ def probe_time(
     delay: float = 3.0,
     dbms: str = "",
     waf_detected: bool = False,
+    ctx: Optional[InjectionContext] = None,
 ) -> Optional[TechniqueHit]:
     if waf_detected:
         return None
 
-    original = oracle.original_value or "1"
-    payload, label = time_probe(original, delay, dbms)
+    context = ctx or infer_context_from_value(oracle.original_value or "1")
+    payload, label = time_probe(context, delay, dbms)
     timeout = max(delay + 6.0, 12.0)
     resp = oracle.send(payload, timeout=timeout)
 
@@ -168,28 +163,58 @@ def probe_time(
     )
 
 
-def probe_union(oracle: HttpParameterOracle, *, after_error: bool = False) -> Optional[TechniqueHit]:
-    """Light UNION check — only meaningful when error-based already confirmed."""
-    if not after_error:
+def probe_union(
+    oracle: HttpParameterOracle,
+    baseline: ProbeResponse,
+    ctx: Optional[InjectionContext] = None,
+    *,
+    after_error: bool = False,
+    after_boolean: bool = False,
+) -> Optional[TechniqueHit]:
+    """UNION with ORDER BY column enumeration when error or boolean already suggested SQLi."""
+    if not after_error and not after_boolean:
         return None
 
-    original = oracle.original_value or "1"
-    payload, label = union_probe(original)
+    context = ctx or infer_context_from_value(oracle.original_value or "1")
+    columns = find_union_column_count(oracle, context, baseline, max_columns=20)
+    if columns is None:
+        columns = 2
+
+    payload, label = union_probe(context, columns)
     resp = oracle.send(payload)
-    if "kspi" not in resp.text.lower() and resp.length <= 50:
-        return None
+    if not union_reflection_marker(resp.text):
+        for fallback_cols in (columns + 1, columns - 1, 3, 2):
+            if fallback_cols < 1 or fallback_cols > 24:
+                continue
+            payload, label = union_probe(context, fallback_cols)
+            resp = oracle.send(payload)
+            if union_reflection_marker(resp.text):
+                columns = fallback_cols
+                break
+        else:
+            if resp.length <= 40 and not match_sqli_error(resp.text):
+                return None
 
     return TechniqueHit(
         technique="union",
         payload=payload,
         label=label,
         confidence=DETECTION_CONFIDENCE["union"],
-        evidence=f"UNION probe response len={resp.length}",
-        indicators=["UNION SELECT probe"],
+        evidence=f"UNION reflected marker ({columns} columns)",
+        indicators=["UNION SELECT column enumeration", f"columns={columns}"],
         status_code=resp.status_code,
         response_time=resp.elapsed,
         response_length=resp.length,
+        column_count=columns,
     )
+
+
+def prepare_context(oracle: HttpParameterOracle) -> InjectionContext:
+    """Heuristic context + optional quote refinement (≤2 requests)."""
+    ctx = infer_context_from_value(oracle.original_value or "1")
+    if ctx.numeric:
+        return ctx
+    return refine_context_with_oracle(oracle, ctx, max_probes=2)
 
 
 def technique_label(technique: str) -> str:

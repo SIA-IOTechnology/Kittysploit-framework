@@ -8,6 +8,18 @@ from __future__ import annotations
 from typing import Any, Dict
 
 MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
+    "quick": {
+        "safety_profile": "discreet",
+        "approved_risks": ["read", "active"],
+        "request_budget": 30,
+        "http_replay": "safe",
+        "campaign_goal": "validate",
+        "discovery_mode": True,
+        "description": (
+            "Default one-command web validation: read/active modules, no intrusive exploits. "
+            "Applied automatically when you run `agent <target>` without --profile."
+        ),
+    },
     "passive": {
         "safety_profile": "safe",
         "approved_risks": ["read"],

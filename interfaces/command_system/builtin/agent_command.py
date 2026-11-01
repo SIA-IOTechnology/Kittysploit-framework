@@ -35,6 +35,7 @@ from interfaces.command_system.builtin.agent.goal_planner import (
 from interfaces.command_system.builtin.agent.explain_service import AgentExplainService
 from interfaces.command_system.builtin.agent.replay_service import AgentReplayService
 from interfaces.command_system.builtin.agent.retest_service import AgentRetestService
+from interfaces.command_system.builtin.agent.local_llm import probe_local_llm_reachable
 from interfaces.command_system.builtin.agent.mission_profiles import apply_mission_profile, list_mission_profiles
 from interfaces.command_system.builtin.scanner_command import ScannerCommand
 from interfaces.command_system.builtin.sessions_command import SessionsCommand
@@ -58,7 +59,13 @@ from interfaces.command_system.builtin.agent.agent_constants import (
 from core.framework.module_context import capture_module_context, restore_module_context
 
 
+_DEFAULT_EASY_AGENT_PROFILE = "quick"
+_EXPLOIT_EXPLICIT_GOALS = frozenset(
+    {"obtain-shell", "obtain_shell", "post-auth", "post_auth", "exploit", "obtain-auth", "obtain_auth"}
+)
+
 _RECOMMENDED_PROFILES = (
+    "quick",
     "safe-web",
     "bug-bounty-safe",
     "api-review",
@@ -91,12 +98,16 @@ class AgentCommand(BaseCommand):
         return f"""
 {self.description}
 
-Start with a target. The agent asks before anything intrusive.
+Start with a target (quick profile + validate goal applied by default):
 
-    agent example.com
-    agent https://example.com --profile safe-web
+    agent https://example.com
+    agent example.com --profile safe-web
     agent example.com --profile bug-bounty-safe
     agent example.com --dry-run
+
+Intrusive exploits need --approve-risk intrusive or --profile internal-lab.
+
+If scope enforcement is on, allow the target first, e.g. scope allow add domain example.com
 
 Choose a preset instead of stacking flags:
     --profile NAME          See the short list with: agent profiles
@@ -170,6 +181,7 @@ Target & workflow:
     --shell-hunter                        Pursue interactive shells (needs --approve-risk intrusive)
     --dry-run                             Plan without network traffic or module execution
     --plan-only                           Recon + planning, no exploitation
+    --no-easy-defaults                    Skip auto quick profile / validate goal / LLM detect
     --checkpoint                          Save checkpoint after each phase
     --resume RUN_ID                       Resume a checkpoint
     --restart-phase PHASE                 scan, analyze, reason, exploit, report
@@ -493,8 +505,89 @@ Examples:
                 "harvested from results (e.g. subdomains)."
             ),
         )
+        parser.add_argument(
+            "--no-easy-defaults",
+            action="store_true",
+            help=(
+                "Skip automatic quick profile, validate goal, and local LLM detection "
+                "(legacy bare `agent <target>` behavior)."
+            ),
+        )
         parser.add_argument("--help", "-h", action="store_true")
         return parser
+
+    @staticmethod
+    def _apply_profile_overrides_to_parsed(parsed, profile_overrides: dict) -> None:
+        if not profile_overrides:
+            return
+        if not parsed.safety_profile or parsed.safety_profile == "normal":
+            parsed.safety_profile = profile_overrides.get("safety_profile", parsed.safety_profile)
+        if not parsed.request_budget:
+            parsed.request_budget = int(profile_overrides.get("request_budget", 0) or 0)
+        if parsed.http_replay == "safe" and profile_overrides.get("http_replay"):
+            parsed.http_replay = profile_overrides.get("http_replay", parsed.http_replay)
+        if profile_overrides.get("plan_only"):
+            parsed.plan_only = True
+        if profile_overrides.get("reuse_proxy_auth"):
+            parsed.reuse_proxy_auth = True
+        for risk in profile_overrides.get("approved_risks") or []:
+            token = str(risk).strip().lower()
+            if token and token not in {str(v).strip().lower() for v in (parsed.approve_risk or [])}:
+                parsed.approve_risk.append(token)
+
+    def _easy_defaults_eligible(self, parsed) -> bool:
+        if bool(getattr(parsed, "no_easy_defaults", False)):
+            return False
+        if bool(getattr(parsed, "resume", None)):
+            return False
+        if str(getattr(parsed, "profile", "") or "").strip():
+            return False
+        if bool(getattr(parsed, "shell_hunter", False)) or bool(getattr(parsed, "until_session", False)):
+            return False
+        goal = str(getattr(parsed, "goal", "") or "").strip().lower().replace("_", "-")
+        if goal in _EXPLOIT_EXPLICIT_GOALS:
+            return False
+        return True
+
+    @staticmethod
+    def _scope_block_hostname(target_info: dict, target_value: str) -> str:
+        host = str((target_info or {}).get("hostname") or "").strip().lower().strip(".")
+        if host:
+            return host
+        raw = str(target_value or "").strip()
+        if "://" in raw:
+            from urllib.parse import urlparse
+
+            host = (urlparse(raw).hostname or "").strip().lower().strip(".")
+        return host
+
+    def _explain_agent_scope_denial(self, manager, hostname: str, reason: str) -> None:
+        if manager is not None and hasattr(manager, "explain_engagement_scope_denial"):
+            manager.explain_engagement_scope_denial(
+                hostname,
+                reason,
+                command_label="agent",
+            )
+            return
+        print_error(f"Agent blocked: {reason}")
+        if hostname:
+            print_info(f"Add the target to scope: scope allow add domain {hostname}")
+
+    def _maybe_apply_easy_agent_defaults(self, parsed) -> list:
+        notes: list = []
+        if not self._easy_defaults_eligible(parsed):
+            return notes
+        parsed.profile = _DEFAULT_EASY_AGENT_PROFILE
+        if not str(getattr(parsed, "goal", "") or "").strip():
+            parsed.goal = "validate"
+        if not parsed.llm_local and probe_local_llm_reachable(parsed.llm_endpoint):
+            parsed.llm_local = True
+            notes.append(f"local LLM on ({parsed.llm_model})")
+        notes.insert(
+            0,
+            f"quick mode: profile={_DEFAULT_EASY_AGENT_PROFILE}, goal={parsed.goal or 'validate'}",
+        )
+        return notes
 
     def _print_profiles(self, args) -> bool:
         profiles = list_mission_profiles()
@@ -555,6 +648,7 @@ Examples:
             print_info(self.help_text)
             return bool(parsed.help)
 
+        easy_notes = self._maybe_apply_easy_agent_defaults(parsed)
         profile_overrides = {}
         if getattr(parsed, "profile", None):
             try:
@@ -562,20 +656,13 @@ Examples:
             except ValueError as exc:
                 print_error(str(exc))
                 return False
-            if not parsed.safety_profile or parsed.safety_profile == "normal":
-                parsed.safety_profile = profile_overrides.get("safety_profile", parsed.safety_profile)
-            if not parsed.request_budget:
-                parsed.request_budget = int(profile_overrides.get("request_budget", 0) or 0)
-            if parsed.http_replay == "safe" and profile_overrides.get("http_replay"):
-                parsed.http_replay = profile_overrides.get("http_replay", parsed.http_replay)
-            if profile_overrides.get("plan_only"):
-                parsed.plan_only = True
-            if profile_overrides.get("reuse_proxy_auth"):
-                parsed.reuse_proxy_auth = True
-            for risk in profile_overrides.get("approved_risks") or []:
-                token = str(risk).strip().lower()
-                if token and token not in {str(v).strip().lower() for v in (parsed.approve_risk or [])}:
-                    parsed.approve_risk.append(token)
+            self._apply_profile_overrides_to_parsed(parsed, profile_overrides)
+        if easy_notes:
+            target_preview = str(parsed.target or "").strip()
+            print_status(
+                f"Agent {target_preview}: " + "; ".join(easy_notes) + " "
+                "(--no-easy-defaults to opt out)"
+            )
 
         scanner = ScannerCommand(self.framework, self.session, self.output_handler)
         workspace = (
@@ -838,13 +925,15 @@ Examples:
                 str(parsed.protocol or target_info.get("scheme") or "tcp"),
             )
         if not allowed:
+            scope_hostname = self._scope_block_hostname(target_info, target_value)
+            scope_manager = getattr(self.framework, "scope_manager", None)
             engagement_graph.remember_refusal(
                 run_id,
                 reason=f"scope refused target: {reason}",
                 target=str(parsed.target or ""),
                 goal=str(getattr(parsed, "goal", "") or ""),
             )
-            print_error(f"Agent scope blocked target: {reason}")
+            self._explain_agent_scope_denial(scope_manager, scope_hostname, reason)
             return False
 
         raw_operator_goal = (

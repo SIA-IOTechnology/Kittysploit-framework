@@ -22,6 +22,7 @@ from core.scanner.http.discovery import (
 )
 from lib.protocols.http.http_client import Http_client
 from lib.protocols.http.sqli_engine import HttpParameterOracle, SqliEngine, technique_label
+from lib.protocols.http.sqli_engine.extraction_bridge import enrich_scan_hit, extract_version_preview
 from lib.protocols.http.sqli_engine.oracles import ORDER_BY_PARAM_HINTS, probe_order_by_sqli
 from lib.scanner.http.module_result import finalize_http_scanner_run
 
@@ -31,8 +32,8 @@ class Module(Auxiliary, Http_client):
     __info__ = {
         "name": "SQLi Engine Scanner",
         "description": (
-            "Low-noise SQL injection detection using the KittySploit sqli_engine "
-            "(error/boolean/time/union, budget-aware, crawl-driven surface only)."
+            "Native SQLi engine: context-aware payloads, stable boolean oracles, "
+            "ORDER BY column find + UNION marker, optional WAF tamper (crawl-driven surface)."
         ),
         "author": "KittySploit Team",
         "tags": ["web", "sqli", "sql", "injection", "scanner", "engine"],
@@ -83,9 +84,14 @@ class Module(Auxiliary, Http_client):
     )
     allow_time = OptBool(True, "Enable time-based blind probes (skipped if WAF detected)", required=False)
     time_delay = OptPort(3, "Seconds for SLEEP/pg_sleep probes", required=False, advanced=True)
-    max_requests = OptPort(16, "Max HTTP requests per parameter", required=False, advanced=True)
+    max_requests = OptPort(32, "Max HTTP requests per parameter (context + UNION enum)", required=False, advanced=True)
     waf_detected = OptBool(False, "Skip time-based probes (set when WAF is known)", required=False, advanced=True)
     test_post = OptBool(True, "Also run GET probes as POST on discovered targets", required=False, advanced=True)
+    extract_preview = OptBool(
+        True,
+        "After confirmation, extract @@version/user via native union/blind bridge",
+        required=False,
+    )
 
     COMMON_PARAMS = [
         "id", "user", "user_id", "username", "email",
@@ -204,6 +210,10 @@ class Module(Auxiliary, Http_client):
             )
         )
         hit["request_count"] = scan.request_count
+        if scan.vulnerable and bool(self._to_bool(getattr(self, "extract_preview", True))):
+            preview = extract_version_preview(oracle, scan)
+            enrich_scan_hit(hit, scan, preview)
+            hit["request_count"] = scan.request_count + int(preview.request_count or 0)
         return hit
 
     def run(self):
@@ -279,6 +289,12 @@ class Module(Auxiliary, Http_client):
             ev = (hit.get("evidence_snippet") or "").strip()
             if ev:
                 print_success(f"    evidence: {ev[:700]}{'…' if len(ev) > 700 else ''}")
+            ver = (hit.get("extracted_version") or "").strip()
+            if ver:
+                print_success(f"    extracted @@version: {ver[:200]}{'…' if len(ver) > 200 else ''}")
+            cfg = hit.get("recommended_technique")
+            if cfg:
+                print_info(f"    post module hint: run post/http/sqli_shell technique={cfg}")
 
         if discovered_targets:
             print_status(

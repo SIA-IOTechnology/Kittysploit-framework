@@ -46,6 +46,7 @@ class Module(Scanner, Http_client):
          'consumes_capabilities': [],
          'option_bindings': {},
          'suggested_followups': [
+             'scanner/http/superset_cve_2023_27524_detect',
              'scanner/http/superset_cve_2026_23980',
              'auxiliary/scanner/http/superset_cve_2026_23980_sqli']},
     },

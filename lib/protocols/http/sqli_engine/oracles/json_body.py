@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ..constants import DETECTION_CONFIDENCE
 from ..fingerprint import evidence_snippet, fingerprint_dbms, match_sqli_error
 from ..oracle import HttpParameterOracle
-from ..techniques import TechniqueHit, boolean_evidence
+from ..comparison import boolean_evidence
+from ..techniques import TechniqueHit
 
 _JSON_PATH_HINTS = ("/api/", "/wp-json/", "/graphql", "/rest/", "/v1/", "/v2/")
 

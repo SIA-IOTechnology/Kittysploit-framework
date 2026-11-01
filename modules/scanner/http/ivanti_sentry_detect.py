@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'exploits/linux/http/ivanti_sentry_cve_2023_38035_rce',
+                    'exploits/linux/http/ivanti_sentry_cve_2026_10520_rce',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
     }

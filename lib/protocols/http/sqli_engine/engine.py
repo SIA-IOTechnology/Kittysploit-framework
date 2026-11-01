@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Unified SQLi detection engine — low-noise, budget-aware."""
+"""Unified SQLi detection engine — context-aware, budget-aware."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from .boundary import refine_boundary
+from .injection_context import InjectionContext
 from .oracle import HttpParameterOracle, ProbeResponse
 from .techniques import (
     TechniqueHit,
+    prepare_context,
     probe_boolean,
     probe_boolean_numeric,
     probe_error,
@@ -39,6 +42,8 @@ class SqliScanResult:
     response_length: int = 0
     request_count: int = 0
     all_hits: List[TechniqueHit] = field(default_factory=list)
+    column_count: Optional[int] = None
+    injection_context: Optional[Dict[str, Any]] = None
 
     def to_hit_dict(self, *, request_url: str = "") -> Dict[str, Any]:
         return {
@@ -59,14 +64,16 @@ class SqliScanResult:
             "response_time": self.response_time,
             "response_length": self.response_length,
             "request_count": self.request_count,
+            "column_count": self.column_count,
+            "injection_context": self.injection_context,
         }
 
 
 class SqliEngine:
     """
-    Scan one HTTP parameter with a minimal probe sequence:
+    Scan one HTTP parameter:
 
-    baseline → error (stop if hit) → boolean → boolean_numeric → time → union
+    baseline → context → error → boolean → boolean_numeric → time → UNION (enum columns)
     """
 
     def __init__(
@@ -76,14 +83,14 @@ class SqliEngine:
         allow_union: bool = True,
         time_delay: float = 3.0,
         waf_detected: bool = False,
-        max_requests: int = 16,
+        max_requests: int = 32,
         stop_on_first: bool = True,
     ):
         self.allow_time = allow_time
         self.allow_union = allow_union
         self.time_delay = time_delay
         self.waf_detected = waf_detected
-        self.max_requests = max(6, int(max_requests))
+        self.max_requests = max(8, int(max_requests))
         self.stop_on_first = stop_on_first
 
     def _budget_left(self, oracle: HttpParameterOracle) -> bool:
@@ -107,26 +114,30 @@ class SqliEngine:
         hits: List[TechniqueHit] = []
         dbms_hint = ""
 
+        ctx: InjectionContext = prepare_context(oracle)
+        result.injection_context = ctx.to_dict()
+
         if self._budget_left(oracle):
-            hit = probe_error(oracle)
+            hit = probe_error(oracle, ctx, waf_detected=self.waf_detected)
             if hit:
                 hits.append(hit)
                 dbms_hint = hit.dbms or ""
-                if self.stop_on_first:
+                if self._budget_left(oracle):
+                    ctx = refine_boundary(oracle, ctx, baseline)
+                    result.injection_context = ctx.to_dict()
+
+        if self._budget_left(oracle):
+            hit = probe_boolean(oracle, baseline, ctx)
+            if hit:
+                hits.append(hit)
+                if self.stop_on_first and not self.allow_union:
                     return self._finalize(result, hits, oracle)
 
         if self._budget_left(oracle):
-            hit = probe_boolean(oracle, baseline)
+            hit = probe_boolean_numeric(oracle, baseline, ctx)
             if hit:
                 hits.append(hit)
-                if self.stop_on_first:
-                    return self._finalize(result, hits, oracle)
-
-        if self._budget_left(oracle):
-            hit = probe_boolean_numeric(oracle, baseline)
-            if hit:
-                hits.append(hit)
-                if self.stop_on_first:
+                if self.stop_on_first and not self.allow_union:
                     return self._finalize(result, hits, oracle)
 
         if self.allow_time and self._budget_left(oracle):
@@ -136,16 +147,26 @@ class SqliEngine:
                 delay=self.time_delay,
                 dbms=dbms_hint,
                 waf_detected=self.waf_detected,
+                ctx=ctx,
             )
             if hit:
                 hits.append(hit)
                 if self.stop_on_first:
                     return self._finalize(result, hits, oracle)
 
-        if self.allow_union and self._budget_left(oracle) and any(h.technique == "error" for h in hits):
-            hit = probe_union(oracle, after_error=True)
-            if hit:
-                hits.append(hit)
+        if self.allow_union and self._budget_left(oracle):
+            has_error = any(h.technique == "error" for h in hits)
+            has_boolean = any(h.technique.startswith("boolean") for h in hits)
+            if has_error or has_boolean:
+                hit = probe_union(
+                    oracle,
+                    baseline,
+                    ctx,
+                    after_error=has_error,
+                    after_boolean=has_boolean,
+                )
+                if hit:
+                    hits.append(hit)
 
         return self._finalize(result, hits, oracle)
 
@@ -172,6 +193,7 @@ class SqliEngine:
         result.status_code = primary.status_code
         result.response_time = primary.response_time
         result.response_length = primary.response_length
+        result.column_count = getattr(primary, "column_count", None)
         return result
 
     def scan_many(

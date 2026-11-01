@@ -348,6 +348,46 @@ class ScopeManager:
             return "ip"
         return "domain"
 
+    def allowlist_command_for_target(self, target: str) -> str:
+        """Console command to add *target* to the engagement allowlist."""
+        token = str(target or "").strip()
+        if not token:
+            return "scope allow add domain <hostname>"
+        if self._target_kind(token) == "ip":
+            return f"scope allow add ip {token}"
+        return f"scope allow add domain {token.lower().strip('.')}"
+
+    def _scope_denial_details(self, target: str) -> List[str]:
+        token = str(target or "").strip()
+        if not token:
+            return [
+                "Engagement scope is ON: add an allowlist entry before scanning.",
+                "Example: scope allow add domain example.com",
+            ]
+        fix = self.allowlist_command_for_target(token)
+        return [
+            "Engagement scope is ON — this target is not on the allowlist.",
+            f"Add it with: {fix}",
+            f"Verify with: scope check {token.lower().strip('.')}",
+            "Then re-run your agent/scanner command.",
+        ]
+
+    def explain_engagement_scope_denial(
+        self,
+        target: str,
+        reason: str,
+        *,
+        command_label: str = "Command",
+    ) -> None:
+        """Print an operator-facing scope refusal with the exact fix command."""
+        from core.output_handler import print_error, print_info, print_warning
+
+        label = str(command_label or "Command").strip()
+        print_error(f"{label} blocked: {reason}")
+        print_warning("Scope enforcement is enabled (deny-by-default). Only allowlisted targets may be tested.")
+        for line in self._scope_denial_details(target):
+            print_info(line)
+
     def is_target_allowed(self, target: str) -> ScopeDecision:
         if not self.enabled:
             return ScopeDecision(True, "not_enforced", "Scope enforcement disabled", [target])
@@ -358,7 +398,7 @@ class ScopeManager:
                 "deny",
                 "Scope enabled but allowlist is empty",
                 [target],
-                ["Add targets with: scope allow ip|domain <entry>"],
+                self._scope_denial_details(target),
             )
 
         kind = self._target_kind(target)
@@ -370,6 +410,7 @@ class ScopeManager:
                 "deny",
                 f"IP {target} is outside engagement scope",
                 [target],
+                self._scope_denial_details(target),
             )
 
         if self._domain_allowed(target):
@@ -379,6 +420,7 @@ class ScopeManager:
             "deny",
             f"Domain {target} is outside engagement scope",
             [target],
+            self._scope_denial_details(target),
         )
 
     def _ip_allowed(self, ip: str) -> bool:
@@ -580,8 +622,13 @@ class ScopeManager:
             print_error(f"{prefix} {decision.reason}")
         for detail in decision.details:
             print_info(f"{prefix} {detail}")
-        if decision.action == "deny" and self.enabled and not self.allowed_ips and not self.allowed_domains:
-            print_info(f"{prefix} Add allowlist entries with: scope allow add ip|domain <value>")
+        if decision.action == "deny" and self.enabled:
+            target = ""
+            if decision.targets:
+                target = str(decision.targets[0] or "")
+            if not decision.details:
+                for line in self._scope_denial_details(target):
+                    print_info(f"{prefix} {line}")
 
     def ensure_execution_permitted(
         self,

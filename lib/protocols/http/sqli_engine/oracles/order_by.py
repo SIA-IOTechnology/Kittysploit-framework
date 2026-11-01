@@ -10,7 +10,8 @@ from typing import Callable, Optional, Tuple
 from ..constants import DETECTION_CONFIDENCE
 from ..fingerprint import evidence_snippet, fingerprint_dbms, match_sqli_error
 from ..oracle import HttpParameterOracle, ProbeResponse
-from ..techniques import TechniqueHit, boolean_evidence
+from ..comparison import boolean_evidence
+from ..techniques import TechniqueHit
 
 ORDER_BY_PARAM_HINTS = frozenset(
     {"order", "sort", "orderby", "sortby", "order_by", "sort_by", "sortcolumn", "sortdir"}

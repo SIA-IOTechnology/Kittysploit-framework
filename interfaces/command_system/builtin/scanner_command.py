@@ -664,8 +664,11 @@ Examples:
         if decision.allowed:
             return True
 
-        manager.report_denial(decision)
-        print_error("Scanner aborted: target is outside engagement scope.")
+        manager.explain_engagement_scope_denial(
+            hostname,
+            decision.reason,
+            command_label="scanner",
+        )
         return False
     
     def _port_to_protocol(self, port: int) -> Optional[str]:
@@ -1822,7 +1825,7 @@ Examples:
             host = str(ti.get("hostname") or ti.get("host") or "target").strip()
             print_warning(
                 f"Scope blocked: {blocked} module(s) — target outside engagement allowlist "
-                f"(add with: scope allow domain {host})"
+                f"(add with: scope allow add domain {host})"
             )
         if skipped > 0:
             print_info(f"Skipped: {skipped}")

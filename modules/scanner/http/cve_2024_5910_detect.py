@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/paloalto_expedition_cve_2024_9465_detect',
+                    'exploits/multi/http/paloalto_expedition_cve_2024_9464_rce',
+                    'auxiliary/scanner/http/login_page_detector',
+                ],
             },
         },
         'references': [

@@ -23,6 +23,7 @@ class Module(Scanner, Http_client):
         'references': [
             'https://nvd.nist.gov/vuln/detail/CVE-2026-102489',
             'https://csirt.divd.nl/CVE-2026-102489',
+            'https://github.com/horizon3ai/CVE-2026-102489',
         ],
         'tags': ['web', 'scanner', 'zammad', 'helpdesk', 'session-fixation', 'rce', 'kev'],
         'agent': {
@@ -34,6 +35,7 @@ class Module(Scanner, Http_client):
             'produces': ['tech_hints', 'risk_signals'],
             'chain': {
                 'suggested_followups': [
+                    'auxiliary/admin/http/zammad_cve_2026_102489_ws_leak_rce',
                     'exploits/multi/http/zammad_cve_2026_102489_rce',
                     'scanner/http/zammad_helpdesk_detect',
                 ],

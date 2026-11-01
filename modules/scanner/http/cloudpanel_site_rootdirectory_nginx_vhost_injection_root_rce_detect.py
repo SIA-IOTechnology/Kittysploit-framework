@@ -34,7 +34,7 @@ class Module(Scanner, Http_client):
         if not resp:
             return False
         body = (resp.text or "").lower()
-        hints = ["cloudpanel", "site"]
+        hints = ["cloudpanel", "cloud panel", "/cloudpanel/"]
         if any(h and h.lower() in body for h in hints if isinstance(h, str)):
             self.set_info(
                 severity="high",

@@ -526,3 +526,19 @@ class LocalLLMService:
             payload=payload,
             timeout=timeout,
         )
+
+
+def probe_local_llm_reachable(endpoint: str, timeout: float = 2.0) -> bool:
+    """Return True when a loopback Ollama-compatible HTTP API responds."""
+    try:
+        parts = urlsplit(str(endpoint or "").strip())
+        host = (parts.hostname or "").lower()
+        if host not in {"127.0.0.1", "::1", "localhost"}:
+            return False
+        base = f"{parts.scheme}://{parts.netloc}"
+        tags_url = f"{base}/api/tags"
+        request = urllib.request.Request(tags_url, method="GET")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return int(getattr(response, "status", 200) or 200) == 200
+    except Exception:
+        return False

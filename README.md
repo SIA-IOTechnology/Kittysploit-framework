@@ -20,7 +20,10 @@ Local LLM. Scope-aware. Automation-ready.
 <img src="docs/screenshots/demo.gif" alt="KittySploit demo — agent mission from recon to shell" width="100%">
 
 ```bash
-# Web/API mission (lab)
+# Web/API mission (lab) — one command, quick profile by default
+kittysploit> agent https://lab.local
+
+# Parallel OWASP specialists (advanced)
 kittysploit> agent https://lab.local --profile owasp-web-parallel
 
 # Go for a shell (authorized lab only)
@@ -73,11 +76,14 @@ python kittyconsole.py
 
 ```text
 kittysploit> doctor
-kittysploit> scanner -u http://192.168.56.10
+kittysploit> agent https://lab.local
 kittysploit> search wordpress
 kittysploit> agent https://lab.local --profile owasp-web-parallel --plan-only
 kittysploit> agent http://192.168.56.10 --profile internal-lab --goal obtain-shell --approve-risk intrusive --shell-hunter
 ```
+
+Bare `agent <url>` uses the **quick** profile (web validation, read/active modules). Ollama on
+`127.0.0.1:11434` is picked up automatically when reachable.
 
 Use `--plan-only` / `--dry-run` until you are ready for live actions. Always test against systems you own or are authorized to assess.
 
@@ -88,10 +94,11 @@ Use `--plan-only` / `--dry-run` until you are ready for live actions. Always tes
 Drive a mission with a local model — no cloud key required:
 
 ```bash
+# Easiest path (quick profile; enables local LLM when Ollama is up)
+kittysploit> agent https://lab.local
+
 # Plan only (safe preview)
 kittysploit> agent lab.local \
-  --llm-local \
-  --llm-model llama3.1:8b \
   --profile owasp-web-parallel \
   --plan-only
 

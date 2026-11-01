@@ -48,7 +48,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/fortinac_cve_2022_39952_rce',
+                ],
             },
         },
     }

@@ -87,8 +87,13 @@ Examples:
         if not args:
             args = ["--help"]
 
+        tokens = [str(item) for item in (args or []) if str(item).strip()]
+        # Shorthand documented in USAGE.md: scope allow domain foo.com
+        if len(tokens) >= 3 and tokens[0] == "allow" and tokens[1] in {"ip", "domain"}:
+            tokens = ["allow", "add", tokens[1], tokens[2], *tokens[3:]]
+
         try:
-            parsed = self.parser.parse_args(args)
+            parsed = self.parser.parse_args(tokens)
         except SystemExit:
             return True
 

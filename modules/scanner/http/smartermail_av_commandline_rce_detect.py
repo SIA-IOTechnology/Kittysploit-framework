@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Detection for SmarterMail — Antivirus Command-Line Configuration → RCE as NT AUTHORITY\SYSTEM"""
+r"""Detection for SmarterMail — Antivirus Command-Line Configuration → RCE as NT AUTHORITY\SYSTEM"""
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client

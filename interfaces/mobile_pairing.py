@@ -29,6 +29,7 @@ class _PendingPairing:
     certificate_sha256: Optional[str]
     created_at: float
     expires_at: float
+    roles: tuple[str, ...] = ("viewer",)
     consumed: bool = False
 
 
@@ -58,6 +59,7 @@ class MobilePairingManager:
         *,
         certificate_sha256: Optional[str] = None,
         ttl_seconds: int = 120,
+        roles: tuple[str, ...] = ("viewer",),
     ) -> Dict[str, Any]:
         ttl_seconds = max(30, min(int(ttl_seconds), 600))
         code = secrets.token_urlsafe(24)
@@ -65,12 +67,14 @@ class MobilePairingManager:
         now = time.time()
         endpoint = api_base_url.rstrip("/")
         fingerprint = self._normalize_fingerprint(certificate_sha256)
+        resolved_roles = tuple(roles or ("viewer",))
         pending = _PendingPairing(
             code_hash=code_hash,
             api_base_url=endpoint,
             certificate_sha256=fingerprint,
             created_at=now,
             expires_at=now + ttl_seconds,
+            roles=resolved_roles,
         )
         with self._lock:
             self._cleanup_locked(now)
@@ -83,6 +87,8 @@ class MobilePairingManager:
         }
         if fingerprint:
             query["fingerprint"] = f"sha256:{fingerprint}"
+        if resolved_roles != ("viewer",):
+            query["interact"] = "1"
         return {
             "pairing_uri": f"kittysploit://pair?{urlencode(query)}",
             "expires_at": iso_timestamp(pending.expires_at),
@@ -120,7 +126,7 @@ class MobilePairingManager:
         subject = f"mobile:{device_id}"
         token_data = self.token_manager.issue_pair(
             subject=subject,
-            roles=("viewer",),
+            roles=pending.roles,
             access_ttl_seconds=self.access_ttl_seconds,
             refresh_ttl_seconds=self.refresh_ttl_seconds,
             metadata={

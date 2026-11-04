@@ -55,7 +55,6 @@ class Module(Scanner, Http_client):
         },
         'references': [
             'http://archive.hack.lu/2016/Wavestone%20-%20Hack.lu%202016%20-%20Hadoop%20safari%20-%20Hunting%20for%20vulnerabilities%20-%20v1.0.pdf',
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/exploits/linux/http/hadoop_unauth_exec.rb',
             'https://github.com/vulhub/vulhub/tree/master/hadoop/unauthorized-yarn',
             'https://github.com/Al1ex/Hadoop-Yarn-ResourceManager-RCE',
         ],

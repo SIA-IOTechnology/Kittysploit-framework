@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Trend Micro Threat Discovery Appliance 2.6.1062r1 is vulnerable to a directory traversal vulnerability when processing a session_id cookie, which allows a remote, unauthenticated attacker to delete arbitrary files as root. This can be used to bypass authentication or cause a DoS.',
         'author': ['KittySploit Team'],
         'severity': 'critical',
-        'tags': ['web', 'scanner', 'cve', 'cve2016', 'msf', 'lfi', 'auth', 'bypass', 'trendmicro', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2016', 'lfi', 'auth', 'bypass', 'trendmicro', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -54,7 +54,6 @@ class Module(Scanner, Http_client):
         'references': [
             'https://gist.github.com/malerisch/5de8b408443ee9253b3954a62a8d97b4',
             'https://nvd.nist.gov/vuln/detail/CVE-2016-7552',
-            'https://github.com/rapid7/metasploit-framework/pull/8216/commits/0f07875a2ddb0bfbb4e985ab074e9fc56da1dcf6',
             'https://github.com/ARPSyndicate/cvemon',
             'https://github.com/ARPSyndicate/kenzer-templates',
         ],

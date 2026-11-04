@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Zoho ManageEngine ServiceDesk Plus before 11306, ServiceDesk Plus MSP before 10530, and SupportCenter Plus before 11014 are vulnerable to unauthenticated remote code execution.',
         'author': ['KittySploit Team'],
         'severity': 'critical',
-        'tags': ['web', 'scanner', 'cve', 'cve2021', 'rce', 'kev', 'msf', 'zoho', 'manageengine', 'zohocorp', 'vkev', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2021', 'rce', 'kev', 'zoho', 'manageengine', 'zohocorp', 'vkev', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -55,7 +55,6 @@ class Module(Scanner, Http_client):
             'https://www.cisa.gov/uscert/ncas/alerts/aa21-336a',
             'https://unit42.paloaltonetworks.com/tiltedtemple-manageengine-servicedesk-plus/',
             'https://github.com/horizon3ai/CVE-2021-44077',
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/exploits/windows/http/manageengine_servicedesk_plus_cve_2021_44077.rb',
             'https://nvd.nist.gov/vuln/detail/CVE-2021-44077',
         ],
         'cve': 'CVE-2021-44077',

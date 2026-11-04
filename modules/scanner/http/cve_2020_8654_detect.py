@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'EyesOfNetwork 5.1 to 5.3 contains SQL injection and remote code execution vulnerabilities. An attacker can possibly obtain sensitive information from a database, modify data, and execute unauthorized administrative operations in the context of the affected site. See also CVE-2020-8655, CVE-2020-8656, CVE-2020-8657, and CVE-2020-9465.',
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'cve', 'cve2020', 'cisa', 'eyesofnetwork', 'rce', 'authenticated', 'msf', 'sqli', 'passive', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2020', 'cisa', 'eyesofnetwork', 'rce', 'authenticated', 'sqli', 'passive', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -53,7 +53,6 @@ class Module(Scanner, Http_client):
         },
         'references': [
             'https://github.com/h4knet/eonrce',
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/exploits/linux/http/eyesofnetwork_autodiscovery_rce.rb',
             'https://github.com/EyesOfNetworkCommunity/eonweb/issues/50',
             'https://nvd.nist.gov/vuln/detail/CVE-2020-8654',
             'https://github.com/ARPSyndicate/cvemon',

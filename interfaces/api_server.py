@@ -49,6 +49,7 @@ from interfaces.api_security import (
     secrets_equal,
 )
 from interfaces.node_command_service import NodeCommandService, RelayRemoteClientError, RelayService
+from core.session_manager import _make_json_serializable
 
 class ApiServer:
     """
@@ -571,8 +572,25 @@ class ApiServer:
             if not self.check_auth(request):
                 return jsonify({'error': 'Non autorisé'}), 401
             
-            sessions = self.framework.session.list_sessions()
-            return jsonify(sessions)
+            return jsonify(self._engagement_sessions_payload())
+
+        @self.app.route('/api/sessions/<session_id>/command', methods=['POST'])
+        def session_command(session_id):
+            """Run one shell command or queue browser JS on an engagement session."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            data = request.get_json(silent=True) or {}
+            try:
+                payload = self._execute_session_command(str(session_id), data)
+                return jsonify(payload)
+            except ValueError as exc:
+                return jsonify({'error': str(exc)}), 400
+            except PermissionError as exc:
+                return jsonify({'error': str(exc)}), 403
+            except LookupError as exc:
+                return jsonify({'error': str(exc)}), 404
+            except RuntimeError as exc:
+                return jsonify({'error': str(exc)}), 503
         
         @self.app.route('/api/sessions/<int:session_id>', methods=['GET'])
         def get_session(session_id):
@@ -1024,6 +1042,182 @@ class ApiServer:
 
         self.configure_route_permissions()
 
+    def _engagement_sessions_payload(self) -> list:
+        """Sessions for mobile/REST viewers (C2 + browser_server hooks)."""
+        manager = getattr(self.framework, "session_manager", None)
+        if manager is None:
+            return []
+
+        grouped = manager.get_all_sessions()
+        rows: list = []
+
+        for session in grouped.get("standard") or []:
+            data = getattr(session, "data", {}) or {}
+            if not isinstance(data, dict):
+                data = {}
+            transport_state = str(data.get("transport_state") or "").lower()
+            pending = bool(data.get("pending_rebind") or data.get("durable"))
+            if transport_state == "disconnected":
+                status = (
+                    "waiting"
+                    if pending
+                    or str(getattr(session, "session_type", "")).lower()
+                    in ("polling", "http_polling", "beacon")
+                    else "disconnected"
+                )
+            else:
+                status = "active"
+            host = str(data.get("client_ip") or getattr(session, "host", "") or "")
+            if host.startswith("Z0FBQUFBQ") or len(host) > 64:
+                host = str(data.get("client_ip") or "(encrypted)")[:32]
+            rows.append(
+                {
+                    "id": getattr(session, "id", ""),
+                    "category": "standard",
+                    "session_type": getattr(session, "session_type", ""),
+                    "host": host,
+                    "port": getattr(session, "port", None),
+                    "status": status,
+                    "target": host or getattr(session, "id", ""),
+                    "info": _make_json_serializable(data),
+                }
+            )
+
+        for session in grouped.get("browser") or []:
+            if not isinstance(session, dict):
+                continue
+            info = session.get("info") or {}
+            if not isinstance(info, dict):
+                info = {}
+            ip = info.get("ip") or info.get("hostname") or ""
+            ua = info.get("user_agent") or ""
+            target = ip or (ua[:48] + "…" if len(ua) > 48 else ua) or "browser hook"
+            rows.append(
+                {
+                    "id": session.get("id", ""),
+                    "category": "browser",
+                    "session_type": "browser",
+                    "host": ip,
+                    "status": "active" if session.get("active", True) else "inactive",
+                    "target": target,
+                    "commands_executed": session.get("commands_executed", 0),
+                    "commands_sent": session.get("commands_sent", 0),
+                    "last_seen": session.get("last_seen"),
+                    "info": _make_json_serializable(info),
+                }
+            )
+
+        return rows
+
+    def _execute_session_command(self, session_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            raise ValueError("session_id is required")
+
+        manager = getattr(self.framework, "session_manager", None)
+        if manager is None:
+            raise RuntimeError("Session manager unavailable")
+
+        category = str(data.get("category") or "").strip().lower()
+        if not category:
+            if session_id in getattr(manager, "browser_sessions", {}):
+                category = "browser"
+            elif session_id in getattr(manager, "sessions", {}):
+                category = "standard"
+            else:
+                raise LookupError(f"Session not found: {session_id}")
+
+        if category == "browser":
+            return self._execute_browser_command(session_id, data)
+        if category in ("standard", "shell", "c2"):
+            return self._execute_shell_command(session_id, data)
+        raise ValueError(f"Unsupported session category: {category}")
+
+    def _execute_browser_command(self, session_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        import uuid as _uuid
+        from datetime import datetime
+
+        code = str(
+            data.get("javascript")
+            or data.get("code")
+            or data.get("command")
+            or ""
+        ).strip()
+        if not code:
+            raise ValueError("javascript or code is required for browser sessions")
+
+        server = getattr(self.framework, "browser_server", None)
+        if server is None or not getattr(server, "running", False):
+            raise RuntimeError("browser_server is not running")
+
+        command = {
+            "type": "execute_js",
+            "code": code[:12000],
+            "id": str(_uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+        }
+        queued = server.send_command_to_session(session_id, command)
+        if not queued:
+            raise LookupError(f"Browser session not found: {session_id}")
+
+        wait_s = max(0, min(int(data.get("wait_seconds") or 8), 30))
+        response_snippet = None
+        if wait_s > 0:
+            cmd_id = str(command.get("id") or "")
+            session = server.get_session(session_id)
+            deadline = time.time() + wait_s
+            while time.time() < deadline and session is not None:
+                time.sleep(0.35)
+                session = server.get_session(session_id)
+                if session is None:
+                    break
+                for row in reversed(getattr(session, "responses", None) or []):
+                    if not isinstance(row, dict):
+                        continue
+                    if cmd_id and str(row.get("command_id") or "") != cmd_id:
+                        continue
+                    response_snippet = str(row.get("result") or "")
+                    break
+                if response_snippet is not None:
+                    break
+
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "category": "browser",
+            "queued": True,
+            "command_id": command.get("id"),
+            "output": response_snippet,
+            "note": "Browser hooks poll for commands; increase wait_seconds if output is empty.",
+        }
+
+    def _execute_shell_command(self, session_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        command = str(data.get("command") or "").strip()
+        if not command:
+            raise ValueError("command is required for shell sessions")
+        if len(command) > 8000:
+            raise ValueError("command too long (max 8000 characters)")
+
+        from core.session_job_manager import get_session_job_manager
+
+        job_manager = getattr(self.framework, "session_job_manager", None) or get_session_job_manager(
+            self.framework
+        )
+        job = job_manager.run_command_on_sessions([session_id], command, wait=True)
+        result = job.results.get(session_id)
+        if result is None:
+            raise LookupError(f"Session not found: {session_id}")
+
+        return {
+            "ok": result.status == "completed",
+            "session_id": session_id,
+            "category": "standard",
+            "status": result.status,
+            "output": result.output or "",
+            "error": result.error or "",
+            "job_id": job.id,
+        }
+
     def _configure_cors(self) -> None:
         """Enable CORS only when KITTYSPLOIT_API_CORS_ORIGINS is explicitly set."""
         origins = parse_cors_origins(os.environ.get("KITTYSPLOIT_API_CORS_ORIGINS"))
@@ -1066,6 +1260,7 @@ class ApiServer:
             "get_modules": "modules:read",
             "get_module_info": "modules:read",
             "get_sessions": "sessions:read",
+            "session_command": "sessions:command",
             "get_session": "sessions:read",
             "get_output": "output:read",
             "stream_output": "output:read",
@@ -1106,6 +1301,7 @@ class ApiServer:
             "run_module": "mutate",
             "execute_module": "mutate",
             "delete_session": "mutate",
+            "session_command": "mutate",
             "execute_interpreter": "admin",
             "create_pipeline": "mutate",
             "switch_workspace": "mutate",

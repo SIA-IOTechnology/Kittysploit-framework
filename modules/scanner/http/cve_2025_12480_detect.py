@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/gladinet_cve_2025_11371_file_read',
+                    'scanner/http/cve_2025_11371_detect',
+                ],
             },
         },
         'references': [
@@ -57,6 +60,7 @@ class Module(Scanner, Http_client):
             'https://nvd.nist.gov/vuln/detail/CVE-2025-12480',
         ],
         'cve': 'CVE-2025-12480',
+        'modules': ['auxiliary/admin/http/gladinet_cve_2025_11371_file_read'],
     }
 
     def run(self):

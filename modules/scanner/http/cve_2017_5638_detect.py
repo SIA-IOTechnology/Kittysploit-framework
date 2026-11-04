@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
         'description': 'Apache Struts 2.3.x before 2.3.32 and 2.5.x before 2.5.10.1 is susceptible to remote command injection attacks. The Jakarta Multipart parser has incorrect exception handling and error-message generation during file upload attempts, which can allow an attacker to execute arbitrary commands via a crafted Content-Type, Content-Disposition, or Content-Length HTTP header. This was exploited in March 2017 with a Content-Type header containing a #cmd= string.',
         'author': ['KittySploit Team'],
         'severity': 'critical',
-        'tags': ['web', 'scanner', 'cve2017', 'cve', 'apache', 'kev', 'msf', 'struts', 'rce', 'vkev', 'vuln'],
+        'tags': ['web', 'scanner', 'cve2017', 'cve', 'apache', 'kev', 'struts', 'rce', 'vkev', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -57,7 +57,6 @@ class Module(Scanner, Http_client):
         'references': [
             'https://github.com/mazen160/struts-pwn',
             'https://isc.sans.edu/diary/22169',
-            'https://github.com/rapid7/metasploit-framework/issues/8064',
             'https://nvd.nist.gov/vuln/detail/CVE-2017-5638',
             'http://blog.talosintelligence.com/2017/03/apache-0-day-exploited.html',
         ],

@@ -9,7 +9,7 @@ from lib.protocols.http.http_client import Http_client
 class Module(Scanner, Http_client):
     __info__ = {
         'name': 'Micro Focus Operations Bridge Manager <=2020.05 - Remote Code Execution Detection',
-        'description': 'Micro Focus Operations Bridge Manager in versions 2020.05 and below is vulnerable to remote code execution via UCMDB. The vulnerability allows remote attackers to execute arbitrary code on affected installations of Data Center Automation. An attack requires network access and authentication as a valid application user. Originated from Metasploit module (#14654).',
+        'description': 'Micro Focus Operations Bridge Manager in versions 2020.05 and below is vulnerable to remote code execution via UCMDB. The vulnerability allows remote attackers to execute arbitrary code on affected installations of Data Center Automation. An attack requires network access and authentication as a valid application user.',
         'author': ['KittySploit Team'],
         'severity': 'high',
         'tags': ['web', 'scanner', 'cve', 'cve2020', 'opm', 'rce', 'packetstorm', 'microfocus', 'vuln'],

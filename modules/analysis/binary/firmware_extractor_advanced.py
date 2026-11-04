@@ -15,6 +15,7 @@ from lib.firmware import (
     FirmwareArch,
     FirmwareExtract,
     detect_firmware_type,
+    extract_squashfs,
     extract_trx,
     SUPPORTED_FORMATS_DEFAULT,
 )
@@ -26,7 +27,7 @@ class Module(Analysis, FirmwareExtract, FirmwareArch):
         "name": "Firmware Extractor (Advanced)",
         "description": (
             "Scan and extract firmware images: TRX headers, gzip/lzma layers, ELF blobs, "
-            "squashfs detection (extraction squashfs non implémentée). "
+            "squashfs via unsquashfs when installed (else raw image export). "
             "Nested structures are partially handled (TRX → gzip)."
         ),
         "author": ["KittySploit Team"],
@@ -40,7 +41,7 @@ class Module(Analysis, FirmwareExtract, FirmwareArch):
         "gzip": {**SUPPORTED_FORMATS_DEFAULT["gzip"], "handler": FirmwareExtract.extract_gzip},
         "lzma": {**SUPPORTED_FORMATS_DEFAULT["lzma"], "handler": FirmwareExtract.extract_lzma},
         "elf": {**SUPPORTED_FORMATS_DEFAULT["elf"], "handler": FirmwareExtract.extract_elf},
-        "squashfs": {**SUPPORTED_FORMATS_DEFAULT["squashfs"], "handler": None},
+        "squashfs": {**SUPPORTED_FORMATS_DEFAULT["squashfs"], "handler": extract_squashfs},
     }
 
     firmware_path = OptString(
@@ -56,7 +57,7 @@ class Module(Analysis, FirmwareExtract, FirmwareArch):
     )
     force_format = OptString(
         "",
-        "Force single format: trx, gzip, lzma, elf (empty = auto)",
+        "Force single format: trx, gzip, lzma, elf, squashfs (empty = auto)",
         required=False,
         advanced=True,
     )

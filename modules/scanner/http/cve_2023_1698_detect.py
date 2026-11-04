@@ -48,7 +48,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/wago_cve_2023_1698_rce'],
             },
         },
         'references': [

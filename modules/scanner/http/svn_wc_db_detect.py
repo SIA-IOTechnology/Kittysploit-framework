@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'SVN wc.db file is exposed.',
         'author': ['KittySploit Team'],
         'severity': 'medium',
-        'tags': ['web', 'scanner', 'exposure', 'msf', 'svn', 'config', 'files', 'vuln'],
+        'tags': ['web', 'scanner', 'exposure', 'svn', 'config', 'files', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -53,7 +53,6 @@ class Module(Scanner, Http_client):
         },
         'references': [
             'https://github.com/maurosoria/dirsearch/blob/master/db/dicc.txt',
-            'https://github.com/rapid7/metasploit-framework/blob/master//modules/auxiliary/scanner/http/svn_wcdb_scanner.rb',
             'https://infosecwriteups.com/indias-aadhar-card-source-code-disclosure-via-exposed-svn-wc-db-c05519ea7761',
         ],
     }

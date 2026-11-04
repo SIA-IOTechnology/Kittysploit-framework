@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from core.output_handler import print_error, print_info, print_success, print_warning
 from interfaces.command_system.base_command import BaseCommand
+from interfaces.mobile_api_defaults import MOBILE_PAIR_DEFAULT_PORT
 
 
 class MobileCommand(BaseCommand):
@@ -30,12 +31,12 @@ class MobileCommand(BaseCommand):
     def usage(self) -> str:
         return (
             "mobile pair [--host HOST] [--port PORT] [--advertise-host HOST] "
-            "[--ttl SECONDS] [--insecure-http] | mobile status | mobile revoke DEVICE_ID"
+            "[--ttl SECONDS] [--insecure-http] [--read-only] | mobile status | mobile revoke DEVICE_ID"
         )
 
     @property
     def help_text(self) -> str:
-        return """
+        return f"""
 Pair the KittySploit mobile app with this running framework.
 
 Note: the mobile feature is under construction — pairing UI and QR work, but the app
@@ -48,10 +49,11 @@ Subcommands:
 
 Pair options:
     --host HOST             Listening interface (default: 0.0.0.0)
-    --port PORT             Listening port (default: 5000)
+    --port PORT             Listening port (default: {MOBILE_PAIR_DEFAULT_PORT})
     --advertise-host HOST   Address reachable by the phone (auto-detected by default)
     --ttl SECONDS           QR lifetime, from 30 to 600 seconds (default: 120)
     --insecure-http         Disable TLS; use only on a trusted isolated network
+    --read-only             Monitoring only (no shell/JS from the app)
 
 Examples:
     mobile pair
@@ -93,10 +95,15 @@ Examples:
     def _pair(self, args: List[str]) -> bool:
         parser = argparse.ArgumentParser(prog="mobile pair", add_help=True)
         parser.add_argument("--host", default="0.0.0.0")
-        parser.add_argument("--port", type=int, default=5000)
+        parser.add_argument("--port", type=int, default=MOBILE_PAIR_DEFAULT_PORT)
         parser.add_argument("--advertise-host")
         parser.add_argument("--ttl", type=int, default=120)
         parser.add_argument("--insecure-http", action="store_true")
+        parser.add_argument(
+            "--read-only",
+            action="store_true",
+            help="Viewer tokens only (no remote shell/JS from the app)",
+        )
         try:
             parsed = parser.parse_args(args)
         except SystemExit:
@@ -116,17 +123,27 @@ Examples:
                 advertise_host=advertise_host,
                 insecure_http=parsed.insecure_http,
             )
+            pair_roles = ("viewer",) if parsed.read_only else ("companion_interact",)
             pairing = state["manager"].create_pairing(
                 state["base_url"],
                 certificate_sha256=state.get("certificate_sha256"),
                 ttl_seconds=parsed.ttl,
+                roles=pair_roles,
             )
         except Exception as exc:
             print_error(f"Unable to start mobile pairing: {exc}")
             return False
 
         print_success("Mobile pairing is ready")
+        if parsed.read_only:
+            print_info("Read-only viewer mode (no shell/JS from the app).")
+        else:
+            print_info("Default mode: sessions + shell/JS from the paired app.")
         print_info(f"Endpoint: {pairing['api_base_url']}")
+        print_info(
+            "Same machine as this console? In the companion app enable "
+            "'Connect from this PC', or run: mobile pair --advertise-host 127.0.0.1"
+        )
         print_info(f"Expires in: {pairing['expires_in']} seconds")
         self._print_qr(pairing["pairing_uri"])
         print_info(f"Pairing link: {pairing['pairing_uri']}")

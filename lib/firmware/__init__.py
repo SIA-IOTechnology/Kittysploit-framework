@@ -31,6 +31,7 @@ from lib.firmware.extract import (
     load_maybe_gzip_file,
 )
 from lib.firmware.fortinet import FortinetFirmware, FortinetKernelProfile
+from lib.firmware.squashfs import extract_squashfs
 from lib.firmware.trx import extract_trx
 from lib.firmware.utils import SUPPORTED_FORMATS_DEFAULT, detect_firmware_type
 
@@ -48,6 +49,7 @@ __all__ = [
     "extract_gzip",
     "extract_lzma",
     "extract_elf",
+    "extract_squashfs",
     "SUPPORTED_FORMATS_DEFAULT",
     "ARCH_PAYLOAD_MAP",
     "analyze_firmware_arch",

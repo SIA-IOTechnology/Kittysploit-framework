@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
         'description': 'zhttpd is vulnerable to unauthenticated local inclusion including privileged files such as /etc/shadow. An attacker can read all files on the system by using this endpoint.',
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'misconfig', 'unauth', 'zyxel', 'lfi', 'msf', 'vuln'],
+        'tags': ['web', 'scanner', 'misconfig', 'unauth', 'zyxel', 'lfi', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -55,7 +55,6 @@ class Module(Scanner, Http_client):
         'references': [
             'https://sec-consult.com/blog/detail/enemy-within-unauthenticated-buffer-overflows-zyxel-routers/',
             'https://sec-consult.com/vulnerability-lab/advisory/multiple-critical-vulnerabilities-in-multiple-zyxel-devices/',
-            'https://github.com/rapid7/metasploit-framework/pull/17388',
         ],
     }
 

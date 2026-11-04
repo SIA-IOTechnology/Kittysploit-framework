@@ -4,7 +4,7 @@
 """
 Direct Windows syscall evasion loader.
 
-Port of Metasploit's direct syscall evasion technique: resolves Zw* stubs from
+Direct syscall evasion technique: resolves Zw* stubs from
 ntdll at runtime, invokes direct syscalls to allocate/write/execute shellcode,
 and encrypts the embedded payload (ChaCha20 or RC4).
 
@@ -34,9 +34,6 @@ class Module(Backdoor):
         "author": ["Yaz (kensh1ro)", "KittySploit"],
         "platform": Platform.WINDOWS,
         "arch": Arch.X64,
-        "references": [
-            "https://github.com/rapid7/metasploit-framework",
-        ],
     }
 
     payload_path = OptString(

@@ -30,7 +30,6 @@ class Module(Backdoor):
         "platform": Platform.WINDOWS,
         "arch": Arch.X64,
         "references": [
-            "https://github.com/rapid7/metasploit-framework/blob/master/modules/evasion/windows/windows_defender_js_hta.rb",
             "https://lolbas-project.github.io/lolbas/Binaries/Jsc/",
         ],
         "tags": ["windows", "defender", "hta", "jscript", "jsc", "evasion", "lolbin"],

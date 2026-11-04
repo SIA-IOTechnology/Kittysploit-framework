@@ -3,7 +3,7 @@
 
 """
 Gather current WLAN connection details on each wireless interface
-(Metasploit-style post/windows/wlan/wlan_current_connection).
+.
 """
 
 from kittysploit import *
@@ -29,7 +29,6 @@ class Module(Post):
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [
             "https://attack.mitre.org/techniques/T1016/",
-            "https://github.com/rapid7/metasploit-framework/blob/master/modules/post/windows/wlan/wlan_current_connection.rb",
         ],
         "tags": ["windows", "post", "gather", "wlan", "wifi"],
         "agent": {

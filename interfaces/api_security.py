@@ -40,10 +40,16 @@ OPERATOR_PERMISSIONS = VIEWER_PERMISSIONS | {
     "mcp:execute",
 }
 
+COMPANION_INTERACT_PERMISSIONS = VIEWER_PERMISSIONS | {
+    "sessions:command",
+    "browser:execute",
+}
+
 ADMIN_PERMISSIONS = {"*"}
 
 ROLE_PERMISSIONS = {
     "viewer": VIEWER_PERMISSIONS,
+    "companion_interact": COMPANION_INTERACT_PERMISSIONS,
     "operator": OPERATOR_PERMISSIONS,
     "admin": ADMIN_PERMISSIONS,
 }

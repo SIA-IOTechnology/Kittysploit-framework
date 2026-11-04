@@ -49,7 +49,7 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': ['exploits/multi/http/ncast_cve_2024_0305_rce'],
             },
         },
         'references': [

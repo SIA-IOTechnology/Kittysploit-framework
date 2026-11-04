@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'scanner/http/cve_2024_10441_synology_detect',
+                    'scanner/http/cve_2024_50629_synology_dsm_detect',
+                    'scanner/tcp/synology_replication_service_cve_2024_10442_detect',
+                ],
             },
         },
         'references': ['https://www.synology.com/en-us/dsm'],

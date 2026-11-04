@@ -31,9 +31,6 @@ class Module(Backdoor):
         "author": "KittySploit",
         "platform": Platform.WINDOWS,
         "arch": Arch.X64,
-        "references": [
-            "https://github.com/rapid7/metasploit-framework",
-        ],
     }
 
     payload_path = OptString(

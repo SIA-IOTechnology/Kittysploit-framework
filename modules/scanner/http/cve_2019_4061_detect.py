@@ -53,7 +53,6 @@ class Module(Scanner, Http_client):
         },
         'references': [
             'https://www.atredis.com/blog/2019/3/18/harvesting-data-from-bigfix-relay-servers',
-            'https://github.com/rapid7/metasploit-framework/blob/0fd8f0984e10a135c000d1fb8797d76d62fb24f7/modules/auxiliary/gather/ibm_bigfix_sites_packages_enum.rb',
             'https://nvd.nist.gov/vuln/detail/CVE-2019-4061',
         ],
         'cve': 'CVE-2019-4061',

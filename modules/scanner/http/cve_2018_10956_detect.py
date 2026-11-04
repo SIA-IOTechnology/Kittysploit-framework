@@ -54,7 +54,6 @@ class Module(Scanner, Http_client):
         },
         'references': [
             'https://labs.nettitude.com/blog/cve-2018-10956-unauthenticated-privileged-directory-traversal-in-ipconfigure-orchid-core-vms/',
-            'https://github.com/nettitude/metasploit-modules/blob/master/orchid_core_vms_directory_traversal.rb',
             'https://www.exploit-db.com/exploits/44916/',
             'https://nvd.nist.gov/vuln/detail/CVE-2018-10956',
             'https://github.com/xbl3/awesome-cve-poc_qazbnm456',

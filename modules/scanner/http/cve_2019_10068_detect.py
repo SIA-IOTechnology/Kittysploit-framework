@@ -12,7 +12,7 @@ class Module(Scanner, Http_client):
         'description': 'Kentico CMS is susceptible to remote code execution via a .NET deserialization vulnerability.',
         'author': ['KittySploit Team'],
         'severity': 'critical',
-        'tags': ['web', 'scanner', 'cve', 'cve2019', 'kentico', 'iis', 'packetstorm', 'rce', 'deserialization', 'kev', 'msf', 'vkev', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2019', 'kentico', 'iis', 'packetstorm', 'rce', 'deserialization', 'kev', 'vkev', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -55,7 +55,6 @@ class Module(Scanner, Http_client):
             'https://www.aon.com/cyber-solutions/aon_cyber_labs/unauthenticated-remote-code-execution-in-kentico-cms/',
             'https://packetstormsecurity.com/files/157588/Kentico-CMS-12.0.14-Remote-Command-Execution.html',
             'https://nvd.nist.gov/vuln/detail/CVE-2019-10068',
-            'https://github.com/rapid7/metasploit-framework/pull/13107',
             'http://packetstormsecurity.com/files/157588/Kentico-CMS-12.0.14-Remote-Command-Execution.html',
         ],
         'cve': 'CVE-2019-10068',

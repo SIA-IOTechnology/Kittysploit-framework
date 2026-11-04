@@ -52,7 +52,6 @@ class Module(Scanner, Http_client):
             },
         },
         'references': [
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/auxiliary/scanner/sap/sap_mgmt_con_version.rb',
             'https://gist.github.com/c6da760f57e062397e52400936ca5797',
             'https://www.neteye-blog.com/2017/03/sap-monitoring-experiences-with-sapcontrol-and-check_sap_health/',
         ],

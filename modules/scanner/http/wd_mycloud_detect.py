@@ -48,7 +48,12 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/cve_2018_17153_detect',
+                    'exploits/linux/http/wd_mycloud_cve_2018_17153_rce',
+                    'scanner/http/cve_2018_18472_detect',
+                    'exploits/linux/http/wd_nas_cve_2018_18472_rce',
+                ],
             },
         },
         'references': [

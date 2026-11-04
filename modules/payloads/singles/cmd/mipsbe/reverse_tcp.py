@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # Linux/MIPS BE reverse TCP + dup2 + execve("//bin/sh") — based on public
-# shellcode by rigan (Metasploit linux/mipsbe/shell_reverse_tcp, EDB-18226).
+# shellcode by rigan (EDB-18226).
 # Use with listeners/multi/reverse_tcp.
 
 from kittysploit import *

@@ -13,7 +13,7 @@ class Module(Scanner, Http_client):
         'description': 'Microsoft SharePoint is vulnerable to a remote code execution when the software fails to check the source markup of an application package.',
         'author': ['KittySploit Team'],
         'severity': 'high',
-        'tags': ['web', 'scanner', 'cve', 'cve2020', 'msf', 'sharepoint', 'iis', 'microsoft', 'ssi', 'rce', 'vuln'],
+        'tags': ['web', 'scanner', 'cve', 'cve2020', 'sharepoint', 'iis', 'microsoft', 'ssi', 'rce', 'vuln'],
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
@@ -55,7 +55,6 @@ class Module(Scanner, Http_client):
         'references': [
             'https://srcincite.io/pocs/cve-2020-16952.py.txt',
             'https://portal.msrc.microsoft.com/en-US/security-guidance/advisory/CVE-2020-16952',
-            'https://github.com/rapid7/metasploit-framework/blob/1a341ae93191ac5f6d8a9603aebb6b3a1f65f107/documentation/modules/exploit/windows/http/sharepoint_ssi_viewstate.md',
             'https://nvd.nist.gov/vuln/detail/CVE-2020-16952',
             'https://github.com/ARPSyndicate/cvemon',
         ],

@@ -132,7 +132,6 @@ kittysploit> agent http://192.168.56.10 \
 - **Workspaces & scope** — engagement boundaries, hosts, and findings organized per job
 - **Workflows & playbooks** — repeatable recon and attack chains
 - **Extensions** — proxy, OSINT, GUI, protocols via the marketplace
-- **Mobile companion** — QR pair for read-only engagement monitoring
 
 ## Ecosystem
 

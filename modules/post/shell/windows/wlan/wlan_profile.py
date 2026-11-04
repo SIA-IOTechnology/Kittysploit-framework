@@ -3,7 +3,7 @@
 
 """
 Extract saved WLAN profiles and cleartext key material
-(Metasploit-style post/windows/wlan/wlan_profile).
+.
 """
 
 from kittysploit import *
@@ -30,7 +30,6 @@ class Module(Post):
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [
             "https://attack.mitre.org/techniques/T1555/",
-            "https://github.com/rapid7/metasploit-framework/blob/master/modules/post/windows/wlan/wlan_profile.rb",
         ],
         "tags": ["windows", "post", "gather", "wlan", "wifi", "credentials"],
         "agent": {

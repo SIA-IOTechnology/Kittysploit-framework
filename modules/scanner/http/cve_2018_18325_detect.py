@@ -56,7 +56,6 @@ class Module(Scanner, Http_client):
             'https://nvd.nist.gov/vuln/detail/CVE-2018-15811',
             'https://github.com/dnnsoftware/Dnn.Platform/releases',
             'http://packetstormsecurity.com/files/157080/DotNetNuke-Cookie-Deserialization-Remote-Code-Execution.html',
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/exploits/windows/http/dnn_cookie_deserialization_rce.rb',
         ],
         'cve': 'CVE-2018-18325',
     }

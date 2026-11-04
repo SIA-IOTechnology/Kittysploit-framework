@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/cve_2025_48703_detect',
+                    'exploits/http/cwp_cve_2025_48703_rce',
+                    'exploits/http/cwp_unauth_rce',
+                ],
             },
         },
     }

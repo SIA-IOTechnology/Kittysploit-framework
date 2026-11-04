@@ -13,7 +13,7 @@ class Module(Post):
     __info__ = {
         "name": "Install Python for Windows",
         "description": "Downloads and extracts an embeddable Python3 distribution onto the target",
-        "author": "KittySploit Team (based on Metasploit module by Michael Long)",
+        "author": "KittySploit Team",
         "platform": Platform.WINDOWS,
         "session_type": [SessionType.METERPRETER, SessionType.SHELL],
         "references": [

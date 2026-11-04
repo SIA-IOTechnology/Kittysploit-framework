@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'scanner/http/qnap_qts_version_cve_2022_27596_detect',
+                    'scanner/http/cve_2023_47218_detect',
+                    'scanner/http/cve_2019_7192_detect',
+                ],
             },
         },
         'references': ['https://www.qnap.com/qts/'],

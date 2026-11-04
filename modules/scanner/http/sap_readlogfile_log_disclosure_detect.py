@@ -52,7 +52,6 @@ class Module(Scanner, Http_client):
             },
         },
         'references': [
-            'https://github.com/rapid7/metasploit-framework/blob/master/modules/auxiliary/scanner/sap/sap_mgmt_con_getlogfiles.rb',
             'https://itsiti.com/csmon/',
             'https://sapbasisinfo.com/blog/2017/01/20/sapcontrol-command-funtions-for-sap-hana/',
             'https://help.sap.com/docs/SUPPORT_CONTENT/si/3362959700.html',

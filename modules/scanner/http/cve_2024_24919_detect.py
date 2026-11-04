@@ -49,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'auxiliary/admin/http/checkpoint_cve_2024_24919_file_read',
+                ],
             },
         },
         'references': [

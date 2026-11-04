@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# Null-free ARM LE reverse TCP + dup2 + execve("/bin/sh") — Flashback / Metasploit prep_shelly.
+# Null-free ARM LE reverse TCP + dup2 + execve("/bin/sh") — Flashback prep_shelly.
 # IPv4 only (embedded sockaddr). Use with listeners/multi/reverse_tcp.
 
 from kittysploit import *

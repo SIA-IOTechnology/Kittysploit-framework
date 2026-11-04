@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-#
-# Ported from Metasploit post/linux/busybox/enum_hosts (Msf::Post::Linux::BusyBox).
-# Original author: Javier Vicente Vallejo — https://github.com/rapid7/metasploit-framework
-
 import os
 import re
 

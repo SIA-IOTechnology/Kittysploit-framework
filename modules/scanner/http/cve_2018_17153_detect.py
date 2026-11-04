@@ -49,7 +49,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/wd_mycloud_cve_2018_17153_rce',
+                    'scanner/http/wd_mycloud_detect',
+                ],
             },
         },
         'references': [

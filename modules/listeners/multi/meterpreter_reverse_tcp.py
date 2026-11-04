@@ -17,9 +17,6 @@ class Module(Listener):
         'version': '1.0.0',
         'handler': Handler.REVERSE,
         'session_type': SessionType.METERPRETER,
-        'references': [
-            'https://www.offensive-security.com/metasploit-unleashed/about-meterpreter/'
-        ]
     }
 
     lhost = OptString("127.0.0.1", "Local IPv4 or IPv6 address", True)

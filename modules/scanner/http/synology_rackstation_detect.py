@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/synology_dsm_system_info_detect',
+                    'scanner/http/cve_2024_10441_synology_detect',
+                    'scanner/tcp/synology_replication_service_cve_2024_10442_detect',
+                ],
             },
         },
     }

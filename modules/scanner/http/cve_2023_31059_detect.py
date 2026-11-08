@@ -49,6 +49,7 @@ class Module(Scanner, Http_client):
                 'consumes_capabilities': [],
                 'option_bindings': {},
                 'suggested_followups': [
+                    'exploits/multi/http/repetier_cve_2023_31059_rce',
                     'auxiliary/admin/http/repetier_cve_2023_31059_file_read',
                 ],
             },

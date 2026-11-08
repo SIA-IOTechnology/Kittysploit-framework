@@ -43,6 +43,7 @@ OPERATOR_PERMISSIONS = VIEWER_PERMISSIONS | {
 COMPANION_INTERACT_PERMISSIONS = VIEWER_PERMISSIONS | {
     "sessions:command",
     "browser:execute",
+    "workspaces:switch",
 }
 
 ADMIN_PERMISSIONS = {"*"}

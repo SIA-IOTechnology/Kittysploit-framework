@@ -40,15 +40,17 @@ class BrowserSession:
     
     def add_response(self, response: Dict[str, Any]):
         self.responses.append(response)
+        if len(self.responses) > 200:
+            self.responses = self.responses[-200:]
         self.update_activity()
     
-    def update_activity(self):
+    def update_activity(self, *, polling: bool = False):
         self.last_activity = datetime.now()
-        # Track polling timestamps for health checking
-        self.polling_timestamps.append(datetime.now())
-        # Keep only last N timestamps
-        if len(self.polling_timestamps) > self.max_polling_history:
-            self.polling_timestamps.pop(0)
+        if polling:
+            # Only a command-poll request proves that the browser hook is alive.
+            self.polling_timestamps.append(self.last_activity)
+            if len(self.polling_timestamps) > self.max_polling_history:
+                self.polling_timestamps.pop(0)
     
     def is_polling_active(self, expected_interval: float = 1.0, tolerance: float = 15.0) -> bool:
         """
@@ -68,26 +70,7 @@ class BrowserSession:
         # Check if we've received a polling request recently (within tolerance)
         time_since_last_poll = (datetime.now() - self.polling_timestamps[-1]).total_seconds()
         
-        # If last poll was recent, consider it active
-        if time_since_last_poll <= tolerance:
-            return True
-        
-        # Check intervals between recent polls if we have enough data
-        if len(self.polling_timestamps) >= 2:
-            # Check intervals between recent polls
-            recent_intervals = []
-            for i in range(1, len(self.polling_timestamps)):
-                interval = (self.polling_timestamps[i] - self.polling_timestamps[i-1]).total_seconds()
-                recent_intervals.append(interval)
-            
-            # If average interval is reasonable (within tolerance of expected), polling is active
-            if recent_intervals:
-                avg_interval = sum(recent_intervals) / len(recent_intervals)
-                # Consider active if average interval is within reasonable range
-                # (allowing for network delays, browser throttling, etc.)
-                return avg_interval <= (expected_interval * 2 + tolerance)
-        
-        return False
+        return time_since_last_poll <= tolerance
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -379,7 +362,7 @@ self.addEventListener('fetch', (event) => {
         # CRITICAL: Always update activity when we receive a polling request
         # This is the definitive proof that the session is still alive
         old_activity = session.last_activity
-        session.update_activity()
+        session.update_activity(polling=True)
         
         # Debug: Log activity updates (only occasionally to avoid spam)
         time_since_last = (datetime.now() - old_activity).total_seconds()
@@ -1730,6 +1713,18 @@ class BrowserServer:
         else:
             print_error(f"Session {session_id} not found!")
             return False
+
+    def get_command_response(self, session_id: str, command_id: str) -> Optional[Dict[str, Any]]:
+        """Return a command response without consuming it, or None while pending."""
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+        for response in reversed(list(session.responses)):
+            if not isinstance(response, dict):
+                continue
+            if str(response.get('command_id') or '') == str(command_id or ''):
+                return dict(response)
+        return None
     
     def handle_command_response(self, session_id: str, command_id: str, result: Any):
         session = self.get_session(session_id)

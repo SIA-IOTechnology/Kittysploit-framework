@@ -141,8 +141,7 @@ Examples:
             print_info("Default mode: sessions + shell/JS from the paired app.")
         print_info(f"Endpoint: {pairing['api_base_url']}")
         print_info(
-            "Same machine as this console? In the companion app enable "
-            "'Connect from this PC', or run: mobile pair --advertise-host 127.0.0.1"
+            "The companion app will use this endpoint exactly as advertised."
         )
         print_info(f"Expires in: {pairing['expires_in']} seconds")
         self._print_qr(pairing["pairing_uri"])

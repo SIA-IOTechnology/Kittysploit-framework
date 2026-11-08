@@ -591,6 +591,23 @@ class ApiServer:
                 return jsonify({'error': str(exc)}), 404
             except RuntimeError as exc:
                 return jsonify({'error': str(exc)}), 503
+
+        @self.app.route(
+            '/api/sessions/<session_id>/commands/<command_id>/result',
+            methods=['GET'],
+        )
+        def session_command_result(session_id, command_id):
+            """Poll the result of a queued browser command."""
+            if not self.check_auth(request):
+                return jsonify({'error': 'Unauthorized'}), 401
+            try:
+                return jsonify(
+                    self._browser_command_result(str(session_id), str(command_id))
+                )
+            except LookupError as exc:
+                return jsonify({'error': str(exc)}), 404
+            except RuntimeError as exc:
+                return jsonify({'error': str(exc)}), 503
         
         @self.app.route('/api/sessions/<int:session_id>', methods=['GET'])
         def get_session(session_id):
@@ -1083,6 +1100,7 @@ class ApiServer:
                 }
             )
 
+        browser_server = getattr(self.framework, "browser_server", None)
         for session in grouped.get("browser") or []:
             if not isinstance(session, dict):
                 continue
@@ -1092,13 +1110,27 @@ class ApiServer:
             ip = info.get("ip") or info.get("hostname") or ""
             ua = info.get("user_agent") or ""
             target = ip or (ua[:48] + "…" if len(ua) > 48 else ua) or "browser hook"
+            session_id = str(session.get("id", ""))
+            live_session = (
+                browser_server.get_session(session_id)
+                if browser_server is not None and session_id
+                else None
+            )
+            polling_active = bool(
+                live_session is not None and live_session.is_polling_active()
+            )
             rows.append(
                 {
-                    "id": session.get("id", ""),
+                    "id": session_id,
                     "category": "browser",
                     "session_type": "browser",
                     "host": ip,
-                    "status": "active" if session.get("active", True) else "inactive",
+                    "status": (
+                        "active"
+                        if session.get("active", True) and polling_active
+                        else "inactive"
+                    ),
+                    "polling_active": polling_active,
                     "target": target,
                     "commands_executed": session.get("commands_executed", 0),
                     "commands_sent": session.get("commands_sent", 0),
@@ -1161,7 +1193,8 @@ class ApiServer:
             raise LookupError(f"Browser session not found: {session_id}")
 
         wait_s = max(0, min(int(data.get("wait_seconds") or 8), 30))
-        response_snippet = None
+        response_found = False
+        response_value = None
         if wait_s > 0:
             cmd_id = str(command.get("id") or "")
             session = server.get_session(session_id)
@@ -1171,14 +1204,10 @@ class ApiServer:
                 session = server.get_session(session_id)
                 if session is None:
                     break
-                for row in reversed(getattr(session, "responses", None) or []):
-                    if not isinstance(row, dict):
-                        continue
-                    if cmd_id and str(row.get("command_id") or "") != cmd_id:
-                        continue
-                    response_snippet = str(row.get("result") or "")
-                    break
-                if response_snippet is not None:
+                response = server.get_command_response(session_id, cmd_id)
+                if response is not None:
+                    response_found = True
+                    response_value = response.get("result")
                     break
 
         return {
@@ -1187,8 +1216,56 @@ class ApiServer:
             "category": "browser",
             "queued": True,
             "command_id": command.get("id"),
-            "output": response_snippet,
-            "note": "Browser hooks poll for commands; increase wait_seconds if output is empty.",
+            "completed": response_found,
+            "pending": not response_found,
+            "output": _make_json_serializable(response_value),
+            "note": (
+                "Browser hook response received."
+                if response_found
+                else "Browser hook is still processing the command."
+            ),
+        }
+
+    def _browser_command_result(
+        self,
+        session_id: str,
+        command_id: str,
+    ) -> Dict[str, Any]:
+        """Return the current state of a queued browser command."""
+        session_id = str(session_id or "").strip()
+        command_id = str(command_id or "").strip()
+        if not session_id or not command_id:
+            raise LookupError("session_id and command_id are required")
+
+        server = getattr(self.framework, "browser_server", None)
+        if server is None or not getattr(server, "running", False):
+            raise RuntimeError("browser_server is not running")
+
+        session = server.get_session(session_id)
+        if session is None:
+            raise LookupError(f"Browser session not found: {session_id}")
+
+        response = server.get_command_response(session_id, command_id)
+        if response is None:
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "command_id": command_id,
+                "completed": False,
+                "pending": True,
+                "polling_active": session.is_polling_active(),
+                "output": None,
+            }
+
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "command_id": command_id,
+            "completed": True,
+            "pending": False,
+            "polling_active": session.is_polling_active(),
+            "output": _make_json_serializable(response.get("result")),
+            "timestamp": response.get("timestamp"),
         }
 
     def _execute_shell_command(self, session_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1261,6 +1338,7 @@ class ApiServer:
             "get_module_info": "modules:read",
             "get_sessions": "sessions:read",
             "session_command": "sessions:command",
+            "session_command_result": "sessions:command",
             "get_session": "sessions:read",
             "get_output": "output:read",
             "stream_output": "output:read",
@@ -1302,6 +1380,7 @@ class ApiServer:
             "execute_module": "mutate",
             "delete_session": "mutate",
             "session_command": "mutate",
+            "session_command_result": "read",
             "execute_interpreter": "admin",
             "create_pipeline": "mutate",
             "switch_workspace": "mutate",
@@ -1620,6 +1699,23 @@ class ApiServer:
             },
             "/api/sessions": {
                 "get": operation("listSessions", "List sessions", "sessions:read"),
+            },
+            "/api/sessions/{session_id}/command": {
+                "post": operation(
+                    "runSessionCommand",
+                    "Queue a shell or browser-session command",
+                    "sessions:command",
+                    request_body=True,
+                    parameters=[path_param("session_id")],
+                ),
+            },
+            "/api/sessions/{session_id}/commands/{command_id}/result": {
+                "get": operation(
+                    "getSessionCommandResult",
+                    "Poll a queued browser-session command result",
+                    "sessions:command",
+                    parameters=[path_param("session_id"), path_param("command_id")],
+                ),
             },
             "/api/sessions/{session_id}": {
                 "get": operation(

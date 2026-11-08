@@ -4,6 +4,7 @@
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.scanner.http.openfire_setup_bypass import probe_openfire_setup_bypass
 
 
 class Module(Scanner, Http_client):
@@ -16,7 +17,7 @@ class Module(Scanner, Http_client):
         'agent': {
             'risk': 'active',
             'effects': ['network_probe'],
-            'expected_requests': 1,
+            'expected_requests': 6,
             'reversible': True,
             'approval_required': False,
             'produces': ['tech_hints', 'risk_signals', 'endpoints'],
@@ -48,7 +49,9 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': [],
+                'suggested_followups': [
+                    'exploits/linux/http/openfire_cve_2023_32315_setup_admin',
+                ],
             },
         },
         'references': [
@@ -62,14 +65,16 @@ class Module(Scanner, Http_client):
     }
 
     def run(self):
-        path = '/setup/setup-s/%u002e%u002e/%u002e%u002e/log.jsp'
-        r = self.http_request(method='GET', path=path, allow_redirects=False, headers={'Origin': '{{BaseURL}}'})
-        if not r or r.status_code != 200:
-            return False
-        body = r.text or ""
-        body_all = ('apache', 'java', 'openfire', 'jivesoftware',)
-        if all(m in body for m in body_all):
-            self.set_info(severity='high', reason='Openfire Administration Console - Authentication Bypass detected', path=path)
-            return True
-        return False
+        def _get(path, **kwargs):
+            return self.http_request(method='GET', path=path, allow_redirects=False, **kwargs)
 
+        hit = probe_openfire_setup_bypass(_get)
+        if not hit.get('vulnerable'):
+            return False
+        path = str(hit.get('path') or '')
+        self.set_info(
+            severity='high',
+            reason='Openfire setup environment exposed (CVE-2023-32315)',
+            path=path,
+        )
+        return True

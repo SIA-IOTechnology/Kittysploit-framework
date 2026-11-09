@@ -159,6 +159,25 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
             "fan out concurrently; only evidence-gate-approved exploit-queue items are promoted."
         ),
     },
+    "attack-specialists": {
+        "safety_profile": "normal",
+        "approved_risks": ["read", "active", "intrusive"],
+        "request_budget": 160,
+        "http_replay": "safe",
+        "campaign_goal": "validate",
+        "catalog_policy": "safe-web",
+        "specialist_parallel": True,
+        "hierarchical_planner": True,
+        "attack_specialists_mission": True,
+        "owasp_classes": ["injection", "xss", "ssrf", "auth", "authz"],
+        "fan_out": 6,
+        "discovery_mode": True,
+        "description": (
+            "Full attack-specialist stack: OWASP-class parallel agents, framework expert "
+            "(module chains + sqli_engine playbooks), domain orchestrator, specialist LLM, "
+            "tactical army, and discovery hypotheses (differential oracles)."
+        ),
+    },
 }
 
 

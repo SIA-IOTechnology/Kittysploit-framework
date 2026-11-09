@@ -100,6 +100,18 @@ FRAMEWORK_TOOLS: Sequence[FrameworkToolSpec] = (
         description="Off-catalog module search by keywords/CVE/tags.",
         parameters={"terms": "array of strings", "limit": "optional int"},
     ),
+    FrameworkToolSpec(
+        name="consult_framework_expert",
+        description=(
+            "Read-only KittySploit expert: ranks modules by attack class, returns agent.chain "
+            "follow-ups, playbooks, and recommended domain specialists. Does not run modules."
+        ),
+        parameters={
+            "attack_class": "string e.g. sqli | xss | lfi | authz | discovery | ad",
+            "terms": "array of search tokens (CVE, product, technique)",
+            "question": "string, natural-language intent (max 500 chars)",
+        },
+    ),
 )
 
 
@@ -126,6 +138,11 @@ def orchestrator_tooling_context(
             "protocol": kb.get("protocol"),
             "services": list(kb.get("identified_services") or kb.get("services") or [])[:12],
         },
+        "framework_expert_hint": (
+            (kb.get("framework_expert_last") or {}).get("answer")
+            if isinstance(kb.get("framework_expert_last"), dict)
+            else None
+        ),
     })
 
 
@@ -149,10 +166,21 @@ def parse_orchestrator_response(payload: Mapping[str, Any]) -> Optional[Dict[str
     confidence = max(0.0, min(1.0, confidence))
     tool = str(payload.get("tool") or payload.get("preferred_tool") or "delegate_domain_agents").strip().lower()
     action_id = str(payload.get("action_id") or "").strip()
+    expert_terms_raw = payload.get("expert_terms") or payload.get("terms") or []
+    if not isinstance(expert_terms_raw, list):
+        expert_terms_raw = [expert_terms_raw]
+    expert_terms = [str(t).strip() for t in expert_terms_raw if str(t).strip()][:12]
+    attack_class = str(
+        payload.get("attack_class") or payload.get("expert_attack_class") or ""
+    ).strip().lower()
+    expert_question = str(payload.get("question") or payload.get("expert_question") or rationale)[:500]
     return {
         "domains": domains,
         "rationale": rationale,
         "confidence": confidence,
         "tool": tool,
         "action_id": action_id or None,
+        "attack_class": attack_class or None,
+        "expert_terms": expert_terms,
+        "expert_question": expert_question,
     }

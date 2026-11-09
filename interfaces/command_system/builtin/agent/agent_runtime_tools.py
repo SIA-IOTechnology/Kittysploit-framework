@@ -55,6 +55,7 @@ class AgentRuntimeToolExecutor:
             "run_module": self._run_module,
             "discover_modules": self._discover_modules,
             "search_modules": self._discover_modules,
+            "consult_framework_expert": self._consult_framework_expert,
             "shell_exec": self._shell_exec,
             "framework_command": self._framework_command,
             "browser_eval": self._browser_eval,
@@ -184,6 +185,20 @@ class AgentRuntimeToolExecutor:
                     stash.append(p)
             kb["adhoc_discovered_modules"] = stash[-80:]
         return {"ok": True, "tool": "discover_modules", "query": query, "modules": rows}
+
+    def _consult_framework_expert(self, args: Mapping[str, Any]) -> Dict[str, Any]:
+        from interfaces.command_system.builtin.agent.framework_expert import consult_framework_expert
+
+        terms = args.get("terms") or args.get("query") or []
+        result = consult_framework_expert(
+            state=self.state,
+            framework=self.framework,
+            question=str(args.get("question") or args.get("intent") or ""),
+            attack_class=str(args.get("attack_class") or args.get("class") or ""),
+            terms=terms if isinstance(terms, list) else [terms],
+            limit=max(1, min(int(args.get("limit") or 10), 20)),
+        )
+        return sanitize_nested({**result, "tool": "consult_framework_expert"})
 
     def _shell_exec(self, args: Mapping[str, Any]) -> Dict[str, Any]:
         command = str(args.get("command") or args.get("cmd") or "").strip()
@@ -350,6 +365,15 @@ def runtime_tools_for_llm() -> Sequence[Dict[str, Any]]:
             "name": "discover_modules",
             "description": "Search module catalog by keywords/CVE when no catalog row fits.",
             "parameters": {"terms": "array of strings", "limit": "int optional"},
+        },
+        {
+            "name": "consult_framework_expert",
+            "description": "Read-only attack-class module rankings and agent.chain follow-ups.",
+            "parameters": {
+                "attack_class": "sqli|xss|lfi|authz|discovery|…",
+                "terms": "array of strings",
+                "question": "string optional",
+            },
         },
         {
             "name": "shell_exec",

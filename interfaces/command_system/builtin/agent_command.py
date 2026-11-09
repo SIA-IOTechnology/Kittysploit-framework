@@ -103,6 +103,7 @@ Start with a target (quick profile + validate goal applied by default):
     agent https://example.com
     agent example.com --profile safe-web
     agent example.com --profile bug-bounty-safe
+    agent https://lab.local --profile attack-specialists --llm-local
     agent example.com --dry-run
 
 Intrusive exploits need --approve-risk intrusive or --profile internal-lab.
@@ -230,6 +231,23 @@ LLM:
     --llm-model MODEL                     Model name (default: llama3.1:8b)
     --llm-endpoint URL                    Chat API endpoint
 
+Reactive surface (auto-dispatch scanner/discover when tech or URL appears):
+    KITTYSPLOIT_AGENT_REACTIVE_SURFACE=1   Default on for normal/aggressive profiles
+    Verbose run shows brief + activated sub-agents + suggested next steps
+
+Attack specialists (env overrides, default on for normal/aggressive):
+    KITTYSPLOIT_AGENT_SPECIALIST_LLM=1    LLM-backed specialist module ranking
+    KITTYSPLOIT_AGENT_DOMAIN_ORCHESTRATOR=1   LLM picks domain corps each cycle
+    KITTYSPLOIT_AGENT_ARMY=1                Extended tactical specialist roster
+    KITTYSPLOIT_AGENT_SPECIALISTS=parallel  parallel | sequential | inline
+    Profile attack-specialists              Enables all of the above + framework expert +
+                                            discovery hypotheses + OWASP parallel fan-out
+
+Framework expert (read-only module intelligence):
+    Orchestrator tool consult_framework_expert (attack_class, terms, question)
+    Agent ad-hoc tool consult_framework_expert
+    MCP ks_consult_framework_expert
+
 Sessions:
     --session-policy POLICY               report-only | open-latest | ask | never
     --no-interact                         Alias for --session-policy never
@@ -242,6 +260,7 @@ Examples:
     agent https://target.com --threads 10 --safety-profile discreet
     agent target.com --no-exploit --goal recon
     agent target.com --profile safe-web --dry-run
+    agent https://lab.local --profile attack-specialists --llm-local --approve-risk intrusive
     agent target.com --profile internal-lab --approve-risk intrusive --goal obtain-shell
     agent target.com --all --shell-hunter --approve-risk intrusive
     agent https://target.com --reuse-proxy-auth --http-replay active --approve-active-replay
@@ -1117,7 +1136,20 @@ Examples:
             )
 
             # Mission profile may force parallel OWASP-class specialists before defaults freeze flags.
-            if profile_overrides.get("owasp_web_parallel") or profile_overrides.get("specialist_parallel"):
+            if profile_overrides.get("attack_specialists_mission"):
+                from interfaces.command_system.builtin.agent.attack_specialists_mission import (
+                    apply_attack_specialists_to_state,
+                )
+
+                apply_attack_specialists_to_state(
+                    state,
+                    classes=profile_overrides.get("owasp_classes"),
+                    fan_out=int(profile_overrides.get("fan_out") or 6),
+                    discovery=bool(profile_overrides.get("discovery_mode")),
+                )
+            elif profile_overrides.get("owasp_web_parallel") or profile_overrides.get(
+                "specialist_parallel"
+            ):
                 from interfaces.command_system.builtin.agent.owasp_mission import (
                     apply_owasp_web_parallel_to_state,
                 )
@@ -1128,6 +1160,8 @@ Examples:
                 )
                 if profile_overrides.get("hierarchical_planner"):
                     state.hierarchical_planner_enabled = True
+            elif profile_overrides.get("discovery_mode"):
+                state.discovery_enabled = True
             intel = apply_intelligence_defaults(state)
             # Re-assert parallel after defaults when mission profile demands it.
             if profile_overrides.get("owasp_web_parallel") or profile_overrides.get("specialist_parallel"):
@@ -1145,7 +1179,13 @@ Examples:
                     f"adaptive={intel.get('adaptive_loop')} "
                     f"specialists={intel.get('specialists')}"
                 )
-                if profile_overrides.get("owasp_web_parallel"):
+                if profile_overrides.get("attack_specialists_mission"):
+                    print_info(
+                        "Attack-specialists mission enabled "
+                        f"(classes={','.join(profile_overrides.get('owasp_classes') or [])}, "
+                        "framework expert + domain orchestrator + specialist LLM)."
+                    )
+                elif profile_overrides.get("owasp_web_parallel"):
                     print_info(
                         "OWASP web-parallel mission enabled "
                         f"(classes={','.join(profile_overrides.get('owasp_classes') or [])})."

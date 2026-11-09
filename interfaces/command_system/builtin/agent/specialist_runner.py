@@ -140,6 +140,12 @@ def _path_matches_specialist(profile: SpecialistProfile, path: str, kb: Mapping[
         return "scanner" in low or "auxiliary/scanner" in low
     if profile.key == "coordinator":
         return True
+    if profile.key == "discovery":
+        if low.startswith(("exploits/", "post/")):
+            return False
+        if low.startswith("/") or low.startswith("http"):
+            return True
+        return low.startswith(("auxiliary/scanner/", "scanner/", "osint/"))
     if profile.key == "database_service":
         return any(tok in low for tok in ("mysql", "mssql", "postgres", "sqli", "sql_injection", "oracle"))
     if profile.key == "active_directory":
@@ -160,6 +166,12 @@ def _specialist_score(
 ) -> float:
     score = float(row.heuristic_score or 0.0)
     path = row.module_path
+    try:
+        from interfaces.command_system.builtin.agent.specialist_attack_intel import score_module_path
+
+        score += min(30.0, score_module_path(path, profile.key, ctx.kb))
+    except Exception:
+        pass
     if _path_matches_specialist(profile, path, ctx.kb):
         score += 25.0
     if path in ctx.seen_paths:
@@ -182,6 +194,40 @@ def propose_for_specialist(
 ) -> List[SpecialistProposal]:
     """Read-only specialist proposal — never executes modules."""
     if profile.key == "discovery":
+        try:
+            from interfaces.command_system.builtin.agent.discovery_specialist import (
+                propose_discovery_specialist,
+            )
+
+            discovery_batch = propose_discovery_specialist(
+                catalog,
+                ctx,
+                state=state,
+                limit=limit,
+            )
+            if discovery_batch:
+                return discovery_batch
+        except Exception:
+            pass
+        if state is not None:
+            try:
+                from interfaces.command_system.builtin.agent.specialist_llm import (
+                    propose_for_specialist_llm,
+                    specialist_llm_enabled,
+                )
+
+                if specialist_llm_enabled(state):
+                    llm_batch = propose_for_specialist_llm(
+                        profile,
+                        [row for row in catalog if row.admissible],
+                        ctx,
+                        state=state,
+                        limit=limit,
+                    )
+                    if llm_batch:
+                        return llm_batch
+            except Exception:
+                pass
         return []
     if state is not None:
         ranked_pre = sorted(

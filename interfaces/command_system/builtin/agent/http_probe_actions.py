@@ -206,7 +206,15 @@ def ingest_http_probe_result(state: Any, raw: Mapping[str, Any]) -> bool:
         merged = intel.ingest_agent_http_result(kb, raw, state=state)
         state.knowledge_base = kb
         last = merged.get("last_agent_item") if isinstance(merged, dict) else {}
-        return int((last or {}).get("interesting_score", 0) or 0) > 0
+        interesting = int((last or {}).get("interesting_score", 0) or 0) > 0
+        if interesting:
+            try:
+                from interfaces.command_system.builtin.agent.plan_recalc import sync_plan_recalc
+
+                sync_plan_recalc(kb, state=state)
+            except Exception:
+                pass
+        return interesting
     except Exception:
         return False
 

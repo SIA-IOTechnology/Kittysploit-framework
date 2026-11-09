@@ -14,15 +14,22 @@ from interfaces.command_system.builtin.agent.hierarchical_planner import parse_l
 from interfaces.command_system.builtin.agent.local_llm import LocalLLMService
 from interfaces.command_system.builtin.agent.model_router import (
     TASK_AD_DOMAIN,
+    TASK_DISCOVERY,
     TASK_HTTP_RECON,
     TASK_SQL_DOMAIN,
     TASK_TACTICAL_RANK,
+    TASK_XSS_DOMAIN,
     ModelRouter,
+    instruction_for_planner_task,
     planner_uses_heuristic_only,
 )
 from interfaces.command_system.builtin.agent.redaction import sanitize_nested
 from interfaces.command_system.builtin.agent.specialist_registry import SpecialistProfile
 from interfaces.command_system.builtin.agent.typed_models import AgentAction, SpecialistProposal
+from interfaces.command_system.builtin.agent.specialist_attack_intel import (
+    build_specialist_attack_context,
+    specialist_llm_instruction,
+)
 from interfaces.command_system.builtin.agent.vuln_specialists import SPECIALIST_HINTS
 
 
@@ -54,19 +61,41 @@ def specialist_llm_enabled(state: Any = None) -> bool:
 def _task_for_specialist(profile: SpecialistProfile) -> str:
     key = str(profile.key or "").lower()
     domain = domain_for_specialist(key)
+    if key == "discovery":
+        return TASK_DISCOVERY
+    if key in {"xss", "browser_agent"}:
+        return TASK_XSS_DOMAIN
     if domain == "sql" or key in {"sqli", "database_service"}:
         return TASK_SQL_DOMAIN
-    if domain == "ad" or key == "active_directory":
+    if domain == "ad" or key in {"active_directory", "ldap_agent", "kerberos_agent"}:
         return TASK_AD_DOMAIN
-    if key == "web_recon" or domain == "web":
+    if key == "web_recon":
         return TASK_HTTP_RECON
     return TASK_TACTICAL_RANK
 
 
-def _instruction_for_specialist(profile: SpecialistProfile) -> str:
+def _base_instruction_for_specialist_task(task: str) -> str:
+    if str(task or "").lower() == TASK_TACTICAL_RANK:
+        return SPECIALIST_RANK_INSTRUCTION
+    return instruction_for_planner_task(task)
+
+
+def _instruction_for_specialist(
+    profile: SpecialistProfile,
+    attack_context: Optional[Mapping[str, Any]] = None,
+    *,
+    task: str = TASK_TACTICAL_RANK,
+) -> str:
+    base = _base_instruction_for_specialist_task(task)
+    if attack_context:
+        return specialist_llm_instruction(
+            profile,
+            attack_context,
+            base_instruction=base,
+        )
     hint = SPECIALIST_HINTS.get(str(profile.key or "").lower(), "")
     extra = f" SPECIALIST MANDATE: {hint}" if hint else f" SPECIALIST MANDATE: {profile.description}"
-    return SPECIALIST_RANK_INSTRUCTION + extra[:1200]
+    return base + extra[:1200]
 
 
 def propose_for_specialist_llm(
@@ -80,6 +109,15 @@ def propose_for_specialist_llm(
     if not specialist_llm_enabled(state):
         return []
     admissible = [row for row in catalog if row.admissible]
+    if str(profile.key or "").lower() == "discovery":
+        try:
+            from interfaces.command_system.builtin.agent.discovery_specialist import (
+                _is_discovery_safe_action,
+            )
+
+            admissible = [row for row in admissible if _is_discovery_safe_action(row)]
+        except Exception:
+            pass
     if not admissible:
         return []
 
@@ -121,9 +159,17 @@ def propose_for_specialist_llm(
         })
         for row in pool
     ]
+    attack_context = build_specialist_attack_context(
+        profile,
+        run_ctx.kb,
+        pool,
+        state=state,
+        max_modules=8,
+    )
     payload = wrap_llm_observations({
         **context,
         "specialist": profile.to_dict(),
+        "specialist_attack_intel": attack_context,
         "admissible_actions": admissible_payload,
         "task": task,
     })
@@ -142,7 +188,7 @@ def propose_for_specialist_llm(
         response = llm.query_json(
             endpoint=endpoint,
             model=str(route.model),
-            instruction=_instruction_for_specialist(profile),
+            instruction=_instruction_for_specialist(profile, attack_context, task=task),
             payload=payload,
             timeout=int(getattr(state, "llm_timeout", 20) or 20),
             allow_remote=bool(getattr(state, "llm_allow_remote", False)),

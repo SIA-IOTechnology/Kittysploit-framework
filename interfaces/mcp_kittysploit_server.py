@@ -56,6 +56,8 @@ Rules:
 - Use only against systems and networks you are explicitly authorized to test.
 - For free-form user requests, start with `ks_plan_natural_request` to extract intent,
   targets, module candidates, and native command/tool suggestions.
+- For attack-class module chains (sqli, xss, authz, …) without executing anything, use
+  `ks_consult_framework_expert` (read-only rankings + agent.chain follow-ups).
 - For full autonomous campaigns (scan → analyze → reason → exploit → report), use
   `ks_run_agent` with an authorized target.
 - Typical flow: search or plan → `ks_prepare_module_run` → confirm resolved options →
@@ -253,6 +255,33 @@ def create_mcp_server(
             "ks_list_modules",
             _safe_json(natural_bridge.list_modules(limit=max(1, min(limit, 500)))),
         )
+
+    @mcp.tool()
+    @safe
+    def ks_consult_framework_expert(
+        attack_class: Optional[str] = None,
+        question: Optional[str] = None,
+        terms: Optional[List[str]] = None,
+        limit: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Read-only framework expert for agent planning: module rankings, playbooks,
+        recommended specialists, and agent.chain follow-ups (no module execution).
+        """
+        blocked = _authorize("ks_consult_framework_expert")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.framework_expert import consult_framework_expert
+
+        result = consult_framework_expert(
+            framework=rpc.framework,
+            question=str(question or ""),
+            attack_class=str(attack_class or ""),
+            terms=terms or [],
+            kb={},
+            limit=max(1, min(int(limit or 10), 20)),
+        )
+        return _finish("ks_consult_framework_expert", _safe_json(result))
 
     @mcp.tool()
     @safe

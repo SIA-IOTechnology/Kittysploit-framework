@@ -558,6 +558,7 @@ MCP_TOOL_SCOPES: Dict[str, MCPToolScope] = {
     "ks_framework_state": MCPToolScope("mcp:read"),
     "ks_ollama_status": MCPToolScope("mcp:read"),
     "ks_list_modules": MCPToolScope("modules:read"),
+    "ks_consult_framework_expert": MCPToolScope("modules:read"),
     "ks_get_module_info": MCPToolScope("modules:read"),
     "ks_get_module_options": MCPToolScope("modules:read"),
     "ks_prepare_module_run": MCPToolScope("modules:read"),

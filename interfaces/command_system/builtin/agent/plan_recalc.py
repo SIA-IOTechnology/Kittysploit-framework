@@ -23,6 +23,9 @@ class CampaignAssetSnapshot:
     credential: Tuple[str, ...] = field(default_factory=tuple)
     session: Tuple[str, ...] = field(default_factory=tuple)
     route: Tuple[str, ...] = field(default_factory=tuple)
+    tech: Tuple[str, ...] = field(default_factory=tuple)
+    endpoints: Tuple[str, ...] = field(default_factory=tuple)
+    interesting_urls: Tuple[str, ...] = field(default_factory=tuple)
 
     def fingerprint(self) -> str:
         parts = [
@@ -30,6 +33,9 @@ class CampaignAssetSnapshot:
             f"credential:{','.join(self.credential)}",
             f"session:{','.join(self.session)}",
             f"route:{','.join(self.route)}",
+            f"tech:{','.join(self.tech)}",
+            f"endpoints:{','.join(self.endpoints[:20])}",
+            f"urls:{','.join(self.interesting_urls[:8])}",
         ]
         digest = hashlib.sha256("|".join(parts).encode("utf-8", errors="replace")).hexdigest()
         return digest[:20]
@@ -40,6 +46,9 @@ class CampaignAssetSnapshot:
             "credential": list(self.credential),
             "session": list(self.session),
             "route": list(self.route),
+            "tech": list(self.tech),
+            "endpoints": list(self.endpoints),
+            "interesting_urls": list(self.interesting_urls),
             "fingerprint": self.fingerprint(),
         })
 
@@ -50,6 +59,7 @@ class PlanRecalcDecision:
     reasons: List[str] = field(default_factory=list)
     revision: int = 0
     snapshot: Optional[CampaignAssetSnapshot] = None
+    previous_snapshot: Optional[CampaignAssetSnapshot] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return sanitize_nested({
@@ -57,6 +67,9 @@ class PlanRecalcDecision:
             "reasons": self.reasons[:8],
             "revision": self.revision,
             "snapshot": self.snapshot.to_dict() if self.snapshot else {},
+            "previous_snapshot": (
+                self.previous_snapshot.to_dict() if self.previous_snapshot else {}
+            ),
         })
 
 
@@ -148,6 +161,28 @@ def _session_tokens(kb: Mapping[str, Any], state: Any = None) -> Tuple[str, ...]
     return _sorted_tokens(tokens)
 
 
+def _tech_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
+    return _sorted_tokens([str(h).lower() for h in (kb.get("tech_hints") or []) if str(h).strip()])
+
+
+def _endpoint_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
+    return _sorted_tokens([str(ep).lower() for ep in (kb.get("discovered_endpoints") or [])[:60] if str(ep).strip()])
+
+
+def _interesting_url_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
+    tokens: List[str] = []
+    intel = kb.get("request_intel") if isinstance(kb.get("request_intel"), Mapping) else {}
+    for row in intel.get("interesting_requests") or []:
+        if not isinstance(row, Mapping):
+            continue
+        if int(row.get("interesting_score") or 0) < 8:
+            continue
+        url = str(row.get("url") or row.get("path") or "").strip().lower()
+        if url:
+            tokens.append(url)
+    return _sorted_tokens(tokens)
+
+
 def _route_tokens(kb: Mapping[str, Any]) -> Tuple[str, ...]:
     tokens: List[str] = []
     world = campaign_world_from_kb(kb)
@@ -181,6 +216,9 @@ def build_campaign_asset_snapshot(kb: Mapping[str, Any], *, state: Any = None) -
         credential=_credential_tokens(kb, state=state),
         session=_session_tokens(kb, state=state),
         route=_route_tokens(kb),
+        tech=_tech_tokens(kb),
+        endpoints=_endpoint_tokens(kb),
+        interesting_urls=_interesting_url_tokens(kb),
     )
 
 
@@ -194,6 +232,17 @@ def _delta_reasons(previous: CampaignAssetSnapshot, current: CampaignAssetSnapsh
         reasons.append("new_session")
     if current.route != previous.route:
         reasons.append("new_route")
+    if current.tech != previous.tech:
+        reasons.append("new_tech")
+    if current.endpoints != previous.endpoints:
+        reasons.append("new_endpoint")
+    if current.interesting_urls != previous.interesting_urls:
+        reasons.append("interesting_url")
+    if any(
+        r in {"new_tech", "new_endpoint", "interesting_url"}
+        for r in reasons
+    ):
+        reasons.append("new_surface")
     return reasons
 
 
@@ -216,7 +265,19 @@ def evaluate_plan_recalc(
     reasons = _delta_reasons(previous, current) if store else (["initial_snapshot"] if force else [])
     replan_required = bool(reasons) and (
         force
-        or any(reason in {"new_identity", "new_credential", "new_session", "new_route"} for reason in reasons)
+        or any(
+            reason in {
+                "new_identity",
+                "new_credential",
+                "new_session",
+                "new_route",
+                "new_tech",
+                "new_endpoint",
+                "interesting_url",
+                "new_surface",
+            }
+            for reason in reasons
+        )
     )
     if replan_required and reasons != ["initial_snapshot"]:
         revision += 1
@@ -225,6 +286,7 @@ def evaluate_plan_recalc(
         reasons=reasons if replan_required else [],
         revision=revision,
         snapshot=current,
+        previous_snapshot=previous if store else None,
     )
     kb["plan_recalc"] = sanitize_nested({
         "schema_version": SCHEMA_VERSION,
@@ -250,6 +312,21 @@ def apply_plan_recalc_to_state(state: Any, decision: PlanRecalcDecision) -> None
     if isinstance(hierarchical, dict):
         hierarchical["stale"] = True
         state.hierarchical_plan = hierarchical
+    try:
+        from interfaces.command_system.builtin.agent.reactive_surface_orchestrator import (
+            on_surface_replan,
+        )
+
+        on_surface_replan(
+            state,
+            reasons=decision.reasons,
+            previous_snapshot=(
+                decision.previous_snapshot.to_dict() if decision.previous_snapshot else {}
+            ),
+            current_snapshot=decision.snapshot.to_dict() if decision.snapshot else {},
+        )
+    except Exception:
+        pass
 
 
 def sync_plan_recalc(

@@ -32,8 +32,9 @@ ORCHESTRATOR_INSTRUCTION = (
     "Reply ONLY with a JSON object. "
     "Required keys: delegate_domains (array of: web, sql, ad, network, post, cloud, cms, "
     "services, osint, identity, ot), rationale (string). "
-    "Optional keys: tool (delegate_domain_agents | rank_catalog_action | http_request | run_module), "
-    "action_id (string from admissible_actions when confidence >= 0.72), reasoning_confidence (0..1). "
+    "Optional keys: tool (delegate_domain_agents | consult_framework_expert | rank_catalog_action | "
+    "http_request | run_module), action_id (string from admissible_actions when confidence >= 0.72), "
+    "attack_class, terms, question (for consult_framework_expert), reasoning_confidence (0..1). "
     "When one catalog action is clearly best, set tool to run_module or http_request and action_id to skip extra ranking. "
     "Pick the smallest set of domain agents that can advance campaign_goal given observations. "
     "Prefer web when HTTP/API surface exists; sql when injection signals exist; ad when LDAP/Kerberos/DC "
@@ -62,6 +63,28 @@ def _write_delegation(kb: Dict[str, Any], record: Mapping[str, Any]) -> None:
     kb["domain_delegation"] = sanitize_nested(dict(record))
 
 
+def _merge_reactive_delegation(kb: Mapping[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep reactive sub-agent roster when heuristic/LLM orchestrator runs in the same cycle."""
+    existing = kb.get("domain_delegation") if isinstance(kb.get("domain_delegation"), Mapping) else {}
+    if str(existing.get("source") or "") != "reactive_surface":
+        return record
+    merged_keys: List[str] = []
+    seen: set[str] = set()
+    for key in list(existing.get("specialist_keys") or []) + list(record.get("specialist_keys") or []):
+        token = str(key or "").strip().lower()
+        if token and token not in seen:
+            seen.add(token)
+            merged_keys.append(token)
+    out = dict(record)
+    out["specialist_keys"] = merged_keys[:20]
+    out["source"] = f"reactive+{record.get('source', 'heuristic')}"
+    out["rationale"] = str(existing.get("rationale") or out.get("rationale") or "")[:500]
+    steps = list(existing.get("next_steps") or [])
+    if steps:
+        out["next_steps"] = steps
+    return out
+
+
 def run_domain_orchestrator(
     state: Any,
     observation: Mapping[str, Any],
@@ -71,6 +94,15 @@ def run_domain_orchestrator(
     kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
     if not isinstance(kb, dict):
         kb = {}
+    try:
+        from interfaces.command_system.builtin.agent.reactive_surface_orchestrator import (
+            seed_initial_sub_agents,
+        )
+
+        seed_initial_sub_agents(state)
+        kb = getattr(state, "knowledge_base", kb)
+    except Exception:
+        pass
     phase = str(getattr(state, "current_phase", "") or observation.get("phase") or "reason")
     goal = str(getattr(state, "campaign_goal", "") or "recon")
 
@@ -131,7 +163,11 @@ def run_domain_orchestrator(
                     if isinstance(response, dict):
                         cache.put(cache_key, response)
                 parsed = parse_orchestrator_response(response) if isinstance(response, dict) else None
-                if parsed and (parsed.get("domains") or parsed.get("action_id")):
+                if parsed and (
+                    parsed.get("domains")
+                    or parsed.get("action_id")
+                    or parsed.get("tool") == "consult_framework_expert"
+                ):
                     domains = list(parsed.get("domains") or heuristic_domains)
                     record = {
                         "source": "llm",
@@ -143,7 +179,31 @@ def run_domain_orchestrator(
                         "action_id": parsed.get("action_id"),
                         "model": route.model,
                     }
+                    if str(parsed.get("tool") or "").lower() == "consult_framework_expert":
+                        from interfaces.command_system.builtin.agent.framework_expert import (
+                            consult_framework_expert,
+                        )
 
+                        expert = consult_framework_expert(
+                            state=state,
+                            question=str(parsed.get("expert_question") or ""),
+                            attack_class=str(parsed.get("attack_class") or ""),
+                            terms=parsed.get("expert_terms") or [],
+                            kb=kb,
+                        )
+                        record["framework_expert"] = expert
+                        if expert.get("recommended_domains"):
+                            domains = list(expert.get("recommended_domains") or domains)
+                            record["domains"] = domains
+                        spec_keys = expert.get("recommended_specialists") or []
+                        if spec_keys:
+                            record["specialist_keys"] = [
+                                str(k).lower()
+                                for k in spec_keys
+                                if str(k).strip()
+                            ][:20]
+
+    record = _merge_reactive_delegation(kb, record)
     mutable_kb = getattr(state, "knowledge_base", None)
     if isinstance(mutable_kb, dict):
         _write_delegation(mutable_kb, record)

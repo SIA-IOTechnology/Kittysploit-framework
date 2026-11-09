@@ -79,6 +79,44 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         None,
     ),
     (
+        re.compile(r"(^|/)xss_scanner$|(^|/)xss_uri_reflected|(^|/)dom_xss"),
+        {
+            "produces_capabilities": [
+                {"capability": "xss_param", "from_detail": "xss_param"},
+                {"capability": "xss_context", "from_detail": "xss_context"},
+                {"capability": "xss_reflection", "from_detail": "xss_confirmed"},
+            ],
+            "suggested_followups": [
+                "browser_auxiliary/misc/xss_dom_scanner",
+            ],
+        },
+        {"risk_signals_any": ["xss"], "min_params": 1},
+    ),
+    (
+        re.compile(r"(^|/)xss_dom_scanner$|(^|/)dom_xss_scanner"),
+        {
+            "consumes_capabilities": ["xss_reflection", "xss_param"],
+            "produces_capabilities": [
+                {"capability": "dom_sink", "from_detail": "dom_sink"},
+                {"capability": "xss_execution", "from_detail": "xss_execution"},
+            ],
+        },
+        {"capabilities_any": ["xss_reflection", "xss_param"]},
+    ),
+    (
+        re.compile(r"(^|/)api_bola_idor$|(^|/)broken_access|(^|/)bola"),
+        {
+            "produces_capabilities": [
+                {"capability": "idor_object_id", "from_detail": "object_id"},
+                {"capability": "authz_break", "from_detail": "authz_confirmed"},
+            ],
+            "suggested_followups": [
+                "auxiliary/scanner/http/api_bola_idor_probe",
+            ],
+        },
+        {"risk_signals_any": ["authz", "bola", "idor"]},
+    ),
+    (
         re.compile(r"(^|/)ssrf_cloud_metadata"),
         {
             "consumes_capabilities": ["ssrf_primitive", "ssrf_param"],

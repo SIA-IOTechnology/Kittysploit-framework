@@ -120,7 +120,7 @@ kittysploit> agent http://192.168.56.10 \
 | `--approve-post-exploit` | Optional read-only collection after a session |
 | `--plan-only` / `--dry-run` | Preview without live intrusive actions |
 
-- Mission profiles (`safe-web`, `owasp-web-parallel`, `internal-lab`, `bug-bounty-safe`, …)
+- Mission profiles (`safe-web`, `owasp-web-parallel`, `attack-specialists`, `internal-lab`, `bug-bounty-safe`, …)
 - Evidence-gated exploit handoff (reduce speculative false positives)
 - Parallel specialists by OWASP class (injection, XSS, SSRF, auth, authz)
 - Scope, budgets, and risk approvals stay under operator control

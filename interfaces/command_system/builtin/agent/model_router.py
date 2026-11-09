@@ -19,6 +19,8 @@ TASK_TACTICAL_RANK = "tactical_rank"
 TASK_STRATEGIC_PLAN = "strategic_plan"
 TASK_HTTP_RECON = "http_recon"
 TASK_SQL_DOMAIN = "sql_domain"
+TASK_XSS_DOMAIN = "xss_domain"
+TASK_DISCOVERY = "discovery"
 TASK_AD_DOMAIN = "ad_domain"
 
 DEFAULT_SMALL_MODEL = "llama3.1:8b"
@@ -36,6 +38,57 @@ HTTP_RECON_INSTRUCTION = (
     "otherwise pick the best scanner/API module action_id from admissible_actions. "
     "Never invent hosts or action_ids."
 )
+
+SQL_DOMAIN_INSTRUCTION = (
+    "You are a SQL injection specialist inside KittySploit. "
+    "Reply ONLY with valid JSON matching agent_tactical_rank. "
+    "Prefer auxiliary/scanner/http/sqli_engine when present in admissible_actions and "
+    "the KB has endpoints or params; only then consider CVE-specific sqli modules. "
+    "Never pick exploit/post modules before a scanner confirms an injection primitive. "
+    "Never invent action_ids."
+)
+
+XSS_DOMAIN_INSTRUCTION = (
+    "You are an XSS specialist inside KittySploit. "
+    "Reply ONLY with valid JSON matching agent_tactical_rank. "
+    "Prefer xss_scanner / dom_xss / reflected xss modules in admissible_actions; "
+    "when tech_hints mention SPA, React, or DOM sinks, favor browser_auxiliary or "
+    "browser_agent modules over blind spray. "
+    "Do not treat reflection alone as success — pick modules that validate execution context. "
+    "Never invent action_ids."
+)
+
+DISCOVERY_INSTRUCTION = (
+    "You are a discovery specialist for authorized app-security research. "
+    "Reply ONLY with valid JSON matching agent_tactical_rank. "
+    "Do NOT select exploits or intrusive post modules. "
+    "Prefer http_request probes, crawlers, and passive scanners that expand routes, "
+    "params, and roles. Use specialist_attack_intel.discovery open_hypotheses to "
+    "choose probes that could refute or confirm differential access-control breaks. "
+    "Never invent action_ids."
+)
+
+AD_DOMAIN_INSTRUCTION = (
+    "You are an Active Directory / LDAP / Kerberos specialist. "
+    "Reply ONLY with valid JSON matching agent_tactical_rank. "
+    "Pick enum and credential-access modules matching observed ports and domain signals. "
+    "Never invent hosts or action_ids."
+)
+
+_TASK_INSTRUCTIONS: dict[str, str] = {
+    TASK_TACTICAL_RANK: TACTICAL_RANK_INSTRUCTION,
+    TASK_HTTP_RECON: HTTP_RECON_INSTRUCTION,
+    TASK_SQL_DOMAIN: SQL_DOMAIN_INSTRUCTION,
+    TASK_XSS_DOMAIN: XSS_DOMAIN_INSTRUCTION,
+    TASK_DISCOVERY: DISCOVERY_INSTRUCTION,
+    TASK_AD_DOMAIN: AD_DOMAIN_INSTRUCTION,
+}
+
+
+def instruction_for_planner_task(task: str) -> str:
+    """Base system instruction for a planner/specialist task id."""
+    key = str(task or "").strip().lower()
+    return _TASK_INSTRUCTIONS.get(key, TACTICAL_RANK_INSTRUCTION)
 
 
 @dataclass(frozen=True)
@@ -171,6 +224,20 @@ class ModelRouter:
                 tier="operator" if operator_model else "small",
                 reason="sql_domain_specialist",
             )
+        if task == TASK_XSS_DOMAIN:
+            return ModelRoute(
+                task=task,
+                model=operator_model or small_model_name(),
+                tier="operator" if operator_model else "small",
+                reason="xss_domain_specialist",
+            )
+        if task == TASK_DISCOVERY:
+            return ModelRoute(
+                task=task,
+                model=operator_model or small_model_name(),
+                tier="operator" if operator_model else "small",
+                reason="discovery_specialist",
+            )
         if task == TASK_AD_DOMAIN:
             return ModelRoute(
                 task=task,
@@ -279,9 +346,7 @@ def attempt_llm_tactical_rank(
     if llm is None:
         llm = LocalLLMService()
     kb = observation.get("knowledge_base") if isinstance(observation.get("knowledge_base"), dict) else {}
-    instruction = TACTICAL_RANK_INSTRUCTION
-    if route.task == TASK_HTTP_RECON:
-        instruction = HTTP_RECON_INSTRUCTION
+    instruction = instruction_for_planner_task(route.task)
 
     cache = get_llm_response_cache()
     cache_key = cache.cache_key(

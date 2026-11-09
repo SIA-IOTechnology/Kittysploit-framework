@@ -37,7 +37,7 @@ class Module(Scanner, Http_client):
         },
     }
 
-    sqli_delay = OptInt(3, "pg_sleep seconds for timing check", required=False, advanced=True)
+    sqli_delay = OptInteger(3, "pg_sleep seconds for timing check", required=False, advanced=True)
 
     def _post(self, raw_sql: str) -> tuple[int, str, float]:
         payload = {"token": "x", "password": "x", "user-id": {"raw": raw_sql}}

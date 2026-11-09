@@ -158,7 +158,9 @@ def enrich_scanner_result(result: Dict[str, Any], target_info: Optional[Dict[str
         enriched["cve"] = extract_cve(enriched)
     enriched["evidence"] = extract_evidence(enriched)
     enriched["vulnerability_key"] = vulnerability_key(enriched)
-    return suppress_noise_finding(suppress_speculative_finding(enriched))
+    return suppress_mass_product_detect(
+        suppress_noise_finding(suppress_speculative_finding(enriched))
+    )
 
 
 _INFO_SEVERITIES = frozenset({"info", "informational"})
@@ -200,9 +202,18 @@ def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
         return item
 
     # CVE rows are handled by suppress_speculative_finding(), which understands
-    # their confidence. Everything else at informational severity is a
-    # fingerprint/detection, not an actionable vulnerability.
+    # their confidence. WordPress plugin/surface rows stay visible as low findings.
     if not extract_cve(item):
+        if any(token in path for token in _WORDPRESS_PATH_TOKENS):
+            item["severity"] = "low"
+            item["detection_state"] = "inventory"
+            item["status"] = "vulnerable"
+            return item
+        if path.startswith("scanner/ssh/"):
+            item["severity"] = "low"
+            item["detection_state"] = "inventory"
+            item["status"] = "vulnerable"
+            return item
         item["detected"] = True
         item["detection_state"] = "informational"
         item["vulnerable"] = False
@@ -236,6 +247,71 @@ def suppress_noise_finding(result: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+_ADVISORY_SURFACE_MARKERS = (
+    "advisory surface",
+    "http service reachable",
+    "run matching exploit module",
+    "fingerprint matches",
+)
+
+_WORDPRESS_PATH_TOKENS = (
+    "wordpress",
+    "wp_",
+    "wp-",
+    "woocommerce",
+    "xmlrpc",
+    "elementor",
+)
+
+
+def _finding_confidence(item: Dict[str, Any]) -> str:
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    return str(
+        details.get("confidence")
+        or item.get("confidence")
+        or ""
+    ).strip().lower()
+
+
+def suppress_mass_product_detect(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Demote auto-generated ``*_rce_detect`` rows that only fingerprint reachability.
+
+    Those modules often return ``True`` on any WordPress/HTML site with
+    ``confidence=low|medium`` — they are hints for follow-up exploits, not findings.
+    """
+    item = dict(result or {})
+    if not item.get("vulnerable"):
+        return item
+    path = str(item.get("path") or "").lower()
+    message = str(item.get("message") or item.get("reason") or "").lower()
+    confidence = _finding_confidence(item)
+
+    if any(token in path for token in _WORDPRESS_PATH_TOKENS):
+        return item
+    if not any(marker in message for marker in _ADVISORY_SURFACE_MARKERS):
+        if "_rce_detect" not in path and not (
+            path.endswith("_detect") and "scanner/http/" in path
+        ):
+            return item
+        if confidence in {"high", "confirmed", "critical"}:
+            return item
+        if "confirmed" in message or "exploit" in message and "reachable" not in message:
+            return item
+
+    if confidence in {"high", "confirmed", "critical"}:
+        return item
+
+    item["detected"] = True
+    item["detection_state"] = "signal"
+    item["vulnerable"] = False
+    item["status"] = "detected"
+    item["suppressed_reason"] = (
+        f"suppressed product fingerprint probe (confidence={confidence or 'unknown'})"
+    )
+    return item
+
+
 def suppress_speculative_finding(result: Dict[str, Any]) -> Dict[str, Any]:
     """Drop CVE rows that only have weak/indirect evidence (common on SPA catch-all hosts)."""
     item = dict(result or {})
@@ -252,6 +328,10 @@ def suppress_speculative_finding(result: Dict[str, Any]) -> Dict[str, Any]:
     ).strip().lower()
 
     if confidence in {"high", "confirmed", "critical"}:
+        return item
+
+    severity = str(item.get("severity") or "").lower()
+    if severity in {"critical", "high"}:
         return item
 
     message = str(item.get("message") or "").lower()
@@ -350,7 +430,7 @@ def group_scanner_results(
                     or key
                 ),
                 severity=str(item.get("severity") or "unknown"),
-                cve=str(item.get("cve") or ""),
+                cve=normalize_cve_value(item.get("cve")),
                 representative=dict(item),
                 members=[dict(item)],
                 occurrences=int(item.get("duplicate_count") or 1),
@@ -363,8 +443,9 @@ def group_scanner_results(
             if severity_rank(item.get("severity")) > severity_rank(group.severity):
                 group.severity = str(item.get("severity") or group.severity)
                 group.representative = dict(item)
-            if not group.cve and item.get("cve"):
-                group.cve = str(item.get("cve"))
+            cve_id = normalize_cve_value(item.get("cve"))
+            if cve_id and not group.cve:
+                group.cve = cve_id
 
         group = buckets[key]
         _append_unique(group.hosts, item.get("host"))
@@ -400,6 +481,16 @@ def vulnerability_key(result: Dict[str, Any]) -> str:
         return f"finding:{path}:{message[:120]}"
     module = str(result.get("module") or path or "unknown").strip().lower()
     return f"module:{module}"
+
+
+def normalize_cve_value(raw: Any) -> str:
+    """Return a single CVE id string from module metadata or result payloads."""
+    if raw is None or raw == "":
+        return ""
+    if isinstance(raw, str):
+        value = raw.strip().upper()
+        return value if CVE_RE.match(value) else extract_cve({"cve": raw})
+    return extract_cve({"cve": raw})
 
 
 def extract_cve(result: Dict[str, Any]) -> str:
@@ -456,14 +547,25 @@ def extract_evidence(result: Dict[str, Any]) -> str:
 
     version = result.get("version")
     if version:
-        parts.append(f"version={version}")
+        ver_token = f"version={version}"
+        blob = normalize_text(" | ".join(parts))
+        if ver_token not in blob:
+            parts.append(ver_token)
 
     if not parts and finding:
         parts.append(finding)
     elif not parts and message:
         parts.append(message)
 
-    return normalize_text(" | ".join(parts))
+    joined = normalize_text(" | ".join(parts))
+    seen: set[str] = set()
+    unique: List[str] = []
+    for token in joined.split("|"):
+        piece = token.strip()
+        if piece and piece not in seen:
+            seen.add(piece)
+            unique.append(piece)
+    return " | ".join(unique)
 
 
 def _is_generic_module_description(text: str, module_description: str = "") -> bool:

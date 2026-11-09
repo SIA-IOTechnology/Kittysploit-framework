@@ -33,7 +33,7 @@ class Module(Scanner, Http_client):
     }
 
     cms_path = OptString("", "CMS subdirectory prefix", required=False)
-    time_delay = OptInt(1, "Sleep seconds in probe", required=False, advanced=True)
+    time_delay = OptInteger(1, "Sleep seconds in probe", required=False, advanced=True)
 
     def _url(self, suffix: str) -> str:
         prefix = str(self.cms_path or "").strip().rstrip("/")

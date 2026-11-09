@@ -66,7 +66,30 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
         "http_replay": "safe",
         "catalog_policy": "bug-bounty-safe",
         "discovery_mode": True,
-        "description": "Bug-bounty-safe validation; no post-exploit, payloads, DoS, persistence, or brute force.",
+        "description": (
+            "Light bug bounty recon/validation (read/active only). "
+            "For full OWASP parallel + compound validation, use profile bug-bounty."
+        ),
+    },
+    "bug-bounty": {
+        "safety_profile": "discreet",
+        "approved_risks": ["read", "active"],
+        "request_budget": 110,
+        "http_replay": "safe",
+        "campaign_goal": "validate",
+        "catalog_policy": "bug-bounty-safe",
+        "discovery_mode": True,
+        "bug_bounty_mission": True,
+        "owasp_web_parallel": True,
+        "specialist_parallel": True,
+        "hierarchical_planner": True,
+        "owasp_classes": ["injection", "xss", "ssrf", "auth", "authz"],
+        "fan_out": 5,
+        "description": (
+            "Bug bounty hunting: OWASP parallel specialists, compound skeptic/validation chains, "
+            "framework expert + discovery — all under bug-bounty-safe catalog (no brute force, "
+            "post-exploit, payloads, or destructive modules). Submission drafts in reports."
+        ),
     },
     "detection-validation": {
         "safety_profile": "discreet",

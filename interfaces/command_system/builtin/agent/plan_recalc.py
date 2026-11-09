@@ -327,6 +327,17 @@ def apply_plan_recalc_to_state(state: Any, decision: PlanRecalcDecision) -> None
         )
     except Exception:
         pass
+    if decision.replan_required and isinstance(getattr(state, "knowledge_base", None), dict):
+        try:
+            from interfaces.command_system.builtin.agent.plan_subtask_refiner import refine_after_recalc
+
+            refine_after_recalc(
+                state.knowledge_base,
+                reasons=decision.reasons,
+                state=state,
+            )
+        except Exception:
+            pass
 
 
 def sync_plan_recalc(

@@ -367,6 +367,17 @@ def build_planner_llm_context(
         "persistent_vault_count": int(persistent_vault.get("entry_count") or 0),
         "plan_revision": int((kb.get("plan_recalc") or {}).get("revision") or 0),
         "plan_recalc_pending": bool((kb.get("plan_recalc") or {}).get("replan_required")),
+        "agent_flow_subtasks": [
+            {
+                "id": s.get("id"),
+                "title": s.get("title"),
+                "status": s.get("status"),
+            }
+            for s in (kb.get("agent_flow") or {}).get("subtasks") or []
+            if isinstance(s, dict)
+        ][:12],
+        "typed_memory_preview": _typed_memory_preview(kb),
+        "power_metrics": _power_metrics(kb),
         "discovery": _discovery_context(kb),
     })
     text = str(payload)
@@ -381,6 +392,24 @@ def _discovery_context(kb: Mapping[str, Any]) -> Dict[str, Any]:
     from interfaces.command_system.builtin.agent.discovery import discovery_summary
 
     return discovery_summary(kb)
+
+
+def _typed_memory_preview(kb: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    try:
+        from interfaces.command_system.builtin.agent.typed_campaign_memory import search_typed_memory
+
+        return search_typed_memory(kb, limit=4)
+    except Exception:
+        return []
+
+
+def _power_metrics(kb: Mapping[str, Any]) -> Dict[str, Any]:
+    try:
+        from interfaces.command_system.builtin.agent.compound_validation_engine import power_status
+
+        return power_status(kb)
+    except Exception:
+        return {}
 
 
 def attach_planner_context(

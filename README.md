@@ -23,6 +23,9 @@ Local LLM. Scope-aware. Automation-ready.
 # Web/API mission (lab) — one command, quick profile by default
 kittysploit> agent https://lab.local
 
+# Bug bounty (in-scope programs only)
+kittysploit> agent https://in-scope.target --profile bug-bounty
+
 # Parallel OWASP specialists (advanced)
 kittysploit> agent https://lab.local --profile owasp-web-parallel
 
@@ -40,11 +43,22 @@ Most stacks force you to jump between a scanner, an exploit framework, a C2, a p
 
 KittySploit keeps the engagement in one place — modules, sessions, scope, and an autonomous agent that plans and executes against authorized targets.
 
+Many **AI pentest agents** stop at “find a vuln → show a PoC → open a fix PR” on a single app. KittySploit is built for **full engagement depth**: recon through **validated findings**, **OWASP-class parallel specialists**, **exploit chains**, and **interactive sessions** on authorized targets — with operator scope, risk gates, and audit-style **compound evidence** in every report.
+
 | | |
 |---|---|
 | **Agent** | Local LLM (Ollama) plans and drives missions with safety profiles, evidence gates, and parallel web specialists |
+| **Compound pipeline** | Skeptic panel → multi-step validation chain → parallel OWASP specialists → exploit queue (witnesses per stage in reports) |
 | **Modules + C2** | 8,000+ scanners/exploits/post modules, listeners, payloads, and live sessions in the same console |
-| **Automation** | CLI, RPC, REST API, and MCP for IDE / CI-style operators |
+| **Automation** | CLI, RPC, REST API, and MCP for IDE / CI-style operators (`ks_agent_power_status`, `ks_agent_compound_evidence`) |
+
+```text
+Signal → evidence gate → skeptic panel → parallel validation steps
+       → OWASP specialist fan-out (injection/xss/ssrf/auth/authz)
+       → exploit chain actions → session / post-exploit (when approved)
+```
+
+Use **`agent … --profile owasp-web-parallel`** for the parallel web mission. Reports include a **Compound evidence** section (JSON + Markdown) so findings are defensible, not just LLM assertions.
 
 ## Quick Start
 

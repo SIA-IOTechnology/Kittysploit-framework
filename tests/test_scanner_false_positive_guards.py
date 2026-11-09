@@ -13,6 +13,8 @@ from core.framework.base_module import normalize_module_result
 from core.framework.scanner import Scanner
 from core.scanner.result_dedup import (
     enrich_scanner_result,
+    group_scanner_results,
+    normalize_cve_value,
     scanner_return_is_vulnerable,
 )
 from lib.scanner.http.serverless_probe import probe_function_endpoint
@@ -80,6 +82,86 @@ class ScannerResultGuardTests(unittest.TestCase):
         )
         self.assertTrue(result["vulnerable"])
 
+    def test_erlang_ssh_banner_rejects_openssh(self):
+        from lib.scanner.ssh.erlang_ssh import is_erlang_otp_ssh_banner
+
+        self.assertFalse(
+            is_erlang_otp_ssh_banner(
+                "SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.13\r\n"
+            )
+        )
+        self.assertTrue(
+            is_erlang_otp_ssh_banner("SSH-2.0-Erlang OTP 26.2\r\n")
+        )
+
+    def test_cve_list_metadata_normalizes_for_display(self):
+        self.assertEqual(normalize_cve_value(["CVE-2023-32433"]), "CVE-2023-32433")
+        groups = group_scanner_results(
+            [
+                {
+                    "vulnerable": True,
+                    "cve": ["CVE-2024-87982"],
+                    "severity": "critical",
+                    "module": "WordPress Core CVE detect",
+                    "path": "scanner/http/wordpress_cve_2024_87982",
+                    "host": "example.test",
+                    "service": "https:443",
+                }
+            ]
+        )
+        self.assertEqual(groups[0].cve, "CVE-2024-87982")
+
+    def test_mysql_evidence_version_not_duplicated(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/mysql/mysql_tls_detect",
+                "severity": "low",
+                "message": "MySQL TLS not supported in handshake | version=5.5.5-10.3.39",
+                "vulnerable": True,
+                "version": "5.5.5-10.3.39",
+            }
+        )
+        self.assertEqual(
+            result["evidence"].count("version=5.5.5-10.3.39"),
+            1,
+        )
+
+    def test_ssh_info_promoted_to_low_finding(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/ssh/ssh_auth_methods",
+                "severity": "info",
+                "message": "Auth methods for root: publickey, password",
+                "vulnerable": True,
+            }
+        )
+        self.assertTrue(result["vulnerable"])
+        self.assertEqual(result["severity"], "low")
+
+    def test_wordpress_info_plugin_inventory_promoted_to_low(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/http/wp_plugin_lifterlms_detect",
+                "severity": "info",
+                "message": "LifterLMS plugin detected",
+                "vulnerable": True,
+            }
+        )
+        self.assertTrue(result["vulnerable"])
+        self.assertEqual(result["severity"], "low")
+
+    def test_critical_cve_without_confidence_is_kept(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/http/wp_plugin_kirki_cve_2026_8206",
+                "cve": "CVE-2026-8206",
+                "severity": "critical",
+                "message": "Kirki 6.0.3 in affected range",
+                "vulnerable": True,
+            }
+        )
+        self.assertTrue(result["vulnerable"])
+
     def test_low_confidence_cve_is_suppressed(self):
         result = enrich_scanner_result(
             {
@@ -93,6 +175,44 @@ class ScannerResultGuardTests(unittest.TestCase):
         )
         self.assertFalse(result["vulnerable"])
         self.assertIn("speculative", result["suppressed_reason"])
+
+    def test_advisory_surface_rce_detect_is_demoted(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/http/raritan_emx_portmux_root_rce_detect",
+                "severity": "high",
+                "message": "Target fingerprint matches raritan advisory surface",
+                "vulnerable": True,
+                "details": {"confidence": "medium"},
+            }
+        )
+        self.assertFalse(result["vulnerable"])
+        self.assertTrue(result.get("detected"))
+        self.assertIn("fingerprint probe", result.get("suppressed_reason", ""))
+
+    def test_http_reachable_hint_is_demoted(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/http/tigergraph_default_creds_ssh_rce_detect",
+                "severity": "medium",
+                "message": "HTTP service reachable — run matching exploit module for validation",
+                "vulnerable": True,
+                "details": {"confidence": "low"},
+            }
+        )
+        self.assertFalse(result["vulnerable"])
+
+    def test_wordpress_plugin_finding_not_demoted_by_vendor_rule(self):
+        result = enrich_scanner_result(
+            {
+                "path": "scanner/http/wordpress_xmlrpc_detect",
+                "severity": "medium",
+                "message": "XML-RPC enabled",
+                "vulnerable": True,
+                "details": {"confidence": "medium"},
+            }
+        )
+        self.assertTrue(result["vulnerable"])
 
     def test_high_confidence_cve_is_preserved(self):
         result = enrich_scanner_result(

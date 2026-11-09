@@ -40,7 +40,7 @@ class Module(Auxiliary, Http_client):
     }
 
     read_path = OptString('/etc/passwd', 'Absolute remote file path to read', required=False)
-    traversal_depth = OptInt(7, 'Number of ../ segments before target path', required=False, advanced=True)
+    traversal_depth = OptInteger(7, 'Number of ../ segments before target path', required=False, advanced=True)
     output_file = OptString('', 'Local path to save retrieved content', required=False)
     output_limit = OptInteger(12000, 'Max chars printed when output_file empty (0=all)', required=False, advanced=True)
 

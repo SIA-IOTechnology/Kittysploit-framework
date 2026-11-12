@@ -235,7 +235,7 @@ Session Types:
                 print_info(f"Type: {standard_session.session_type}")
                 print_info("Session data:")
                 for key, value in standard_session.data.items():
-                    print_info(f"  {key}: {value}")
+                    self._print_session_field(key, value)
                 return True
             
             # Check if it's a browser session
@@ -249,7 +249,7 @@ Session Types:
                 print_info(f"Last seen: {self._format_timestamp(browser_session.get('last_seen', 0))}")
                 print_info("Session info:")
                 for key, value in browser_session.get('info', {}).items():
-                    print_info(f"  {key}: {value}")
+                    self._print_session_field(key, value)
                 return True
             
             print_error(f"Session not found: {session_id}")
@@ -807,6 +807,30 @@ Session Types:
             print_info(f"Started parallel session job {job.id[:8]} on {len(targets)} session(s)")
         return True
     
+    def _print_session_field(self, key: str, value, indent: int = 2) -> None:
+        """Print session metadata; nested dicts (e.g. browser_info) are shown one field per line."""
+        pad = " " * indent
+        if isinstance(value, dict):
+            if not value:
+                print_info(f"{pad}{key}: {{}}")
+                return
+            print_info(f"{pad}{key}:")
+            for sub_key, sub_val in value.items():
+                self._print_session_field(sub_key, sub_val, indent + 2)
+            return
+        if isinstance(value, (list, tuple)):
+            if not value:
+                print_info(f"{pad}{key}: []")
+                return
+            if all(isinstance(item, dict) for item in value):
+                print_info(f"{pad}{key}:")
+                for index, item in enumerate(value):
+                    print_info(f"{pad}  [{index}]")
+                    for sub_key, sub_val in item.items():
+                        self._print_session_field(sub_key, sub_val, indent + 4)
+                return
+        print_info(f"{pad}{key}: {value}")
+
     def _format_timestamp(self, timestamp: float) -> str:
         """Format timestamp for display"""
         try:

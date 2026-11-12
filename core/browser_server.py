@@ -93,6 +93,8 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         try:
+            if self.browser_server:
+                self.browser_server.increment_total_requests()
             parsed_path = urlparse(self.path)
             path = parsed_path.path
             
@@ -142,6 +144,8 @@ class BrowserHTTPHandler(BaseHTTPRequestHandler):
     
     def do_POST(self):
         try:
+            if self.browser_server:
+                self.browser_server.increment_total_requests()
             parsed_path = urlparse(self.path)
             path = parsed_path.path
             if path == '/api/register':
@@ -314,7 +318,8 @@ self.addEventListener('fetch', (event) => {
             'running': self.browser_server.is_running(),
             'uptime': self.browser_server.get_uptime(),
             'total_sessions': len(self.browser_server.sessions),
-            'total_commands': self.browser_server.stats['total_commands']
+            'total_commands': self.browser_server.stats['total_commands'],
+            'total_requests': self.browser_server.get_total_requests(),
         }
         
         self.send_response(200)
@@ -534,6 +539,7 @@ class BrowserServer:
         
         self.sessions: Dict[str, BrowserSession] = {}
         self.total_requests = 0
+        self._request_count_lock = threading.Lock()
         self.start_time = None
         self.server = None
         self.server_thread = None
@@ -701,6 +707,14 @@ class BrowserServer:
             uptime = datetime.now() - self.start_time
             return str(uptime).split('.')[0]  # Remove microseconds
         return "0:00:00"
+
+    def increment_total_requests(self) -> None:
+        with self._request_count_lock:
+            self.total_requests += 1
+
+    def get_total_requests(self) -> int:
+        with self._request_count_lock:
+            return self.total_requests
     
     def force_cleanup(self):
         """Force immediate cleanup of inactive sessions"""

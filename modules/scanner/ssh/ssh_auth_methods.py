@@ -64,11 +64,11 @@ class Module(Scanner, Tcp_scanner_client):
         username = str(self.username or "root")
         method_list = [str(m) for m in methods]
         method_lc = [m.lower() for m in method_list]
-        severity = "info"
+        severity = "low" if method_list else "info"
         if "none" in method_lc:
             severity = "low"
         elif any(m in method_lc for m in ("password", "keyboard-interactive")):
-            severity = "low"
+            severity = "medium"
         if method_list:
             reason = f"Auth methods for {username}: {', '.join(method_list)}"
         else:

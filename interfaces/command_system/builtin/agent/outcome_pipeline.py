@@ -128,6 +128,49 @@ def apply_normalized_outcome_to_state(
     )
     apply_observations_to_kb(kb, [observation])
 
+    if chain_status == OBS_CONFIRMED:
+        try:
+            from interfaces.command_system.builtin.agent.compound_validation_engine import (
+                process_confirmed_outcome,
+            )
+
+            process_confirmed_outcome(
+                state,
+                module_path=normalized.module_path,
+                evidence=normalized.evidence,
+                phase=phase or str(obs.get("phase") or ""),
+                message=str(obs.get("message") or ""),
+            )
+        except Exception:
+            try:
+                from interfaces.command_system.builtin.agent.finding_validation_queue import (
+                    enqueue_finding_validation,
+                )
+
+                enqueue_finding_validation(
+                    kb,
+                    module_path=normalized.module_path,
+                    evidence=normalized.evidence,
+                    phase=phase or str(obs.get("phase") or ""),
+                    state=state,
+                )
+            except Exception:
+                pass
+    try:
+        from interfaces.command_system.builtin.agent.typed_campaign_memory import (
+            memory_from_module_outcome,
+        )
+
+        memory_from_module_outcome(
+            kb,
+            module_path=normalized.module_path,
+            vulnerable=chain_status == OBS_CONFIRMED,
+            phase=phase or str(obs.get("phase") or ""),
+            message=str(obs.get("message") or ""),
+        )
+    except Exception:
+        pass
+
     if normalized.session_claim_valid and session_id:
         verified = list(getattr(state, "verified_sessions", []) or [])
         token = str(session_id)

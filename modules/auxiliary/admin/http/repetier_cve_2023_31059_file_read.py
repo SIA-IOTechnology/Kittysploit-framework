@@ -43,7 +43,7 @@ class Module(Auxiliary, Http_client):
         'Windows-relative path (forward slashes) under traversal',
         required=False,
     )
-    depth = OptInt(16, 'Number of ..\\ segments (URL-encoded as ..%5c)', required=False, advanced=True)
+    depth = OptInteger(16, 'Number of ..\\ segments (URL-encoded as ..%5c)', required=False, advanced=True)
     output_file = OptString('', 'Local path to save retrieved content', required=False)
     output_limit = OptInteger(12000, 'Max chars printed when output_file empty (0=all)', required=False, advanced=True)
 

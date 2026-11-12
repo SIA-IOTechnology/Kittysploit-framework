@@ -67,6 +67,7 @@ _EXPLOIT_EXPLICIT_GOALS = frozenset(
 _RECOMMENDED_PROFILES = (
     "quick",
     "safe-web",
+    "bug-bounty",
     "bug-bounty-safe",
     "api-review",
     "authenticated-audit",
@@ -102,6 +103,7 @@ Start with a target (quick profile + validate goal applied by default):
 
     agent https://example.com
     agent example.com --profile safe-web
+    agent example.com --profile bug-bounty
     agent example.com --profile bug-bounty-safe
     agent https://lab.local --profile attack-specialists --llm-local
     agent example.com --dry-run
@@ -1136,7 +1138,15 @@ Examples:
             )
 
             # Mission profile may force parallel OWASP-class specialists before defaults freeze flags.
-            if profile_overrides.get("attack_specialists_mission"):
+            if profile_overrides.get("bug_bounty_mission"):
+                from interfaces.command_system.builtin.agent.bug_bounty_mission import apply_bug_bounty_to_state
+
+                apply_bug_bounty_to_state(
+                    state,
+                    classes=profile_overrides.get("owasp_classes"),
+                    fan_out=int(profile_overrides.get("fan_out") or 5),
+                )
+            elif profile_overrides.get("attack_specialists_mission"):
                 from interfaces.command_system.builtin.agent.attack_specialists_mission import (
                     apply_attack_specialists_to_state,
                 )
@@ -1184,6 +1194,12 @@ Examples:
                         "Attack-specialists mission enabled "
                         f"(classes={','.join(profile_overrides.get('owasp_classes') or [])}, "
                         "framework expert + domain orchestrator + specialist LLM)."
+                    )
+                elif profile_overrides.get("bug_bounty_mission"):
+                    print_info(
+                        "Bug bounty mission enabled "
+                        f"(classes={','.join(profile_overrides.get('owasp_classes') or [])}, "
+                        "compound validation + bug-bounty-safe catalog)."
                     )
                 elif profile_overrides.get("owasp_web_parallel"):
                     print_info(

@@ -32,6 +32,10 @@ from typing import List, Dict, Any, Set, Optional, Tuple
 import errno
 import re
 
+DEFAULT_SCANNER_THREADS = 24
+DEFAULT_PREFETCH_THREADS = 48
+MAX_PREFETCH_THREADS = 96
+
 from core.scanner.result_dedup import (
     deduplicate_scanner_results,
     enrich_scanner_result,
@@ -107,7 +111,11 @@ Options:
     --scan-ports         Enable automatic port scanning (default: enabled if no filters)
     --no-scan-ports      Disable automatic port scanning
     --auto-exploit       Automatically launch exploit modules after vulnerability detection
-    --threads N          Number of concurrent threads (default: 10)
+    --threads N          Number of concurrent threads (default: 24)
+    --prefetch-threads N HTTP prefetch workers (default: max(threads, 48), cap 96)
+    --prefetch-timeout S Timeout per prefetch GET (default: 6)
+    --prefetch-limit N   Max unique URLs to prefetch (0 = unlimited; --all default 2000)
+    --no-prefetch        Skip HTTP path prefetch (slower modules, instant start)
     --module MODULE      Execute only a specific module (e.g., http/apache_version_check)
     --all                Include panel/CVE/mass-detect modules (noisy/slow; off by default)
     --list               List all available scanner modules
@@ -136,7 +144,7 @@ Examples:
     scanner -u https://example.com --evidence --screenshots
     scanner -u https://example.com --tags panel
     scanner -u https://example.com --all
-    scanner -u http://192.168.1.100 --threads 10
+    scanner -u http://192.168.1.100 --threads 24
     scanner -u https://example.com --module http/apache_version_check
     scanner -u example.com --protocol http
     scanner -u example.com --tags ssh --port 2222
@@ -256,6 +264,12 @@ Examples:
                         print_warning(f"No modules available for port {target_info['port']}")
                         return False
 
+            http_catalog = [
+                m for m in modules if str(m.get("path") or "").startswith("scanner/http/")
+            ]
+            ssh_catalog = [
+                m for m in modules if str(m.get("path") or "").startswith("scanner/ssh/")
+            ]
             # Mass CVE modules are opt-in (otherwise default scans take hours)
             modules = self._apply_default_module_scope(modules, options)
             
@@ -326,7 +340,16 @@ Examples:
             timing: Dict[str, float] = {}
             scan_t0 = time.perf_counter()
             gate_info: Dict[str, Any] = {}
-            with scan_http_session(pool_size=max(20, options["threads"] * 2)):
+            prefetch_workers = options.get("prefetch_threads")
+            if prefetch_workers is None:
+                prefetch_workers = max(int(options["threads"]), DEFAULT_PREFETCH_THREADS)
+                prefetch_workers = min(MAX_PREFETCH_THREADS, prefetch_workers)
+            pool_size = max(
+                DEFAULT_PREFETCH_THREADS,
+                int(options["threads"]) * 2,
+                int(prefetch_workers) * 2,
+            )
+            with scan_http_session(pool_size=pool_size):
                 # Fingerprint `/` (+ cheap CMS confirms) BEFORE prefetch so we do
                 # not pull hundreds of WordPress/plugin paths on non-CMS targets.
                 if not options.get("no_stack_gate") and not options.get("module"):
@@ -345,14 +368,88 @@ Examples:
                             f"Stack fingerprint: {', '.join(gate_info['hints'])}"
                         )
                         target_info["stack_hints"] = list(gate_info["hints"])
+                    from lib.scanner.stack_fingerprint import (
+                        DEFAULT_CONFIDENCE_FLOOR,
+                        confidence_for,
+                        filter_vendor_detect_on_confirmed_cms,
+                    )
+
+                    hints = {str(h).lower() for h in (gate_info.get("hints") or [])}
+                    kb_fp = {
+                        "tech_hints": list(gate_info.get("hints") or []),
+                        "tech_confidence": dict(gate_info.get("tech_confidence") or {}),
+                    }
+                    wp_confirmed = "wordpress" in hints or confidence_for(
+                        kb_fp, "wordpress"
+                    ) >= DEFAULT_CONFIDENCE_FLOOR
+                    if wp_confirmed:
+                        if not kb_fp["tech_confidence"].get("wordpress"):
+                            kb_fp["tech_confidence"] = {
+                                **kb_fp["tech_confidence"],
+                                "wordpress": 0.85,
+                            }
+                        trimmed, vendor_skipped = filter_vendor_detect_on_confirmed_cms(
+                            modules, kb_fp, cms="wordpress"
+                        )
+                        if vendor_skipped:
+                            modules = trimmed
+                            gate_info["vendor_detect_skipped"] = len(vendor_skipped)
+                            print_info(
+                                f"WordPress stack: skipped {len(vendor_skipped)} third-party "
+                                "RCE fingerprint module(s) (use --no-stack-gate to run all)"
+                            )
+                        from lib.scanner.wordpress_surface import (
+                            augment_wordpress_scan_modules,
+                            wordpress_modules_from_catalog,
+                        )
+
+                        wp_catalog_n = len(wordpress_modules_from_catalog(http_catalog))
+                        modules = augment_wordpress_scan_modules(
+                            modules, http_catalog, options
+                        )
+                        from lib.scanner.wordpress_surface import is_wordpress_scan_module
+
+                        wp_active = sum(
+                            1 for m in modules if is_wordpress_scan_module(m)
+                        )
+                        print_info(
+                            f"WordPress confirmé: {wp_active} module(s) WordPress "
+                            f"({wp_catalog_n} dans le catalogue, {len(modules)} au total)"
+                        )
                     if not modules:
                         print_warning("No modules left after stack gating")
                         return False
                     print_info(f"Running {len(modules)} module(s) after stack gate")
 
+                open_ports = list(target_info.get("open_ports") or [])
+                if any(int(p) in (22, 2222, 2223) for p in open_ports):
+                    from lib.scanner.ssh_surface import augment_ssh_scan_modules
+
+                    before_ssh = len(modules)
+                    modules = augment_ssh_scan_modules(
+                        modules, ssh_catalog, open_ports
+                    )
+                    if len(modules) > before_ssh:
+                        print_info(
+                            f"SSH port open: +{len(modules) - before_ssh} module(s) "
+                            f"(auth methods, banner, host key)"
+                        )
+
                 if not options.get("no_cache", False):
                     prefetch_t0 = time.perf_counter()
-                    self._prefetch_http_probes(modules, target_info, options["threads"])
+                    if not options.get("no_prefetch"):
+                        limit = options.get("prefetch_limit")
+                        if limit is None and options.get("all"):
+                            limit = 2000
+                        self._prefetch_http_probes(
+                            modules,
+                            target_info,
+                            prefetch_workers,
+                            timeout=float(options.get("prefetch_timeout") or 6.0),
+                            prefetch_limit=limit,
+                        )
+                    else:
+                        print_info("HTTP prefetch skipped (--no-prefetch)")
                     timing["prefetch"] = time.perf_counter() - prefetch_t0
                 exec_t0 = time.perf_counter()
                 raw_results = self._execute_modules(
@@ -465,7 +562,8 @@ Examples:
             'port': None,
             'scan_ports': True,  # Default: auto-scan ports if no filters
             'auto_exploit': False,  # Auto-launch exploits after detection
-            'threads': 10,
+            'threads': DEFAULT_SCANNER_THREADS,
+            'prefetch_threads': None,
             'module': None,
             'list': False,
             'protocols': False,
@@ -474,6 +572,9 @@ Examples:
             'no_dedup': False,
             'no_save': False,
             'no_stack_gate': False,
+            'no_prefetch': False,
+            'prefetch_timeout': 6.0,
+            'prefetch_limit': None,
             'all': False,
             'evidence': False,
             'screenshots': False,
@@ -566,6 +667,42 @@ Examples:
             elif arg == '--no-stack-gate':
                 options['no_stack_gate'] = True
                 i += 1
+            elif arg == '--no-prefetch':
+                options['no_prefetch'] = True
+                i += 1
+            elif arg == '--prefetch-threads':
+                if i + 1 < len(args):
+                    try:
+                        options['prefetch_threads'] = max(1, min(MAX_PREFETCH_THREADS, int(args[i + 1])))
+                        i += 2
+                    except ValueError:
+                        print_error("--prefetch-threads requires a number")
+                        i += 1
+                else:
+                    print_error("--prefetch-threads requires a value")
+                    i += 1
+            elif arg == '--prefetch-timeout':
+                if i + 1 < len(args):
+                    try:
+                        options['prefetch_timeout'] = max(1.0, float(args[i + 1]))
+                        i += 2
+                    except ValueError:
+                        print_error("--prefetch-timeout requires a number")
+                        i += 1
+                else:
+                    print_error("--prefetch-timeout requires a value")
+                    i += 1
+            elif arg == '--prefetch-limit':
+                if i + 1 < len(args):
+                    try:
+                        options['prefetch_limit'] = max(0, int(args[i + 1]))
+                        i += 2
+                    except ValueError:
+                        print_error("--prefetch-limit requires a number")
+                        i += 1
+                else:
+                    print_error("--prefetch-limit requires a value")
+                    i += 1
             elif arg == '--all':
                 options['all'] = True
                 i += 1
@@ -778,17 +915,18 @@ Examples:
             10061,  # Windows fallback
         }
 
-        def check_port(port: int) -> Tuple[bool, bool]:
+        def check_port(port: int, probe_timeout: Optional[float] = None) -> Tuple[bool, bool]:
+            tmo = float(probe_timeout if probe_timeout is not None else timeout)
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(timeout)
+                sock.settimeout(tmo)
                 result = sock.connect_ex((hostname, port))
                 sock.close()
                 is_open = result == 0
                 # Connection refused means host responded, even if port is closed.
                 host_responded = is_open or result in refused_codes
                 return is_open, host_responded
-            except:
+            except Exception:
                 return False, False
 
         # Quick scan with threading
@@ -803,8 +941,32 @@ Examples:
                     with lock:
                         responded["value"] = True
 
+        open_set = set(open_ports)
+        slow_ports = {22, 2222}
+        if default_port:
+            slow_ports.add(int(default_port))
+        # SSH/TLS often needs >1s; a fast parallel pass can miss an open port between runs.
+        for port in sorted(slow_ports):
+            if port in open_set:
+                continue
+            is_open, host_responded = check_port(int(port), probe_timeout=max(2.5, timeout))
+            if is_open:
+                open_set.add(int(port))
+                open_ports.append(int(port))
+            if host_responded:
+                responded["value"] = True
+
+        # If DB/mail/FTP are up, re-probe SSH (common co-location).
+        if open_set.intersection({21, 25, 110, 143, 3306, 5432}) and 22 not in open_set:
+            is_open, host_responded = check_port(22, probe_timeout=3.0)
+            if is_open:
+                open_set.add(22)
+                open_ports.append(22)
+            if host_responded:
+                responded["value"] = True
+
         return {
-            "open_ports": sorted(open_ports),
+            "open_ports": sorted(set(open_ports)),
             "host_responsive": responded["value"],
             "resolution_error": None,
         }
@@ -910,6 +1072,10 @@ Examples:
             "server_banner_detect",
             "robots_txt_detect",
             "deprecated_feature_policy_detect",
+            "wordpress_detect",
+            "wordpress_rest_api_detect",
+            "wordpress_user_enum_detect",
+            "wordpress_xmlrpc_detect",
         }
         if name in allowlist:
             return False
@@ -996,7 +1162,12 @@ Examples:
                 is_http = family == "http"
                 # Prefer non-http services, then header/method checks, then the rest
                 reliable = 0 if self._is_reliable_http_module(mod) else 1
-                return (1 if is_http else 0, reliable, path)
+                cms_detect = 0 if path.endswith("_detect") and family == "http" else 1
+                ssh_core = 0 if path in {
+                    "scanner/ssh/openssh_banner_detect",
+                    "scanner/ssh/ssh_auth_methods",
+                } else 1
+                return (1 if is_http else 0, ssh_core, cms_detect, reliable, path)
 
             kept_sorted = sorted(kept, key=_priority)
             capped = len(kept_sorted) - default_cap
@@ -1272,6 +1443,7 @@ Examples:
         info["skipped"] = len(skipped)
         info["summary"] = summarize_skips(skipped, modules)
         info["hints"] = list(kb.get("tech_hints") or [])
+        info["tech_confidence"] = dict(kb.get("tech_confidence") or {})
         if options.get("verbose") and skipped:
             for path, reason in skipped[:12]:
                 print_status(f"  skip {path}: {reason}")
@@ -1284,6 +1456,9 @@ Examples:
         modules: List[Dict[str, Any]],
         target_info: Dict[str, Any],
         threads: int,
+        *,
+        timeout: float = 6.0,
+        prefetch_limit: Optional[int] = None,
     ) -> None:
         """P0/P1: seed ``/`` and prefetch unique GET paths into the response cache."""
         try:
@@ -1303,10 +1478,19 @@ Examples:
         )
         if not probes:
             return
+        total_before = len(probes)
+        if prefetch_limit and int(prefetch_limit) > 0 and len(probes) > int(prefetch_limit):
+            from lib.scanner.probe_prefetch import trim_probes_for_limit
+
+            probes = trim_probes_for_limit(probes, int(prefetch_limit))
+            print_warning(
+                f"Prefetch capped to {len(probes)} URL(s) (from {total_before}); "
+                f"raise with --prefetch-limit 0 or increase limit"
+            )
 
         print_info(
             f"Prefetching {len(probes)} unique HTTP path(s) "
-            f"(seed=/ + soft-404 canary + path grouping)..."
+            f"({threads} workers, timeout={timeout:.0f}s)..."
         )
 
         def _progress(done, total, stats):
@@ -1325,7 +1509,7 @@ Examples:
         stats = prefetch_probes(
             probes,
             threads=threads,
-            timeout=10.0,
+            timeout=float(timeout),
             verify=False,
             progress_cb=_progress if len(probes) > 40 else None,
         )
@@ -1502,6 +1686,19 @@ Examples:
                     if execution.blocked:
                         result["status"] = "blocked"
                         result["message"] = execution.error or "Module execution blocked"
+                        br = getattr(execution, "block_reason", None)
+                        if br is not None:
+                            result["block_reason"] = (
+                                br.value if hasattr(br, "value") else str(br)
+                            )
+                        scope_mgr = getattr(self.framework, "scope_manager", None)
+                        if br is not None and str(getattr(br, "value", br)) == "scope_denied":
+                            decision = (
+                                getattr(scope_mgr, "last_decision", None) if scope_mgr is not None else None
+                            )
+                            if decision is not None and not getattr(decision, "allowed", True):
+                                result["scope_denied_targets"] = list(decision.targets or [])
+                                result["scope_reason"] = str(decision.reason or "")
                         return result
                     if execution.error and not execution.command_success:
                         raise RuntimeError(execution.error)
@@ -1617,8 +1814,14 @@ Examples:
                     else:
                         result["severity"] = "info"
 
-                    if result.get("vulnerable") and module_info.get('cve'):
-                        result['cve'] = module_info.get('cve')
+                    if result.get("vulnerable") and module_info.get("cve"):
+                        from core.scanner.result_dedup import normalize_cve_value
+
+                        cve_id = normalize_cve_value(module_info.get("cve"))
+                        if not cve_id:
+                            cve_id = normalize_cve_value(result.get("cve"))
+                        if cve_id:
+                            result["cve"] = cve_id
 
                     # Version and other dynamic details
                     if result.get("vulnerable") and dynamic_info.get('version'):
@@ -1780,6 +1983,19 @@ Examples:
         raw_vulnerable = sum(1 for r in raw_results if r.get("vulnerable"))
         unique_vulnerable = sum(1 for r in results if r.get("vulnerable"))
         blocked = sum(1 for r in raw_results if r.get("status") == "blocked")
+        scope_blocked = sum(
+            1 for r in raw_results
+            if r.get("status") == "blocked" and str(r.get("block_reason") or "") == "scope_denied"
+        )
+        guardian_blocked = sum(
+            1 for r in raw_results
+            if r.get("status") == "blocked" and str(r.get("block_reason") or "") == "guardian_blacklist"
+        )
+        options_blocked = sum(
+            1 for r in raw_results
+            if r.get("status") == "blocked" and str(r.get("block_reason") or "") == "missing_options"
+        )
+        other_blocked = max(0, blocked - scope_blocked - guardian_blocked - options_blocked)
         detected = sum(
             1 for r in raw_results if r.get("status") == "detected"
         )
@@ -1820,13 +2036,70 @@ Examples:
             )
         print_info(f"Safe: {safe}")
         if detected > 0:
-            print_info(f"Informational detections: {detected}")
-        if blocked > 0:
-            host = str(ti.get("hostname") or ti.get("host") or "target").strip()
-            print_warning(
-                f"Scope blocked: {blocked} module(s) — target outside engagement allowlist "
-                f"(add with: scope allow add domain {host})"
+            print_info(
+                f"Informational detections: {detected} "
+                "(non-WordPress; WordPress plugin hits appear as low findings)"
             )
+        if guardian_blocked > 0:
+            print_warning(
+                f"Guardian blocked: {guardian_blocked} module(s) — target IP on Guardian blacklist "
+                "(check `guardian` / remove false positives before rescanning)."
+            )
+        if options_blocked > 0:
+            print_info(
+                f"Preflight blocked: {options_blocked} module(s) missing required options "
+                "(normal for surface scan — wrong port/protocol for this target)."
+            )
+        if other_blocked > 0:
+            print_info(
+                f"Blocked: {other_blocked} module(s) — see per-module messages "
+                "(not engagement scope when scope enforcement is off)."
+            )
+        if scope_blocked > 0:
+            host = str(ti.get("hostname") or ti.get("host") or "target").strip()
+            denied_targets: set[str] = set()
+            for row in raw_results:
+                if row.get("status") != "blocked" or str(row.get("block_reason") or "") != "scope_denied":
+                    continue
+                for token in row.get("scope_denied_targets") or []:
+                    denied_targets.add(str(token))
+            manager = getattr(self.framework, "scope_manager", None)
+            scope_enabled = bool(manager and getattr(manager, "enabled", False))
+            main_allowed = True
+            if manager is not None and host and scope_enabled:
+                try:
+                    main_allowed = bool(manager.is_target_allowed(host).allowed)
+                except Exception:
+                    main_allowed = True
+            if denied_targets:
+                fixes = []
+                for token in sorted(denied_targets)[:6]:
+                    if manager is not None and hasattr(manager, "allowlist_command_for_target"):
+                        fixes.append(manager.allowlist_command_for_target(token))
+                    else:
+                        fixes.append(f"scope allow add domain {token}")
+                fix_text = " | ".join(fixes[:4])
+                if main_allowed:
+                    print_warning(
+                        f"Scope blocked: {scope_blocked} module(s) — off-scope target(s): "
+                        f"{', '.join(sorted(denied_targets)[:6])} "
+                        f"(scan host `{host}` is allowlisted). Add with: {fix_text}"
+                    )
+                else:
+                    print_warning(
+                        f"Scope blocked: {scope_blocked} module(s) — outside allowlist "
+                        f"(add with: scope allow add domain {host})"
+                    )
+            elif scope_enabled and main_allowed:
+                print_warning(
+                    f"Scope blocked: {scope_blocked} module(s) while `{host}` is allowlisted — "
+                    "run `scope check <host>` or inspect module messages for secondary targets."
+                )
+            elif scope_enabled:
+                print_warning(
+                    f"Scope blocked: {scope_blocked} module(s) — target outside engagement allowlist "
+                    f"(add with: scope allow add domain {host})"
+                )
         if skipped > 0:
             print_info(f"Skipped: {skipped}")
         if errors > 0:
@@ -2151,8 +2424,9 @@ Examples:
                     or str(group.title or "").strip()
                     or str(rep.get("module") or scanner_path or "Finding").strip()
                 )
-                if group.cve and group.cve not in title:
-                    title = f"[{group.cve}] {title}"
+                cve_id = str(group.cve or "").strip()
+                if cve_id and cve_id not in title and f"[{cve_id}]" not in title:
+                    title = f"[{cve_id}] {title}"
                 schema_evidence: List[Dict[str, Any]] = []
                 evidence_paths: List[str] = []
                 report = None
@@ -2218,8 +2492,10 @@ Examples:
                     str(result.get("finding") or "").strip()
                     or str(result.get("module") or scanner_path or "Finding").lstrip("[+]").strip()
                 )
-                cve = str(result.get("cve") or "")
-                if cve and cve not in title:
+                from core.scanner.result_dedup import normalize_cve_value
+
+                cve = normalize_cve_value(result.get("cve"))
+                if cve and cve not in title and f"[{cve}]" not in title:
                     title = f"[{cve}] {title}"
                 schema_evidence = [
                     item

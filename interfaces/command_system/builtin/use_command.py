@@ -243,13 +243,14 @@ Examples:
         applied = []
         try:
             if host:
-                if hasattr(module, "target"):
-                    module.set_option("target", host)
-                    applied.append(f"target={host}")
-                elif hasattr(module, "rhost"):
+                if hasattr(module, "rhost"):
                     module.set_option("rhost", host)
                     applied.append(f"rhost={host}")
-                elif hasattr(module, "rhosts"):
+                if hasattr(module, "target"):
+                    module.set_option("target", host)
+                    if "target=" not in ",".join(applied):
+                        applied.append(f"target={host}")
+                elif hasattr(module, "rhosts") and not hasattr(module, "rhost"):
                     module.set_option("rhosts", host)
                     applied.append(f"rhosts={host}")
             if port is not None and str(port).strip() != "":

@@ -435,6 +435,22 @@ class ReportService:
                 "sql_findings": safe_sql_findings,
                 "errors": safe_error_results,
             }
+            try:
+                from interfaces.command_system.builtin.agent.compound_evidence_report import enrich_report_payload
+
+                payload = enrich_report_payload(payload, safe_knowledge_base)
+            except Exception:
+                pass
+            try:
+                from interfaces.command_system.builtin.agent.bug_bounty_report import enrich_report_with_bug_bounty
+
+                payload = enrich_report_with_bug_bounty(
+                    payload,
+                    contextual_findings=safe_contextual_findings,
+                    knowledge_base=safe_knowledge_base,
+                )
+            except Exception:
+                pass
 
             atomic_write_json(json_path, payload)
 
@@ -479,6 +495,27 @@ class ReportService:
                             f"{row.get('name', '')} "
                             f"(MITRE: {', '.join(row.get('mitre_tactics') or []) or 'n/a'})\n"
                         )
+                except Exception:
+                    pass
+                try:
+                    from interfaces.command_system.builtin.agent.compound_evidence_report import (
+                        format_compound_evidence_markdown,
+                    )
+
+                    ce = payload.get("compound_evidence") if isinstance(payload.get("compound_evidence"), dict) else {}
+                    summary = ce.get("summary") if isinstance(ce.get("summary"), dict) else {}
+                    block = format_compound_evidence_markdown(summary)
+                    if block:
+                        report_md.write(block)
+                except Exception:
+                    pass
+                try:
+                    from interfaces.command_system.builtin.agent.bug_bounty_report import format_bug_bounty_markdown
+
+                    bb = payload.get("bug_bounty_submissions") if isinstance(payload.get("bug_bounty_submissions"), dict) else {}
+                    block = format_bug_bounty_markdown(bb)
+                    if block:
+                        report_md.write(block)
                 except Exception:
                     pass
                 if safe_network_budget:

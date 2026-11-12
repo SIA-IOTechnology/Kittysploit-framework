@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import socket
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -89,6 +90,7 @@ class ScopeManager:
         self.block_destructive: bool = False  # hard-block destructive (no confirm)
 
         self._rate_buckets: Dict[str, List[float]] = {}
+        self._allowlist_ips_cache: Optional[tuple[float, Set[str]]] = None
         self.last_decision: Optional[ScopeDecision] = None
         self.load()
 
@@ -167,6 +169,7 @@ class ScopeManager:
             netaddr.IPNetwork(normalized)
         if normalized not in self.allowed_ips:
             self.allowed_ips.append(normalized)
+            self._invalidate_ip_cache()
             self.save()
             self.audit("allow_ip_added", {"entry": normalized})
 
@@ -174,6 +177,7 @@ class ScopeManager:
         normalized = entry.strip()
         if normalized in self.allowed_ips:
             self.allowed_ips.remove(normalized)
+            self._invalidate_ip_cache()
             self.save()
             self.audit("allow_ip_removed", {"entry": normalized})
             return True
@@ -185,6 +189,7 @@ class ScopeManager:
             raise ValueError("Empty domain entry")
         if normalized not in self.allowed_domains:
             self.allowed_domains.append(normalized)
+            self._allowlist_ips_cache = None
             self.save()
             self.audit("allow_domain_added", {"entry": normalized})
 
@@ -192,10 +197,38 @@ class ScopeManager:
         normalized = self._normalize_domain(entry)
         if normalized in self.allowed_domains:
             self.allowed_domains.remove(normalized)
+            self._allowlist_ips_cache = None
             self.save()
             self.audit("allow_domain_removed", {"entry": normalized})
             return True
         return False
+
+    def _invalidate_ip_cache(self) -> None:
+        self._allowlist_ips_cache = None
+
+    def _resolve_allowlist_ips(self, *, ttl_sec: float = 300.0) -> Set[str]:
+        """A/AAAA records for apex/wildcard allowlist entries (module rhost often uses IPs)."""
+        now = time.time()
+        if self._allowlist_ips_cache is not None:
+            cached_at, cached = self._allowlist_ips_cache
+            if now - cached_at < ttl_sec:
+                return set(cached)
+        ips: Set[str] = set()
+        seen_hosts: Set[str] = set()
+        for pattern in self.allowed_domains:
+            host = pattern[2:] if pattern.startswith("*.") else pattern
+            host = host.strip().lower().strip(".")
+            if not host or host in seen_hosts:
+                continue
+            seen_hosts.add(host)
+            try:
+                for family, _, _, _, sockaddr in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM):
+                    if sockaddr and sockaddr[0]:
+                        ips.add(str(sockaddr[0]))
+            except OSError:
+                continue
+        self._allowlist_ips_cache = (now, ips)
+        return ips
 
     def set_rate_limit(self, max_actions: int, window_sec: int = 60) -> None:
         self.rate_limit_max = max(0, int(max_actions))
@@ -424,6 +457,8 @@ class ScopeManager:
         )
 
     def _ip_allowed(self, ip: str) -> bool:
+        if ip in self._resolve_allowlist_ips():
+            return True
         if netaddr is None:
             return ip in self.allowed_ips
         try:
@@ -444,10 +479,13 @@ class ScopeManager:
         host = host.lower().strip(".")
         for pattern in self.allowed_domains:
             if pattern.startswith("*."):
-                suffix = pattern[2:]
+                suffix = pattern[2:].strip(".")
                 if host == suffix or host.endswith("." + suffix):
                     return True
             elif host == pattern:
+                return True
+            elif pattern and host.endswith("." + pattern):
+                # Apex allowlist covers subdomains (www.example.com when example.com is listed).
                 return True
         return False
 

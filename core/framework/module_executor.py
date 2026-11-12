@@ -289,10 +289,19 @@ class ModuleExecutor:
             skip_confirm=skip_scope_confirm,
             skip_enforcement=skip_scope_enforcement,
         ):
+            scope_msg = "Scope denied"
+            manager = getattr(framework, "scope_manager", None)
+            decision = getattr(manager, "last_decision", None) if manager is not None else None
+            if decision is not None and not decision.allowed:
+                targets = [str(t) for t in (decision.targets or []) if str(t).strip()]
+                if targets:
+                    scope_msg = f"Scope denied: {decision.reason} (targets: {', '.join(targets[:5])})"
+                elif decision.reason:
+                    scope_msg = f"Scope denied: {decision.reason}"
             return PreflightResult(
                 allowed=False,
                 block_reason=ModuleExecutionBlockReason.SCOPE_DENIED,
-                message="Scope denied",
+                message=scope_msg,
             )
 
         allowed, reason = ModuleExecutor.check_guardian_blacklist(

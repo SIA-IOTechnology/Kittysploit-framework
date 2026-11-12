@@ -805,6 +805,107 @@ def create_mcp_server(
             ),
         )
 
+    @mcp.tool()
+    @safe
+    def ks_agent_power_status(run_id: str) -> Dict[str, Any]:
+        """Compound validation / exploit-chain power metrics vs Strix-style depth scoring."""
+        blocked = _authorize("ks_agent_power_status")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.agent_flow_control import (
+            _load_state_from_run_checkpoint,
+        )
+        from interfaces.command_system.builtin.agent.compound_validation_engine import power_status
+
+        state = _load_state_from_run_checkpoint(run_id.strip(), command_bridge.framework)
+        if state is None:
+            return _finish("ks_agent_power_status", {"error": "checkpoint_not_found"})
+        kb = getattr(state, "knowledge_base", None)
+        payload = power_status(kb if isinstance(kb, dict) else {})
+        payload["run_id"] = run_id
+        return _finish("ks_agent_power_status", _safe_json(payload))
+
+    @mcp.tool()
+    @safe
+    def ks_agent_compound_evidence(run_id: str) -> Dict[str, Any]:
+        """Export compound evidence ledger (skeptic → validation → OWASP specialists → exploit chain)."""
+        blocked = _authorize("ks_agent_compound_evidence")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.agent_flow_control import (
+            _load_state_from_run_checkpoint,
+        )
+        from interfaces.command_system.builtin.agent.compound_evidence_report import export_compound_evidence
+
+        state = _load_state_from_run_checkpoint(run_id.strip(), command_bridge.framework)
+        if state is None:
+            return _finish("ks_agent_compound_evidence", {"error": "checkpoint_not_found"})
+        kb = getattr(state, "knowledge_base", None)
+        payload = export_compound_evidence(kb if isinstance(kb, dict) else {})
+        payload["run_id"] = run_id
+        return _finish("ks_agent_compound_evidence", _safe_json(payload))
+
+    @mcp.tool()
+    @safe
+    def ks_agent_flow_status(run_id: str, verbose: bool = False) -> Dict[str, Any]:
+        """Read agent flow status (subtasks, barriers, validation queue) from a run checkpoint."""
+        blocked = _authorize("ks_agent_flow_status")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.agent_flow_control import flow_status_for_run_id
+
+        return _finish(
+            "ks_agent_flow_status",
+            _safe_json(flow_status_for_run_id(run_id.strip(), command_bridge.framework, verbose=verbose)),
+        )
+
+    @mcp.tool()
+    @safe
+    def ks_agent_flow_patch(run_id: str, operations_json: str) -> Dict[str, Any]:
+        """
+        Patch planned subtasks on a saved agent run (JSON array of ops: add|remove|modify|reorder).
+        """
+        blocked = _authorize("ks_agent_flow_patch")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.agent_flow_control import patch_checkpoint_subtasks
+
+        try:
+            operations = json.loads(operations_json)
+        except json.JSONDecodeError as exc:
+            return _finish("ks_agent_flow_patch", {"error": f"invalid json: {exc}"})
+        if not isinstance(operations, list):
+            return _finish("ks_agent_flow_patch", {"error": "operations_json must be a JSON array"})
+        return _finish(
+            "ks_agent_flow_patch",
+            _safe_json(patch_checkpoint_subtasks(run_id.strip(), operations, command_bridge.framework)),
+        )
+
+    @mcp.tool()
+    @safe
+    def ks_agent_flow_answer(run_id: str, answer: str) -> Dict[str, Any]:
+        """Answer an agent_flow operator_ask barrier and persist checkpoint."""
+        blocked = _authorize("ks_agent_flow_answer")
+        if blocked:
+            return blocked
+        from interfaces.command_system.builtin.agent.agent_flow_control import (
+            _load_state_from_run_checkpoint,
+            submit_flow_input,
+        )
+        from interfaces.command_system.builtin.agent.run_store import AgentPathService, AgentRunStore
+        from interfaces.command_system.builtin.agent.state import agent_state_checkpoint_dict
+
+        state = _load_state_from_run_checkpoint(run_id.strip(), command_bridge.framework)
+        if state is None:
+            return _finish("ks_agent_flow_answer", {"error": "checkpoint_not_found", "run_id": run_id})
+        result = submit_flow_input(state, answer)
+        paths = AgentPathService(command_bridge.framework)
+        store = AgentRunStore(paths, run_id.strip())
+        store.save_checkpoint("mcp_flow_answer", agent_state_checkpoint_dict(state))
+        result["run_id"] = run_id
+        result["checkpoint_saved"] = True
+        return _finish("ks_agent_flow_answer", _safe_json(result))
+
     return mcp
 
 

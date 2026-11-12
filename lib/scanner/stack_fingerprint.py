@@ -33,7 +33,11 @@ DEFAULT_CONFIDENCE_FLOOR = 0.3
 
 # Cheap confirmation paths when homepage evidence is inconclusive.
 CONFIRM_PATHS: Dict[str, Tuple[str, ...]] = {
-    "wordpress": ("/wp-login.php", "/wp-json/"),
+    "wordpress": (
+        "/wp-login.php",
+        "/wp-json/",
+        "/wp-admin/maint/repair.php",
+    ),
     "joomla": ("/administrator/", "/administrator/manifests/files/joomla.xml"),
     "drupal": ("/core/misc/drupal.js", "/user/login"),
 }
@@ -164,6 +168,16 @@ def confidence_for(kb: Mapping[str, Any], tech: str) -> float:
         return 0.0
 
 
+# Primary CMS/service fingerprint modules must run even when the homepage is inconclusive.
+_STACK_DETECTOR_PATHS = frozenset(
+    {
+        "scanner/http/wordpress_detect",
+        "scanner/http/joomla_detect",
+        "scanner/http/drupal_detect",
+    }
+)
+
+
 def tag_stack_mismatch_reason(
     module: Mapping[str, Any],
     kb: Mapping[str, Any],
@@ -175,6 +189,9 @@ def tag_stack_mismatch_reason(
 
     Modules tagged wordpress/wp-plugin/... require wordpress confidence >= floor.
     """
+    path = str(module.get("path") or "")
+    if path in _STACK_DETECTOR_PATHS:
+        return ""
     families = tech_families_for_module(module)
     if not families:
         return ""
@@ -208,6 +225,74 @@ def filter_modules_by_stack(
             reason = tag_stack_mismatch_reason(module, kb, floor=floor)
         if reason:
             skipped.append((path, reason))
+            continue
+        kept.append(module)
+    return kept, skipped
+
+
+_HTTP_GENERIC_DETECT_ALLOW = frozenset(
+    {
+        "http_methods_detect",
+        "security_headers_detect",
+        "server_banner_detect",
+        "robots_txt_detect",
+    "wordpress_detect",
+    "wordpress_rest_api_detect",
+    "wordpress_user_enum_detect",
+    "wordpress_xmlrpc_detect",
+    "cors_misconfig",
+        "deprecated_feature_policy_detect",
+    }
+)
+
+
+def filter_vendor_detect_on_confirmed_cms(
+    modules: Sequence[Dict[str, Any]],
+    kb: Mapping[str, Any],
+    *,
+    cms: str = "wordpress",
+    floor: float = DEFAULT_CONFIDENCE_FLOOR,
+) -> Tuple[List[Dict[str, Any]], List[Tuple[str, str]]]:
+    """
+    When a CMS stack is confirmed (e.g. WordPress), skip third-party ``*_rce_detect``
+    catalog modules that only make sense on matching product surfaces.
+    """
+    if confidence_for(kb, cms) < floor:
+        return list(modules), []
+    kept: List[Dict[str, Any]] = []
+    skipped: List[Tuple[str, str]] = []
+    cms_l = cms.lower()
+    for module in modules:
+        path = str(module.get("path") or "")
+        low = path.lower()
+        name = low.rsplit("/", 1)[-1]
+        if name in _HTTP_GENERIC_DETECT_ALLOW:
+            kept.append(module)
+            continue
+        if cms_l in low or any(tok in low for tok in ("wordpress", "wp_plugin", "wp-", "xmlrpc", "woocommerce")):
+            kept.append(module)
+            continue
+        if "_rce_detect" in low or (low.endswith("_detect") and low.startswith("scanner/http/")):
+            if any(
+                tok in low
+                for tok in (
+                    "sqli",
+                    "xss",
+                    "lfi",
+                    "ssrf",
+                    "ssti",
+                    "csrf",
+                    "idor",
+                    "upload",
+                    "auth",
+                    "header",
+                    "cors",
+                    "method",
+                )
+            ):
+                kept.append(module)
+                continue
+            skipped.append((path, f"vendor detect skipped ({cms} stack confirmed)"))
             continue
         kept.append(module)
     return kept, skipped

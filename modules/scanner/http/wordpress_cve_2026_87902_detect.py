@@ -176,20 +176,40 @@ class Module(Scanner, Http_client, Wordpress):
         if bool(self.active_probe) and has_prefix:
             confirmed = self._traversal_differential(self._page_id(home_body))
 
-        if affected is True or has_prefix or confirmed:
-            severity = "critical" if (has_prefix and affected is not False) or confirmed else "high"
+        if confirmed:
             self.set_info(
-                severity=severity,
+                severity="critical",
                 cve=CVE_ID,
-                reason=(
-                    "Page-template traversal prerequisites met"
-                    if has_prefix
-                    else "WordPress core version in affected range"
-                ),
+                reason="Pagename traversal differential confirmed",
                 version=version or "unknown",
                 theme=theme or "unknown",
-                page_prefix=prefix_dir or "not found",
-                active_probe=confirmed,
+                page_prefix=prefix_dir or "unknown",
+                confidence="high",
+                active_probe=True,
+            )
+            return True
+        if affected is True and has_prefix:
+            self.set_info(
+                severity="high",
+                cve=CVE_ID,
+                reason="Affected core version and theme page-* prefix present",
+                version=version,
+                theme=theme or "unknown",
+                page_prefix=prefix_dir,
+                confidence="medium",
+            )
+            return True
+        if affected is True:
+            self.set_info(
+                severity="medium",
+                cve=CVE_ID,
+                reason=(
+                    "WordPress core version in affected range; "
+                    "theme page-template prefix not confirmed"
+                ),
+                version=version,
+                theme=theme or "unknown",
+                confidence="medium",
             )
             return True
         return False

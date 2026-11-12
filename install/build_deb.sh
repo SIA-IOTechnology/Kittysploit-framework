@@ -18,17 +18,19 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
   exit 1
 fi
 
-VERSION="$("${PYTHON}" - <<'PY'
+VERSION="$("${PYTHON}" - "${ROOT_DIR}" <<'PY'
+import sys
 from pathlib import Path
-content = Path("pyproject.toml").read_text(encoding="utf-8")
-version = None
-for line in content.splitlines():
-    stripped = line.strip()
-    if stripped.startswith("version") and "=" in stripped:
-        version = stripped.split("=", 1)[1].strip().strip('"').strip("'")
-        break
-if not version:
-    raise SystemExit("Unable to find project version in pyproject.toml")
+
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+try:
+    from core.version import VERSION
+except ImportError as exc:
+    raise SystemExit(f"Unable to import core.version.VERSION: {exc}") from exc
+version = str(VERSION or "").strip()
+if not version or " " in version:
+    raise SystemExit(f"Invalid VERSION in core/version.py: {version!r}")
 print(version)
 PY
 )"

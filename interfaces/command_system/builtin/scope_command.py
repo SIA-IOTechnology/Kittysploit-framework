@@ -169,6 +169,10 @@ Examples:
                 else:
                     manager.add_allow_domain(parsed.value)
                 print_success(f"Added {parsed.kind} allowlist entry: {parsed.value}")
+                if parsed.kind == "domain" and not str(parsed.value).strip().startswith("*."):
+                    print_info(
+                        "Apex domains also cover subdomains (e.g. www) and resolved A/AAAA IPs for that host."
+                    )
                 return True
             except Exception as exc:
                 print_error(str(exc))

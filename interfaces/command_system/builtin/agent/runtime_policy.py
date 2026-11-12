@@ -32,6 +32,8 @@ NON_IDEMPOTENT_EFFECTS = frozenset({
 MISSION_PROFILE_ALIASES = {
     "ot-safe": "ot-safe",
     "ot-safe-assessment": "ot-safe",
+    "bug-bounty": "bug-bounty-safe",
+    "bug_bounty": "bug-bounty-safe",
     "bug-bounty-safe": "bug-bounty-safe",
     "internal-lab": "internal-lab",
     "europol-passive": "europol-passive",

@@ -111,6 +111,24 @@ class AdaptiveLoopEngine:
             loop_state.iteration += 1
             if not pending:
                 loop_state.micro_loops = 0
+            kb_loop = getattr(state, "knowledge_base", None)
+            if isinstance(kb_loop, dict):
+                try:
+                    from interfaces.command_system.builtin.agent.agent_flow_barrier import (
+                        flow_awaiting_operator,
+                    )
+
+                    if flow_awaiting_operator(kb_loop):
+                        loop_state.stop = StopDecision(
+                            stop=True,
+                            kind="soft",
+                            reason="operator_ask",
+                            detail="Campaign paused for operator input (agent_flow barrier)",
+                        )
+                        state.campaign_stop_reason = "operator_ask"
+                        break
+                except Exception:
+                    pass
             observation = self._observe(state)
             loop_state.goal_progress = self._goal_progress(state, observation)
 
@@ -122,6 +140,39 @@ class AdaptiveLoopEngine:
 
             if not pending:
                 pending = self._plan(state, observation)
+                try:
+                    from interfaces.command_system.builtin.agent.finding_validation_queue import (
+                        pop_validation_actions,
+                    )
+
+                    validation_actions = pop_validation_actions(state)
+                    specialist_fanout: List[AgentAction] = []
+                    try:
+                        from interfaces.command_system.builtin.agent.compound_specialist_fanout import (
+                            maybe_run_compound_specialist_fanout,
+                        )
+
+                        specialist_fanout = maybe_run_compound_specialist_fanout(
+                            state,
+                            observation,
+                            self.services,
+                            validation_wave_active=bool(validation_actions),
+                        )
+                    except Exception:
+                        specialist_fanout = []
+                    compound_exploit = list(getattr(state, "_compound_exploit_pending", []) or [])
+                    if compound_exploit:
+                        pending = compound_exploit + list(pending or [])
+                        state._compound_exploit_pending = []  # type: ignore[attr-defined]
+                        loop_state.pivots.append("compound_exploit_chain")
+                    if specialist_fanout:
+                        pending = specialist_fanout + list(pending or [])
+                        loop_state.pivots.append("compound_owasp_specialist_fanout")
+                    if validation_actions:
+                        pending = validation_actions + list(pending or [])
+                        loop_state.pivots.append("compound_validation_wave")
+                except Exception:
+                    pass
                 if not pending:
                     try:
                         from interfaces.command_system.builtin.agent.session_pursuit import (
@@ -186,6 +237,35 @@ class AdaptiveLoopEngine:
             self._reflect(state, action, outcome)
             self._record_blackboard(loop_state, action, outcome)
 
+            kb_post = getattr(state, "knowledge_base", None)
+            if isinstance(kb_post, dict):
+                try:
+                    from interfaces.command_system.builtin.agent.agent_flow_barrier import mark_subtask_done
+                    from interfaces.command_system.builtin.agent.finding_validation_queue import (
+                        complete_validation,
+                    )
+
+                    opts = action.options if isinstance(action.options, dict) else {}
+                    vid = str(opts.get("validation_id") or "")
+                    if vid:
+                        finished = complete_validation(
+                            kb_post,
+                            vid,
+                            verdict=str(getattr(outcome, "verdict", "") or ""),
+                            state=state,
+                        )
+                        if finished and opts.get("compound"):
+                            loop_state.pivots.append("compound_chain_complete")
+                    if str(getattr(outcome, "verdict", "") or "") == "confirmed" and action.path:
+                        mark_subtask_done(
+                            kb_post,
+                            subtask_id=str(action.path),
+                            summary=str(getattr(outcome, "summary", "") or action.path)[:500],
+                            state=state,
+                        )
+                except Exception:
+                    pass
+
             from interfaces.command_system.builtin.agent.plan_recalc import consume_plan_recalc
 
             replan_reasons = consume_plan_recalc(state)
@@ -193,6 +273,16 @@ class AdaptiveLoopEngine:
                 pending.clear()
                 loop_state.replans += 1
                 loop_state.pivots.append(f"plan_recalc:{replan_reasons[0]}")
+                kb_replan = getattr(state, "knowledge_base", None)
+                if isinstance(kb_replan, dict):
+                    try:
+                        from interfaces.command_system.builtin.agent.plan_subtask_refiner import (
+                            refine_after_recalc,
+                        )
+
+                        refine_after_recalc(kb_replan, reasons=replan_reasons, state=state)
+                    except Exception:
+                        pass
 
             if raw.get("http_intel_replan"):
                 chained = False

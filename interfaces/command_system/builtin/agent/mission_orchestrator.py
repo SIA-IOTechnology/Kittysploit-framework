@@ -163,6 +163,32 @@ def run_domain_orchestrator(
                     if isinstance(response, dict):
                         cache.put(cache_key, response)
                 parsed = parse_orchestrator_response(response) if isinstance(response, dict) else None
+                if parsed is None and response is not None:
+                    try:
+                        from interfaces.command_system.builtin.agent.llm_reflector import (
+                            reflect_structured_json,
+                        )
+
+                        def _reflect_query(**kwargs: Any) -> Optional[Dict[str, Any]]:
+                            return llm.query_json(
+                                endpoint=str(kwargs.get("endpoint") or endpoint),
+                                model=str(kwargs.get("model") or route.model),
+                                instruction=str(kwargs.get("instruction") or ""),
+                                payload=kwargs.get("payload") or {},
+                                timeout=int(kwargs.get("timeout") or 20),
+                                allow_remote=bool(getattr(state, "llm_allow_remote", False)),
+                            )
+
+                        parsed = reflect_structured_json(
+                            response,
+                            parse_fn=parse_orchestrator_response,
+                            llm_query=_reflect_query,
+                            endpoint=endpoint,
+                            model=str(route.model),
+                            required_keys=["delegate_domains", "rationale"],
+                        )
+                    except Exception:
+                        parsed = None
                 if parsed and (
                     parsed.get("domains")
                     or parsed.get("action_id")

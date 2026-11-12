@@ -202,7 +202,7 @@ Runs all matching scanner modules against a target:
 
 ```bash
 scanner -u https://example.com
-scanner -u http://192.168.1.100 --threads 10
+scanner -u http://192.168.1.100 --threads 24
 scanner -u example.com --protocol http --tags ssh
 scanner -u example.com --module http/apache_version_check
 scanner --list

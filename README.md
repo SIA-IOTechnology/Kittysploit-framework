@@ -3,64 +3,44 @@
 
 # KittySploit
 
-**From recon to shell — in one console.**
+**Exploitation and post-exploitation framework — one console.**
 
-Autonomous agent for web/API testing. 8,000+ modules. Built-in C2.
-Local LLM. Scope-aware. Automation-ready.
+Recon, scanning, **exploits**, interactive sessions, and **post-exploitation** across **60+ session connectors** (shell, browser, databases, cloud, IoT/ICS, and more).
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/RNskjwSW5W)
 [![GitHub stars](https://img.shields.io/github/stars/SIA-IOTechnology/Kittysploit-framework?style=social)](https://github.com/SIA-IOTechnology/Kittysploit-framework)
 
-**[Quick start](#quick-start) · [Docs](USAGE.md) · [Website](https://kittysploit.com) · [Discord](https://discord.gg/RNskjwSW5W)**
+**[Installation](#installation) · [Quick start](#quick-start) · [Full guide](USAGE.md) · [Website](https://kittysploit.com)**
 
 </div>
 
-<img src="docs/screenshots/demo.gif" alt="KittySploit demo — agent mission from recon to shell" width="100%">
+<img src="docs/screenshots/demo.gif" alt="KittySploit — console, exploitation, and sessions" width="100%">
 
-```bash
-# Web/API mission (lab) — one command, quick profile by default
-kittysploit> agent https://lab.local
+## At a glance
 
-# Bug bounty (in-scope programs only)
-kittysploit> agent https://in-scope.target --profile bug-bounty
+| Step | What KittySploit does |
+| --- | --- |
+| **1. Find** | Web, network, cloud, and service scanners and recon |
+| **2. Exploit** | Exploit modules, chains, and optional local-LLM agent |
+| **3. Post-exploit** | **60+ session connectors** — loot, pivot, persistence, enumeration |
 
-# Parallel OWASP specialists (advanced)
-kittysploit> agent https://lab.local --profile owasp-web-parallel
+Everything stays in **one console**: modules, listeners, payloads, built-in C2, and reporting.
 
-# Go for a shell (authorized lab only)
-kittysploit> agent http://192.168.56.10 \
-  --profile internal-lab \
-  --goal obtain-shell \
-  --approve-risk intrusive \
-  --shell-hunter
-```
+> Use only on targets you own or are **explicitly authorized** to test.
 
 ## Why KittySploit?
 
-Most stacks force you to jump between a scanner, an exploit framework, a C2, a proxy, and a notebook.
+Typical stacks split the scanner, exploit framework, C2, and notes across different tools.
 
-KittySploit keeps the engagement in one place — modules, sessions, scope, and an autonomous agent that plans and executes against authorized targets.
+KittySploit brings them together: **exploit** to get a **session**, then run **post-exploitation** without switching apps.
 
-Many **AI pentest agents** stop at “find a vuln → show a PoC → open a fix PR” on a single app. KittySploit is built for **full engagement depth**: recon through **validated findings**, **OWASP-class parallel specialists**, **exploit chains**, and **interactive sessions** on authorized targets — with operator scope, risk gates, and audit-style **compound evidence** in every report.
+**Post-exploitation connector examples:** Linux/Windows shell, browser (JS session), SSH, MySQL/PostgreSQL/Redis/MongoDB, SMB, FTP, Kubernetes, AWS/GCP/Azure, PHP webshell, WinRM, LDAP, BLE, MQTT, Modbus, BACnet, ONVIF, and more.
 
-| | |
-|---|---|
-| **Agent** | Local LLM (Ollama) plans and drives missions with safety profiles, evidence gates, and parallel web specialists |
-| **Compound pipeline** | Skeptic panel → multi-step validation chain → parallel OWASP specialists → exploit queue (witnesses per stage in reports) |
-| **Modules + C2** | 8,000+ scanners/exploits/post modules, listeners, payloads, and live sessions in the same console |
-| **Automation** | CLI, RPC, REST API, and MCP for IDE / CI-style operators (`ks_agent_power_status`, `ks_agent_compound_evidence`) |
+**Module scale (approximate):** thousands of scanners/auxiliary modules, **700+** exploits, **400+** post modules.
 
-```text
-Signal → evidence gate → skeptic panel → parallel validation steps
-       → OWASP specialist fan-out (injection/xss/ssrf/auth/authz)
-       → exploit chain actions → session / post-exploit (when approved)
-```
-
-Use **`agent … --profile owasp-web-parallel`** for the parallel web mission. Reports include a **Compound evidence** section (JSON + Markdown) so findings are defensible, not just LLM assertions.
-
-## Quick Start
+## Installation
 
 ### Linux and macOS
 
@@ -71,10 +51,10 @@ cd Kittysploit-framework
 python3 kittyconsole.py
 ```
 
-One-line installer:
+One-line install:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/kittysploit-framework/main/install/install-standalone.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SIA-IOTechnology/Kittysploit-framework/main/install/install-standalone.sh | bash
 ```
 
 ### Windows
@@ -86,96 +66,66 @@ install\install.bat
 python kittyconsole.py
 ```
 
-## First 60 seconds
+## Quick start
 
 ```text
 kittysploit> doctor
-kittysploit> agent https://lab.local
-kittysploit> search wordpress
-kittysploit> agent https://lab.local --profile owasp-web-parallel --plan-only
-kittysploit> agent http://192.168.56.10 --profile internal-lab --goal obtain-shell --approve-risk intrusive --shell-hunter
+kittysploit> search cve:2024 type:exploit
+kittysploit> use exploits/multi/http/...
+kittysploit> run
+
+kittysploit> sessions -l
+kittysploit> sessions -i 1
+kittysploit> search type:post platform:windows
 ```
 
-Bare `agent <url>` uses the **quick** profile (web validation, read/active modules). Ollama on
-`127.0.0.1:11434` is picked up automatically when reachable.
-
-Use `--plan-only` / `--dry-run` until you are ready for live actions. Always test against systems you own or are authorized to assess.
-
-<img src="docs/screenshots/cli-interface.png" alt="KittySploit console" width="100%">
-
-## Autonomous agent
-
-Drive a mission with a local model — no cloud key required:
+**Automated web mission (authorized lab):**
 
 ```bash
-# Easiest path (quick profile; enables local LLM when Ollama is up)
 kittysploit> agent https://lab.local
+```
 
-# Plan only (safe preview)
-kittysploit> agent lab.local \
-  --profile owasp-web-parallel \
-  --plan-only
+Shell goal on an internal lab:
 
-# Obtain a shell (lab / authorized targets only)
+```bash
 kittysploit> agent http://192.168.56.10 \
   --profile internal-lab \
   --goal obtain-shell \
   --approve-risk intrusive \
-  --shell-hunter \
-  --llm-local \
-  --llm-model llama3.1:8b
+  --shell-hunter
 ```
 
-| Flag | Role |
-| --- | --- |
-| `--goal obtain-shell` | Campaign objective is an interactive session |
-| `--approve-risk intrusive` | Required to run exploits (blocked otherwise) |
-| `--shell-hunter` | Push harder toward a shell |
-| `--approve-post-exploit` | Optional read-only collection after a session |
-| `--plan-only` / `--dry-run` | Preview without live intrusive actions |
+Use `--plan-only` or `--dry-run` to preview without intrusive actions.
 
-- Mission profiles (`safe-web`, `owasp-web-parallel`, `attack-specialists`, `internal-lab`, `bug-bounty-safe`, …)
-- Evidence-gated exploit handoff (reduce speculative false positives)
-- Parallel specialists by OWASP class (injection, XSS, SSRF, auth, authz)
-- Scope, budgets, and risk approvals stay under operator control
+## Core features
 
-## Core platform
+- **Exploitation** — `search` / `use` / `run`, payloads, listeners, exploit queues
+- **Sessions and C2** — shells, callbacks, pivots, multi-session management
+- **Post-exploitation** — modules per session type (gather, manage, pivot, loot)
+- **Agent (optional)** — local LLM (Ollama), mission profiles, scope controls
+- **Automation** — CLI, API/RPC, and MCP for IDE or scripted workflows
 
-- **Modular console** — `search` / `use` / `set` / `run` across scanners, exploits, auxiliary, and post modules
-- **Built-in C2** — listeners, payloads, sessions, pivots, and post-exploitation
-- **Workspaces & scope** — engagement boundaries, hosts, and findings organized per job
-- **Workflows & playbooks** — repeatable recon and attack chains
-- **Extensions** — proxy, OSINT, GUI, protocols via the marketplace
+Agent profiles, compound evidence, environment variables, and cookbooks are in **[USAGE.md](USAGE.md)**.
 
 ## Ecosystem
 
 | Project | Purpose |
 | --- | --- |
-| [KittyProxy](https://github.com/SIA-IOTechnology/KittyProxy) | Web traffic capture and analysis |
-| [KittyCosmic](https://github.com/SIA-IOTechnology/KittyCosmic) | Graphical interface and marketplace |
-| [KittyOsint](https://github.com/SIA-IOTechnology/KittyOsint) | Visual OSINT investigation |
+| [KittyProxy](https://github.com/SIA-IOTechnology/KittyProxy) | HTTP capture and analysis |
+| [KittyCosmic](https://github.com/SIA-IOTechnology/KittyCosmic) | Graphical interface |
+| [KittyOsint](https://github.com/SIA-IOTechnology/KittyOsint) | Visual OSINT |
 | [KittyProtocol](https://github.com/SIA-IOTechnology/KittyProtocol) | Protocol analysis |
-| [KittyV8Debugger](https://github.com/SIA-IOTechnology/KittyV8Debugger) | V8 debugging and analysis |
+| [KittyV8Debugger](https://github.com/SIA-IOTechnology/KittyV8Debugger) | V8 debugging |
 
-[Demo video](docs/screenshots/demo.mp4) · [More screenshots](docs/screenshots/) · [Full usage guide](USAGE.md)
-
-## Documentation
-
-- [Usage guide](USAGE.md)
-- [Project wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
-- [Extension marketplace](https://kittysploit.com)
-- [Issues](https://github.com/SIA-IOTechnology/Kittysploit-framework/issues)
-
-## Project status
-
-KittySploit 1.x is the foundation of a broader offensive platform and is still evolving. Validate new releases in a lab before using them on an engagement.
+[Demo video](docs/screenshots/demo.mp4) · [Site and marketplace](https://kittysploit.com) · [Wiki](https://github.com/SIA-IOTechnology/Kittysploit-framework/wiki)
 
 ## Community
 
-- Star the repo to help others discover it
-- Join [Discord](https://discord.gg/RNskjwSW5W)
-- Open an issue for bugs or ideas
-- Support development on [Liberapay](https://liberapay.com/KittySploit/donate)
+- [Discord](https://discord.gg/RNskjwSW5W)
+- [Issues](https://github.com/SIA-IOTechnology/Kittysploit-framework/issues)
+- [Liberapay](https://liberapay.com/KittySploit/donate)
+
+The project is still evolving — validate in a lab before production engagements.
 
 ## Acknowledgments
 
@@ -183,4 +133,4 @@ Thanks to [Woody](https://github.com/v-Woody) for their contributions.
 
 ## License
 
-KittySploit is released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE).

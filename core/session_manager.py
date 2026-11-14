@@ -832,6 +832,27 @@ class SessionManager:
             # Framework not available or error, silently skip
             pass
     
+    def _session_data_for_browser(
+        self, session_id: str, info: Optional[Dict[str, Any]] = None
+    ) -> SessionData:
+        """Normalize a browser hook session for triggers, API, and event payloads."""
+        info = dict(info or {})
+        row = self.browser_sessions.get(session_id)
+        if row:
+            info = {**(row.get("info") or {}), **info}
+        host = str(info.get("ip") or info.get("host") or "")
+        return SessionData(
+            id=session_id,
+            host=host,
+            port=0,
+            session_type="browser",
+            data={
+                "ip": host,
+                "user_agent": info.get("user_agent"),
+                "browser_info": info.get("browser_info") or {},
+            },
+        )
+
     def register_browser_session(self, session_id, info):
         info = info or {}
         now = time.time()
@@ -863,6 +884,13 @@ class SessionManager:
         
         # Play sound notification if enabled (only for new sessions)
         if is_new_session:
+            session_view = self._session_data_for_browser(session_id, info)
+            for callback in self.callbacks:
+                try:
+                    callback("session_created", session_id, session_view)
+                except Exception as e:
+                    print(f"Error in session callback: {e}")
+            self._publish_session_event("session.created", session_id, session_view)
             self._play_session_sound()
             self._maybe_show_assistant_for_session(session_id, "browser")
         
@@ -917,7 +945,12 @@ class SessionManager:
                     print_error(f"Error in commands_sent callback: {e}")
     
     def get_session(self, session_id: str) -> Optional[SessionData]:
-        return self.sessions.get(session_id)
+        session = self.sessions.get(session_id)
+        if session is not None:
+            return session
+        if session_id in self.browser_sessions:
+            return self._session_data_for_browser(session_id)
+        return None
     
     def get_browser_session(self, session_id):
         

@@ -34,6 +34,11 @@ class Module(Scanner, Http_client, Wordpress):
             "reversible": True,
             "approval_required": False,
             "produces": ["risk_signals", "exploit_paths"],
+            "chain": {
+                "suggested_followups": [
+                    "exploits/multi/http/latepoint_cve_2026_118066_takeover",
+                ],
+            },
         },
     }
 

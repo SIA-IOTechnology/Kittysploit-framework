@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Optional
 
 from kittysploit import *
-from lib.protocols.http.gitea_probe import GITEA_PATCHED_VERSION, Gitea
+from lib.protocols.http.gitea_probe import Gitea
 from lib.protocols.http.http_client import Http_client
 
 
@@ -50,6 +50,10 @@ class Module(Scanner, Http_client, Gitea):
             "chain": {
                 "produces_capabilities": ["rce"],
                 "suggested_followups": [
+                    "exploits/linux/http/gitea_cve_2026_59774_unauth_markup_rce",
+                    "auxiliary/admin/http/gitea_cve_2026_59774_unauth_file_read",
+                    "scanner/http/forgejo_cve_2026_59774_detect",
+                    "auxiliary/admin/http/forgejo_cve_2026_59774_file_read",
                     "exploits/linux/http/gitea_cve_2026_60004_diffpatch_rce",
                 ],
             },
@@ -74,20 +78,20 @@ class Module(Scanner, Http_client, Gitea):
         if vulnerable is True:
             severity = "critical"
             reason = (
-                f"{forge.title()} {version or version_raw} < {GITEA_PATCHED_VERSION} "
+                f"{forge.title()} {version or version_raw} < {self.PATCHED_VERSION} "
                 f"(CVE-2026-60004 diffpatch hook RCE)"
             )
         elif vulnerable is False:
             severity = "info"
             reason = (
-                f"{forge.title()} {version or version_raw} >= {GITEA_PATCHED_VERSION} "
+                f"{forge.title()} {version or version_raw} >= {self.PATCHED_VERSION} "
                 f"(patched for CVE-2026-60004)"
             )
         else:
             severity = "high"
             reason = (
                 f"{forge.title()} detected (version {version or version_raw or 'unknown'}); "
-                f"CVE-2026-60004 possible if diffpatch runs in bare clone (< {GITEA_PATCHED_VERSION})"
+                f"CVE-2026-60004 possible if diffpatch runs in bare clone (< {self.PATCHED_VERSION})"
             )
 
         if registration:

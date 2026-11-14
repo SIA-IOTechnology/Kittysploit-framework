@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from core.framework.runtime.events import Event, EventType
-from core.output_handler import print_error, print_info, print_warning
+from core.output_handler import print_error, print_warning
 
 
 @dataclass
@@ -227,8 +227,6 @@ class SessionTriggerManager:
 
     def _run_trigger(self, trigger: SessionTrigger, session_id: str, session, *, key) -> None:
         try:
-            label = trigger.name or trigger.event
-            print_info(f"Session trigger '{label}' on {session_id[:8]}")
             for action in trigger.actions:
                 self._execute_action(action, session_id, session)
         except Exception as exc:
@@ -269,7 +267,7 @@ class SessionTriggerManager:
         if not loader:
             return
         try:
-            module = loader.load_module(module_path)
+            module = loader.load_module(module_path, framework=self.framework)
         except Exception as exc:
             print_error(f"Trigger module load failed ({module_path}): {exc}")
             return
@@ -277,7 +275,10 @@ class SessionTriggerManager:
             print_error(f"Trigger module not found: {module_path}")
             return
         module.framework = self.framework
-        module.session_id = session_id
+        try:
+            module.set_option("session_id", session_id)
+        except Exception:
+            module.session_id = session_id
         for key, value in (options or {}).items():
             try:
                 module.set_option(key, value)

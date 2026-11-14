@@ -50,7 +50,12 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/spip_cve_2026_77806_detect',
+                    'exploits/multi/http/spip_cve_2026_77806_x_spip_filtre_rce',
+                    'exploits/multi/http/spip_forum_autosave_rce',
+                    'auxiliary/admin/http/spip_idor_password_reset',
+                ],
             },
         },
         'references': ['https://www.spip.net/'],

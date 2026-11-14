@@ -48,7 +48,11 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/cve_2026_33497_detect',
+                    'exploits/multi/http/langflow_cve_2026_33497_secret_key_leak',
+                    'scanner/http/langflow_cve_2026_5027',
+                ],
             },
         },
         'references': ['https://github.com/langflow-ai/langflow', 'https://docs.langflow.org/'],

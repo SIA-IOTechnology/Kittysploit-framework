@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/openbullet2_cve_2026_25856_detect',
+                    'exploits/multi/http/openbullet2_cve_2026_25856_rce',
+                ],
             },
         },
     }

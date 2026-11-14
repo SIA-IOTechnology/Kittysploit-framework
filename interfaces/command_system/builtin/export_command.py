@@ -56,8 +56,9 @@ Examples:
 
     def _create_parser(self) -> argparse.ArgumentParser:
         parser = argparse.ArgumentParser(
+            prog="export",
             description="Export workspace data to JSON for Reports import",
-            add_help=True,
+            add_help=False,
         )
         parser.add_argument(
             "-o", "--output",
@@ -77,13 +78,14 @@ Examples:
         return parser
 
     def execute(self, args, **kwargs) -> bool:
+        if not args or str(args[0]).lower() in ("help", "--help", "-h"):
+            print_info(self.help_text)
+            return True
+
         try:
             parsed = self.parser.parse_args(args)
         except SystemExit:
-            return True
-
-        if args and args[0].lower() in ("help", "--help", "-h"):
-            self.parser.print_help()
+            print_info(self.help_text)
             return True
 
         if parsed.hosts_only and parsed.vulns_only:

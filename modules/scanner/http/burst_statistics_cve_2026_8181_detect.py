@@ -33,6 +33,7 @@ class Module(Scanner, Http_client, Wordpress):
             "https://github.com/projectdiscovery/nuclei-templates/blob/main/http/cves/2026/CVE-2026-8181.yaml",
         ],
         "modules": [
+            "exploits/multi/http/burst_statistics_cve_2026_8181_rce",
             "auxiliary/admin/http/burst_statistics_cve_2026_8181_auth_bypass",
         ],
         "tags": ["web", "scanner", "wordpress", "burst-statistics", "auth-bypass", "cve-2026-8181"],
@@ -45,6 +46,7 @@ class Module(Scanner, Http_client, Wordpress):
             "produces": ["tech_hints", "risk_signals", "exploit_paths"],
             "chain": {
                 "suggested_followups": [
+                    "exploits/multi/http/burst_statistics_cve_2026_8181_rce",
                     "auxiliary/admin/http/burst_statistics_cve_2026_8181_auth_bypass",
                 ],
             },

@@ -50,8 +50,9 @@ class Module(Scanner, Http_client):
                 "consumes_capabilities": [],
                 "option_bindings": {},
                 "suggested_followups": [
-                    "scanner/http/dify_detect",
-                    "scanner/http/langflow_cve_2026_5027",
+                    "scanner/http/flowise_cve_2026_41264_detect",
+                    "scanner/http/flowise_cve_2026_56274_detect",
+                    "exploits/multi/http/flowise_cve_2025_58434_account_takeover",
                 ],
             },
         },

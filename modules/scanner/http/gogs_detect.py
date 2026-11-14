@@ -48,7 +48,10 @@ class Module(Scanner, Http_client):
                 ],
                 'consumes_capabilities': [],
                 'option_bindings': {},
-                'suggested_followups': ['auxiliary/scanner/http/login_page_detector'],
+                'suggested_followups': [
+                    'scanner/http/gogs_cve_2026_52806_detect',
+                    'exploits/linux/http/gogs_cve_2025_8110_rce',
+                ],
             },
         },
         'references': ['https://gogs.io/'],

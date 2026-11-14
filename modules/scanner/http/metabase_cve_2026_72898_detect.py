@@ -37,7 +37,7 @@ class Module(Scanner, Http_client):
         },
     }
 
-    sqli_delay = OptInteger(3, "pg_sleep seconds for timing check", required=False, advanced=True)
+    _SQLI_DELAY = 3
 
     def _post(self, raw_sql: str) -> tuple[int, str, float]:
         payload = {"token": "x", "password": "x", "user-id": {"raw": raw_sql}}
@@ -56,7 +56,7 @@ class Module(Scanner, Http_client):
         _, body, base = self._post("1")
         if "disallowed key" in body.lower():
             return False
-        delay = int(self.sqli_delay or 3)
+        delay = self._SQLI_DELAY
         _, _, slow = self._post(f"(SELECT 1 FROM pg_sleep({delay}))")
         if slow > base + delay * 0.6:
             self.set_info(

@@ -41,8 +41,9 @@ class Module(Scanner, Http_client):
                                    {'capability': 'admin_surface', 'from_detail': ''}],
          'consumes_capabilities': [],
          'option_bindings': {},
-         'suggested_followups': ['auxiliary/scanner/http/login_page_detector',
-                                 'scanner/http/swagger_detect']},
+         'suggested_followups': [
+             'exploits/linux/http/portainer_docker_host_rce',
+         ]},
     },
     }
 

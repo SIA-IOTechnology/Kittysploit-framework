@@ -50,7 +50,15 @@ class Module(Scanner, Http_client, Wordpress):
             "https://github.com/projectdiscovery/nuclei-templates/blob/main/http/cves/2026/CVE-2026-84434.yaml",
         ],
         "tags": ["web", "scanner", "wordpress", "gravityforms", "file-upload", "cve-2026-84434"],
-        "agent": {"approval_required": True, "risk": "active"},
+        "agent": {
+            "approval_required": True,
+            "risk": "active",
+            "chain": {
+                "suggested_followups": [
+                    "exploits/multi/http/gravity_forms_cve_2026_84434_upload_rce",
+                ],
+            },
+        },
     }
 
     active_probe = OptBool(

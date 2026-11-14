@@ -31,6 +31,11 @@ class Module(Scanner, Http_client, Wordpress):
             "risk": "passive",
             "approval_required": False,
             "produces": ["risk_signals"],
+            "chain": {
+                "suggested_followups": [
+                    "exploits/multi/http/sms_alert_cve_2026_11387_takeover",
+                ],
+            },
         },
     }
 

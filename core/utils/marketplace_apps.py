@@ -16,6 +16,7 @@ OFFICIAL_APP_PACKAGES: Dict[str, str] = {
     "kittyprotocol": "kittyprotocol",
     "kittycluster": "kittycluster",
     "kittyops": "kittyops",
+    "kittyrf": "kittyrf",
 }
 
 

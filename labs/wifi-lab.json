@@ -1,0 +1,47 @@
+{
+  "id": "wifi-lab",
+  "name": "802.11 Authorized WiFi Lab",
+  "description": "Host-local monitor-mode lab for KittySploit pure-Python WLAN modules (your own AP or isolated RF cage).",
+  "tags": ["wlan", "wifi", "802.11", "internal-lab", "agent-profile"],
+  "difficulty": "intermediate",
+  "max_score": 100,
+  "prerequisites": [
+    "Linux monitor interface (e.g. wlan0mon)",
+    "Written authorization for target SSIDs",
+    "scapy + injection-capable NIC"
+  ],
+  "agent_profile": "wifi-lab",
+  "suggested_modules": [
+    "auxiliary/scanner/wlan/ap_survey",
+    "auxiliary/scanner/wlan/handshake_to_hc22000",
+    "auxiliary/wlan/wlan_pipeline",
+    "auxiliary/wlan/wlan_vault"
+  ],
+  "objectives": [
+    {
+      "id": "monitor_iface",
+      "title": "Monitor interface listed in scapy",
+      "points": 25,
+      "check": {"type": "manual", "hint": "kittysploit> use auxiliary/scanner/wlan/beacon_scan; set IFACE wlan0mon; run"}
+    },
+    {
+      "id": "handshake_hash",
+      "title": "Produce at least one .hc22000 line",
+      "points": 35,
+      "check": {"type": "manual", "hint": "handshake_to_hc22000 or wlan_pipeline"}
+    },
+    {
+      "id": "vault_entry",
+      "title": "Store hash or PSK in WLAN vault",
+      "points": 20,
+      "check": {"type": "manual", "hint": "auxiliary/wlan/wlan_vault ACTION list"}
+    },
+    {
+      "id": "agent_profile",
+      "title": "Run agent with --profile wifi-lab against lab target",
+      "points": 20,
+      "check": {"type": "manual", "hint": "agent wifi-lab --profile wifi-lab --plan-only"}
+    }
+  ],
+  "operator_notes": "Agent target is symbolic (wifi-lab); RF modules require IFACE option, not HTTP URL."
+}

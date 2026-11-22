@@ -182,6 +182,31 @@ MISSION_PROFILES: Dict[str, Dict[str, Any]] = {
             "fan out concurrently; only evidence-gate-approved exploit-queue items are promoted."
         ),
     },
+    "wifi-lab": {
+        "safety_profile": "normal",
+        "approved_risks": ["read", "active", "intrusive"],
+        "request_budget": 90,
+        "campaign_goal": "recon",
+        "catalog_policy": "internal-lab",
+        "plan_only": False,
+        "description": (
+            "Authorized 802.11 lab: recon scanners, handshake capture, WPA/WEP offline "
+            "crack, WPS probes, evil-twin lures — requires monitor IFACE on operator host."
+        ),
+        "wlan_workflows": {
+            "recon": [
+                "auxiliary/scanner/wlan/ap_survey",
+                "auxiliary/scanner/wlan/wpa3_transition_scan",
+                "auxiliary/scanner/wlan/owe_scan",
+                "auxiliary/scanner/wlan/ft_psk_scan",
+            ],
+            "capture_crack": [
+                "auxiliary/wlan/wlan_pipeline",
+                "auxiliary/wlan/wpa_cpu_crack",
+                "auxiliary/wlan/wlan_vault",
+            ],
+        },
+    },
     "attack-specialists": {
         "safety_profile": "normal",
         "approved_risks": ["read", "active", "intrusive"],

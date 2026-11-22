@@ -861,6 +861,53 @@ _CHAIN_RULES: Sequence[Tuple[re.Pattern[str], Dict[str, Any], Optional[Dict[str,
         },
         None,
     ),
+    (
+        re.compile(r"(^|/)wlan/ap_survey$|(^|/)beacon_scan$|(^|/)wpa3_transition_scan$"),
+        {
+            "produces_capabilities": ["wlan_recon", "ot_assets"],
+            "suggested_followups": [
+                "auxiliary/scanner/wlan/client_enum",
+                "auxiliary/scanner/wlan/handshake_to_hc22000",
+                "auxiliary/wlan/wlan_pipeline",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)wlan/handshake_to_hc22000$|(^|/)handshake_capture$"),
+        {
+            "produces_capabilities": ["wlan_handshake", "credential"],
+            "suggested_followups": [
+                "auxiliary/wlan/pcap_analyze",
+                "auxiliary/wlan/wpa_cpu_crack",
+                "auxiliary/wlan/wlan_vault",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)wlan/pmkid_harvest$|(^|/)wps_pixie$|(^|/)wps_pin_brute$"),
+        {
+            "produces_capabilities": ["credential"],
+            "suggested_followups": [
+                "auxiliary/wlan/wpa_cpu_crack",
+                "auxiliary/wlan/wlan_vault",
+            ],
+        },
+        None,
+    ),
+    (
+        re.compile(r"(^|/)wlan/wep_iv_collect$"),
+        {
+            "produces_capabilities": ["wlan_recon"],
+            "suggested_followups": [
+                "auxiliary/wlan/wep_cpu_crack",
+                "auxiliary/wlan/wep_chopchop",
+                "auxiliary/wlan/wep_replay_inject",
+            ],
+        },
+        None,
+    ),
 )
 
 _FAMILY_DEFAULTS: Dict[str, Dict[str, Any]] = {

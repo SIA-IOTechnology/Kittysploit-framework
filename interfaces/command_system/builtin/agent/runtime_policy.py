@@ -36,6 +36,7 @@ MISSION_PROFILE_ALIASES = {
     "bug_bounty": "bug-bounty-safe",
     "bug-bounty-safe": "bug-bounty-safe",
     "internal-lab": "internal-lab",
+    "wifi-lab": "internal-lab",
     "europol-passive": "europol-passive",
     "europol_passive": "europol-passive",
     "infra-discovery": "infra-discovery",

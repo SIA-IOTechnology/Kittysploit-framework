@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+LLC_SNAP_EAPOL = bytes.fromhex("aaaa03000000888e")
+EAPOL_TYPE_KEY = 3
+MIC_LEN = 16
+NONCE_LEN = 32
+MIC_OFFSET = 81
+KEY_DESCRIPTOR_VERSION_MASK = 0x0007
+HMAC_SHA1_AES = 2
+AES_128_CMAC = 3

@@ -4,13 +4,12 @@
 """Sniff 802.11 beacon frames on a monitor-mode interface."""
 
 from __future__ import annotations
-
 from typing import Dict
-
 from kittysploit import *
+from lib.protocols.wlan.wlan_client import Wlan_client
 
 
-class Module(Auxiliary):
+class Module(Auxiliary, Wlan_client):
     __info__ = {
         "name": "WiFi Beacon Scanner",
         "description": (
@@ -26,7 +25,7 @@ class Module(Auxiliary):
             "techniques": ["T1016"],
             "prerequisites": [
                 "Wireless adapter capable of monitor mode",
-                "Interface in monitor mode (e.g. wlan0mon via airmon-ng)",
+                "Interface in monitor mode (KittySploit lib/protocols/wlan)",
                 "Root or CAP_NET_RAW on the capture interface"],
             "detections": [
                 "802.11 passive monitoring on adjacent channels"],
@@ -64,35 +63,13 @@ class Module(Auxiliary):
     },
     }
 
-    iface = OptString("wlan0mon", "Monitor-mode wireless interface", required=True)
     timeout = OptInteger(30, "Capture duration in seconds", required=False)
     show_hidden = OptBool(True, "Include hidden networks (empty SSID)", required=False)
 
     def check(self):
-        try:
-            from scapy.all import Dot11, sniff  # noqa: F401
-        except ImportError:
-            print_error("scapy is not installed. Install it with: pip install scapy")
-            return False
-
-        iface = str(self.iface or "").strip()
-        if not iface:
-            print_error("Interface name is required")
-            return False
-
-        try:
-            from scapy.all import get_if_list
-
-            if iface not in get_if_list():
-                print_warning(f"Interface {iface} not found in scapy interface list")
-        except Exception:
-            pass
-
-        return True
+        return self.wlan_check_iface()
 
     def run(self):
-        from scapy.all import Dot11, sniff
-
         iface = str(self.iface or "wlan0mon").strip()
         timeout = max(1, int(self.timeout or 30))
         show_hidden = bool(self.show_hidden)
@@ -102,31 +79,23 @@ class Module(Auxiliary):
         print_info("=" * 72)
         print_status("Listening for beacon frames (Ctrl+C to stop early)...")
 
-        def on_packet(packet):
-            if not packet.haslayer(Dot11):
+        def on_frame(raw: bytes, _rssi: int | None) -> None:
+            beacon = self.wlan_parse_beacon(raw)
+            if not beacon:
                 return
-            dot11 = packet[Dot11]
-            if dot11.type != 0 or dot11.subtype != 8:
-                return
-
-            bssid = dot11.addr2
-            if not bssid:
-                return
-
-            raw_ssid = packet.info.decode(errors="ignore") if hasattr(packet, "info") else ""
-            ssid = raw_ssid.strip()
+            bssid = beacon.bssid
+            ssid = (beacon.ssid or "").strip()
             if not ssid:
                 if not show_hidden:
                     return
                 ssid = "<hidden>"
-
             previous = networks.get(bssid)
             if previous is None or (previous == "<hidden>" and ssid != "<hidden>"):
                 networks[bssid] = ssid
                 print_success(f"SSID: {ssid} | BSSID: {bssid}")
 
         try:
-            sniff(iface=iface, prn=on_packet, timeout=timeout, store=0)
+            self.wlan_sniff(on_frame, timeout=float(timeout))
         except PermissionError:
             print_error(
                 f"Permission denied capturing on {iface}. "
@@ -135,7 +104,7 @@ class Module(Auxiliary):
             return False
         except OSError as exc:
             print_error(f"Could not sniff on {iface}: {exc}")
-            print_info("Tip: put the interface in monitor mode, e.g. sudo airmon-ng start wlan0")
+            print_info("Tip: enable monitor mode on the capture interface before running")
             return False
         except KeyboardInterrupt:
             print_warning("Capture interrupted by user")

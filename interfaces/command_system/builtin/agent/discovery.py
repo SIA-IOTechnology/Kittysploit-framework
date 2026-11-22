@@ -21,7 +21,7 @@ _AUTO_PROFILES = frozenset({
     "training-lab",
     "discovery",
 })
-_EXPLICIT_PROFILES = _AUTO_PROFILES | frozenset({"internal-lab", "safe-web"})
+_EXPLICIT_PROFILES = _AUTO_PROFILES | frozenset({"internal-lab", "safe-web", "wifi-lab"})
 _ID_PARAMS = frozenset({
     "id",
     "uid",

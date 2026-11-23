@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards import Prestage_guards
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards):
     PRESTAGE_ID = "stage_verify"
 
     __info__ = {
@@ -24,8 +25,6 @@ class Module(Prestage):
     stage_sha256 = OptString("", "Expected SHA256 of staged artifact", False)
 
     def generate_python(self, context: Dict[str, Any] = None) -> str:
-        from lib.c2.prestage_guards import build_stage_verify_bootstrap
-
         ctx = dict(context or {})
         stage_url = str(
             ctx.get("prestage_stage_url")
@@ -38,4 +37,4 @@ class Module(Prestage):
             or getattr(getattr(self, "stage_sha256", None), "value", "")
             or ""
         ).strip()
-        return build_stage_verify_bootstrap(stage_url=stage_url, stage_sha256=stage_sha256)
+        return self.build_stage_verify_bootstrap(stage_url=stage_url, stage_sha256=stage_sha256)

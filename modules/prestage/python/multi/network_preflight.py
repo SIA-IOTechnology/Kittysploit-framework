@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards import Prestage_guards
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards):
     PRESTAGE_ID = "network_preflight"
 
     __info__ = {
@@ -23,8 +24,6 @@ class Module(Prestage):
     timeout = OptString("3", "TCP connect timeout in seconds", False)
 
     def generate_python(self, context: Dict[str, Any] = None) -> str:
-        from lib.c2.prestage_guards import build_network_preflight_bootstrap
-
         ctx = dict(context or {})
         c2_host = str(ctx.get("c2_host") or "").strip()
         c2_port = int(ctx.get("c2_port") or 8088)
@@ -34,4 +33,4 @@ class Module(Prestage):
             timeout = 3.0
         if not c2_host:
             return "pass  # network_preflight: set lhost on payload"
-        return build_network_preflight_bootstrap(c2_host=c2_host, c2_port=c2_port, timeout=timeout)
+        return self.build_network_preflight_bootstrap(c2_host=c2_host, c2_port=c2_port, timeout=timeout)

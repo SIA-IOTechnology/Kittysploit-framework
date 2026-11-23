@@ -34,7 +34,7 @@ class Payload(BaseModule):
     )
     prestage_profile = OptString(
         "",
-        "Named prestage profile (lab-safe, reliable, iot, durable-agent)",
+        "Named prestage profile (lab-safe, reliable, iot, durable-agent, engagement-safe)",
         False,
         advanced=True,
     )

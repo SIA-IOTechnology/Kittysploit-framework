@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards import Prestage_guards
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards):
     PRESTAGE_ID = "resource_guard"
 
     __info__ = {
@@ -32,11 +33,4 @@ class Module(Prestage):
             min_disk = int(getattr(getattr(self, "min_disk_mb", None), "value", self.min_disk_mb) or 10)
         except (TypeError, ValueError):
             min_disk = 10
-        return f"""
-$ErrorActionPreference='SilentlyContinue'
-$global:_kitty_resource_guard=@{{ ok=$true; mem_mb=0; disk_mb=0 }}
-try {{ $global:_kitty_resource_guard.disk_mb=[int]((Get-PSDrive -Name C).Free/1MB) }} catch {{}}
-try {{ $global:_kitty_resource_guard.mem_mb=[int]((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB) }} catch {{}}
-if($global:_kitty_resource_guard.mem_mb -gt 0 -and $global:_kitty_resource_guard.mem_mb -lt {min_mem}){{ try {{ _KittyTelemetryRecord 'resource_guard' 'low_memory' $global:_kitty_resource_guard.mem_mb }} catch {{}}; exit 0 }}
-if($global:_kitty_resource_guard.disk_mb -gt 0 -and $global:_kitty_resource_guard.disk_mb -lt {min_disk}){{ try {{ _KittyTelemetryRecord 'resource_guard' 'low_disk' $global:_kitty_resource_guard.disk_mb }} catch {{}}; exit 0 }}
-""".strip()
+        return self.build_resource_guard_powershell(min_mem_mb=min_mem, min_disk_mb=min_disk)

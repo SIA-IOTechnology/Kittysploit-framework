@@ -17,7 +17,13 @@ PRESTAGE_PROFILES: Dict[str, PrestageProfile] = {
     },
     "reliable": {
         "description": "Host/network probes with verified staging and telemetry",
-        "modules": ["capability_probe", "network_preflight", "stage_verify", "telemetry_buffer"],
+        "modules": [
+            "capability_probe",
+            "dns_preflight",
+            "network_preflight",
+            "stage_verify",
+            "telemetry_buffer",
+        ],
     },
     "iot": {
         "description": "Lightweight probes and resumable staging for constrained targets",
@@ -26,6 +32,17 @@ PRESTAGE_PROFILES: Dict[str, PrestageProfile] = {
     "durable-agent": {
         "description": "Persistent agent with signed config, cache, and telemetry",
         "modules": ["telemetry_buffer", "signed_config", "agent_store", "stage_cache"],
+    },
+    "engagement-safe": {
+        "description": "Scope, single-instance, DNS/TCP reachability, and resource guards",
+        "modules": [
+            "scope_guard",
+            "single_instance",
+            "dns_preflight",
+            "network_preflight",
+            "resource_guard",
+            "telemetry_buffer",
+        ],
     },
 }
 

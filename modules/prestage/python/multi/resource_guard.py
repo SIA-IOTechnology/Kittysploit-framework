@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards import Prestage_guards
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards):
     PRESTAGE_ID = "resource_guard"
 
     __info__ = {
@@ -24,8 +25,6 @@ class Module(Prestage):
     min_disk_mb = OptString("10", "Minimum free disk in MB", False)
 
     def generate_python(self, context: Dict[str, Any] = None) -> str:
-        from lib.c2.prestage_guards import build_resource_guard_bootstrap
-
         try:
             min_mem = int(getattr(getattr(self, "min_mem_mb", None), "value", self.min_mem_mb) or 32)
         except (TypeError, ValueError):
@@ -34,4 +33,4 @@ class Module(Prestage):
             min_disk = int(getattr(getattr(self, "min_disk_mb", None), "value", self.min_disk_mb) or 10)
         except (TypeError, ValueError):
             min_disk = 10
-        return build_resource_guard_bootstrap(min_mem_mb=min_mem, min_disk_mb=min_disk)
+        return self.build_resource_guard_bootstrap(min_mem_mb=min_mem, min_disk_mb=min_disk)

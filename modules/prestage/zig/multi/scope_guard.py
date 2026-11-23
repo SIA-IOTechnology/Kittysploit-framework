@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards_zig import Prestage_guards_zig
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards_zig):
     PRESTAGE_ID = "scope_guard"
 
     __info__ = {
@@ -20,13 +21,21 @@ class Module(Prestage):
         "tags": ["prestage", "offline", "guard", "zig"],
     }
 
+    allowed_scope = OptString(
+        "",
+        "Extra allowed hosts/CIDRs (comma-separated, merged with private ranges)",
+        False,
+    )
+
     def generate_zig(self, context: Dict[str, Any] = None) -> str:
         ctx = dict(context or {})
-        c2_host = str(ctx.get("c2_host") or "").replace("\\", "\\\\").replace('"', '\\"')
-        if not c2_host:
-            return "// scope_guard: set lhost on payload"
-        return f"""
-    const c2_host = "{c2_host}";
-    _ = c2_host;
-    // Private-lab scope enforcement is currently lightweight on Zig implants.
-""".strip()
+        c2_host = str(ctx.get("c2_host") or "").strip()
+        raw_scope = str(
+            ctx.get("prestage_scope") or getattr(getattr(self, "allowed_scope", None), "value", "") or ""
+        ).strip()
+        allowed_hosts, allowed_cidrs = self.parse_scope_selection(raw_scope, c2_host=c2_host)
+        return self.build_scope_guard_zig(
+            c2_host=c2_host,
+            allowed_hosts=allowed_hosts,
+            allowed_cidrs=allowed_cidrs or None,
+        )

@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from core.framework.base_module import BaseModule
 
@@ -55,6 +57,45 @@ class Gogs(BaseModule):
                 return True, version, commit
             return False, version, commit
         return True, "", commit or "unknown commit hash"
+
+    def _opt_str(self, name: str) -> str:
+        val = getattr(self, name, "")
+        if hasattr(val, "value"):
+            val = val.value
+        return str(val or "")
+
+    def gogs_basic_creds(self) -> Tuple[str, str]:
+        return self._opt_str("username"), self._opt_str("password")
+
+    def gogs_api_path(self, suffix: str) -> str:
+        base = str(getattr(self, "path", None) or "").strip().rstrip("/")
+        suffix = suffix if suffix.startswith("/") else f"/{suffix}"
+        return f"{base}{suffix}" if base else suffix
+
+    def gogs_basic_api(
+        self,
+        method: str,
+        suffix: str,
+        json_body: Optional[dict] = None,
+    ) -> Tuple[int, Any]:
+        user, pwd = self.gogs_basic_creds()
+        token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+        headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+        kwargs: Dict[str, Any] = {
+            "method": method,
+            "path": self.gogs_api_path(suffix),
+            "headers": headers,
+        }
+        if json_body is not None:
+            kwargs["data"] = json.dumps(json_body)
+        resp = self.http_request(**kwargs)
+        if not resp:
+            return 0, None
+        try:
+            body = resp.json()
+        except Exception:
+            body = resp.text
+        return int(resp.status_code or 0), body
 
 
 def gogs_rebase_vulnerable(body: str) -> Tuple[bool, str, str]:

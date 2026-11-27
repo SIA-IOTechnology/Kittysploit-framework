@@ -23,7 +23,7 @@ class Module(Listener):
         'dependencies': ['can']
     }
     
-    interface = OptString("socketcan", "CAN interface type (socketcan, virtual, pcan, slcan, usb2can)", required=True)
+    interface = OptString("socketcan", "CAN interface type (socketcan, virtual, pcan, slcan, usb2can, cansub)", required=True)
     channel = OptString("can0", "CAN channel/device (e.g., can0, vcan0, COM3)", required=True)
     bitrate = OptInteger(500000, "CAN bus bitrate in bps (e.g., 500000 for 500 kbps)", required=True)
     
@@ -118,7 +118,7 @@ class Module(Listener):
                     self.bus = can.interface.Bus(channel=self.can_channel, bustype=self.can_interface, bitrate=self.bitrate)
             except Exception as e:
                 print_error(f"Failed to initialize CAN bus: {e}")
-                print_info("Available interfaces: socketcan, virtual, pcan, slcan, usb2can")
+                print_info("Available interfaces: socketcan, virtual, pcan, slcan, usb2can, cansub")
                 self.running = False
                 return
             

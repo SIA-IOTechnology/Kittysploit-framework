@@ -270,7 +270,7 @@ class Module(Listener):
                 pass
             self.bus = None
         
-        if self.listener_thread and self.listener_thread.is_alive():
+        if self.listener_thread and self.listener_thread.is_alive() and self.listener_thread is not threading.current_thread():
             self.listener_thread.join(timeout=2)
         
         print_info("CANBUS listener stopped")
